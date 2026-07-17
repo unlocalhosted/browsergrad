@@ -61,6 +61,7 @@ import {
 import {
   CPP_CUTE_BROWSER_VFS_STATUS,
   CppCuteBrowserVfsSessionError,
+  bindCppCuteBrowserVfsMount,
   cancelCppCuteBrowserVfsSession,
   closeCppCuteBrowserVfsSession,
   closedCppCuteBrowserVfsSessionReceipt,
@@ -71,9 +72,13 @@ import {
   cppCuteBrowserVfsRead,
   cppCuteBrowserVfsStatus,
   createCppCuteBrowserVfsHostImports,
+  discardCppCuteBrowserVfsMount,
+  observeCppCuteBrowserVfsMount,
   observeCppCuteBrowserVfsSession,
+  prepareCppCuteBrowserVfsMount,
   prepareCppCuteBrowserVfsSession,
   unwrapClosedCppCuteBrowserVfsSession,
+  type PreparedCppCuteBrowserVfsMount,
   type PreparedCppCuteBrowserVfsSession,
 } from "../../src/cpp_cute_browser_vfs_session.js";
 import { createCppCuteBrowserProfileInput } from "./support/cpp_cute_frontend_fixtures.js";
@@ -88,6 +93,62 @@ const ENCODER = new TextEncoder();
 const DECODER = new TextDecoder();
 const MEMORY_INITIAL_PAGES = 4_096;
 const MEMORY_MAXIMUM_PAGES = 16_384;
+const NATIVE_DEFINE_PROPERTY = Object.defineProperty;
+const NATIVE_GET_OWN_PROPERTY_DESCRIPTOR = Object.getOwnPropertyDescriptor;
+
+interface IntrinsicRestore {
+  readonly target: object;
+  readonly key: PropertyKey;
+  readonly descriptor: PropertyDescriptor | undefined;
+}
+
+function poisonValue(
+  restores: IntrinsicRestore[],
+  target: object,
+  key: PropertyKey,
+  label: string,
+): void {
+  restores.push({
+    target,
+    key,
+    descriptor: NATIVE_GET_OWN_PROPERTY_DESCRIPTOR(target, key),
+  });
+  NATIVE_DEFINE_PROPERTY(target, key, {
+    configurable: true,
+    writable: true,
+    value: () => {
+      throw new Error(`poisoned ${label}`);
+    },
+  });
+}
+
+function poisonGetter(
+  restores: IntrinsicRestore[],
+  target: object,
+  key: PropertyKey,
+  label: string,
+): void {
+  const descriptor = NATIVE_GET_OWN_PROPERTY_DESCRIPTOR(target, key);
+  restores.push({ target, key, descriptor });
+  NATIVE_DEFINE_PROPERTY(target, key, {
+    configurable: true,
+    enumerable: descriptor?.enumerable ?? false,
+    get: () => {
+      throw new Error(`poisoned ${label}`);
+    },
+  });
+}
+
+function restoreIntrinsics(restores: readonly IntrinsicRestore[]): void {
+  for (let index = restores.length - 1; index >= 0; index -= 1) {
+    const restore = restores[index]!;
+    if (restore.descriptor === undefined) {
+      delete (restore.target as Record<PropertyKey, unknown>)[restore.key];
+    } else {
+      NATIVE_DEFINE_PROPERTY(restore.target, restore.key, restore.descriptor);
+    }
+  }
+}
 
 interface AuthorityFixture {
   readonly installation: VerifiedCppCuteBrowserVfsInstallation;
@@ -124,6 +185,227 @@ async function sessionFixture(): Promise<SessionFixture> {
 }
 
 describe("C++/CuTe Worker-owned aggregate lazy VFS session", () => {
+  it("keeps the verified mount memory-independent until one exact bind mints the session imports", async () => {
+    const authority = await authorityFixture();
+    const mount = prepareCppCuteBrowserVfsMount({
+      installation: authority.installation,
+      request: authority.request,
+      runtimeAbiAsset: authority.runtimeAbiAsset,
+    });
+    expect(observeCppCuteBrowserVfsMount(mount)).toMatchObject({
+      mountOrdinal: mount.mountOrdinal,
+      installationId: authority.installation.installationId,
+      requestId: authority.request.requestId,
+      profileHash: authority.request.profileHash,
+      state: "prepared",
+      workerExecutionObserved: false,
+      loweringAuthorityReady: false,
+    });
+    expectSessionError(
+      () => createCppCuteBrowserVfsHostImports(mount as unknown as PreparedCppCuteBrowserVfsSession),
+      "BG-COMPILER-CPP-CUTE-BROWSER-VFS-SESSION-UNVERIFIED",
+      "$.session",
+    );
+
+    const memory = new WebAssembly.Memory({
+      initial: MEMORY_INITIAL_PAGES,
+      maximum: MEMORY_MAXIMUM_PAGES,
+    });
+    const session = bindCppCuteBrowserVfsMount({ mount, memory });
+    expect(observeCppCuteBrowserVfsMount(mount).state).toBe("bound");
+    const imports = createCppCuteBrowserVfsHostImports(session);
+    expect(createCppCuteBrowserVfsHostImports(session)).toBe(imports);
+    writePath(memory, 64, MAIN_PATH);
+    expect(imports.bg_vfs_status(64, byteLength(MAIN_PATH), 512)).toBe(
+      CPP_CUTE_BROWSER_VFS_STATUS.ok,
+    );
+    expectSessionError(
+      () => bindCppCuteBrowserVfsMount({ mount, memory }),
+      "BG-COMPILER-CPP-CUTE-BROWSER-VFS-SESSION-STATE",
+      "$.mount",
+    );
+    closeCppCuteBrowserVfsSession(session, "completed");
+  });
+
+  it("rejects cloned mount authority and invalid memory without consuming the real mount", async () => {
+    const authority = await authorityFixture();
+    const mount = prepareCppCuteBrowserVfsMount({
+      installation: authority.installation,
+      request: authority.request,
+      runtimeAbiAsset: authority.runtimeAbiAsset,
+    });
+    const cloned = structuredClone(mount) as PreparedCppCuteBrowserVfsMount;
+    expectSessionError(
+      () => bindCppCuteBrowserVfsMount({
+        mount: cloned,
+        memory: new WebAssembly.Memory({ initial: 1, maximum: 1 }),
+      }),
+      "BG-COMPILER-CPP-CUTE-BROWSER-VFS-SESSION-UNVERIFIED",
+      "$.mount",
+    );
+    expectSessionError(
+      () => bindCppCuteBrowserVfsMount({
+        mount,
+        memory: new WebAssembly.Memory({ initial: 1, maximum: 1 }),
+      }),
+      "BG-COMPILER-CPP-CUTE-BROWSER-VFS-SESSION-MISMATCH",
+      "$.memory",
+    );
+    class MemorySubclass extends WebAssembly.Memory {}
+    expectSessionError(
+      () => bindCppCuteBrowserVfsMount({
+        mount,
+        memory: new MemorySubclass({ initial: 1, maximum: 1 }),
+      }),
+      "BG-COMPILER-CPP-CUTE-BROWSER-VFS-SESSION-INVALID",
+      "$.memory",
+    );
+    const exactMemory = new WebAssembly.Memory({
+      initial: MEMORY_INITIAL_PAGES,
+      maximum: MEMORY_MAXIMUM_PAGES,
+    });
+    const accessor = {
+      mount,
+      get memory(): WebAssembly.Memory {
+        return exactMemory;
+      },
+    };
+    expectSessionError(
+      () => bindCppCuteBrowserVfsMount(accessor),
+      "BG-COMPILER-CPP-CUTE-BROWSER-VFS-SESSION-INVALID",
+      "$.input.memory",
+    );
+    expect(observeCppCuteBrowserVfsMount(mount).state).toBe("prepared");
+    const session = bindCppCuteBrowserVfsMount({ mount, memory: exactMemory });
+    cancelCppCuteBrowserVfsSession(session);
+  });
+
+  it("destructively discards an unbound mount and refuses later bind or repeated cleanup", async () => {
+    const authority = await authorityFixture();
+    const mount = prepareCppCuteBrowserVfsMount({
+      installation: authority.installation,
+      request: authority.request,
+      runtimeAbiAsset: authority.runtimeAbiAsset,
+    });
+    discardCppCuteBrowserVfsMount(mount);
+    expect(observeCppCuteBrowserVfsMount(mount).state).toBe("discarded");
+    expectSessionError(
+      () => bindCppCuteBrowserVfsMount({
+        mount,
+        memory: new WebAssembly.Memory({ initial: 1, maximum: 1 }),
+      }),
+      "BG-COMPILER-CPP-CUTE-BROWSER-VFS-SESSION-STATE",
+      "$.mount",
+    );
+    expectSessionError(
+      () => discardCppCuteBrowserVfsMount(mount),
+      "BG-COMPILER-CPP-CUTE-BROWSER-VFS-SESSION-STATE",
+      "$.mount",
+    );
+  });
+
+  it("binds same-realm authority through captured admission and memory intrinsics", async () => {
+    const authority = await authorityFixture();
+    const admissionRestores: IntrinsicRestore[] = [];
+    let mount: PreparedCppCuteBrowserVfsMount | undefined;
+    try {
+      poisonValue(admissionRestores, WeakMap.prototype, "set", "WeakMap.set");
+      poisonValue(admissionRestores, Object, "getPrototypeOf", "Object.getPrototypeOf");
+      poisonValue(
+        admissionRestores,
+        Object,
+        "getOwnPropertyDescriptors",
+        "Object.getOwnPropertyDescriptors",
+      );
+      poisonValue(admissionRestores, Reflect, "ownKeys", "Reflect.ownKeys");
+      poisonValue(admissionRestores, Reflect, "apply", "Reflect.apply");
+      mount = prepareCppCuteBrowserVfsMount({
+        installation: authority.installation,
+        request: authority.request,
+        runtimeAbiAsset: authority.runtimeAbiAsset,
+      });
+    } finally {
+      restoreIntrinsics(admissionRestores);
+    }
+    expect(mount).toBeDefined();
+    const memory = new WebAssembly.Memory({
+      initial: MEMORY_INITIAL_PAGES,
+      maximum: MEMORY_MAXIMUM_PAGES,
+    });
+    const memoryBufferDescriptor = NATIVE_GET_OWN_PROPERTY_DESCRIPTOR(
+      WebAssembly.Memory.prototype,
+      "buffer",
+    );
+    const memoryBufferGetter = memoryBufferDescriptor?.get;
+    expect(memoryBufferGetter).toBeDefined();
+    const restores: IntrinsicRestore[] = [];
+    let session: PreparedCppCuteBrowserVfsSession | undefined;
+    try {
+      poisonValue(restores, WeakMap.prototype, "get", "WeakMap.get");
+      poisonValue(restores, WeakMap.prototype, "set", "WeakMap.set");
+      poisonValue(restores, Object, "getPrototypeOf", "Object.getPrototypeOf");
+      poisonValue(
+        restores,
+        Object,
+        "getOwnPropertyDescriptors",
+        "Object.getOwnPropertyDescriptors",
+      );
+      poisonValue(restores, Object, "freeze", "Object.freeze");
+      poisonValue(restores, Reflect, "ownKeys", "Reflect.ownKeys");
+      poisonValue(restores, Reflect, "apply", "Reflect.apply");
+      poisonValue(restores, ArrayBuffer, Symbol.hasInstance, "ArrayBuffer instanceof");
+      poisonGetter(
+        restores,
+        WebAssembly.Memory.prototype,
+        "buffer",
+        "WebAssembly.Memory.buffer",
+      );
+      poisonValue(restores, memoryBufferGetter!, "call", "memory getter.call");
+      session = bindCppCuteBrowserVfsMount({ mount: mount!, memory });
+    } finally {
+      restoreIntrinsics(restores);
+    }
+    expect(session).toBeDefined();
+    expect(observeCppCuteBrowserVfsMount(mount!).state).toBe("bound");
+    expect(createCppCuteBrowserVfsHostImports(session!)).toBe(
+      createCppCuteBrowserVfsHostImports(session!),
+    );
+    cancelCppCuteBrowserVfsSession(session!);
+  });
+
+  it("settles mount and session cleanup while destructive prototype methods are hostile", async () => {
+    const authority = await authorityFixture();
+    const mount = prepareCppCuteBrowserVfsMount({
+      installation: authority.installation,
+      request: authority.request,
+      runtimeAbiAsset: authority.runtimeAbiAsset,
+    });
+    const fixture = await sessionFixture();
+    const restores: IntrinsicRestore[] = [];
+    let closed: ReturnType<typeof cancelCppCuteBrowserVfsSession> | undefined;
+    try {
+      poisonValue(restores, Uint8Array.prototype, "fill", "Uint8Array.fill");
+      poisonValue(restores, Map.prototype, "clear", "Map.clear");
+      poisonValue(restores, Set.prototype, "clear", "Set.clear");
+      discardCppCuteBrowserVfsMount(mount);
+      closed = cancelCppCuteBrowserVfsSession(fixture.session);
+    } finally {
+      restoreIntrinsics(restores);
+    }
+    expect(observeCppCuteBrowserVfsMount(mount).state).toBe("discarded");
+    expect(closed).toBeDefined();
+    expect(closedCppCuteBrowserVfsSessionReceipt(fixture.session)).toBe(closed);
+    expect(unwrapClosedCppCuteBrowserVfsSession(closed!).reason).toBe("cancelled");
+    expect(observeCppCuteBrowserVfsSession(fixture.session)).toMatchObject({
+      state: "disposed",
+      openedFiles: [],
+      counters: {
+        currentLiveHandles: "0",
+        currentLiveLogicalReservationByteLength: "0",
+      },
+    });
+  });
+
   it("serves copied request sources and range-copied installed packs through one ABI memory", async () => {
     const fixture = await sessionFixture();
     const installedPath = [...fixture.installedBytes.entries()]

@@ -23,7 +23,29 @@ import {
   type VerifiedCppCuteBrowserVfsPack,
 } from "./cpp_cute_browser_vfs_pack.js";
 
-export const CPP_CUTE_BROWSER_VFS_STATUS = Object.freeze({
+const REFLECT_APPLY = Reflect.apply;
+const REFLECT_OWN_KEYS = Reflect.ownKeys;
+const OBJECT_PROTOTYPE = Object.prototype;
+const OBJECT_GET_PROTOTYPE_OF = Object.getPrototypeOf;
+const OBJECT_GET_OWN_PROPERTY_DESCRIPTOR = Object.getOwnPropertyDescriptor;
+const OBJECT_GET_OWN_PROPERTY_DESCRIPTORS = Object.getOwnPropertyDescriptors;
+const OBJECT_CREATE = Object.create;
+const OBJECT_ASSIGN = Object.assign;
+const OBJECT_FREEZE = Object.freeze;
+const WEAK_MAP_GET = WeakMap.prototype.get;
+const WEAK_MAP_SET = WeakMap.prototype.set;
+const MAP_CLEAR = Map.prototype.clear;
+const SET_CLEAR = Set.prototype.clear;
+const NATIVE_MAP = Map;
+const NATIVE_SET = Set;
+const ARRAY_BUFFER_PROTOTYPE = ArrayBuffer.prototype;
+const ARRAY_BUFFER_BYTE_LENGTH_GETTER =
+  OBJECT_GET_OWN_PROPERTY_DESCRIPTOR(ARRAY_BUFFER_PROTOTYPE, "byteLength")?.get;
+const WEBASSEMBLY_MEMORY_PROTOTYPE = typeof WebAssembly === "undefined"
+  ? undefined
+  : WebAssembly.Memory.prototype;
+
+export const CPP_CUTE_BROWSER_VFS_STATUS = OBJECT_FREEZE({
   ok: 0,
   notFound: 1,
   notDirectory: 2,
@@ -45,11 +67,60 @@ const TEXT_ENCODER = new TextEncoder();
 const TEXT_DECODE = TextDecoder.prototype.decode;
 const TEXT_ENCODE = TextEncoder.prototype.encode;
 const UINT8_ARRAY_SET = Uint8Array.prototype.set;
-const MEMORY_BUFFER_GETTER = typeof WebAssembly === "undefined"
+const MEMORY_BUFFER_GETTER = WEBASSEMBLY_MEMORY_PROTOTYPE === undefined
   ? undefined
-  : Object.getOwnPropertyDescriptor(WebAssembly.Memory.prototype, "buffer")?.get;
+  : OBJECT_GET_OWN_PROPERTY_DESCRIPTOR(WEBASSEMBLY_MEMORY_PROTOTYPE, "buffer")?.get;
 
+let nextMountOrdinal = 1;
 let nextSessionOrdinal = 1;
+
+declare const preparedMountBrand: unique symbol;
+
+/**
+ * Opaque Worker-realm authority over one verified VFS mount and expanded
+ * index. It is deliberately memory-independent. Its public projection may be
+ * cloned, but its authority does not survive structured cloning into another
+ * JavaScript realm.
+ */
+export interface PreparedCppCuteBrowserVfsMount {
+  readonly [preparedMountBrand]: true;
+  readonly mountOrdinal: number;
+  readonly installationId: string;
+  readonly requestId: string;
+  readonly profileHash: string;
+  readonly maxSessionCalls: number;
+  readonly maxLiveFileHandles: number;
+  readonly maxAggregateLiveOpenByteLength: number;
+  readonly maxIndexedNodes: number;
+  readonly maxIndexLogicalByteLength: number;
+  readonly indexedNodes: number;
+  readonly indexLogicalByteLength: number;
+  readonly workerExecutionObserved: false;
+  readonly loweringAuthorityReady: false;
+}
+
+export interface PrepareCppCuteBrowserVfsMountInput {
+  readonly installation: VerifiedCppCuteBrowserVfsInstallation;
+  readonly request: PreparedCppCuteFrontendRequest;
+  readonly runtimeAbiAsset: VerifiedCppCuteBrowserRuntimeAbiAsset;
+}
+
+export interface BindCppCuteBrowserVfsMountInput {
+  readonly mount: PreparedCppCuteBrowserVfsMount;
+  readonly memory: WebAssembly.Memory;
+}
+
+export interface CppCuteBrowserVfsMountObservation {
+  readonly mountOrdinal: number;
+  readonly installationId: string;
+  readonly requestId: string;
+  readonly profileHash: string;
+  readonly state: "prepared" | "bound" | "discarded";
+  readonly indexedNodes: number;
+  readonly indexLogicalByteLength: number;
+  readonly workerExecutionObserved: false;
+  readonly loweringAuthorityReady: false;
+}
 
 declare const preparedSessionBrand: unique symbol;
 
@@ -274,13 +345,14 @@ interface StoredSession {
   readonly indexedNodes: number;
   readonly indexLogicalByteLength: number;
   readonly maxMemoryByteLength: number;
+  readonly hostImports: CppCuteBrowserVfsHostImports;
   installation: VerifiedCppCuteBrowserVfsInstallation | undefined;
   request: PreparedCppCuteFrontendRequest | undefined;
   memory: WebAssembly.Memory | undefined;
-  readonly files: Map<string, SessionFile>;
-  readonly directories: Map<string, SessionDirectory>;
-  readonly handles: Map<number, LiveHandle>;
-  readonly successfullyReadPaths: Set<string>;
+  files: Map<string, SessionFile>;
+  directories: Map<string, SessionDirectory>;
+  handles: Map<number, LiveHandle>;
+  successfullyReadPaths: Set<string>;
   readonly counters: SessionCountersMutable;
   nextHandle: number;
   state: "active" | "disposed";
@@ -310,6 +382,32 @@ interface SessionIndex {
   readonly indexLogicalByteLength: number;
 }
 
+interface StoredMount {
+  readonly mountOrdinal: number;
+  readonly installationId: string;
+  readonly requestId: string;
+  readonly profileHash: string;
+  readonly maxPathByteLength: number;
+  readonly maxSessionCalls: number;
+  readonly maxLiveFileHandles: number;
+  readonly maxAggregateLiveOpenByteLength: number;
+  readonly maxIndexedNodes: number;
+  readonly maxIndexLogicalByteLength: number;
+  readonly indexedNodes: number;
+  readonly indexLogicalByteLength: number;
+  readonly expectedInitialMemoryByteLength: number;
+  readonly maxMemoryByteLength: number;
+  installation: VerifiedCppCuteBrowserVfsInstallation | undefined;
+  request: PreparedCppCuteFrontendRequest | undefined;
+  files: Map<string, SessionFile> | undefined;
+  directories: Map<string, SessionDirectory> | undefined;
+  state: "prepared" | "bound" | "discarded";
+}
+
+interface CleanupFailure {
+  readonly cause: unknown;
+}
+
 class AbiStatus extends Error {
   constructor(readonly status: number) {
     super(`VFS ABI status ${status}`);
@@ -318,17 +416,24 @@ class AbiStatus extends Error {
 
 const SESSIONS = new WeakMap<object, StoredSession>();
 const CLOSED_SESSIONS = new WeakMap<object, ClosedCppCuteBrowserVfsSessionRecord>();
+const MOUNTS = new WeakMap<object, StoredMount>();
 
-export function prepareCppCuteBrowserVfsSession(
-  input: PrepareCppCuteBrowserVfsSessionInput,
-): PreparedCppCuteBrowserVfsSession {
+/**
+ * Verifies and indexes three opaque authorities minted in this JavaScript
+ * realm without binding WebAssembly memory. A real Worker must reconstruct
+ * the installation, request, and runtime-ABI authorities inside that Worker,
+ * or admit separately verified serialized inputs before calling this API;
+ * structured-cloned public projections are never authority.
+ */
+export function prepareCppCuteBrowserVfsMount(
+  input: PrepareCppCuteBrowserVfsMountInput,
+): PreparedCppCuteBrowserVfsMount {
   const values = exactDataRecord(input, "$.input", [
-    "installation", "request", "runtimeAbiAsset", "memory",
+    "installation", "request", "runtimeAbiAsset",
   ]);
   const installation = values["installation"] as VerifiedCppCuteBrowserVfsInstallation;
   const request = values["request"] as PreparedCppCuteFrontendRequest;
   const runtimeAbiAsset = values["runtimeAbiAsset"] as VerifiedCppCuteBrowserRuntimeAbiAsset;
-  const memory = values["memory"] as WebAssembly.Memory;
   const installationRecord = unwrapVerifiedCppCuteBrowserVfsInstallation(installation);
   const requestRecord = unwrapPreparedCppCuteFrontendRequest(request);
   const runtimeAbiRecord = unwrapVerifiedCppCuteBrowserRuntimeAbiAsset(runtimeAbiAsset);
@@ -348,11 +453,6 @@ export function prepareCppCuteBrowserVfsSession(
       runtimeAbi.runtimeAbiId !== deployment.compilerRuntime.runtimeAbiId) {
     mismatch("$.runtimeAbiAsset", "decoded ABI differs from the exact browser profile");
   }
-  const initialEpoch = inspectMemory(memory, "$.memory");
-  const expectedInitialBytes = deployment.compilerRuntime.memory.initialPages * WASM_PAGE_BYTE_LENGTH;
-  if (initialEpoch.byteLength !== expectedInitialBytes) {
-    mismatch("$.memory", "session memory must begin at the exact profile initial-page length");
-  }
   const profileVfs = deployment.compilerRuntime.virtualFileSystem;
   const files = buildFiles(installationRecord, request, abiBody.vfs.maxPathByteLength);
   const index = buildDirectories(
@@ -361,70 +461,203 @@ export function prepareCppCuteBrowserVfsSession(
     profileVfs.maxIndexLogicalByteLength,
     abiBody.vfs.metadataRecord.byteLength,
   );
-  const sessionOrdinal = nextSessionOrdinal++;
-  if (!Number.isSafeInteger(sessionOrdinal)) resource("$.session", "session ordinal space exhausted");
-  const prepared = Object.freeze({
-    sessionOrdinal,
+  const mountOrdinal = nextMountOrdinal++;
+  if (!Number.isSafeInteger(mountOrdinal)) resource("$.mount", "mount ordinal space exhausted");
+  const prepared = OBJECT_FREEZE({
+    mountOrdinal,
     installationId: installation.installationId,
     requestId: request.requestId,
     profileHash: request.profileHash,
     maxSessionCalls: abiBody.vfs.maxSessionCalls,
     maxLiveFileHandles: abiBody.vfs.maxLiveFileHandles,
-    maxAggregateLiveOpenByteLength:
-      profileVfs.maxAggregateLiveOpenByteLength,
+    maxAggregateLiveOpenByteLength: profileVfs.maxAggregateLiveOpenByteLength,
     maxIndexedNodes: profileVfs.maxIndexedNodes,
     maxIndexLogicalByteLength: profileVfs.maxIndexLogicalByteLength,
     indexedNodes: index.indexedNodes,
     indexLogicalByteLength: index.indexLogicalByteLength,
     workerExecutionObserved: false,
     loweringAuthorityReady: false,
-  }) as PreparedCppCuteBrowserVfsSession;
-  SESSIONS.set(prepared, {
-    sessionOrdinal,
+  }) as PreparedCppCuteBrowserVfsMount;
+  weakMapSet(MOUNTS, prepared, {
+    mountOrdinal,
     installationId: installation.installationId,
     requestId: request.requestId,
     profileHash: request.profileHash,
     maxPathByteLength: abiBody.vfs.maxPathByteLength,
     maxSessionCalls: abiBody.vfs.maxSessionCalls,
     maxLiveFileHandles: abiBody.vfs.maxLiveFileHandles,
-    maxAggregateLiveOpenByteLength:
-      profileVfs.maxAggregateLiveOpenByteLength,
+    maxAggregateLiveOpenByteLength: profileVfs.maxAggregateLiveOpenByteLength,
     maxIndexedNodes: profileVfs.maxIndexedNodes,
     maxIndexLogicalByteLength: profileVfs.maxIndexLogicalByteLength,
     indexedNodes: index.indexedNodes,
     indexLogicalByteLength: index.indexLogicalByteLength,
-    maxMemoryByteLength: deployment.compilerRuntime.memory.maximumPages * WASM_PAGE_BYTE_LENGTH,
+    expectedInitialMemoryByteLength:
+      deployment.compilerRuntime.memory.initialPages * WASM_PAGE_BYTE_LENGTH,
+    maxMemoryByteLength:
+      deployment.compilerRuntime.memory.maximumPages * WASM_PAGE_BYTE_LENGTH,
     installation,
     request,
-    memory,
     files,
     directories: index.directories,
-    handles: new Map(),
-    successfullyReadPaths: new Set(),
-    counters: {
-      totalSessionCalls: 0n,
-      statusCalls: 0n,
-      openCalls: 0n,
-      readCalls: 0n,
-      closeCalls: 0n,
-      directoryCountCalls: 0n,
-      directoryEntryCalls: 0n,
-      peakLiveHandles: 0n,
-      currentLiveSourceBytes: 0n,
-      currentLiveInstalledBytes: 0n,
-      peakLiveLogicalReservationBytes: 0n,
-    },
+    state: "prepared",
+  });
+  return prepared;
+}
+
+export function bindCppCuteBrowserVfsMount(
+  input: BindCppCuteBrowserVfsMountInput,
+): PreparedCppCuteBrowserVfsSession {
+  const values = exactDataRecord(input, "$.input", ["mount", "memory"]);
+  const mount = values["mount"] as PreparedCppCuteBrowserVfsMount;
+  const memory = values["memory"] as WebAssembly.Memory;
+  const stored = storedMount(mount);
+  if (stored.state !== "prepared" || stored.files === undefined || stored.directories === undefined ||
+      stored.installation === undefined || stored.request === undefined) {
+    state("$.mount", "VFS mount is no longer available for memory binding");
+  }
+  const initialEpoch = inspectMemory(memory, "$.memory");
+  if (initialEpoch.byteLength !== stored.expectedInitialMemoryByteLength) {
+    mismatch("$.memory", "session memory must begin at the exact profile initial-page length");
+  }
+  const sessionOrdinal = nextSessionOrdinal++;
+  if (!Number.isSafeInteger(sessionOrdinal)) resource("$.session", "session ordinal space exhausted");
+  const session = OBJECT_FREEZE({
+    sessionOrdinal,
+    installationId: stored.installationId,
+    requestId: stored.requestId,
+    profileHash: stored.profileHash,
+    maxSessionCalls: stored.maxSessionCalls,
+    maxLiveFileHandles: stored.maxLiveFileHandles,
+    maxAggregateLiveOpenByteLength: stored.maxAggregateLiveOpenByteLength,
+    maxIndexedNodes: stored.maxIndexedNodes,
+    maxIndexLogicalByteLength: stored.maxIndexLogicalByteLength,
+    indexedNodes: stored.indexedNodes,
+    indexLogicalByteLength: stored.indexLogicalByteLength,
+    workerExecutionObserved: false,
+    loweringAuthorityReady: false,
+  }) as PreparedCppCuteBrowserVfsSession;
+  const hostImports = makeCppCuteBrowserVfsHostImports(session);
+  weakMapSet(SESSIONS, session, {
+    sessionOrdinal,
+    installationId: stored.installationId,
+    requestId: stored.requestId,
+    profileHash: stored.profileHash,
+    maxPathByteLength: stored.maxPathByteLength,
+    maxSessionCalls: stored.maxSessionCalls,
+    maxLiveFileHandles: stored.maxLiveFileHandles,
+    maxAggregateLiveOpenByteLength: stored.maxAggregateLiveOpenByteLength,
+    maxIndexedNodes: stored.maxIndexedNodes,
+    maxIndexLogicalByteLength: stored.maxIndexLogicalByteLength,
+    indexedNodes: stored.indexedNodes,
+    indexLogicalByteLength: stored.indexLogicalByteLength,
+    maxMemoryByteLength: stored.maxMemoryByteLength,
+    hostImports,
+    installation: stored.installation,
+    request: stored.request,
+    memory,
+    files: stored.files,
+    directories: stored.directories,
+    handles: new NATIVE_MAP<number, LiveHandle>(),
+    successfullyReadPaths: new NATIVE_SET<string>(),
+    counters: emptySessionCounters(),
     nextHandle: 1,
     state: "active",
     terminalReceipt: undefined,
   });
-  return prepared;
+  stored.installation = undefined;
+  stored.request = undefined;
+  stored.files = undefined;
+  stored.directories = undefined;
+  stored.state = "bound";
+  return session;
+}
+
+export function observeCppCuteBrowserVfsMount(
+  mount: PreparedCppCuteBrowserVfsMount,
+): CppCuteBrowserVfsMountObservation {
+  const stored = storedMount(mount);
+  return OBJECT_FREEZE({
+    mountOrdinal: stored.mountOrdinal,
+    installationId: stored.installationId,
+    requestId: stored.requestId,
+    profileHash: stored.profileHash,
+    state: stored.state,
+    indexedNodes: stored.indexedNodes,
+    indexLogicalByteLength: stored.indexLogicalByteLength,
+    workerExecutionObserved: false,
+    loweringAuthorityReady: false,
+  });
+}
+
+export function discardCppCuteBrowserVfsMount(
+  mount: PreparedCppCuteBrowserVfsMount,
+): void {
+  const stored = storedMount(mount);
+  if (
+    stored.state !== "prepared" ||
+    stored.installation === undefined ||
+    stored.request === undefined ||
+    stored.files === undefined ||
+    stored.directories === undefined
+  ) {
+    state("$.mount", "only an unbound VFS mount can be discarded");
+  }
+  const files = stored.files;
+  const directories = stored.directories;
+  stored.installation = undefined;
+  stored.request = undefined;
+  stored.files = undefined;
+  stored.directories = undefined;
+  stored.state = "discarded";
+  let cleanupFailure: CleanupFailure | undefined;
+  cleanupFailure = attemptCleanup(cleanupFailure, () => zeroSourceFileBytes(files));
+  cleanupFailure = attemptCleanup(cleanupFailure, () => clearMap(files));
+  cleanupFailure = attemptCleanup(cleanupFailure, () => clearMap(directories));
+  if (cleanupFailure !== undefined) {
+    throw new Error("VFS mount cleanup failed after terminal discard", {
+      cause: cleanupFailure.cause,
+    });
+  }
+}
+
+export function prepareCppCuteBrowserVfsSession(
+  input: PrepareCppCuteBrowserVfsSessionInput,
+): PreparedCppCuteBrowserVfsSession {
+  const values = exactDataRecord(input, "$.input", [
+    "installation", "request", "runtimeAbiAsset", "memory",
+  ]);
+  const installation = values["installation"] as VerifiedCppCuteBrowserVfsInstallation;
+  const request = values["request"] as PreparedCppCuteFrontendRequest;
+  const runtimeAbiAsset = values["runtimeAbiAsset"] as VerifiedCppCuteBrowserRuntimeAbiAsset;
+  const memory = values["memory"] as WebAssembly.Memory;
+  const mount = prepareCppCuteBrowserVfsMount({
+    installation,
+    request,
+    runtimeAbiAsset,
+  });
+  try {
+    return bindCppCuteBrowserVfsMount({ mount, memory });
+  } catch (cause) {
+    if (storedMount(mount).state === "prepared") {
+      try {
+        discardCppCuteBrowserVfsMount(mount);
+      } catch {
+        // Discard severs authority before destructive cleanup and is already terminal.
+      }
+    }
+    throw cause;
+  }
 }
 
 export function createCppCuteBrowserVfsHostImports(
   session: PreparedCppCuteBrowserVfsSession,
 ): CppCuteBrowserVfsHostImports {
-  storedSession(session);
+  return storedSession(session).hostImports;
+}
+
+function makeCppCuteBrowserVfsHostImports(
+  session: PreparedCppCuteBrowserVfsSession,
+): CppCuteBrowserVfsHostImports {
   const imports: CppCuteBrowserVfsHostImports = {
     bg_vfs_status: (pathPointer, pathByteLength, metadataPointer) =>
       cppCuteBrowserVfsStatus(session, pathPointer, pathByteLength, metadataPointer),
@@ -459,7 +692,7 @@ export function createCppCuteBrowserVfsHostImports(
       metadataPointer,
     ),
   };
-  return Object.freeze(imports);
+  return OBJECT_FREEZE(imports);
 }
 
 export function cppCuteBrowserVfsStatus(
@@ -647,7 +880,7 @@ export function unwrapClosedCppCuteBrowserVfsSession(
   closed: ClosedCppCuteBrowserVfsSession,
 ): ClosedCppCuteBrowserVfsSessionRecord {
   if (typeof closed !== "object" || closed === null) unverified("$.closedSession");
-  const record = CLOSED_SESSIONS.get(closed as object);
+  const record = weakMapGet(CLOSED_SESSIONS, closed as object);
   if (record === undefined) unverified("$.closedSession");
   return record;
 }
@@ -705,7 +938,11 @@ function successfulRead(pointer: number, bytes: Uint8Array, file: SessionFile): 
 function commitWrites(stored: StoredSession, epoch: MemoryEpoch, writes: readonly PlannedWrite[]): void {
   ensureMemoryUnchanged(stored, epoch);
   for (const write of writes) {
-    UINT8_ARRAY_SET.call(new Uint8Array(epoch.buffer, write.pointer, write.bytes.byteLength), write.bytes);
+    REFLECT_APPLY(
+      UINT8_ARRAY_SET,
+      new Uint8Array(epoch.buffer, write.pointer, write.bytes.byteLength),
+      [write.bytes],
+    );
   }
   ensureMemoryUnchanged(stored, epoch);
 }
@@ -720,27 +957,52 @@ function inspectStoredMemory(stored: StoredSession): MemoryEpoch {
 }
 
 function inspectMemory(memory: WebAssembly.Memory, path: string): MemoryEpoch {
-  if (MEMORY_BUFFER_GETTER === undefined || typeof memory !== "object" || memory === null ||
-      Object.getPrototypeOf(memory) !== WebAssembly.Memory.prototype) {
+  if (
+    WEBASSEMBLY_MEMORY_PROTOTYPE === undefined ||
+    MEMORY_BUFFER_GETTER === undefined ||
+    ARRAY_BUFFER_BYTE_LENGTH_GETTER === undefined ||
+    typeof memory !== "object" ||
+    memory === null ||
+    exactPrototypeOf(memory, path) !== WEBASSEMBLY_MEMORY_PROTOTYPE
+  ) {
     invalid(path, "expected an exact WebAssembly.Memory instance");
   }
   let buffer: unknown;
   try {
-    buffer = MEMORY_BUFFER_GETTER.call(memory);
+    buffer = REFLECT_APPLY(MEMORY_BUFFER_GETTER, memory, []);
   } catch (cause) {
     invalid(path, "WebAssembly.Memory buffer is unavailable", { cause });
   }
-  if (!(buffer instanceof ArrayBuffer) ||
-      (typeof SharedArrayBuffer !== "undefined" && buffer instanceof SharedArrayBuffer)) {
+  if (
+    typeof buffer !== "object" ||
+    buffer === null ||
+    exactPrototypeOf(buffer, path) !== ARRAY_BUFFER_PROTOTYPE
+  ) {
     invalid(path, "VFS memory must be one unshared wasm32 ArrayBuffer");
   }
-  return { memory, buffer, byteLength: buffer.byteLength };
+  let byteLength: unknown;
+  try {
+    byteLength = REFLECT_APPLY(ARRAY_BUFFER_BYTE_LENGTH_GETTER, buffer, []);
+  } catch (cause) {
+    invalid(path, "WebAssembly.Memory buffer is unavailable", { cause });
+  }
+  if (typeof byteLength !== "number" || !Number.isSafeInteger(byteLength)) {
+    invalid(path, "WebAssembly.Memory buffer has an invalid byte length");
+  }
+  return { memory, buffer: buffer as ArrayBuffer, byteLength };
 }
 
 function ensureMemoryUnchanged(stored: StoredSession, epoch: MemoryEpoch): void {
   if (stored.memory !== epoch.memory || MEMORY_BUFFER_GETTER === undefined) throw new Error("session memory changed");
-  const current = MEMORY_BUFFER_GETTER.call(epoch.memory) as unknown;
-  if (current !== epoch.buffer || !(current instanceof ArrayBuffer) || current.byteLength !== epoch.byteLength) {
+  const current = REFLECT_APPLY(MEMORY_BUFFER_GETTER, epoch.memory, []) as unknown;
+  if (
+    current !== epoch.buffer ||
+    typeof current !== "object" ||
+    current === null ||
+    exactPrototypeOf(current, "$.memory") !== ARRAY_BUFFER_PROTOTYPE ||
+    ARRAY_BUFFER_BYTE_LENGTH_GETTER === undefined ||
+    REFLECT_APPLY(ARRAY_BUFFER_BYTE_LENGTH_GETTER, current, []) !== epoch.byteLength
+  ) {
     throw new Error("WebAssembly memory grew during one synchronous VFS import");
   }
 }
@@ -773,14 +1035,16 @@ function readPath(
   }
   const range = outputRange(epoch, pointerValue, byteLength, 1);
   const snapshot = new Uint8Array(byteLength);
-  UINT8_ARRAY_SET.call(snapshot, new Uint8Array(epoch.buffer, range.pointer, byteLength));
+  REFLECT_APPLY(UINT8_ARRAY_SET, snapshot, [
+    new Uint8Array(epoch.buffer, range.pointer, byteLength),
+  ]);
   let path: string;
   try {
-    path = TEXT_DECODE.call(TEXT_DECODER, snapshot);
+    path = REFLECT_APPLY(TEXT_DECODE, TEXT_DECODER, [snapshot]);
   } catch {
     throw new AbiStatus(CPP_CUTE_BROWSER_VFS_STATUS.invalidPath);
   }
-  const encoded = TEXT_ENCODE.call(TEXT_ENCODER, path);
+  const encoded = REFLECT_APPLY(TEXT_ENCODE, TEXT_ENCODER, [path]);
   if (!equalBytes(snapshot, encoded) || !validCanonicalPath(path)) {
     throw new AbiStatus(CPP_CUTE_BROWSER_VFS_STATUS.invalidPath);
   }
@@ -1000,10 +1264,55 @@ function buildDirectories(
         node: child,
       });
     }).sort((left, right) => compareBytes(left.basenameBytes, right.basenameBytes));
-    (node as { children: readonly DirectoryChild[] }).children = Object.freeze(children);
-    Object.freeze(node);
+    (node as { children: readonly DirectoryChild[] }).children = OBJECT_FREEZE(children);
+    OBJECT_FREEZE(node);
   }
   return nullFrozen({ directories, indexedNodes, indexLogicalByteLength });
+}
+
+function emptySessionCounters(): SessionCountersMutable {
+  return {
+    totalSessionCalls: 0n,
+    statusCalls: 0n,
+    openCalls: 0n,
+    readCalls: 0n,
+    closeCalls: 0n,
+    directoryCountCalls: 0n,
+    directoryEntryCalls: 0n,
+    peakLiveHandles: 0n,
+    currentLiveSourceBytes: 0n,
+    currentLiveInstalledBytes: 0n,
+    peakLiveLogicalReservationBytes: 0n,
+  };
+}
+
+function attemptCleanup(
+  current: CleanupFailure | undefined,
+  cleanup: () => void,
+): CleanupFailure | undefined {
+  try {
+    cleanup();
+    return current;
+  } catch (cause) {
+    return current === undefined ? { cause } : current;
+  }
+}
+
+function clearMap<Key, Value>(map: Map<Key, Value>): void {
+  REFLECT_APPLY(MAP_CLEAR, map, []);
+}
+
+function clearSet<Value>(set: Set<Value>): void {
+  REFLECT_APPLY(SET_CLEAR, set, []);
+}
+
+function zeroSourceFileBytes(files: ReadonlyMap<string, SessionFile>): void {
+  for (const file of files.values()) {
+    if (file.source !== "request-source") continue;
+    for (let index = 0; index < file.bytes.byteLength; index += 1) {
+      file.bytes[index] = 0;
+    }
+  }
 }
 
 function disposeStored(
@@ -1012,24 +1321,30 @@ function disposeStored(
 ): ClosedCppCuteBrowserVfsSession {
   if (stored.terminalReceipt !== undefined) return stored.terminalReceipt;
   const preDisposalObservation = sessionObservation(stored, "disposed");
-  for (const file of stored.files.values()) {
-    if (file.source === "request-source") {
-      for (let index = 0; index < file.bytes.byteLength; index += 1) file.bytes[index] = 0;
-    }
-  }
-  stored.handles.clear();
-  stored.files.clear();
-  stored.directories.clear();
-  stored.successfullyReadPaths.clear();
+  const files = stored.files;
+  const directories = stored.directories;
+  const handles = stored.handles;
+  const successfullyReadPaths = stored.successfullyReadPaths;
+  stored.files = new NATIVE_MAP<string, SessionFile>();
+  stored.directories = new NATIVE_MAP<string, SessionDirectory>();
+  stored.handles = new NATIVE_MAP<number, LiveHandle>();
+  stored.successfullyReadPaths = new NATIVE_SET<string>();
   stored.counters.currentLiveSourceBytes = 0n;
   stored.counters.currentLiveInstalledBytes = 0n;
   stored.installation = undefined;
   stored.request = undefined;
   stored.memory = undefined;
   stored.state = "disposed";
-  const observation = Object.freeze({
+  let cleanupFailure: CleanupFailure | undefined;
+  cleanupFailure = attemptCleanup(cleanupFailure, () => zeroSourceFileBytes(files));
+  cleanupFailure = attemptCleanup(cleanupFailure, () => clearMap(handles));
+  cleanupFailure = attemptCleanup(cleanupFailure, () => clearMap(files));
+  cleanupFailure = attemptCleanup(cleanupFailure, () => clearMap(directories));
+  cleanupFailure = attemptCleanup(cleanupFailure, () => clearSet(successfullyReadPaths));
+  const settledReason = cleanupFailure === undefined ? reason : "internal-error";
+  const observation = OBJECT_FREEZE({
     ...preDisposalObservation,
-    counters: Object.freeze({
+    counters: OBJECT_FREEZE({
       ...preDisposalObservation.counters,
       currentLiveHandles: encodeWireU64(0n),
       currentLiveSourceLogicalReservationByteLength: encodeWireU64(0n),
@@ -1037,16 +1352,16 @@ function disposeStored(
       currentLiveLogicalReservationByteLength: encodeWireU64(0n),
     }),
   });
-  const closed = Object.freeze({
+  const closed = OBJECT_FREEZE({
     sessionOrdinal: stored.sessionOrdinal,
     installationId: stored.installationId,
     requestId: stored.requestId,
-    reason,
+    reason: settledReason,
     workerExecutionObserved: false,
     loweringAuthorityReady: false,
   }) as ClosedCppCuteBrowserVfsSession;
-  const record = Object.freeze({ observation, reason });
-  CLOSED_SESSIONS.set(closed, record);
+  const record = OBJECT_FREEZE({ observation, reason: settledReason });
+  weakMapSet(CLOSED_SESSIONS, closed, record);
   stored.terminalReceipt = closed;
   return closed;
 }
@@ -1060,7 +1375,7 @@ function sessionObservation(
     .map((path): CppCuteBrowserVfsOpenedFileObservation => {
       const file = stored.files.get(path);
       if (file === undefined) throw new Error("opened file disappeared before observation");
-      return Object.freeze({
+      return OBJECT_FREEZE({
         virtualPath: file.virtualPath,
         source: file.source,
         contentSha256: file.contentSha256,
@@ -1073,12 +1388,12 @@ function sessionObservation(
   const logicalInstalled = openedFiles
     .filter((file) => file.source === "installed-pack")
     .reduce((total, file) => total + wireIntegerToBigInt(file.byteLength), 0n);
-  return Object.freeze({
+  return OBJECT_FREEZE({
     installationId: stored.installationId,
     requestId: stored.requestId,
     profileHash: stored.profileHash,
     state: forcedState ?? stored.state,
-    counters: Object.freeze({
+    counters: OBJECT_FREEZE({
       totalSessionCalls: encodeWireU64(stored.counters.totalSessionCalls),
       statusCalls: encodeWireU64(stored.counters.statusCalls),
       openCalls: encodeWireU64(stored.counters.openCalls),
@@ -1102,15 +1417,38 @@ function sessionObservation(
       logicalOpenedInstalledVfsByteLength: encodeWireU64(logicalInstalled),
       logicalOpenedTotalByteLength: encodeWireU64(logicalSource + logicalInstalled),
     }),
-    openedFiles: Object.freeze(openedFiles),
+    openedFiles: OBJECT_FREEZE(openedFiles),
   });
 }
 
 function storedSession(session: PreparedCppCuteBrowserVfsSession): StoredSession {
   if (typeof session !== "object" || session === null) unverified("$.session");
-  const stored = SESSIONS.get(session as object);
+  const stored = weakMapGet(SESSIONS, session as object);
   if (stored === undefined) unverified("$.session");
   return stored;
+}
+
+function storedMount(mount: PreparedCppCuteBrowserVfsMount): StoredMount {
+  if (typeof mount !== "object" || mount === null) unverified("$.mount");
+  const stored = weakMapGet(MOUNTS, mount as object);
+  if (stored === undefined) unverified("$.mount");
+  return stored;
+}
+
+function weakMapGet<Value>(map: WeakMap<object, Value>, key: object): Value | undefined {
+  return REFLECT_APPLY(WEAK_MAP_GET, map, [key]) as Value | undefined;
+}
+
+function weakMapSet<Value>(map: WeakMap<object, Value>, key: object, value: Value): void {
+  REFLECT_APPLY(WEAK_MAP_SET, map, [key, value]);
+}
+
+function exactPrototypeOf(value: object, path: string): object | null {
+  try {
+    return OBJECT_GET_PROTOTYPE_OF(value);
+  } catch (cause) {
+    invalid(path, "object prototype is unavailable", { cause });
+  }
 }
 
 function currentLiveLogicalReservationBytes(stored: StoredSession): bigint {
@@ -1123,7 +1461,7 @@ function indexedPath(
   path: string,
 ): { readonly virtualPathBytes: Uint8Array; readonly basenameBytes: Uint8Array } {
   if (!validCanonicalPath(virtualPath)) mismatch(path, "indexed path is not canonical absolute UTF-8 VFS form");
-  const virtualPathBytes = TEXT_ENCODE.call(TEXT_ENCODER, virtualPath);
+  const virtualPathBytes = REFLECT_APPLY(TEXT_ENCODE, TEXT_ENCODER, [virtualPath]);
   if (virtualPathBytes.byteLength > maxPathByteLength) {
     resource(path, `mounted absolute UTF-8 path exceeds maxPathByteLength ${maxPathByteLength}`);
   }
@@ -1132,20 +1470,23 @@ function indexedPath(
     : virtualPath.slice(virtualPath.lastIndexOf("/") + 1);
   return nullFrozen({
     virtualPathBytes,
-    basenameBytes: TEXT_ENCODE.call(TEXT_ENCODER, basename),
+    basenameBytes: REFLECT_APPLY(TEXT_ENCODE, TEXT_ENCODER, [basename]),
   });
 }
 
 function nullRecord<T extends object>(value: T): T {
-  return Object.assign(Object.create(null) as object, value) as T;
+  return OBJECT_ASSIGN(OBJECT_CREATE(null) as object, value) as T;
 }
 
 function nullFrozen<T extends object>(value: T): T {
-  return Object.freeze(nullRecord(value));
+  return OBJECT_FREEZE(nullRecord(value));
 }
 
 function compareUtf8(left: string, right: string): number {
-  return compareBytes(TEXT_ENCODE.call(TEXT_ENCODER, left), TEXT_ENCODE.call(TEXT_ENCODER, right));
+  return compareBytes(
+    REFLECT_APPLY(TEXT_ENCODE, TEXT_ENCODER, [left]),
+    REFLECT_APPLY(TEXT_ENCODE, TEXT_ENCODER, [right]),
+  );
 }
 
 function compareBytes(left: Uint8Array, right: Uint8Array): number {
@@ -1172,17 +1513,20 @@ function exactDataRecord(
   path: string,
   keys: readonly string[],
 ): Readonly<Record<string, unknown>> {
-  if (typeof value !== "object" || value === null ||
-      (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) {
+  if (typeof value !== "object" || value === null) {
     invalid(path, "expected a plain data object");
   }
-  const ownKeys = Reflect.ownKeys(value);
+  const prototype = exactPrototypeOf(value, path);
+  if (prototype !== OBJECT_PROTOTYPE && prototype !== null) {
+    invalid(path, "expected a plain data object");
+  }
+  const ownKeys = REFLECT_OWN_KEYS(value);
   if (ownKeys.some((key) => typeof key !== "string") || ownKeys.length !== keys.length ||
       ownKeys.some((key) => typeof key !== "string" || !keys.includes(key))) {
     invalid(path, `expected exactly data fields ${keys.join(", ")}`);
   }
-  const descriptors = Object.getOwnPropertyDescriptors(value);
-  const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  const descriptors = OBJECT_GET_OWN_PROPERTY_DESCRIPTORS(value);
+  const result: Record<string, unknown> = OBJECT_CREATE(null) as Record<string, unknown>;
   for (const key of keys) {
     const descriptor = descriptors[key];
     if (descriptor === undefined || descriptor.enumerable !== true || !("value" in descriptor)) {
@@ -1190,7 +1534,7 @@ function exactDataRecord(
     }
     result[key] = descriptor.value;
   }
-  return Object.freeze(result);
+  return OBJECT_FREEZE(result);
 }
 
 function invalid(path: string, message: string, options?: ErrorOptions): never {
