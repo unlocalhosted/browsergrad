@@ -1,4 +1,5 @@
 import {
+  MAXIMUM_DECODE_LIMITS,
   canonicalJsonBytes,
   decodeWireJson,
   deepFreezeJson,
@@ -8,6 +9,7 @@ import {
   parseWireU64,
   sha256Hex,
   wireIntegerToBigInt,
+  type DecodeLimits,
   type JsonObject,
   type JsonValue,
   type WireU64,
@@ -30,6 +32,7 @@ import {
 } from "./cpp_cute_browser_assets.js";
 import {
   unwrapPreparedCppCuteBrowserRuntimeAbiManifest,
+  type CppCuteBrowserRuntimeAbiBodyV1,
   type PreparedCppCuteBrowserRuntimeAbiManifest,
 } from "./cpp_cute_browser_runtime_abi.js";
 import {
@@ -54,6 +57,10 @@ import {
   type CppCuteFrontendExtractionLimits,
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
+import {
+  DEFAULT_CPP_CUTE_FRONTEND_ARTIFACT_LIMITS,
+  type CppCuteFrontendArtifactLimits,
+} from "./cpp_cute_frontend_parse.js";
 import type {
   CppCuteFrontendDiagnosticV3,
   CppCuteFrontendPayloadV3,
@@ -66,6 +73,9 @@ export const CPP_CUTE_BROWSER_WORKER_RESULT_SCHEMA =
 export const CPP_CUTE_BROWSER_WORKER_PROTOCOL_MAJOR = 1;
 export const CPP_CUTE_BROWSER_WORKER_PROTOCOL_MINOR = 0;
 export const CPP_CUTE_BROWSER_WORKER_RESULT_CONTROL_BYTE_LIMIT = 1024 * 1024;
+// Covers the artifact envelope plus the verifier's bounded 128-level semantic
+// expression/template structures without opening the global 256-level maximum.
+const CPP_CUTE_BROWSER_ARTIFACT_DECODE_DEPTH = 192;
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const INVOCATION_ID = /^bg\.cpp\.browser-worker-invocation\.sha256\.[0-9a-f]{64}$/u;
@@ -153,8 +163,12 @@ export interface PreparedCppCuteBrowserWorkerInvocationRecord {
 
 interface ActiveStoredInvocation extends PreparedCppCuteBrowserWorkerInvocationRecord {
   readonly canonicalBytes: Uint8Array;
+  readonly profileRegionBytes: Uint8Array;
+  readonly requestRegionBytes: Uint8Array;
   readonly workerModuleBytes: Uint8Array;
   readonly clangWasmBytes: Uint8Array;
+  readonly extractionLimits: CppCuteFrontendExtractionLimits;
+  readonly artifactVerification: WorkerArtifactVerificationContract;
 }
 
 /** The slot survives replay checks; terminalization releases every heavy authority and byte copy. */
@@ -364,6 +378,14 @@ export async function prepareCppCuteBrowserWorkerInvocation(
   if (manifestRecord.profile !== profile || requestRecord.profile !== profile) {
     mismatch("$.profile", "manifest and request must derive from the exact prepared browser profile");
   }
+  const extractionLimits = effectiveExtractionLimits(profile, request);
+  // Reject request/verifier incompatibility before copying or hashing either
+  // executable asset. This is a pure admission check over prepared authorities.
+  const artifactVerification = workerArtifactVerificationContract(
+    extractionLimits,
+    profileRecord.profile.virtualFileSystem.includeRoots.length,
+    requestRecord.request.entryRequests.length,
+  );
   const assetSetRecord = unwrapVerifiedCppCuteBrowserAssetSet(installationRecord.assetSet);
   if (assetSetRecord.manifest !== assetManifest) {
     mismatch("$.vfsInstallation", "VFS installation does not derive from the exact prepared asset manifest");
@@ -382,6 +404,21 @@ export async function prepareCppCuteBrowserWorkerInvocation(
       rawWasmConformance.runtimeAbiContractSha256 !== runtimeAbi.contractSha256) {
     mismatch("$.rawWasmConformance", "raw-Wasm conformance authority differs from the exact runtime ABI");
   }
+  const profileRegionBytes = canonicalWorkerInputRegionBytes(
+    profileRecord.profile,
+    "$.profileRegion",
+    runtimeManifest.body.inputFrame.maxFrameByteLength,
+  );
+  const requestRegionBytes = canonicalWorkerInputRegionBytes(
+    requestRecord.request,
+    "$.requestRegion",
+    runtimeManifest.body.inputFrame.maxFrameByteLength,
+  );
+  verifyWorkerInputRegionsFitFrame(
+    profileRegionBytes,
+    requestRegionBytes,
+    runtimeManifest.body.inputFrame,
+  );
   const clangAsset = manifestRecord.manifest.body.assets.find((asset) => asset.kind === "clang-extractor-wasm");
   if (clangAsset === undefined) mismatch("$.assetManifest", "asset manifest has no Clang-Wasm extractor");
   if (clangAsset.sha256 !== rawWasmConformance.wasmSha256 ||
@@ -485,8 +522,12 @@ export async function prepareCppCuteBrowserWorkerInvocation(
       rawWasmConformance,
       invocation,
       canonicalBytes: canonicalJsonBytes(invocation),
+      profileRegionBytes,
+      requestRegionBytes,
       workerModuleBytes,
       clangWasmBytes,
+      extractionLimits,
+      artifactVerification,
     },
   });
   return prepared;
@@ -518,18 +559,14 @@ export function unwrapPreparedCppCuteBrowserWorkerInvocation(
 export function canonicalCppCuteBrowserWorkerProfileRegionBytes(
   invocation: PreparedCppCuteBrowserWorkerInvocation,
 ): Uint8Array {
-  return canonicalJsonBytes(unwrapPreparedCppCuteBrowserFrontendProfile(
-    activeStoredInvocation(invocation).profile,
-  ).profile);
+  return new Uint8Array(activeStoredInvocation(invocation).profileRegionBytes);
 }
 
 /** Exact runtime-ABI request JSON region; source bytes stay out of band. */
 export function canonicalCppCuteBrowserWorkerRequestRegionBytes(
   invocation: PreparedCppCuteBrowserWorkerInvocation,
 ): Uint8Array {
-  return canonicalJsonBytes(unwrapPreparedCppCuteFrontendRequest(
-    activeStoredInvocation(invocation).request,
-  ).request);
+  return new Uint8Array(activeStoredInvocation(invocation).requestRegionBytes);
 }
 
 export function copyCppCuteBrowserWorkerModuleBytes(
@@ -561,7 +598,8 @@ export async function validateCppCuteBrowserWorkerResultFrame(
   artifactBytes: Uint8Array,
 ): Promise<ValidatedCppCuteBrowserWorkerResultFrame> {
   const stored = beginTerminal(invocation);
-  const effectiveLimits = effectiveExtractionLimits(stored.profile, stored.request);
+  const effectiveLimits = stored.extractionLimits;
+  const artifactVerification = stored.artifactVerification;
   const controlSnapshot = snapshotBytesWithinLimit(
     controlBytes,
     "$.controlBytes",
@@ -578,9 +616,12 @@ export async function validateCppCuteBrowserWorkerResultFrame(
     effectiveLimits.maxOutputBytes,
   );
   const artifactResource = await decodeCppCuteFrontendArtifact(artifactSnapshot, {
-    artifactLimits: extractionArtifactLimits(effectiveLimits),
+    limits: artifactVerification.decodeLimits,
+    artifactLimits: artifactVerification.artifactLimits,
   });
-  const canonicalArtifact = canonicalCppCuteFrontendArtifactResourceBytes(artifactResource);
+  const canonicalArtifact = canonicalCppCuteFrontendArtifactResourceBytes(artifactResource, {
+    limits: artifactVerification.decodeLimits,
+  });
   if (!equalBytes(artifactSnapshot, canonicalArtifact)) {
     noncanonical("$.artifactBytes", "artifact bytes differ from the canonical verified resource");
   }
@@ -596,6 +637,7 @@ export async function validateCppCuteBrowserWorkerResultFrame(
     stored.profile,
     effectiveLimits,
     stored.runtimeAbi,
+    artifactVerification.decodeLimits,
   );
   const resultBytesSha256 = await hashBytes(controlSnapshot, "$.controlBytes");
   const validationHash = await hashCanonicalJson({
@@ -873,6 +915,7 @@ async function verifyClaimedResultConsistency(
   profile: PreparedCppCuteFrontendProfile,
   limits: CppCuteFrontendExtractionLimits,
   runtimeAbi: PreparedCppCuteBrowserRuntimeAbiManifest,
+  decodeLimits: DecodeLimits,
 ): Promise<void> {
   const sources = payload.inputs.files.filter((file) => file.owner.kind === "source");
   const headers = payload.inputs.files.filter((file) => file.owner.kind !== "source");
@@ -893,7 +936,7 @@ async function verifyClaimedResultConsistency(
       sumFileBytes(headers) > BigInt(limits.maxHeaderBytes)) {
     resource("$.result.openedInputs", "opened-input closure exceeds the exact prepared source or header ceiling");
   }
-  const expectedDiagnostics = await diagnosticsProjection(payload.diagnostics);
+  const expectedDiagnostics = await diagnosticsProjection(payload.diagnostics, decodeLimits);
   if (!sameJson(result.diagnostics, expectedDiagnostics)) {
     resultMismatch("$.result.diagnostics", "diagnostic claims differ from the verified artifact diagnostics");
   }
@@ -1087,18 +1130,120 @@ function verifyFrontendWorkLimits(
   }
 }
 
-function extractionArtifactLimits(limits: CppCuteFrontendExtractionLimits) {
-  return {
+type AdmissionDerivedArtifactLimitName =
+  | "maxIncludeRoots"
+  | "maxFiles"
+  | "maxMacroExpansions"
+  | "maxTemplateInstantiations"
+  | "maxDeclarations"
+  | "maxTypes"
+  | "maxConstants"
+  | "maxFacts"
+  | "maxEntries"
+  | "maxDiagnostics";
+
+interface WorkerArtifactVerificationContract {
+  readonly artifactLimits: CppCuteFrontendArtifactLimits;
+  readonly decodeLimits: DecodeLimits;
+}
+
+function workerArtifactVerificationContract(
+  limits: CppCuteFrontendExtractionLimits,
+  includeRootCount: number,
+  entryRequestCount: number,
+): WorkerArtifactVerificationContract {
+  const admissionDerivedLimits: Readonly<Pick<
+    CppCuteFrontendArtifactLimits,
+    AdmissionDerivedArtifactLimitName
+  >> = {
+    maxIncludeRoots: includeRootCount,
     maxFiles: limits.maxSourceFiles + limits.maxHeaderFiles,
-    maxIncludeDepth: limits.maxIncludeDepth,
     maxMacroExpansions: limits.maxMacroExpansions,
     maxTemplateInstantiations: limits.maxTemplateInstantiations,
     maxDeclarations: limits.maxDeclarations,
     maxTypes: limits.maxTypes,
     maxConstants: limits.maxConstants,
     maxFacts: limits.maxLayouts + limits.maxTensors + limits.maxOperations + limits.maxTargetIntrinsics,
+    maxEntries: entryRequestCount,
     maxDiagnostics: limits.maxDiagnostics,
   };
+  for (const [key, value] of Object.entries(admissionDerivedLimits) as Array<
+    [AdmissionDerivedArtifactLimitName, number]
+  >) {
+    const verifierCeiling = DEFAULT_CPP_CUTE_FRONTEND_ARTIFACT_LIMITS[key];
+    if (!Number.isSafeInteger(value) || value <= 0 || value > verifierCeiling) {
+      const path = key === "maxIncludeRoots"
+        ? "$.profile.virtualFileSystem.includeRoots"
+        : key === "maxEntries"
+          ? "$.request.entryRequests"
+          : "$.request.limits";
+      resource(
+        path,
+        `effective admission-derived ${key} ceiling ${value} exceeds the artifact-v3 verifier ceiling ${verifierCeiling}`,
+      );
+    }
+  }
+  if (!Number.isSafeInteger(limits.maxOutputBytes) || limits.maxOutputBytes <= 0 ||
+      limits.maxOutputBytes > MAXIMUM_DECODE_LIMITS.maxDocumentBytes) {
+    resource(
+      "$.request.limits.maxOutputBytes",
+      `effective output ceiling ${limits.maxOutputBytes} exceeds the strict JSON decoder ceiling ${MAXIMUM_DECODE_LIMITS.maxDocumentBytes}`,
+    );
+  }
+  // Pass every artifact-v3 structural ceiling explicitly. Admission-derived
+  // dimensions may lower the fixed verifier contract; dimensions not exposed
+  // by the request remain fixed implementation ceilings rather than hidden
+  // defaults that can drift independently from Worker admission.
+  const artifactLimits: CppCuteFrontendArtifactLimits = Object.freeze({
+    ...DEFAULT_CPP_CUTE_FRONTEND_ARTIFACT_LIMITS,
+    ...admissionDerivedLimits,
+  });
+  // Artifact verification must not fall back to the semantic-core defaults:
+  // those defaults are intentionally smaller than the browser artifact/output
+  // contract. The global maximums remain hard bounded, while document and
+  // cumulative decoded-string bytes are lowered to the exact request ceiling.
+  const decodeLimits: DecodeLimits = Object.freeze({
+    ...MAXIMUM_DECODE_LIMITS,
+    maxDocumentBytes: limits.maxOutputBytes,
+    maxDepth: CPP_CUTE_BROWSER_ARTIFACT_DECODE_DEPTH,
+    maxStringBytes: Math.min(limits.maxOutputBytes, MAXIMUM_DECODE_LIMITS.maxStringBytes),
+  });
+  return Object.freeze({ artifactLimits, decodeLimits });
+}
+
+function canonicalWorkerInputRegionBytes(
+  value: JsonValue,
+  path: string,
+  maximumByteLength: number,
+): Uint8Array {
+  try {
+    return canonicalJsonBytes(value, {
+      limits: {
+        ...MAXIMUM_DECODE_LIMITS,
+        maxDocumentBytes: maximumByteLength,
+        maxStringBytes: Math.min(maximumByteLength, MAXIMUM_DECODE_LIMITS.maxStringBytes),
+      },
+    });
+  } catch {
+    resource(path, `canonical input region exceeds the runtime-ABI frame budget ${maximumByteLength}`);
+  }
+}
+
+function verifyWorkerInputRegionsFitFrame(
+  profileBytes: Uint8Array,
+  requestBytes: Uint8Array,
+  inputFrame: CppCuteBrowserRuntimeAbiBodyV1["inputFrame"],
+): void {
+  const align = (value: number): number =>
+    Math.ceil(value / inputFrame.alignmentByteLength) * inputFrame.alignmentByteLength;
+  const requestOffset = align(inputFrame.headerByteLength + profileBytes.byteLength);
+  const frameByteLength = align(requestOffset + requestBytes.byteLength);
+  if (!Number.isSafeInteger(frameByteLength) || frameByteLength > inputFrame.maxFrameByteLength) {
+    resource(
+      "$.inputFrame",
+      `canonical profile and request regions require ${frameByteLength} bytes but runtime ABI permits ${inputFrame.maxFrameByteLength}`,
+    );
+  }
 }
 
 function effectiveExtractionLimits(
@@ -1113,6 +1258,7 @@ function effectiveExtractionLimits(
 
 async function diagnosticsProjection(
   diagnostics: readonly CppCuteFrontendDiagnosticV3[],
+  decodeLimits: DecodeLimits,
 ): Promise<CppCuteBrowserWorkerDiagnosticsV1> {
   const count = (severity: CppCuteFrontendDiagnosticV3["severity"]): WireU64 =>
     wireCount(diagnostics.filter((entry) => entry.severity === severity).length);
@@ -1120,7 +1266,7 @@ async function diagnosticsProjection(
     diagnosticsSha256: await hashCanonicalJson({
       domain: "browsergrad.compiler.cpp-cute.browser-worker-diagnostics.v1",
       diagnostics,
-    }),
+    }, { limits: decodeLimits }),
     count: wireCount(diagnostics.length),
     remarks: count("remark"),
     notes: count("note"),

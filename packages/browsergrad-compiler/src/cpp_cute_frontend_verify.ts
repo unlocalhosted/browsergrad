@@ -49,15 +49,15 @@ export async function verifyCppCuteFrontendPayload(
   verifyDeclarations(payload, indexes);
   verifyTemplateInstantiations(payload, indexes);
   verifyOverloadResolutions(payload, indexes);
-  await verifySourceAbi(payload, indexes);
+  await verifySourceAbi(payload, indexes, options.limits);
   verifyDeclarationInitializers(payload, indexes);
   verifyFunctionBodies(payload, indexes);
   verifyFacts(payload, indexes, options.limits);
   verifyEntries(payload, indexes);
   verifyDiagnosticsAndOutcome(payload, indexes);
-  await verifySemanticPasses(payload, indexes);
+  await verifySemanticPasses(payload, indexes, options.limits);
 
-  const hashes = await computeCppCuteInputHashes(payload);
+  const hashes = await computeCppCuteInputHashes(payload, options);
   if (payload.inputs.sourceSetSha256 !== hashes.sourceSetSha256) {
     mismatch("$.payload.inputs.sourceSetSha256", "source-set hash does not match normalized main-source records");
   }
@@ -516,8 +516,12 @@ function verifyOverloadResolutions(payload: CppCuteFrontendPayloadV3, indexes: A
   }
 }
 
-async function verifySourceAbi(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): Promise<void> {
-  const sourceEntities = await verifySourceEntities(payload, indexes);
+async function verifySourceAbi(
+  payload: CppCuteFrontendPayloadV3,
+  indexes: ArtifactIndexes,
+  limits: Partial<DecodeLimits> | undefined,
+): Promise<void> {
+  const sourceEntities = await verifySourceEntities(payload, indexes, limits);
   const observedDomains = new Map<string, Set<"host" | "device">>();
   const abiOwners = new Map<string, Set<"host" | "device">>();
   for (const [passIndex, pass] of payload.semanticPasses.entries()) {
@@ -713,12 +717,13 @@ function addSourceEntityDomain(
 async function verifySourceEntities(
   payload: CppCuteFrontendPayloadV3,
   indexes: ArtifactIndexes,
+  limits: Partial<DecodeLimits> | undefined,
 ): Promise<ReadonlyMap<string, CppCuteSourceEntityV1>> {
   const entities = mapBy(payload.sourceEntities, (entry) => entry.sourceEntityId);
   for (const [index, entity] of payload.sourceEntities.entries()) {
     const path = `$.payload.sourceEntities[${index}]`;
     verifyOrigin(entity.origin, `${path}.origin`, indexes);
-    const expected = await deriveSourceEntityId(entity, indexes);
+    const expected = await deriveSourceEntityId(entity, indexes, limits);
     if (entity.sourceEntityId !== expected) {
       mismatch(`${path}.sourceEntityId`, "source entity ID is not derived from canonical source identity and resolved origin");
     }
@@ -736,20 +741,22 @@ type CppCuteSourceEntityIdentity = {
 export async function deriveCppCuteSourceEntityId(
   payload: CppCuteFrontendPayloadV3,
   entity: CppCuteSourceEntityIdentity,
+  options: { readonly limits?: Partial<DecodeLimits> } = {},
 ): Promise<string> {
-  return deriveSourceEntityId(entity, buildIndexes(payload));
+  return deriveSourceEntityId(entity, buildIndexes(payload), options.limits);
 }
 
 async function deriveSourceEntityId(
   entity: CppCuteSourceEntityIdentity,
   indexes: ArtifactIndexes,
+  limits: Partial<DecodeLimits> | undefined,
 ): Promise<string> {
   const digest = await hashCanonicalJson({
     domain: "browsergrad.compiler.cpp-cute.source-entity-id.v1",
     entityKind: entity.entityKind,
     canonicalIdentity: entity.canonicalIdentity,
     origin: canonicalSourceOrigin(entity.origin, indexes),
-  });
+  }, hashOptions(limits));
   return `bg.cpp.source-entity.sha256.${digest}`;
 }
 
@@ -791,13 +798,22 @@ function sameSourceOrigin(left: CppCuteSourceOriginV1, right: CppCuteSourceOrigi
     : right.kind === "implicit" && left.anchorSpanId === right.anchorSpanId && left.reason === right.reason);
 }
 
-async function verifySemanticPasses(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): Promise<void> {
+async function verifySemanticPasses(
+  payload: CppCuteFrontendPayloadV3,
+  indexes: ArtifactIndexes,
+  limits: Partial<DecodeLimits> | undefined,
+): Promise<void> {
   const factOwner = new Map<string, number>();
   const diagnosticOwner = new Map<string, number>();
   const openedFileUnion = new Set<string>();
   const includeEdgeUnion = new Set<string>();
   const sourceEntities = mapBy(payload.sourceEntities, (entry) => entry.sourceEntityId);
-  const selectedSourceRootEntityIds = await deriveSelectedSourceRootEntityIds(payload, indexes, sourceEntities);
+  const selectedSourceRootEntityIds = await deriveSelectedSourceRootEntityIds(
+    payload,
+    indexes,
+    sourceEntities,
+    limits,
+  );
   for (const [passIndex, pass] of payload.semanticPasses.entries()) {
     const path = `$.payload.semanticPasses[${passIndex}]`;
     for (const [entityIndex, sourceEntityId] of pass.selectedSourceRootEntityIds.entries()) {
@@ -844,7 +860,11 @@ async function verifySemanticPasses(payload: CppCuteFrontendPayloadV3, indexes: 
         invalid(`${path}.openedFileIds`, "executed semantic pass must open the main source");
       }
       verifySemanticPassInputClosure(payload, passIndex, indexes);
-      const observedHash = await computeCppCuteSemanticPassInputClosureHash(payload, passIndex);
+      const observedHash = await computeCppCuteSemanticPassInputClosureHash(
+        payload,
+        passIndex,
+        hashOptions(limits),
+      );
       if (pass.observedInputClosureSha256 !== observedHash) {
         mismatch(`${path}.observedInputClosureSha256`, "semantic pass observed-input hash is not canonical");
       }
@@ -875,7 +895,11 @@ async function verifySemanticPasses(payload: CppCuteFrontendPayloadV3, indexes: 
       invalid(`${path}.sharedSurfaceSha256`, "successful semantic pass requires shared source-surface evidence");
     }
     if (pass.sharedSurfaceSha256 !== null) {
-      const surfaceHash = await computeCppCuteSharedSurfaceHash(payload, pass.domain);
+      const surfaceHash = await computeCppCuteSharedSurfaceHash(
+        payload,
+        pass.domain,
+        hashOptions(limits),
+      );
       if (pass.sharedSurfaceSha256 !== surfaceHash) {
         mismatch(`${path}.sharedSurfaceSha256`, "shared source-surface hash is not canonical for pass ABI projection");
       }
@@ -1008,6 +1032,7 @@ async function deriveSelectedSourceRootEntityIds(
   payload: CppCuteFrontendPayloadV3,
   indexes: ArtifactIndexes,
   sourceEntities: ReadonlyMap<string, CppCuteSourceEntityV1>,
+  limits: Partial<DecodeLimits> | undefined,
 ): Promise<readonly string[]> {
   const declarationIds = [...new Set(payload.entries.flatMap((entry) => entry.selectedRootDeclarationIds))].sort();
   const sourceEntityIds = await Promise.all(declarationIds.map(async (declarationId, index) => {
@@ -1025,7 +1050,7 @@ async function deriveSelectedSourceRootEntityIds(
       canonicalIdentity: declaration.canonicalUsr,
       origin: declaration.origin,
       domains: [],
-    }, indexes);
+    }, indexes, limits);
     const entity = ref(sourceEntities, sourceEntityId, path, "selected-root source entity");
     if (entity.entityKind !== entityKind || entity.canonicalIdentity !== declaration.canonicalUsr ||
         !sameSourceOrigin(entity.origin, declaration.origin)) {
@@ -1088,6 +1113,7 @@ function verifySemanticPassInputClosure(
 export async function computeCppCuteSemanticPassInputClosureHash(
   payload: CppCuteFrontendPayloadV3,
   passIndex: number,
+  options: { readonly limits?: Partial<DecodeLimits> } = {},
 ): Promise<string> {
   const pass = payload.semanticPasses[passIndex];
   if (pass === undefined) invalid(`$.payload.semanticPasses[${passIndex}]`, "semantic pass required");
@@ -1099,12 +1125,13 @@ export async function computeCppCuteSemanticPassInputClosureHash(
     includeRoots: payload.inputs.includeRoots,
     files: payload.inputs.files.filter((file) => opened.has(file.fileId)),
     includeEdges: payload.inputs.includeEdges.filter((edge) => edges.has(edge.includeEdgeId)),
-  });
+  }, hashOptions(options.limits));
 }
 
 export async function computeCppCuteSharedSurfaceHash(
   payload: CppCuteFrontendPayloadV3,
   domain: "host" | "device",
+  options: { readonly limits?: Partial<DecodeLimits> } = {},
 ): Promise<string> {
   const pass = payload.semanticPasses.find((entry) => entry.domain === domain);
   if (pass === undefined) invalid("$.payload.semanticPasses", `missing ${domain} semantic pass`);
@@ -1135,7 +1162,7 @@ export async function computeCppCuteSharedSurfaceHash(
           sourceTypeEntityId: parameter.sourceTypeEntityId,
         })),
       })),
-  });
+  }, hashOptions(options.limits));
 }
 
 function verifyFunctionBodies(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): void {
@@ -1598,6 +1625,7 @@ function abiDomainKey(domain: "host" | "device", id: string): string {
 export async function computeCppCuteInputFileSetHash(
   kind: "source" | "header",
   files: CppCuteFrontendPayloadV3["inputs"]["files"],
+  options: { readonly limits?: Partial<DecodeLimits> } = {},
 ): Promise<string> {
   const selected = files
     .filter((file) => kind === "source" ? file.role === "main-source" : file.role !== "main-source")
@@ -1612,12 +1640,15 @@ export async function computeCppCuteInputFileSetHash(
   return hashCanonicalJson({
     domain: `browsergrad.compiler.cpp-cute.${kind}-set.v2`,
     files: selected,
-  });
+  }, hashOptions(options.limits));
 }
 
-export async function computeCppCuteInputHashes(payload: CppCuteFrontendPayloadV3): Promise<VerifiedCppCuteInputHashes> {
-  const sourceSetSha256 = await computeCppCuteInputFileSetHash("source", payload.inputs.files);
-  const headerSetSha256 = await computeCppCuteInputFileSetHash("header", payload.inputs.files);
+export async function computeCppCuteInputHashes(
+  payload: CppCuteFrontendPayloadV3,
+  options: { readonly limits?: Partial<DecodeLimits> } = {},
+): Promise<VerifiedCppCuteInputHashes> {
+  const sourceSetSha256 = await computeCppCuteInputFileSetHash("source", payload.inputs.files, options);
+  const headerSetSha256 = await computeCppCuteInputFileSetHash("header", payload.inputs.files, options);
   const closureSha256 = await hashCanonicalJson({
     domain: "browsergrad.compiler.cpp-cute.input-closure.v2",
     mainFileId: payload.inputs.mainFileId,
@@ -1626,8 +1657,14 @@ export async function computeCppCuteInputHashes(payload: CppCuteFrontendPayloadV
     includeEdges: payload.inputs.includeEdges,
     sourceSetSha256,
     headerSetSha256,
-  });
+  }, hashOptions(options.limits));
   return { sourceSetSha256, headerSetSha256, closureSha256 };
+}
+
+function hashOptions(
+  limits: Partial<DecodeLimits> | undefined,
+): { readonly limits?: Partial<DecodeLimits> } {
+  return limits === undefined ? {} : { limits };
 }
 
 function verifyParentForest<T>(
