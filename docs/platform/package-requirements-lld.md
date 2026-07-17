@@ -1,7 +1,7 @@
 # BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
 - **Status:** normative platform architecture; implementation status is not implied
-- **Last reviewed:** 2026-07-16
+- **Last reviewed:** 2026-07-17
 - **Implementation ledger:**
   [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
 - **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
@@ -12,6 +12,21 @@
 The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
 describe requirement strength. They are used deliberately rather than as
 general emphasis.
+
+## Implementation Checkpoint — Paused 2026-07-17
+
+Implementation is paused during Gate 3. The last verified green baseline is
+`cf94cc97`; the resumable code checkpoint through `7b7757fa` is intentionally
+incomplete and red. Gates 0 through 2 are verified; Gate 3 remains in progress;
+Gates 4 through 7 have not started. A committed checkpoint MUST NOT be treated
+as capability or release evidence without the gate's required proofs.
+
+Resume from the authoritative
+[`2026-07-17 handover`](../internal/package-requirements-handover-2026-07-17.md),
+then use the linked implementation ledger for chronological decisions and
+evidence. This checkpoint is informational: the remainder of this document
+continues to define the normative target and does not become a mutable status
+dashboard.
 
 ## Purpose
 

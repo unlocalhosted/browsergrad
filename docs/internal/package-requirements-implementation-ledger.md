@@ -2,9 +2,11 @@
 
 - **Normative source:**
   [`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md)
-- **Ledger status:** active
+- **Ledger status:** paused
 - **Last updated:** 2026-07-17
-- **Current implementation slice:** Gate 3 typed compile-session and sealed Clang-WASM producer integration
+- **Paused handover:**
+  [`package-requirements-handover-2026-07-17.md`](./package-requirements-handover-2026-07-17.md)
+- **Current implementation slice:** Gate 3 typed compile-session and sealed Clang-WASM producer integration (paused)
 
 **Runtime boundary:** the portable product runs the Clang/extractor as Wasm in
 a browser Worker, then executes verified semantics through CPU or WebGPU. It
@@ -3024,6 +3026,26 @@ whether any files may be left partially changed.
   the new observer/callback/policy helpers, the runtime does not decode a typed
   compile session, and artifact-v3 production remains the fail-closed
   placeholder. No pinned build, Wasm instance, browser C++, or artifact ran.
+
+### 2026-07-17 — Goal paused and complete worktree checkpointed
+
+- The user paused the implementation goal and explicitly requested that the
+  complete worktree be committed and pushed to `main`.
+- `cf94cc97` remains the last verified green baseline. The paused code
+  checkpoint ends at `7b7757fa` and is known red.
+- Checkpoint commits are `0adc5a97` (platform direction), `74e8061f`
+  (validated runtime regions), `d45077bd` (diagnostic/profile/assets),
+  `b8061280` (sealed native invocation), and `7b7757fa` (typed compile session).
+- The focused TypeScript checkpoint has 2 of 5 files passing and 56 of 74 tests
+  passing. Profile hashes and browser-asset installation fixtures are stale.
+- The focused native checkpoint has 2 of 3 files passing. Invocation and
+  runtime pass; compile-session strict and UBSan cases fail at profile offset
+  4667 because native decode trails `resourceDirectoryVirtualPath`.
+- No real Clang-Wasm build, valid Worker compile, browser-local C++, production
+  Artifact V3, or C++-originated WebGPU execution occurred.
+- Resume from
+  [`package-requirements-handover-2026-07-17.md`](./package-requirements-handover-2026-07-17.md),
+  which records exact file ownership, failures, decisions, and recovery order.
 
 ## Quick Resume Checklist
 
