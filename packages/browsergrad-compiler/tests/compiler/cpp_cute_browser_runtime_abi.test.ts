@@ -70,7 +70,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       contractSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256,
       generatedImportAllowlistSha256:
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256,
-      resourceByteLength: 18_363,
+      resourceByteLength: 19_127,
       designAuthority: true,
       interfaceReviewReady: false,
       observedWasmVerified: false,
@@ -145,6 +145,27 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       accounting: {
         requestedByteBasis:
           "caller-requested-byte-length-before-alignment-or-allocator-rounding",
+        interception: {
+          exactEntrypoints: [
+            "aligned_alloc", "calloc", "free", "__libc_calloc", "__libc_free",
+            "__libc_malloc", "__libc_realloc", "malloc", "memalign", "posix_memalign",
+            "pvalloc", "realloc", "reallocarray", "valloc",
+          ],
+          forbiddenEntrypoints: [
+            "bulk_free", "independent_calloc", "independent_comalloc", "realloc_in_place",
+          ],
+          underlyingBypassEntrypoints: [
+            "emscripten_builtin_calloc", "emscripten_builtin_free",
+            "emscripten_builtin_malloc", "emscripten_builtin_memalign",
+            "emscripten_builtin_realloc",
+          ],
+          directBypassReferences:
+            "forbidden-outside-BrowserGradCppCuteMetrics.cpp",
+          linkClosureProof:
+            "pinned-object-and-final-wasm-call-graph-evidence-required",
+        },
+        failedInvalidRequestSemantics:
+          "invalid-or-size-overflowing-nonzero-request-increments-failed-once-zero-request-does-not",
         zeroByteCreationSemantics:
           "nonnull-result-counts-one-tracked-zero-byte-allocation-null-result-is-permitted-no-op-neither-success-nor-failure",
         freeNullSemantics: "no-op-with-no-counter-change",

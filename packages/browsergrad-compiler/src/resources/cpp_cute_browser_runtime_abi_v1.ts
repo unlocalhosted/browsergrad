@@ -13,7 +13,7 @@ import {
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
   version: { major: 1, minor: 1 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.80506ea26d2a0eafae7a5f9babe28e04e28642b0f6014eba8f76e206fa428a90",
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.df1948909dc26d5339659c380a4a5d1601ccecba43433585a779ebe3e3a16d0e",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -242,6 +242,41 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
       accounting: {
         unit: "requested-bytes",
         scope: "all-instrumented-module-global-allocator-events",
+        interception: {
+          exactEntrypoints: [
+            "aligned_alloc",
+            "calloc",
+            "free",
+            "__libc_calloc",
+            "__libc_free",
+            "__libc_malloc",
+            "__libc_realloc",
+            "malloc",
+            "memalign",
+            "posix_memalign",
+            "pvalloc",
+            "realloc",
+            "reallocarray",
+            "valloc",
+          ],
+          forbiddenEntrypoints: [
+            "bulk_free",
+            "independent_calloc",
+            "independent_comalloc",
+            "realloc_in_place",
+          ],
+          underlyingBypassEntrypoints: [
+            "emscripten_builtin_calloc",
+            "emscripten_builtin_free",
+            "emscripten_builtin_malloc",
+            "emscripten_builtin_memalign",
+            "emscripten_builtin_realloc",
+          ],
+          directBypassReferences:
+            "forbidden-outside-BrowserGradCppCuteMetrics.cpp",
+          linkClosureProof:
+            "pinned-object-and-final-wasm-call-graph-evidence-required",
+        },
         requestedByteBasis: "caller-requested-byte-length-before-alignment-or-allocator-rounding",
         currentFormula: "cumulative-allocated-minus-cumulative-freed",
         peakFormula: "maximum-current-live-since-module-instantiation",
@@ -249,6 +284,8 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         allocationCountSemantics: "successful-creation-or-resize-of-one-tracked-live-allocation",
         freeCountSemantics: "successful-release-of-one-tracked-live-allocation",
         failedAllocationCountSemantics: "failed-nonzero-request-that-preserves-all-prior-live-allocations",
+        failedInvalidRequestSemantics:
+          "invalid-or-size-overflowing-nonzero-request-increments-failed-once-zero-request-does-not",
         zeroByteCreationSemantics:
           "nonnull-result-counts-one-tracked-zero-byte-allocation-null-result-is-permitted-no-op-neither-success-nor-failure",
         freeNullSemantics: "no-op-with-no-counter-change",

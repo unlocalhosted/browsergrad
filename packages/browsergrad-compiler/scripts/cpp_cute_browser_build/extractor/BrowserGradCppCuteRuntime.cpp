@@ -1,5 +1,7 @@
 #include "BrowserGradCppCuteRuntime.h"
 
+#include "BrowserGradCppCuteMetrics.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -9,7 +11,7 @@
 namespace browsergrad::cpp_cute {
 namespace {
 
-constexpr std::uint32_t kRuntimeAbiVersion = 0x0001'0000U;
+constexpr std::uint32_t kRuntimeAbiVersion = 0x0001'0001U;
 constexpr std::uint32_t kInputFrameMaximumByteLength = 4U * 1024U * 1024U;
 constexpr std::uint32_t kInputFrameHeaderByteLength = 64U;
 constexpr std::uint32_t kInputFrameAlignment = 8U;
@@ -110,6 +112,11 @@ std::int32_t wire_status(WireCompileStatus status) {
 std::uint32_t runtime_abi_version() { return kRuntimeAbiVersion; }
 
 std::uint32_t runtime_allocate(std::uint32_t byte_length) {
+  if (!allocator_metrics_healthy()) {
+    g_runtime.status = WireCompileStatus::kInternalError;
+    g_runtime.phase = RuntimePhase::kFailed;
+    return 0U;
+  }
   if (g_runtime.phase != RuntimePhase::kIdle || byte_length == 0U ||
       byte_length > kInputFrameMaximumByteLength) {
     g_runtime.status = WireCompileStatus::kInvalidArgument;
@@ -118,7 +125,9 @@ std::uint32_t runtime_allocate(std::uint32_t byte_length) {
   }
   auto* allocation = static_cast<std::uint8_t*>(std::malloc(byte_length));
   if (allocation == nullptr) {
-    g_runtime.status = WireCompileStatus::kResourceLimit;
+    g_runtime.status = allocator_metrics_healthy()
+                           ? WireCompileStatus::kResourceLimit
+                           : WireCompileStatus::kInternalError;
     g_runtime.phase = RuntimePhase::kFailed;
     return 0U;
   }
@@ -139,6 +148,11 @@ std::uint32_t runtime_allocate(std::uint32_t byte_length) {
 std::int32_t runtime_compile(std::uint32_t input_pointer,
                              std::uint32_t input_length,
                              ArtifactV3Compile compile_artifact) {
+  if (!allocator_metrics_healthy()) {
+    g_runtime.status = WireCompileStatus::kInternalError;
+    g_runtime.phase = RuntimePhase::kFailed;
+    return wire_status(g_runtime.status);
+  }
   if (g_runtime.phase != RuntimePhase::kInputAllocated ||
       g_runtime.input == nullptr) {
     g_runtime.status = WireCompileStatus::kInvalidState;
@@ -167,7 +181,8 @@ std::int32_t runtime_compile(std::uint32_t input_pointer,
                 ReviewOnlyBlocker::kCanonicalArtifactV3Unavailable}
           : compile_artifact(g_runtime.input, g_runtime.input_byte_length);
   g_runtime.blocker = result.blocker;
-  g_runtime.status = result.status == WireCompileStatus::kArtifactReady
+  g_runtime.status = !allocator_metrics_healthy() ||
+                             result.status == WireCompileStatus::kArtifactReady
                          ? WireCompileStatus::kInternalError
                          : result.status;
   g_runtime.phase = RuntimePhase::kFailed;
@@ -184,6 +199,11 @@ void runtime_free(std::uint32_t pointer, std::uint32_t byte_length) {
   }
   const bool was_allocated = g_runtime.phase == RuntimePhase::kInputAllocated;
   release_input();
+  if (!allocator_metrics_healthy()) {
+    g_runtime.phase = RuntimePhase::kFailed;
+    g_runtime.status = WireCompileStatus::kInternalError;
+    return;
+  }
   if (was_allocated) {
     g_runtime.phase = RuntimePhase::kIdle;
     g_runtime.status = WireCompileStatus::kIdle;
@@ -193,6 +213,10 @@ void runtime_free(std::uint32_t pointer, std::uint32_t byte_length) {
 void runtime_reset() {
   release_input();
   g_runtime = RuntimeState{};
+  if (!allocator_metrics_healthy()) {
+    g_runtime.phase = RuntimePhase::kFailed;
+    g_runtime.status = WireCompileStatus::kInternalError;
+  }
 }
 
 std::uint32_t runtime_result_length() { return 0U; }

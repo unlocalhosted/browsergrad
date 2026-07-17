@@ -1,4 +1,5 @@
 #include "BrowserGradCppCuteArtifactV3.h"
+#include "BrowserGradCppCuteMetrics.h"
 #include "BrowserGradCppCuteRuntime.h"
 
 #include <cstdint>
@@ -19,6 +20,11 @@ BG_CPP_CUTE_EXPORT std::uint32_t bg_cpp_cute_abi_version(void) {
 BG_CPP_CUTE_EXPORT std::uint32_t bg_cpp_cute_alloc(
     std::uint32_t byte_length) {
   return browsergrad::cpp_cute::runtime_allocate(byte_length);
+}
+
+BG_CPP_CUTE_EXPORT std::uint32_t
+bg_cpp_cute_allocator_metrics_pointer(void) {
+  return browsergrad::cpp_cute::allocator_metrics_pointer();
 }
 
 BG_CPP_CUTE_EXPORT std::int32_t bg_cpp_cute_compile(

@@ -149,7 +149,7 @@ describe("C++/CuTe opaque Clang-WASM build plan", () => {
     const plan = planCppCuteClangWasmBuild(input());
 
     expect(plan.extractorSource).toMatchObject({
-      sourceSetSha256: "acdd9846dcf5e15e299b99bcdf59bf5d0e10dbd1213c9fbb6a5cc7f8e0fc4a32",
+      sourceSetSha256: preparedLock.extractorSourceSetSha256,
       buildVerified: false,
       blockerId: "browsergrad-extractor-source-verification",
     });
@@ -164,6 +164,8 @@ describe("C++/CuTe opaque Clang-WASM build plan", () => {
       "BrowserGradCppCuteExtractor.cpp",
       "BrowserGradCppCuteImportedVfs.cpp",
       "BrowserGradCppCuteImportedVfs.h",
+      "BrowserGradCppCuteMetrics.cpp",
+      "BrowserGradCppCuteMetrics.h",
       "BrowserGradCppCuteRuntime.cpp",
       "BrowserGradCppCuteRuntime.h",
       "CMakeLists.txt",

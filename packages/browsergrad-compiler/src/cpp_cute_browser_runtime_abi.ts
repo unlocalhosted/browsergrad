@@ -24,11 +24,11 @@ export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 1;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.80506ea26d2a0eafae7a5f9babe28e04e28642b0f6014eba8f76e206fa428a90";
+  "bg.cpp.browser-runtime-abi.sha256.df1948909dc26d5339659c380a4a5d1601ccecba43433585a779ebe3e3a16d0e";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "a61d6f2d219dbc7f7ede1acce60e38ad6d778df6a785037c27210e3c53584ba9";
+  "476f47b4248aa1c0ca6087b6f015c2c9bd5d8bf329a2da9cbf8193140ca900e7";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "8e04871b85e3ee977713098056655dbec671649bd5a8abed623bf08f5957c026";
+  "22ab84e0c24ce2de988524dded779a0455d24ba4ceb3a86ba638df5c28ca56d5";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "ee4936a35d73df799e5d6f2c4eaad86d3cb8ba10d1dfd1e53da9f9e7f32e0075";
 
@@ -435,6 +435,8 @@ function validateBodyInvariants(value: JsonObject): void {
         accounting.freeCountSemantics !== "successful-release-of-one-tracked-live-allocation" ||
         accounting.failedAllocationCountSemantics !==
           "failed-nonzero-request-that-preserves-all-prior-live-allocations" ||
+        accounting.failedInvalidRequestSemantics !==
+          "invalid-or-size-overflowing-nonzero-request-increments-failed-once-zero-request-does-not" ||
         accounting.zeroByteCreationSemantics !==
           "nonnull-result-counts-one-tracked-zero-byte-allocation-null-result-is-permitted-no-op-neither-success-nor-failure" ||
         accounting.freeNullSemantics !== "no-op-with-no-counter-change" ||
@@ -448,6 +450,29 @@ function validateBodyInvariants(value: JsonObject): void {
         accounting.overflowPolicy !==
           "counter-overflow-must-fail-closed-before-wrap-and-forbids-artifact-ready") {
       invalid("$.body.allocatorMetricsRecord.accounting", "allocator metrics accounting differs from runtime v1");
+    }
+    const interception = accounting.interception;
+    assertExactStrings(interception.exactEntrypoints, [
+      "aligned_alloc", "calloc", "free", "__libc_calloc", "__libc_free",
+      "__libc_malloc", "__libc_realloc", "malloc", "memalign", "posix_memalign",
+      "pvalloc", "realloc", "reallocarray", "valloc",
+    ], "$.body.allocatorMetricsRecord.accounting.interception.exactEntrypoints");
+    assertExactStrings(interception.forbiddenEntrypoints, [
+      "bulk_free", "independent_calloc", "independent_comalloc", "realloc_in_place",
+    ], "$.body.allocatorMetricsRecord.accounting.interception.forbiddenEntrypoints");
+    assertExactStrings(interception.underlyingBypassEntrypoints, [
+      "emscripten_builtin_calloc", "emscripten_builtin_free",
+      "emscripten_builtin_malloc", "emscripten_builtin_memalign",
+      "emscripten_builtin_realloc",
+    ], "$.body.allocatorMetricsRecord.accounting.interception.underlyingBypassEntrypoints");
+    if (interception.directBypassReferences !==
+          "forbidden-outside-BrowserGradCppCuteMetrics.cpp" ||
+        interception.linkClosureProof !==
+          "pinned-object-and-final-wasm-call-graph-evidence-required") {
+      invalid(
+        "$.body.allocatorMetricsRecord.accounting.interception",
+        "allocator interception must remain source-closed and observed-link blocked",
+      );
     }
     assertExactStrings(accounting.excludes, [
       "allocator-metadata-alignment-and-size-class-rounding",

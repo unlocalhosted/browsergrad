@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.68f60dbc78e41bffbd9c2d1dd2682324aa0060d7f1d8f8bbedae199cc9fada1a",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.57b38d19b1b7ae05c316583b9367d81491bd45f2348ab4c38526ff1e23852469",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -30,9 +30,9 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
       outputPath: "assets/browsergrad-cpp-cute/runtime-abi-manifest.json",
       mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
       runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
-      manifestId: "bg.cpp.browser-runtime-abi.sha256.80506ea26d2a0eafae7a5f9babe28e04e28642b0f6014eba8f76e206fa428a90",
-      resourceSha256: "a61d6f2d219dbc7f7ede1acce60e38ad6d778df6a785037c27210e3c53584ba9",
-      resourceByteLength: "18363",
+      manifestId: "bg.cpp.browser-runtime-abi.sha256.df1948909dc26d5339659c380a4a5d1601ccecba43433585a779ebe3e3a16d0e",
+      resourceSha256: "476f47b4248aa1c0ca6087b6f015c2c9bd5d8bf329a2da9cbf8193140ca900e7",
+      resourceByteLength: "19127",
       byteIdentity: "must-equal-package-canonical-resource",
       authority: "design-reference-only-no-wasm-conformance-worker-or-release-authority",
     },
@@ -235,7 +235,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
             "-sMAXIMUM_MEMORY=1073741824",
             "-sMEMORY_GROWTH_LINEAR_STEP=67108864",
             "-sSTACK_SIZE=16777216",
-            "-sABORTING_MALLOC=1",
+            "-sABORTING_MALLOC=0",
             "-sMALLOC=dlmalloc",
             "-sERROR_ON_UNDEFINED_SYMBOLS=1",
             "-sWASM_ASYNC_COMPILATION=1",
@@ -243,14 +243,14 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
             "-sEMIT_PRODUCERS_SECTION=0",
             "-sINCOMING_MODULE_JS_API=['instantiateWasm','onAbort','print','printErr']",
             "-sEXPORTED_RUNTIME_METHODS=[]",
-            "-sEXPORTED_FUNCTIONS=['_bg_cpp_cute_abi_version','_bg_cpp_cute_alloc','_bg_cpp_cute_compile','_bg_cpp_cute_free','_bg_cpp_cute_reset','_bg_cpp_cute_result_length','_bg_cpp_cute_result_pointer','_bg_cpp_cute_status']",
+            "-sEXPORTED_FUNCTIONS=['_bg_cpp_cute_abi_version','_bg_cpp_cute_alloc','_bg_cpp_cute_allocator_metrics_pointer','_bg_cpp_cute_compile','_bg_cpp_cute_free','_bg_cpp_cute_reset','_bg_cpp_cute_result_length','_bg_cpp_cute_result_pointer','_bg_cpp_cute_status']",
             "-Wl,--Map=@BUILD_EVIDENCE@/clang-extractor.link.map",
           ],
           targets: ["browsergrad-cpp-cute-extractor"],
         },
       ],
       extractorSource: {
-        sourceSetSha256: "acdd9846dcf5e15e299b99bcdf59bf5d0e10dbd1213c9fbb6a5cc7f8e0fc4a32",
+        sourceSetSha256: "92026b36f1e4f732199a14b2a402c233b6c46d274789085e0144d4c5461789a2",
         hashDomain: "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1",
         files: [
           {
@@ -275,8 +275,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteExtractor.cpp",
-            sha256: "09e8634c44f868818bd2123da0bcc77b4f001e3cc3eabb973aa3fb50d08a1a44",
-            byteLength: "1520",
+            sha256: "c53eb5f5458e4d77f203bb0fec7969435ebb8852c72153fe3a54f299f9d90c62",
+            byteLength: "1702",
           },
           {
             path: "BrowserGradCppCuteImportedVfs.cpp",
@@ -289,9 +289,19 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
             byteLength: "245",
           },
           {
+            path: "BrowserGradCppCuteMetrics.cpp",
+            sha256: "3efc83e5a3972b2afe8dee2a57462a74d7c3c47a70e97e684b1ad84a7d162f72",
+            byteLength: "23372",
+          },
+          {
+            path: "BrowserGradCppCuteMetrics.h",
+            sha256: "02fd7c8e0e2cabf9c77e1479b0759a54f6aa16da7666f66c03caf6cf9fe22555",
+            byteLength: "2371",
+          },
+          {
             path: "BrowserGradCppCuteRuntime.cpp",
-            sha256: "91d200b0294769b988472fe1ffb453709caf63e91fe1deeec6d24df860347a8c",
-            byteLength: "7436",
+            sha256: "d687bbcda548a1efb5089be8d4fe697ca97ee1e2dc62308330fee7705a004780",
+            byteLength: "8306",
           },
           {
             path: "BrowserGradCppCuteRuntime.h",
@@ -300,8 +310,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "CMakeLists.txt",
-            sha256: "5071058747966e70d5d02d1d4041fec977cfea9a44b604c8b1b9ab128028cbec",
-            byteLength: "1754",
+            sha256: "22389086651267965fd81b4fd87eb3e2c788b571947572bcaa0dbd00433c5e58",
+            byteLength: "1816",
           },
         ],
       },
@@ -322,6 +332,33 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
         driverSubprocesses: "forbidden",
         transitiveDependencies: "only-cmake-declared-static-dependencies-at-pinned-llvm-source",
         linkMapObjectClosure: "detached-evidence-required",
+        allocatorInterceptionPolicy: {
+          exactEntrypoints: [
+            "aligned_alloc",
+            "calloc",
+            "free",
+            "__libc_calloc",
+            "__libc_free",
+            "__libc_malloc",
+            "__libc_realloc",
+            "malloc",
+            "memalign",
+            "posix_memalign",
+            "pvalloc",
+            "realloc",
+            "reallocarray",
+            "valloc",
+          ],
+          forbiddenEntrypoints: [
+            "bulk_free",
+            "independent_calloc",
+            "independent_comalloc",
+            "realloc_in_place",
+          ],
+          directBypassReferences:
+            "forbidden-outside-BrowserGradCppCuteMetrics.cpp",
+          observedCallGraph: "detached-evidence-required",
+        },
         prohibitedComponents: [
           "clangCodeGen",
           "clangInterpreter",
@@ -620,7 +657,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
       {
         blockerId: "browsergrad-extractor-runtime-metrics-export",
         requirement:
-          "current-extractor-abi-1.0-lacks-runtime-abi-1.1-metrics-export-producer-and-zero-size-reallocation-conformance",
+          "runtime-abi-1.1-metrics-source-exists-but-pinned-executed-wasm-interception-zero-size-reallocation-and-call-graph-conformance-remain-unproved",
       },
       {
         blockerId: "browsergrad-extractor-source-verification",

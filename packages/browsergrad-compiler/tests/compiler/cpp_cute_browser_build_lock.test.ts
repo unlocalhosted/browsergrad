@@ -22,10 +22,10 @@ import {
 } from "../../src/cpp_cute_browser_runtime_abi.js";
 
 const LOCK_ID =
-  "bg.cpp.browser-build-input-lock.sha256.68f60dbc78e41bffbd9c2d1dd2682324aa0060d7f1d8f8bbedae199cc9fada1a";
-const RESOURCE_SHA256 = "152028d0db27c9c7da7a7d5aae94df7c1104b873058e26cc1802c9e6c10cf49a";
-const RECIPE_SHA256 = "4f920a7c9f7805b3fe29bf01d9457117959644ac4b215a59733b29a022cb5b91";
-const EXTRACTOR_SOURCE_SHA256 = "acdd9846dcf5e15e299b99bcdf59bf5d0e10dbd1213c9fbb6a5cc7f8e0fc4a32";
+  "bg.cpp.browser-build-input-lock.sha256.57b38d19b1b7ae05c316583b9367d81491bd45f2348ab4c38526ff1e23852469";
+const RESOURCE_SHA256 = "2b1654e236a00540c36e6b351edff25ec548d4c194af9bd65a220df0db0cfd97";
+const RECIPE_SHA256 = "4251760d1a2142265eaa177d0ccd01fd55f470af090e713bd6559a4362379b68";
+const EXTRACTOR_SOURCE_SHA256 = "92026b36f1e4f732199a14b2a402c233b6c46d274789085e0144d4c5461789a2";
 const NOTICE_SHA256 = "ae94cc9272e8d3458778dda90db035388450075d5404f736f6daadc7192163d1";
 const BLOCKERS = [
   "browsergrad-extractor-artifact-v3",
@@ -56,7 +56,7 @@ describe("browser Clang-WASM build-input lock", () => {
       runtimeAbiManifestId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
       runtimeAbiResourceSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
       runtimeAbiResourceByteLength: cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength,
-      resourceByteLength: 21_604,
+      resourceByteLength: 22_402,
       releaseReady: false,
       releaseBlockerIds: BLOCKERS,
     });
@@ -174,11 +174,9 @@ describe("browser Clang-WASM build-input lock", () => {
     expect(recipe.stages[1]?.linkerFlags).not.toContain("-sSTANDALONE_WASM=1");
     expect(recipe.stages[1]?.linkerFlags).toContain("-sFILESYSTEM=0");
     expect(recipe.stages[1]?.linkerFlags).toContain("-sMAXIMUM_MEMORY=1073741824");
+    expect(recipe.stages[1]?.linkerFlags).toContain("-sABORTING_MALLOC=0");
     expect(recipe.stages[1]?.linkerFlags).toContain(
-      "-sEXPORTED_FUNCTIONS=['_bg_cpp_cute_abi_version','_bg_cpp_cute_alloc','_bg_cpp_cute_compile','_bg_cpp_cute_free','_bg_cpp_cute_reset','_bg_cpp_cute_result_length','_bg_cpp_cute_result_pointer','_bg_cpp_cute_status']",
-    );
-    expect(recipe.stages[1]?.linkerFlags.join(" ")).not.toContain(
-      "_bg_cpp_cute_allocator_metrics_pointer",
+      "-sEXPORTED_FUNCTIONS=['_bg_cpp_cute_abi_version','_bg_cpp_cute_alloc','_bg_cpp_cute_allocator_metrics_pointer','_bg_cpp_cute_compile','_bg_cpp_cute_free','_bg_cpp_cute_reset','_bg_cpp_cute_result_length','_bg_cpp_cute_result_pointer','_bg_cpp_cute_status']",
     );
     expect(recipe.stages[1]?.linkerFlags).toContain(
       "-Wl,--Map=@BUILD_EVIDENCE@/clang-extractor.link.map",
@@ -197,7 +195,7 @@ describe("browser Clang-WASM build-input lock", () => {
       .toContainEqual({
         blockerId: "browsergrad-extractor-runtime-metrics-export",
         requirement:
-          "current-extractor-abi-1.0-lacks-runtime-abi-1.1-metrics-export-producer-and-zero-size-reallocation-conformance",
+          "runtime-abi-1.1-metrics-source-exists-but-pinned-executed-wasm-interception-zero-size-reallocation-and-call-graph-conformance-remain-unproved",
       });
   });
 
@@ -247,6 +245,19 @@ describe("browser Clang-WASM build-input lock", () => {
       driverSubprocesses: "forbidden",
       transitiveDependencies: "only-cmake-declared-static-dependencies-at-pinned-llvm-source",
       linkMapObjectClosure: "detached-evidence-required",
+      allocatorInterceptionPolicy: {
+        exactEntrypoints: [
+          "aligned_alloc", "calloc", "free", "__libc_calloc", "__libc_free",
+          "__libc_malloc", "__libc_realloc", "malloc", "memalign", "posix_memalign",
+          "pvalloc", "realloc", "reallocarray", "valloc",
+        ],
+        forbiddenEntrypoints: [
+          "bulk_free", "independent_calloc", "independent_comalloc", "realloc_in_place",
+        ],
+        directBypassReferences:
+          "forbidden-outside-BrowserGradCppCuteMetrics.cpp",
+        observedCallGraph: "detached-evidence-required",
+      },
       prohibitedComponents: [
         "clangCodeGen",
         "clangInterpreter",

@@ -26,6 +26,8 @@ add_llvm_executable(browsergrad-cpp-cute-extractor
   BrowserGradCppCuteExtractor.cpp
   BrowserGradCppCuteImportedVfs.cpp
   BrowserGradCppCuteImportedVfs.h
+  BrowserGradCppCuteMetrics.cpp
+  BrowserGradCppCuteMetrics.h
   BrowserGradCppCuteRuntime.cpp
   BrowserGradCppCuteRuntime.h
 )

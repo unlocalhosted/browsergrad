@@ -26,6 +26,8 @@ const expectedSourcePaths = [
   "BrowserGradCppCuteExtractor.cpp",
   "BrowserGradCppCuteImportedVfs.cpp",
   "BrowserGradCppCuteImportedVfs.h",
+  "BrowserGradCppCuteMetrics.cpp",
+  "BrowserGradCppCuteMetrics.h",
   "BrowserGradCppCuteRuntime.cpp",
   "BrowserGradCppCuteRuntime.h",
   "CMakeLists.txt",
@@ -44,6 +46,11 @@ let runtimeVfsLimits: {
   readonly maxLiveFileHandles: number;
   readonly maxAggregateLiveOpenByteLength: number;
 };
+let allocatorInterception: {
+  readonly exactEntrypoints: readonly string[];
+  readonly forbiddenEntrypoints: readonly string[];
+  readonly underlyingBypassEntrypoints: readonly string[];
+};
 
 beforeAll(async () => {
   const prepared = await decodeCppCuteBrowserBuildInputLock(
@@ -60,6 +67,7 @@ beforeAll(async () => {
     .manifest.body;
   applicationImportNames = body.hostImports.functions.map((entry) => entry.fieldName);
   runtimeVfsLimits = body.vfs;
+  allocatorInterception = body.allocatorMetricsRecord.accounting.interception;
 });
 
 async function extractorSource(path: typeof expectedSourcePaths[number]): Promise<string> {
@@ -97,7 +105,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     }
   });
 
-  it("keeps the top-level translation unit as exact ABI-1.0 composition only", async () => {
+  it("keeps the top-level translation unit as exact ABI-1.1 composition only", async () => {
     const source = await extractorSource("BrowserGradCppCuteExtractor.cpp");
     expect(source).toContain('#include "BrowserGradCppCuteArtifactV3.h"');
     expect(source).toContain('#include "BrowserGradCppCuteRuntime.h"');
@@ -106,6 +114,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
       .map((match) => match[1])).toEqual([
         "bg_cpp_cute_abi_version",
         "bg_cpp_cute_alloc",
+        "bg_cpp_cute_allocator_metrics_pointer",
         "bg_cpp_cute_compile",
         "bg_cpp_cute_free",
         "bg_cpp_cute_reset",
@@ -117,13 +126,58 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
 
   it("owns lifecycle/frame validation in runtime while preserving fail-closed result state", async () => {
     const source = await extractorSource("BrowserGradCppCuteRuntime.cpp");
-    expect(source).toContain("kRuntimeAbiVersion = 0x0001'0000U");
+    expect(source).toContain("kRuntimeAbiVersion = 0x0001'0001U");
     expect(source).toContain("validate_frame_envelope");
     expect(source).toContain("RuntimeState g_runtime");
     expect(source).toContain("result.status == WireCompileStatus::kArtifactReady");
     expect(source).toMatch(/runtime_result_length\(\)[\s\S]*?return 0U;/u);
     expect(source).toMatch(/runtime_result_pointer\(\)[\s\S]*?return 0U;/u);
     expect(source).not.toMatch(/clang\/|llvm\/|bg_vfs_/u);
+  });
+
+  it("owns exact requested-byte allocator metrics without recursive allocation", async () => {
+    const header = await extractorSource("BrowserGradCppCuteMetrics.h");
+    const source = await extractorSource("BrowserGradCppCuteMetrics.cpp");
+    const allOtherSource = (await Promise.all(expectedSourcePaths
+      .filter((path) => path !== "BrowserGradCppCuteMetrics.cpp")
+      .filter((path) => path.endsWith(".cpp") || path.endsWith(".h"))
+      .map(extractorSource))).join("\n");
+    expect(header).toContain("struct alignas(8) AllocatorMetricsRecordV1");
+    expect(header).toContain("sizeof(AllocatorMetricsRecordV1) == 72U");
+    for (const offset of [
+      "magic) == 0U", "version) == 8U", "byte_length) == 12U",
+      "current_live_global_requested_byte_length) == 16U",
+      "peak_live_global_requested_byte_length) == 24U",
+      "cumulative_global_allocated_requested_byte_length) == 32U",
+      "cumulative_global_freed_requested_byte_length) == 40U",
+      "successful_allocation_count) == 48U", "free_count) == 56U",
+      "failed_allocation_count) == 64U",
+    ]) {
+      expect(header).toContain(offset);
+    }
+    expect(source).toContain("emscripten_builtin_malloc");
+    expect(source).toContain("emscripten_builtin_calloc");
+    expect(source).toContain("emscripten_builtin_realloc");
+    expect(source).toContain("emscripten_builtin_free");
+    expect(source).toContain("emscripten_builtin_memalign");
+    expect(source).toContain("kMaximumRecordStart");
+    expect(source).toContain("g_metrics_healthy");
+    expect(source).toContain("g_allocator_hook_active");
+    expect(source).toContain("ensure_allocation_table_capacity");
+    expect(source).toContain("erase_allocation");
+    const overrides = [...source.matchAll(
+      /BG_CPP_CUTE_ALLOCATOR_OVERRIDE\s+(?:void|int|std::size_t|void\*)\s*\**\s*([_a-z][_a-z0-9]*)\s*\(/gu,
+    )].map((match) => match[1]);
+    expect(new Set(overrides)).toEqual(new Set(allocatorInterception.exactEntrypoints));
+    expect(overrides).toHaveLength(allocatorInterception.exactEntrypoints.length);
+    for (const bypass of allocatorInterception.underlyingBypassEntrypoints) {
+      expect(source).toContain(`${bypass}(`);
+    }
+    expect(source).not.toMatch(/std::(?:unordered_)?map|std::vector|new\s/u);
+    expect(allOtherSource).not.toMatch(/emscripten_builtin_|\bdl(?:malloc|calloc|realloc|free|memalign)\b/u);
+    for (const forbidden of allocatorInterception.forbiddenEntrypoints) {
+      expect(overrides).not.toContain(forbidden);
+    }
   });
 
   it("declares and consumes only the exact imported-VFS application surface", async () => {

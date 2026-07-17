@@ -440,6 +440,24 @@ function validateBodyInvariants(value: JsonObject): void {
       body.recipe.extractorLinkPolicy.prohibitedComponents,
       "$.body.recipe.extractorLinkPolicy.prohibitedComponents",
     );
+    const allocatorInterception =
+      body.recipe.extractorLinkPolicy.allocatorInterceptionPolicy;
+    assertSortedUniqueStrings(
+      allocatorInterception.exactEntrypoints,
+      "$.body.recipe.extractorLinkPolicy.allocatorInterceptionPolicy.exactEntrypoints",
+    );
+    assertSortedUniqueStrings(
+      allocatorInterception.forbiddenEntrypoints,
+      "$.body.recipe.extractorLinkPolicy.allocatorInterceptionPolicy.forbiddenEntrypoints",
+    );
+    if (allocatorInterception.directBypassReferences !==
+          "forbidden-outside-BrowserGradCppCuteMetrics.cpp" ||
+        allocatorInterception.observedCallGraph !== "detached-evidence-required") {
+      invalid(
+        "$.body.recipe.extractorLinkPolicy.allocatorInterceptionPolicy",
+        "allocator interception must stay source-closed and observed-call-graph blocked",
+      );
+    }
 
     const outputs = body.recipe.distributedOutputPlan.outputs;
     const outputPaths = outputs.map((output) => output.path);
