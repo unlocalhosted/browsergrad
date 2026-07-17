@@ -12,19 +12,31 @@ import {
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
 } from "./cpp_cute_browser_runtime_abi.js";
 import {
+  CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256,
+} from "./cpp_cute_semantic_adapter_manifest.js";
+import {
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE,
 } from "./resources/cpp_cute_browser_runtime_abi_v1.js";
+import {
+  CPP_CUTE_FRONTEND_TEMPORAL_MACRO_POLICY_ID,
+  CPP_CUTE_FRONTEND_WARNING_BASELINE,
+  CPP_CUTE_FRONTEND_WARNING_POLICY_REGISTRY_ID,
+  cppCuteFrontendWarningPolicyMapping,
+  isCppCuteFrontendTemporalMacroName,
+  isCppCuteFrontendReservedMacroName,
+  type CppCuteFrontendWarningPolicyId,
+} from "./cpp_cute_frontend_compiler_policy.js";
 import {
   findCppCuteVirtualPathError,
 } from "./cpp_cute_virtual_path.js";
 
 export const CPP_CUTE_FRONTEND_PROFILE_SCHEMA = "browsergrad.compiler.cpp-cute.frontend-profile";
 export const CPP_CUTE_FRONTEND_PROFILE_MAJOR = 2;
-export const CPP_CUTE_FRONTEND_PROFILE_MINOR = 4;
+export const CPP_CUTE_FRONTEND_PROFILE_MINOR = 5;
 export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_SCHEMA =
   "browsergrad.compiler.cpp-cute.compilation-contract";
 export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MAJOR = 1;
-export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MINOR = 0;
+export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MINOR = 1;
 export const CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE =
   "https://browsergrad.dev/provenance/cpp-cute-aot/v3";
 
@@ -35,7 +47,6 @@ const PROFILE_ID = /^browsergrad\.compiler\.cpp-cute\.[a-z0-9][a-z0-9._-]*@[1-9]
 const CAPABILITY_ID = /^[a-z][a-z0-9.-]*:[a-z][a-z0-9._-]*(?:@[1-9][0-9]*)?$/u;
 const DEPENDENCY_ID = /^[a-z][a-z0-9._-]*$/u;
 const MACRO_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
-const WARNING_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/u;
 const TARGET_ARCHITECTURE = /^sm_[1-9][0-9][a-z]?$/u;
 const LLVM_DATA_LAYOUT = /^[A-Za-z0-9:_+.-]+$/u;
 const OCI_REPOSITORY = /^[a-z0-9.-]+(?::[1-9][0-9]*)?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+$/u;
@@ -265,7 +276,7 @@ export type CppCuteFrontendCompilerOption =
     })
   | (JsonObject & {
       readonly kind: "warning-policy";
-      readonly id: string;
+      readonly id: CppCuteFrontendWarningPolicyId;
       readonly disposition: "ignore" | "warn" | "error";
     })
   | (JsonObject & {
@@ -292,9 +303,23 @@ export interface CppCuteFrontendSemanticPassProfile extends JsonObject {
   readonly deviceArchitecture: string;
 }
 
+export interface CppCuteFrontendPreprocessingPolicy extends JsonObject {
+  readonly temporalMacros: JsonObject & {
+    readonly policyId: typeof CPP_CUTE_FRONTEND_TEMPORAL_MACRO_POLICY_ID;
+    readonly mode: "reject";
+  };
+}
+
+export interface CppCuteFrontendDiagnosticPolicy extends JsonObject {
+  readonly warningRegistryId: typeof CPP_CUTE_FRONTEND_WARNING_POLICY_REGISTRY_ID;
+  readonly baseline: typeof CPP_CUTE_FRONTEND_WARNING_BASELINE;
+}
+
 export interface CppCuteFrontendLanguageProfile extends JsonObject {
   readonly cxxStandard: "c++17";
   readonly cudaCompatibility: string;
+  readonly preprocessing: CppCuteFrontendPreprocessingPolicy;
+  readonly diagnostics: CppCuteFrontendDiagnosticPolicy;
   /** Exactly device extraction then host validation over the same unmodified input closure. */
   readonly semanticPasses: readonly CppCuteFrontendSemanticPassProfile[];
   /** Compiler option order is semantic and therefore preserved, not sorted. */
@@ -368,6 +393,7 @@ export interface CppCuteFrontendIncludeRoot extends JsonObject {
 
 export interface CppCuteFrontendCompatibilityProfile extends JsonObject {
   readonly supportedSourceFeatures: readonly string[];
+  readonly unsupportedSourceFeatures: readonly string[];
   readonly unsupportedIntrinsicFamilies: readonly string[];
 }
 
@@ -593,7 +619,10 @@ function parseProfile(value: unknown): CppCuteFrontendProfileV2 {
     "$.virtualFileSystem",
   );
   validateProfileReferences(language, toolchain, virtualFileSystem);
+  const compatibility = parseCompatibility(field(object, "compatibility", "$"), "$.compatibility");
+  validateLanguageCompatibility(language, compatibility);
   const deployment = parseDeployment(field(object, "deployment", "$"), "$.deployment");
+  validateSemanticAdapterBinding(toolchain, deployment);
   const extractionLimits = parseExtractionLimits(field(object, "extractionLimits", "$"), "$.extractionLimits");
   if (deployment.mode === "browser-local" &&
       toolchain.compiler.binarySha256 !== deployment.extractor.binarySha256) {
@@ -645,10 +674,29 @@ function parseProfile(value: unknown): CppCuteFrontendProfileV2 {
     target,
     toolchain,
     virtualFileSystem,
-    compatibility: parseCompatibility(field(object, "compatibility", "$"), "$.compatibility"),
+    compatibility,
     extractionLimits,
   } as CppCuteFrontendProfileV2;
   return deepFreezeJson(profile);
+}
+
+function validateSemanticAdapterBinding(
+  toolchain: CppCuteFrontendToolchainProfile,
+  deployment: CppCuteFrontendDeploymentProfile,
+): void {
+  if (toolchain.compiler.id !== "clang" || toolchain.compiler.version !== "22.1.8") {
+    invalid(
+      "$.toolchain.compiler",
+      "profile v2.5 semantic adapter requires exact Clang 22.1.8 identity",
+    );
+  }
+  if (deployment.extractor.semanticAdapterManifestSha256 !==
+      CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256) {
+    invalid(
+      "$.deployment.extractor.semanticAdapterManifestSha256",
+      "profile v2.5 requires the package canonical semantic-adapter manifest",
+    );
+  }
 }
 
 function parseVersion(value: JsonValue, path: string): CppCuteFrontendProfileVersion {
@@ -1151,13 +1199,76 @@ function parseExtractorProfile(value: JsonValue, path: string): CppCuteFrontendE
 }
 
 function parseLanguage(value: JsonValue, path: string): CppCuteFrontendLanguageProfile {
-  const object = closedObject(value, ["cxxStandard", "cudaCompatibility", "semanticPasses", "options"], path);
+  const object = closedObject(value, [
+    "cxxStandard",
+    "cudaCompatibility",
+    "preprocessing",
+    "diagnostics",
+    "semanticPasses",
+    "options",
+  ], path);
   if (object.cxxStandard !== "c++17") invalid(`${path}.cxxStandard`, "profile v2 supports c++17 only");
   return {
     cxxStandard: "c++17",
     cudaCompatibility: boundedString(field(object, "cudaCompatibility", path), `${path}.cudaCompatibility`, 128),
+    preprocessing: parsePreprocessingPolicy(
+      field(object, "preprocessing", path),
+      `${path}.preprocessing`,
+    ),
+    diagnostics: parseDiagnosticPolicy(
+      field(object, "diagnostics", path),
+      `${path}.diagnostics`,
+    ),
     semanticPasses: parseSemanticPasses(field(object, "semanticPasses", path), `${path}.semanticPasses`),
     options: parseCompilerOptions(field(object, "options", path), `${path}.options`),
+  };
+}
+
+function parsePreprocessingPolicy(
+  value: JsonValue,
+  path: string,
+): CppCuteFrontendPreprocessingPolicy {
+  const object = closedObject(value, ["temporalMacros"], path);
+  const temporalPath = `${path}.temporalMacros`;
+  const temporal = closedObject(
+    field(object, "temporalMacros", path),
+    ["policyId", "mode"],
+    temporalPath,
+  );
+  if (temporal.policyId !== CPP_CUTE_FRONTEND_TEMPORAL_MACRO_POLICY_ID) {
+    invalid(
+      `${temporalPath}.policyId`,
+      `temporal macro policy must equal ${CPP_CUTE_FRONTEND_TEMPORAL_MACRO_POLICY_ID}`,
+    );
+  }
+  if (temporal.mode !== "reject") {
+    invalid(`${temporalPath}.mode`, "temporal macro policy v1 requires reject mode");
+  }
+  return {
+    temporalMacros: {
+      policyId: CPP_CUTE_FRONTEND_TEMPORAL_MACRO_POLICY_ID,
+      mode: "reject",
+    },
+  };
+}
+
+function parseDiagnosticPolicy(
+  value: JsonValue,
+  path: string,
+): CppCuteFrontendDiagnosticPolicy {
+  const object = closedObject(value, ["warningRegistryId", "baseline"], path);
+  if (object.warningRegistryId !== CPP_CUTE_FRONTEND_WARNING_POLICY_REGISTRY_ID) {
+    invalid(
+      `${path}.warningRegistryId`,
+      `warning registry must equal ${CPP_CUTE_FRONTEND_WARNING_POLICY_REGISTRY_ID}`,
+    );
+  }
+  if (object.baseline !== CPP_CUTE_FRONTEND_WARNING_BASELINE) {
+    invalid(`${path}.baseline`, `warning baseline must equal ${CPP_CUTE_FRONTEND_WARNING_BASELINE}`);
+  }
+  return {
+    warningRegistryId: CPP_CUTE_FRONTEND_WARNING_POLICY_REGISTRY_ID,
+    baseline: CPP_CUTE_FRONTEND_WARNING_BASELINE,
   };
 }
 
@@ -1256,6 +1367,12 @@ function parseCompilerOptions(value: JsonValue, path: string): readonly CppCuteF
     if (kind === "define") {
       const object = closedObject(entry, ["kind", "name", "value"], optionPath);
       const name = macroName(field(object, "name", optionPath), `${optionPath}.name`);
+      if (isCppCuteFrontendTemporalMacroName(name)) {
+        invalid(`${optionPath}.name`, "temporal macro policy forbids command-line definition");
+      }
+      if (isCppCuteFrontendReservedMacroName(name)) {
+        invalid(`${optionPath}.name`, "reserved implementation macro cannot be defined by profile");
+      }
       const rawValue = field(object, "value", optionPath);
       const defineValue = rawValue === null ? null : boundedString(rawValue, `${optionPath}.value`, 1_024);
       option = { kind, name, value: defineValue };
@@ -1263,6 +1380,12 @@ function parseCompilerOptions(value: JsonValue, path: string): readonly CppCuteF
     } else if (kind === "undefine") {
       const object = closedObject(entry, ["kind", "name"], optionPath);
       const name = macroName(field(object, "name", optionPath), `${optionPath}.name`);
+      if (isCppCuteFrontendTemporalMacroName(name)) {
+        invalid(`${optionPath}.name`, "temporal macro policy forbids command-line undefinition");
+      }
+      if (isCppCuteFrontendReservedMacroName(name)) {
+        invalid(`${optionPath}.name`, "reserved implementation macro cannot be undefined by profile");
+      }
       option = { kind, name };
       singleton = `macro:${name}`;
     } else if (kind === "frontend-option") {
@@ -1284,13 +1407,16 @@ function parseCompilerOptions(value: JsonValue, path: string): readonly CppCuteF
     } else if (kind === "warning-policy") {
       const object = closedObject(entry, ["kind", "id", "disposition"], optionPath);
       const id = stringValue(field(object, "id", optionPath), `${optionPath}.id`);
-      if (!WARNING_ID.test(id)) invalid(`${optionPath}.id`, "invalid warning policy ID");
+      const mapping = cppCuteFrontendWarningPolicyMapping(id);
+      if (mapping === undefined) {
+        invalid(`${optionPath}.id`, `warning policy ${JSON.stringify(id)} is not present in the closed registry`);
+      }
       const disposition = stringValue(field(object, "disposition", optionPath), `${optionPath}.disposition`);
       if (disposition !== "ignore" && disposition !== "warn" && disposition !== "error") {
         invalid(`${optionPath}.disposition`, "warning disposition must be ignore, warn, or error");
       }
-      option = { kind, id, disposition };
-      singleton = `warning:${id}`;
+      option = { kind, id: mapping.policyId, disposition };
+      singleton = `warning:${mapping.policyId}`;
     } else if (kind === "forced-include") {
       const object = closedObject(entry, ["kind", "includeRootId", "virtualPath"], optionPath);
       const includeRootId = dependencyId(
@@ -1325,13 +1451,13 @@ function parseTarget(value: JsonValue, path: string): CppCuteFrontendTargetProfi
     invalid(`${devicePath}.architecture`, "device architecture must be an sm_NN Clang CUDA target CPU");
   }
   if (device.triple !== "nvptx64-nvidia-cuda") {
-    invalid(`${devicePath}.triple`, "profile v2.4 requires the nvptx64-nvidia-cuda device triple");
+    invalid(`${devicePath}.triple`, "profile v2.5 requires the nvptx64-nvidia-cuda device triple");
   }
   if (host.endianness !== "little" || device.endianness !== "little") {
-    invalid(path, "CUDA profile v2.4 requires little-endian host and NVPTX targets");
+    invalid(path, "CUDA profile v2.5 requires little-endian host and NVPTX targets");
   }
   if (host.pointerBits !== 64 || device.pointerBits !== 64) {
-    invalid(path, "CUDA profile v2.4 requires matching 64-bit host and device pointer widths");
+    invalid(path, "CUDA profile v2.5 requires matching 64-bit host and device pointer widths");
   }
   const hostDataLayout = boundedString(field(host, "dataLayout", hostPath), `${hostPath}.dataLayout`, 1_024);
   const deviceDataLayout = boundedString(field(device, "dataLayout", devicePath), `${devicePath}.dataLayout`, 1_024);
@@ -1542,6 +1668,7 @@ function validateProfileReferences(
 function parseCompatibility(value: JsonValue, path: string): CppCuteFrontendCompatibilityProfile {
   const object = closedObject(value, [
     "supportedSourceFeatures",
+    "unsupportedSourceFeatures",
     "unsupportedIntrinsicFamilies",
   ], path);
   const supportedSourceFeatures = capabilitySet(
@@ -1553,11 +1680,36 @@ function parseCompatibility(value: JsonValue, path: string): CppCuteFrontendComp
   }
   return {
     supportedSourceFeatures,
+    unsupportedSourceFeatures: capabilitySet(
+      field(object, "unsupportedSourceFeatures", path),
+      `${path}.unsupportedSourceFeatures`,
+    ),
     unsupportedIntrinsicFamilies: capabilitySet(
       field(object, "unsupportedIntrinsicFamilies", path),
       `${path}.unsupportedIntrinsicFamilies`,
     ),
   };
+}
+
+function validateLanguageCompatibility(
+  language: CppCuteFrontendLanguageProfile,
+  compatibility: CppCuteFrontendCompatibilityProfile,
+): void {
+  const temporalFeature = "cxx:temporal-macros@1";
+  if (language.preprocessing.temporalMacros.mode === "reject") {
+    if (!compatibility.unsupportedSourceFeatures.includes(temporalFeature)) {
+      invalid(
+        "$.compatibility.unsupportedSourceFeatures",
+        `reject temporal macro policy requires ${temporalFeature}`,
+      );
+    }
+    if (compatibility.supportedSourceFeatures.includes(temporalFeature)) {
+      invalid(
+        "$.compatibility.supportedSourceFeatures",
+        `reject temporal macro policy forbids supported claim ${temporalFeature}`,
+      );
+    }
+  }
 }
 
 function parseExtractionLimits(value: JsonValue, path: string): CppCuteFrontendExtractionLimits {

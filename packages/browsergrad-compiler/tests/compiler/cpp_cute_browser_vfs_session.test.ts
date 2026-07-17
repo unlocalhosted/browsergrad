@@ -33,6 +33,9 @@ import {
   cppCuteBrowserRuntimeAbiManifestResourceBytes,
 } from "../../src/cpp_cute_browser_runtime_abi.js";
 import {
+  cppCuteSemanticAdapterManifestResourceBytes,
+} from "../../src/cpp_cute_semantic_adapter_manifest.js";
+import {
   CPP_CUTE_FRONTEND_REQUEST_SCHEMA,
   deriveCppCuteFrontendEntryRequestId,
   deriveCppCuteFrontendRequestHash,
@@ -889,7 +892,7 @@ async function createAuthorityFixture(
       1;
     profileVfs.maxAggregateLiveOpenByteLength = MAIN_BYTES.byteLength + HEADER_BYTES.byteLength + 1;
   }
-  const adapterBytes = Uint8Array.of(1, 2, 3);
+  const adapterBytes = cppCuteSemanticAdapterManifestResourceBytes();
   const wasmBytes = Uint8Array.of(4, 5, 6, 7);
   const runtimeAbiBytes = cppCuteBrowserRuntimeAbiManifestResourceBytes();
   const adapterSha256 = await sha256Hex(adapterBytes);

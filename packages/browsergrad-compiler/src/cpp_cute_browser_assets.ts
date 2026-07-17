@@ -25,6 +25,10 @@ import {
   cppCuteBrowserRuntimeAbiManifestResourceBytes,
 } from "./cpp_cute_browser_runtime_abi.js";
 import {
+  CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256,
+  cppCuteSemanticAdapterManifestResourceBytes,
+} from "./cpp_cute_semantic_adapter_manifest.js";
+import {
   unwrapPreparedCppCuteBrowserFrontendProfile,
   type CppCuteFrontendBrowserAssetLimits,
   type CppCuteFrontendCompatibilityProfile,
@@ -52,6 +56,8 @@ const HARD_MAX_ASSET_UNPACKED_BYTES = 4n * 1024n * 1024n * 1024n;
 const HARD_MAX_TOTAL_COMPRESSED_BYTES = 2n * 1024n * 1024n * 1024n;
 const HARD_MAX_TOTAL_UNPACKED_BYTES = 8n * 1024n * 1024n * 1024n;
 const RUNTIME_ABI_RESOURCE_BYTE_LENGTH = cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength;
+const SEMANTIC_ADAPTER_RESOURCE_BYTE_LENGTH =
+  cppCuteSemanticAdapterManifestResourceBytes().byteLength;
 const TEXT_ENCODER = new TextEncoder();
 const ABORT_SIGNAL_ABORTED_GETTER = typeof AbortSignal === "undefined"
   ? undefined
@@ -753,8 +759,15 @@ function validateAssetProfileClosure(
     hashMismatch("$.body.assets", "Clang WASM asset must bind exact extractor binary and source ABI hashes");
   }
   const adapter = body.assets.find((asset) => asset.kind === "semantic-adapter-manifest");
-  if (adapter?.sha256 !== profile.deployment.extractor.semanticAdapterManifestSha256) {
-    hashMismatch("$.body.assets", "semantic-adapter asset must bind prepared profile adapter manifest hash");
+  if (adapter?.kind !== "semantic-adapter-manifest" ||
+      adapter.sha256 !== CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256 ||
+      adapter.sha256 !== profile.deployment.extractor.semanticAdapterManifestSha256 ||
+      wireIntegerToBigInt(adapter.byteLength) !== BigInt(SEMANTIC_ADAPTER_RESOURCE_BYTE_LENGTH) ||
+      wireIntegerToBigInt(adapter.unpackedByteLength) !== BigInt(SEMANTIC_ADAPTER_RESOURCE_BYTE_LENGTH)) {
+    hashMismatch(
+      "$.body.assets",
+      "semantic-adapter asset must bind exact package canonical policy bytes",
+    );
   }
   const runtimeAbi = body.assets.find((asset) => asset.kind === "runtime-abi-manifest");
   if (runtimeAbi?.kind !== "runtime-abi-manifest" ||

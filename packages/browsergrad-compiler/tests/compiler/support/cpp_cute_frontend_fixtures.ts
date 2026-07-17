@@ -8,6 +8,14 @@ import {
 import {
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
 } from "../../../src/cpp_cute_browser_runtime_abi.js";
+import {
+  CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256,
+} from "../../../src/cpp_cute_semantic_adapter_manifest.js";
+import {
+  CPP_CUTE_FRONTEND_TEMPORAL_MACRO_POLICY_ID,
+  CPP_CUTE_FRONTEND_WARNING_BASELINE,
+  CPP_CUTE_FRONTEND_WARNING_POLICY_REGISTRY_ID,
+} from "../../../src/cpp_cute_frontend_compiler_policy.js";
 import { CPP_CUTE_AOT_SANDBOX_POLICY_SHA256 } from "../../../src/cpp_cute_aot_policy.js";
 import { deriveCppCuteFrontendArtifactId } from "../../../src/cpp_cute_frontend_artifact.js";
 import {
@@ -28,7 +36,8 @@ import type {
 export const CPP_CUTE_FIXTURE_HEADER_SET_HASH = "2".repeat(64);
 export const CPP_CUTE_FIXTURE_COMPILER_HASH = "3".repeat(64);
 export const CPP_CUTE_FIXTURE_COMPILER_RESOURCE_HASH = "b".repeat(64);
-export const CPP_CUTE_FIXTURE_SEMANTIC_ADAPTER_HASH = "e".repeat(64);
+export const CPP_CUTE_FIXTURE_SEMANTIC_ADAPTER_HASH =
+  CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256;
 export const CPP_CUTE_FIXTURE_RUNTIME_ABI_MANIFEST_SHA256 =
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256;
 export const CPP_CUTE_FIXTURE_CONTAINER_DIGEST = `sha256:${"4".repeat(64)}`;
@@ -70,7 +79,7 @@ export function createCppCuteProfileInput(
   const sourceRoots = options.sourceRoots ?? ["/workspace/src"];
   return {
     schema: "browsergrad.compiler.cpp-cute.frontend-profile",
-    version: { major: 2, minor: 4 },
+    version: { major: 2, minor: 5 },
     profileId: "browsergrad.compiler.cpp-cute.layout-tracer@2",
     deployment: {
       mode: "ahead-of-time",
@@ -107,6 +116,16 @@ export function createCppCuteProfileInput(
     language: {
       cxxStandard: "c++17",
       cudaCompatibility: "12.6",
+      preprocessing: {
+        temporalMacros: {
+          policyId: CPP_CUTE_FRONTEND_TEMPORAL_MACRO_POLICY_ID,
+          mode: "reject",
+        },
+      },
+      diagnostics: {
+        warningRegistryId: CPP_CUTE_FRONTEND_WARNING_POLICY_REGISTRY_ID,
+        baseline: CPP_CUTE_FRONTEND_WARNING_BASELINE,
+      },
       semanticPasses: [
         {
           ordinal: 0,
@@ -134,7 +153,7 @@ export function createCppCuteProfileInput(
         {
           kind: "forced-include",
           includeRootId: "clang-resource",
-          virtualPath: "/toolchain/clang/lib/clang/20/include/__clang_cuda_runtime_wrapper.h",
+          virtualPath: "/toolchain/clang/lib/clang/22/include/__clang_cuda_runtime_wrapper.h",
         },
         { kind: "frontend-option", id: "syntax-only", value: null },
       ],
@@ -157,8 +176,8 @@ export function createCppCuteProfileInput(
     toolchain: {
       compiler: {
         id: "clang",
-        version: "20.1.8",
-        buildId: "llvmorg-20.1.8",
+        version: "22.1.8",
+        buildId: "llvmorg-22.1.8",
         binarySha256: CPP_CUTE_FIXTURE_COMPILER_HASH,
         resourceDirectorySha256: CPP_CUTE_FIXTURE_COMPILER_RESOURCE_HASH,
       },
@@ -199,6 +218,7 @@ export function createCppCuteProfileInput(
     },
     compatibility: {
       supportedSourceFeatures: ["cuda:language@1", "cute:layout-algebra@1", "cxx:templates@1"],
+      unsupportedSourceFeatures: ["cxx:temporal-macros@1"],
       unsupportedIntrinsicFamilies: ["nvidia:tma@1", "nvidia:wgmma@1"],
     },
     extractionLimits: {
@@ -329,7 +349,7 @@ function createDefaultCppCuteIncludeRoots(sourceRoot: string): readonly CppCuteF
     {
       includeRootId: "clang-resource",
       mode: "system",
-      virtualPath: "/toolchain/clang/lib/clang/20/include",
+      virtualPath: "/toolchain/clang/lib/clang/22/include",
       manifestSha256: CPP_CUTE_FIXTURE_COMPILER_RESOURCE_HASH,
       owner: { kind: "compiler-resource-directory" },
     },
@@ -429,7 +449,7 @@ export async function createCppCutePayloadInput(
           includeRootId: CPP_CUTE_FIXTURE_COMPILER_INCLUDE_ROOT_ID,
           ordinal: 1,
           mode: "system",
-          virtualPath: "/toolchain/clang/lib/clang/20/include",
+          virtualPath: "/toolchain/clang/lib/clang/22/include",
           manifestSha256: CPP_CUTE_FIXTURE_COMPILER_RESOURCE_HASH,
           owner: { kind: "compiler-resource-directory" },
         },
@@ -479,7 +499,7 @@ export async function createCppCutePayloadInput(
         {
           fileId: CPP_CUTE_FIXTURE_COMPILER_HEADER_FILE_ID,
           role: "compiler-header",
-          virtualPath: "/toolchain/clang/lib/clang/20/include/__clang_cuda_runtime_wrapper.h",
+          virtualPath: "/toolchain/clang/lib/clang/22/include/__clang_cuda_runtime_wrapper.h",
           contentSha256: "c".repeat(64),
           byteLength: "300" as never,
           owner: { kind: "compiler-resource-directory" },

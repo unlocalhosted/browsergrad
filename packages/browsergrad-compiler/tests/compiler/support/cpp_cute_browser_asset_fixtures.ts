@@ -20,6 +20,9 @@ import {
   cppCuteBrowserRuntimeAbiManifestResourceBytes,
 } from "../../../src/cpp_cute_browser_runtime_abi.js";
 import {
+  cppCuteSemanticAdapterManifestResourceBytes,
+} from "../../../src/cpp_cute_semantic_adapter_manifest.js";
+import {
   prepareCppCuteFrontendProfile,
   unwrapPreparedCppCuteBrowserFrontendProfile,
   type CppCuteFrontendBrowserAssetLimits,
@@ -31,6 +34,8 @@ import {
 } from "./cpp_cute_frontend_fixtures.js";
 
 const PROVENANCE_ID = `bg.build-provenance.sha256.${"9".repeat(64)}`;
+const SEMANTIC_ADAPTER_RESOURCE_BYTE_LENGTH =
+  cppCuteSemanticAdapterManifestResourceBytes().byteLength;
 
 export interface CppCuteBrowserAssetFixture {
   readonly profile: PreparedCppCuteFrontendProfile;
@@ -70,8 +75,8 @@ export async function createCppCuteBrowserAssetFixture(
       url: "/browsergrad/cpp-cute/semantic-adapter.json",
       urlPolicy: "same-origin-root-relative",
       sha256: provisionalRecord.deployment.extractor.semanticAdapterManifestSha256,
-      byteLength: wire(128),
-      unpackedByteLength: wire(128),
+      byteLength: wire(SEMANTIC_ADAPTER_RESOURCE_BYTE_LENGTH),
+      unpackedByteLength: wire(SEMANTIC_ADAPTER_RESOURCE_BYTE_LENGTH),
       mediaType: "application/vnd.browsergrad.cpp-cute.semantic-adapter.v1+json",
       compression: "identity",
       buildProvenanceId: PROVENANCE_ID,

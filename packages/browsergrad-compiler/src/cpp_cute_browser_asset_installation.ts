@@ -21,6 +21,11 @@ import {
 } from "./cpp_cute_browser_runtime_abi.js";
 import { unwrapPreparedCppCuteBrowserFrontendProfile } from "./cpp_cute_frontend_profile.js";
 import {
+  CppCuteSemanticAdapterManifestError,
+  decodeCppCuteSemanticAdapterManifest,
+  type PreparedCppCuteSemanticAdapterManifest,
+} from "./cpp_cute_semantic_adapter_manifest.js";
+import {
   CppCuteBrowserVfsPackError,
   unwrapVerifiedCppCuteBrowserVfsPack,
   verifyCppCuteBrowserVfsPackAsset,
@@ -75,6 +80,7 @@ const ARRAY_BUFFER_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
 )?.get;
 const VERIFIED_ASSET_SETS = new WeakMap<object, StoredVerifiedAssetSet>();
 const VERIFIED_RUNTIME_ABI_ASSETS = new WeakMap<object, StoredVerifiedRuntimeAbiAsset>();
+const VERIFIED_SEMANTIC_ADAPTER_ASSETS = new WeakMap<object, StoredVerifiedSemanticAdapterAsset>();
 const CACHE_ADMISSIONS = new WeakMap<object, StoredCacheAdmission>();
 const VFS_INSTALLATIONS = new WeakMap<object, StoredVfsInstallation>();
 
@@ -157,6 +163,36 @@ interface StoredVerifiedRuntimeAbiAsset {
   readonly record: VerifiedCppCuteBrowserRuntimeAbiAssetRecord;
 }
 
+declare const verifiedSemanticAdapterAssetBrand: unique symbol;
+
+/**
+ * Opaque link from one acquired asset set to its strict-decoded semantic
+ * policy. It proves neither a Clang invocation nor producer conformance.
+ */
+export interface VerifiedCppCuteBrowserSemanticAdapterAsset {
+  readonly [verifiedSemanticAdapterAssetBrand]: true;
+  readonly assetManifestId: string;
+  readonly assetSetSha256: string;
+  readonly assetId: string;
+  readonly semanticAdapterManifestId: string;
+  readonly semanticAdapterId: string;
+  readonly semanticAdapterResourceSha256: string;
+  readonly semanticAdapterResourceByteLength: WireU64;
+  readonly designAuthority: true;
+  readonly clangInvocationAuthorized: false;
+  readonly workerExecutionReady: false;
+  readonly releaseReady: false;
+}
+
+export interface VerifiedCppCuteBrowserSemanticAdapterAssetRecord {
+  readonly assetSet: VerifiedCppCuteBrowserAssetSet;
+  readonly semanticAdapter: PreparedCppCuteSemanticAdapterManifest;
+}
+
+interface StoredVerifiedSemanticAdapterAsset {
+  readonly record: VerifiedCppCuteBrowserSemanticAdapterAssetRecord;
+}
+
 declare const cacheAdmissionBrand: unique symbol;
 
 /** Temporal proof that one cache adapter accepted copies of the exact set. */
@@ -231,6 +267,7 @@ export type CppCuteBrowserAssetInstallationErrorCode =
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-CACHE-FAILED"
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-PACK-INVALID"
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-RUNTIME-ABI-INVALID"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-SEMANTIC-ADAPTER-INVALID"
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-MOUNT-COLLISION"
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-UNVERIFIED";
 
@@ -460,6 +497,78 @@ export function unwrapVerifiedCppCuteBrowserRuntimeAbiAsset(
   if (typeof verified !== "object" || verified === null) unverified("$.runtimeAbi");
   const stored = VERIFIED_RUNTIME_ABI_ASSETS.get(verified as object);
   if (stored === undefined) unverified("$.runtimeAbi");
+  return stored.record;
+}
+
+/** Strict-decodes the acquired semantic policy before any Clang authority. */
+export async function decodeAcquiredCppCuteBrowserSemanticAdapterAsset(
+  assetSet: VerifiedCppCuteBrowserAssetSet,
+  options: CppCuteBrowserAssetOperationOptions = {},
+): Promise<VerifiedCppCuteBrowserSemanticAdapterAsset> {
+  const signal = normalizeSignal(options.signal);
+  throwIfAborted(signal);
+  const stored = storedAssetSet(assetSet);
+  const entry = stored.assets.find(
+    (candidate) => candidate.asset.kind === "semantic-adapter-manifest",
+  );
+  if (entry?.asset.kind !== "semantic-adapter-manifest") {
+    invalid("$.semanticAdapter", "verified asset set has no semantic-adapter manifest asset");
+  }
+  let semanticAdapter: PreparedCppCuteSemanticAdapterManifest;
+  try {
+    semanticAdapter = await decodeCppCuteSemanticAdapterManifest(
+      entry.bytes,
+      signal === undefined ? {} : { signal },
+    );
+  } catch (cause) {
+    if (isAborted(signal)) cancelled();
+    if (cause instanceof CppCuteSemanticAdapterManifestError) {
+      fail(
+        "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-SEMANTIC-ADAPTER-INVALID",
+        "$.semanticAdapter",
+        "acquired semantic-adapter bytes failed strict canonical decoding",
+        { cause },
+      );
+    }
+    throw cause;
+  }
+  throwIfAborted(signal);
+  const manifestRecord = unwrapPreparedCppCuteBrowserAssetManifest(stored.manifest);
+  const profile = unwrapPreparedCppCuteBrowserFrontendProfile(manifestRecord.profile).profile;
+  if (semanticAdapter.resourceSha256 !== entry.asset.sha256 ||
+      BigInt(semanticAdapter.resourceByteLength) !== wireIntegerToBigInt(entry.asset.byteLength) ||
+      semanticAdapter.resourceSha256 !==
+        profile.deployment.extractor.semanticAdapterManifestSha256) {
+    fail(
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-SEMANTIC-ADAPTER-INVALID",
+      "$.semanticAdapter",
+      "decoded semantic-adapter authority differs from asset or prepared-profile binding",
+    );
+  }
+  const verified = Object.freeze({
+    assetManifestId: assetSet.manifestId,
+    assetSetSha256: assetSet.assetSetSha256,
+    assetId: entry.asset.assetId,
+    semanticAdapterManifestId: semanticAdapter.manifestId,
+    semanticAdapterId: semanticAdapter.semanticAdapterId,
+    semanticAdapterResourceSha256: semanticAdapter.resourceSha256,
+    semanticAdapterResourceByteLength: encodeWireU64(BigInt(semanticAdapter.resourceByteLength)),
+    designAuthority: true,
+    clangInvocationAuthorized: false,
+    workerExecutionReady: false,
+    releaseReady: false,
+  }) as VerifiedCppCuteBrowserSemanticAdapterAsset;
+  const record = Object.freeze({ assetSet, semanticAdapter });
+  VERIFIED_SEMANTIC_ADAPTER_ASSETS.set(verified, Object.freeze({ record }));
+  return verified;
+}
+
+export function unwrapVerifiedCppCuteBrowserSemanticAdapterAsset(
+  verified: VerifiedCppCuteBrowserSemanticAdapterAsset,
+): VerifiedCppCuteBrowserSemanticAdapterAssetRecord {
+  if (typeof verified !== "object" || verified === null) unverified("$.semanticAdapter");
+  const stored = VERIFIED_SEMANTIC_ADAPTER_ASSETS.get(verified as object);
+  if (stored === undefined) unverified("$.semanticAdapter");
   return stored.record;
 }
 

@@ -79,13 +79,13 @@ describe("C++/CuTe frontend artifact", () => {
       headerSetSha256: verified.headerSetSha256,
       inputClosureSha256: verified.inputClosureSha256,
     }).toEqual({
-      artifactHash: "bbb05a48da31219963aa2fd4c1b6b5ce61239e832b63c624c8eb6d3b8c7f927c",
+      artifactHash: "cb71e4b59126b09331d3e3f114b851e247017985f70e6ac45520bba68f94e8ed",
       sourceSetSha256: "1c6c78df750362ea1a78dd0513be899140c4b6bbcc7986e476c916c718270a46",
-      headerSetSha256: "a2974167b9230f04b7cf95e0d2e2d1304b9974ba90398fadd93d087b12d44b91",
-      inputClosureSha256: "4df918262f32e5655e26fc72c7f9053e707c9612216733146d035d75870e2f7b",
+      headerSetSha256: "b737489faf070a5b30e0664ba0aaeb3a209caa7b7cc8380d74a3a54683729649",
+      inputClosureSha256: "f295f6e1b13768dcef523323f951a4cbb30b4227790f44004126a200fc6a4131",
     });
     expect(verified.transportHash).toMatch(/^[0-9a-f]{64}$/u);
-    expect(verified.artifactBytesSha256).toBe("02e00b21c65c9a25fcdcbe2a66c14ab4df96cb537708e9949e82e84faf3b8120");
+    expect(verified.artifactBytesSha256).toBe("a21684d21c3e18f3d3d40106d212101027f80612e4ae6cc1cccf76a75c653f2a");
     expect(verified.artifactByteLength).toBe("15081");
     expect(verified.compilationContractHash).toBe(CPP_CUTE_FIXTURE_COMPILATION_CONTRACT_HASH);
     expect(verified.outcome).toBe("accepted");

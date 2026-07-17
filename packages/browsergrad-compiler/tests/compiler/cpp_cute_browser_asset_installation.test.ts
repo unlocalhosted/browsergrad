@@ -10,13 +10,16 @@ import {
   copyVerifiedCppCuteBrowserAssetBytes,
   CppCuteBrowserAssetInstallationError,
   decodeAcquiredCppCuteBrowserRuntimeAbiAsset,
+  decodeAcquiredCppCuteBrowserSemanticAdapterAsset,
   installCppCuteBrowserVfs,
   loadCppCuteBrowserAssetSetFromCache,
   unwrapVerifiedCppCuteBrowserRuntimeAbiAsset,
+  unwrapVerifiedCppCuteBrowserSemanticAdapterAsset,
   unwrapVerifiedCppCuteBrowserVfsInstallation,
   verifyTransferredCppCuteBrowserAssetSet,
   type CppCuteBrowserTransferredAssetInput,
   type VerifiedCppCuteBrowserRuntimeAbiAsset,
+  type VerifiedCppCuteBrowserSemanticAdapterAsset,
   type CppCuteBrowserContentCache,
   type CppCuteBrowserHostFetch,
 } from "../../src/cpp_cute_browser_asset_installation.js";
@@ -39,6 +42,11 @@ import {
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
   cppCuteBrowserRuntimeAbiManifestResourceBytes,
 } from "../../src/cpp_cute_browser_runtime_abi.js";
+import {
+  CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_MANIFEST_ID,
+  CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256,
+  cppCuteSemanticAdapterManifestResourceBytes,
+} from "../../src/cpp_cute_semantic_adapter_manifest.js";
 import {
   prepareCppCuteFrontendProfile,
   unwrapPreparedCppCuteBrowserFrontendProfile,
@@ -130,7 +138,7 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
     (cutlass as { virtualPath: string }).virtualPath = `${cuda.virtualPath}/nested`;
   }
 
-  const adapterBytes = Uint8Array.of(1, 2, 3);
+  const adapterBytes = cppCuteSemanticAdapterManifestResourceBytes();
   const wasmBytes = Uint8Array.of(4, 5, 6, 7);
   const runtimeAbiBytes = cppCuteBrowserRuntimeAbiManifestResourceBytes();
   const adapterSha256 = await sha256Hex(adapterBytes);
@@ -350,6 +358,13 @@ describe("C++/CuTe browser asset acquisition and VFS installation", () => {
       workerExecutionReady: false,
       releaseReady: false,
     });
+    const semanticAdapter = await decodeAcquiredCppCuteBrowserSemanticAdapterAsset(assetSet);
+    expect(semanticAdapter).toMatchObject({
+      designAuthority: true,
+      clangInvocationAuthorized: false,
+      workerExecutionReady: false,
+      releaseReady: false,
+    });
     await expect(installCppCuteBrowserVfs(assetSet)).resolves.toMatchObject({
       manifestId: environment.manifest.manifestId,
     });
@@ -521,6 +536,62 @@ describe("C++/CuTe browser asset acquisition and VFS installation", () => {
       code: "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-UNVERIFIED",
       path: "$.runtimeAbi",
     }));
+
+    const semanticAdapter = await decodeAcquiredCppCuteBrowserSemanticAdapterAsset(assetSet);
+    expect(semanticAdapter).toMatchObject({
+      assetManifestId: assetSet.manifestId,
+      assetSetSha256: assetSet.assetSetSha256,
+      assetId: "adapter",
+      semanticAdapterManifestId: CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_MANIFEST_ID,
+      semanticAdapterId: "browsergrad.compiler.cpp-cute.clang-semantic-adapter@1",
+      semanticAdapterResourceSha256: CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256,
+      semanticAdapterResourceByteLength: String(
+        cppCuteSemanticAdapterManifestResourceBytes().byteLength,
+      ),
+      designAuthority: true,
+      clangInvocationAuthorized: false,
+      workerExecutionReady: false,
+      releaseReady: false,
+    });
+    expect(unwrapVerifiedCppCuteBrowserSemanticAdapterAsset(semanticAdapter).assetSet).toBe(assetSet);
+    expect(() => unwrapVerifiedCppCuteBrowserSemanticAdapterAsset(
+      { ...semanticAdapter } as VerifiedCppCuteBrowserSemanticAdapterAsset,
+    )).toThrowError(expect.objectContaining({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-UNVERIFIED",
+      path: "$.semanticAdapter",
+    }));
+  });
+
+  it("fails closed on invalid acquired semantic policy and preserves cancellation", async () => {
+    const environment = await createEnvironment();
+    const assetSet = await acquireCppCuteBrowserAssetSet(
+      environment.manifest,
+      ORIGIN,
+      hostFetch(environment.bytesByUrl),
+    );
+    const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+    try {
+      await expectIoError(
+        decodeAcquiredCppCuteBrowserSemanticAdapterAsset(assetSet),
+        "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-SEMANTIC-ADAPTER-INVALID",
+        "$.semanticAdapter",
+      );
+    } finally {
+      if (cryptoDescriptor === undefined) delete (globalThis as { crypto?: Crypto }).crypto;
+      else Object.defineProperty(globalThis, "crypto", cryptoDescriptor);
+    }
+
+    const controller = new AbortController();
+    const pending = decodeAcquiredCppCuteBrowserSemanticAdapterAsset(assetSet, {
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expectIoError(
+      pending,
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-CANCELLED",
+      "$.signal",
+    );
   });
 
   it("admits isolated copies and rehashes every cache hit before authority", async () => {

@@ -299,7 +299,7 @@ describe("C++/CuTe closed browser VFS pack", () => {
       profileHash: manifest.profileHash,
       assetId: "compiler-resource",
       includeRootId: "clang-resource",
-      mountedVirtualRoot: "/toolchain/clang/lib/clang/20/include",
+      mountedVirtualRoot: "/toolchain/clang/lib/clang/22/include",
       packSha256: packFixture.expected.packSha256,
       fileContentByteLength: packFixture.expected.fileContentByteLength,
       contentSetSha256: packFixture.expected.contentSetSha256,

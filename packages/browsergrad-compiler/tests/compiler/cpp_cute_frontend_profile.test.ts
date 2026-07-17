@@ -34,7 +34,7 @@ describe("C++/CuTe frontend profile", () => {
     const second = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("e8c3f40c901aa95d7f2e2af0db29a5cf8760e2940f8141d832da7844cad24a83");
+    expect(first.profileHash).toBe("bf29e78145dcd0e0b4b4e3859c1c35c55c40061f832c471d471d8d09d23363e7");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.layout-tracer@2");
     expect(first.deploymentMode).toBe("ahead-of-time");
     expect(Object.isFrozen(first)).toBe(true);
@@ -156,11 +156,11 @@ describe("C++/CuTe frontend profile", () => {
     const aot = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("b545294062c38dd7b2399e47cbb55e65da94bd76203b6ecf4092673526aba52f");
+    expect(first.profileHash).toBe("02829315865f3fdf3523893a317a0d373582fbd989c45bf7b6b06b6a95229cd9");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.browser-clang@1");
     expect(first.deploymentMode).toBe("browser-local");
     expect(first.compilationContractHash).toBe(aot.compilationContractHash);
-    expect(first.compilationContractHash).toBe("0d4f9a1d7378131cd61a8f1b0f41efd5e8413602b8692dbfc6baecf3c8a1495b");
+    expect(first.compilationContractHash).toBe("18e46c4e9cfaca6c9a23114c68f7dd6fce489f50f5c74e5b3277878a3d35ca62");
     const record = unwrapPreparedCppCuteBrowserFrontendProfile(first);
     expect(record.profile.deployment.assetSetSha256).toBe("8".repeat(64));
     expect(record.profile.deployment.buildProvenanceLockSha256).toBe("7".repeat(64));
@@ -393,7 +393,7 @@ describe("C++/CuTe frontend profile", () => {
       {
         kind: "forced-include",
         includeRootId: "clang-resource",
-        virtualPath: "/toolchain/clang/lib/clang/20/include/__clang_cuda_runtime_wrapper.h",
+        virtualPath: "/toolchain/clang/lib/clang/22/include/__clang_cuda_runtime_wrapper.h",
       },
       { kind: "define", name: "CUTE_SM80_ENABLED", value: "1" },
     ];
@@ -407,7 +407,7 @@ describe("C++/CuTe frontend profile", () => {
       {
         kind: "forced-include",
         includeRootId: "clang-resource",
-        virtualPath: "/toolchain/clang/lib/clang/20/include/__clang_cuda_runtime_wrapper.h",
+        virtualPath: "/toolchain/clang/lib/clang/22/include/__clang_cuda_runtime_wrapper.h",
       },
       { kind: "define", name: "CUTE_SM80_ENABLED", value: "1" },
     ]);
@@ -505,6 +505,25 @@ describe("C++/CuTe frontend profile", () => {
       value,
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
       "$.deployment.extractor.semanticAdapterManifestSha256",
+    );
+
+    const otherManifest = cloneCppCuteProfileInput();
+    const otherDeployment = otherManifest["deployment"] as Record<string, unknown>;
+    (otherDeployment["extractor"] as Record<string, unknown>)["semanticAdapterManifestSha256"] =
+      "0".repeat(64);
+    await expectProfileError(
+      otherManifest,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.deployment.extractor.semanticAdapterManifestSha256",
+    );
+
+    const otherClang = cloneCppCuteProfileInput();
+    const toolchain = otherClang["toolchain"] as Record<string, unknown>;
+    (toolchain["compiler"] as Record<string, unknown>)["version"] = "20.1.9";
+    await expectProfileError(
+      otherClang,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.toolchain.compiler",
     );
   });
 
@@ -653,7 +672,7 @@ describe("C++/CuTe frontend profile", () => {
     const pathEscape = cloneCppCuteProfileInput();
     const escapedOptions = (pathEscape["language"] as Record<string, unknown>)["options"] as Record<string, unknown>[];
     if (escapedOptions[1] === undefined) throw new Error("fixture lost forced include");
-    escapedOptions[1]["virtualPath"] = "/toolchain/clang/lib/clang/20/include-shadow/wrapper.h";
+    escapedOptions[1]["virtualPath"] = "/toolchain/clang/lib/clang/22/include-shadow/wrapper.h";
     await expectProfileError(
       pathEscape,
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
@@ -663,7 +682,7 @@ describe("C++/CuTe frontend profile", () => {
     const rootInsteadOfFile = cloneCppCuteProfileInput();
     const rootOptions = (rootInsteadOfFile["language"] as Record<string, unknown>)["options"] as Record<string, unknown>[];
     if (rootOptions[1] === undefined) throw new Error("fixture lost forced include");
-    rootOptions[1]["virtualPath"] = "/toolchain/clang/lib/clang/20/include";
+    rootOptions[1]["virtualPath"] = "/toolchain/clang/lib/clang/22/include";
     await expectProfileError(
       rootInsteadOfFile,
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
