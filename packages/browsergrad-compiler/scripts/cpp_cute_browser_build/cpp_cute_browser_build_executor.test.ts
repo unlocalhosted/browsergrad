@@ -49,6 +49,7 @@ const executorProcessState = vi.hoisted(() => ({
   afterRun: undefined as ((index: number) => Promise<void>) | undefined,
   factoryPath: undefined as string | undefined,
   linkMapPath: undefined as string | undefined,
+  invalidConfiguredTarget: false,
   malformedFactory: false,
   malformedWasm: false,
 }));
@@ -164,7 +165,9 @@ vi.mock("./cpp_cute_browser_build_executor_process.mjs", async (importOriginal) 
           await Promise.all([
             writeFile(
               join(targetDirectory, "flags.make"),
-              "CXX_FLAGS = -O3 -fexceptions -DNDEBUG\n",
+              executorProcessState.invalidConfiguredTarget
+                ? "CXX_FLAGS = -O3 -fno-exceptions -DNDEBUG\n"
+                : "CXX_FLAGS = -O3 -fexceptions -DNDEBUG\n",
             ),
             writeFile(
               join(targetDirectory, "link.txt"),
@@ -249,6 +252,7 @@ afterEach(async () => {
   executorProcessState.afterRun = undefined;
   executorProcessState.factoryPath = undefined;
   executorProcessState.linkMapPath = undefined;
+  executorProcessState.invalidConfiguredTarget = false;
   executorProcessState.malformedFactory = false;
   executorProcessState.malformedWasm = false;
   await Promise.all(temporaryRoots.splice(0).map(async (root) => {
@@ -542,14 +546,6 @@ describe("exact Clang-Wasm build executor", () => {
       lockId: lock.lockId,
       sourceSetSha256: lock.extractorSourceSetSha256,
       stepCount: 4,
-      configuredTarget: {
-        authority: "configured-target-flags-review-only",
-        exceptionMode: "emscripten-javascript",
-        rttiRequired: true,
-        buildExecuted: false,
-        abiConformanceVerified: false,
-        releaseReady: false,
-      },
       sourceVerified: true,
       buildExecuted: true,
       factoryModuleUtf8Validated: true,
@@ -633,6 +629,21 @@ describe("exact Clang-Wasm build executor", () => {
       "native-tablegen-configure.stderr.log",
       "native-tablegen-configure.stdout.log",
     ]);
+  });
+
+  it("rejects target-level exception drift before the expensive Wasm build", async () => {
+    const { input } = await fixture(true);
+    const prepared = await prepareCppCuteClangWasmBuildSource(input);
+    executorProcessState.invalidConfiguredTarget = true;
+
+    await expect(executeCppCuteClangWasmBuild(prepared)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-INVALID",
+      path: "$.configuredTarget",
+    });
+    expect(executorProcessState.calls).toHaveLength(3);
+    const logs = await readdir(join(input.roots.stateRoot, "evidence", "build-logs"));
+    expect(logs).not.toContain("clang-extractor-wasm-build.stdout.log");
+    expect(logs).not.toContain("clang-extractor-wasm-build.stderr.log");
   });
 
   it.each([

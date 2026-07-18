@@ -427,7 +427,6 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
       stateRoot: roots.stateRoot,
     }),
     nativeTools,
-    configuredTarget: completedTargetReview,
     stepCount: receipts.length,
     steps: Object.freeze(receipts),
     factoryModulePath: plan.generatedExtractor.factoryModulePath,
