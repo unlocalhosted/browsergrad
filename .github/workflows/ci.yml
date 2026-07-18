@@ -53,9 +53,8 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends clang libclang-cpp-dev llvm-dev
-          bg_llvm_config="$(find -L /usr/lib -path '*/bin/llvm-config' -type f -executable -print | sort --version-sort | tail --lines=1)"
-          test -n "${bg_llvm_config}"
+          sudo apt-get install --yes --no-install-recommends clang-18 libclang-cpp18-dev llvm-18-dev
+          bg_llvm_config="/usr/lib/llvm-18/bin/llvm-config"
           test -x "${bg_llvm_config}"
           echo "BROWSERGRAD_LLVM_CONFIG=${bg_llvm_config}" >> "${GITHUB_ENV}"
 
