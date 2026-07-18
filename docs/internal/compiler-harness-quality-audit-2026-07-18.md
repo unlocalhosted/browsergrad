@@ -50,12 +50,13 @@ now resolved with CMake `REAL_PATH` before target attachment. This converted the
 same class of integration defect from an 85-to-95-minute discovery into a
 roughly ten-minute discovery.
 
-Exact-source CI run `29658159688` is green at `cd112795`, including Node 20,
+Exact-source CI run `29658935991` is green at `3e17a744`, including Node 20,
 24, and 25, the exact-Clang native harness checks, Pyodide integration, and the
 real Chromium/WebGPU CUDA corpus. Replacement build run `29658164083` remained
 in isolated execution beyond the prior preflight failure point, proving the
-canonical include-root review passed and the expensive compile began. It is
-still not completed-build, ABI, reproducibility, Worker, or release evidence.
+canonical include-root review passed and the expensive compile began. It still
+targets the unchanged extractor/build lock at `cd112795` and is not completed-
+build, ABI, reproducibility, Worker, or release evidence.
 
 That cost is partly an honest reproducibility cost and partly a harness design
 failure: configuration mismatches should not require an almost-complete LLVM
@@ -66,10 +67,10 @@ build to discover.
 | Area | Rating | Evidence | Required improvement |
 | --- | --- | --- | --- |
 | Locked input integrity | Good but incomplete | Exact LLVM archive, builder manifest/config, extractor source closure, recipe, ABI, and resource identities are checked. The success receipt does not yet bind the harness implementation revision. | Bind the harness revision, successful output, and reviewed runtime projections before distribution. |
-| Build isolation | Strong containment; incomplete hermeticity | No network, read-only root and inputs, private work mount, zero capabilities, and no-new-privileges are observed. The container can still read the whole checkout and installed workspace. | Minimize or independently bind the read-only workspace closure and preserve the same boundary in reproducibility runs. |
+| Build isolation | Strong containment; incomplete hermeticity | No network, read-only root and inputs, private work mount, zero capabilities, and no-new-privileges are observed. The unrelated checkout is no longer mounted; the container can still read the complete compiler and semantic-core package trees. | Stage or independently bind the exact runtime closure and preserve the same boundary in reproducibility runs. |
 | Native semantic coverage | Good but incomplete | Exact Clang 22 pass integration plus native behavioral, UBSan, and ASan lanes are required in CI. | Keep the exact-version lane blocking and add executed-Wasm coverage. |
 | Evidence quality | Mixed | Bounded immutable logs, raw-Wasm inspection, authority-specific records, and a failure-only observation for available partial logs exist. | Complete successful and reproducible build evidence. |
-| Feedback speed | Weak but improving | The clean serial toolchain build dominates successful validation, but target-configuration defects now stop after native TableGen plus Wasm configuration instead of an almost-complete compile. | Validate a safe higher parallelism only through reproducibility evidence. |
+| Feedback speed | Weak but improving | The clean serial toolchain build dominates successful validation, but target-configuration defects now stop after native TableGen plus Wasm configuration instead of an almost-complete compile. A million-call VFS test was replaced by direct exact-boundary coverage after it timed out only under the Node 20 CI load. | Validate a safe higher parallelism only through reproducibility evidence. |
 | Maintainability | Weak | The build executor remains over 2,200 lines; native compile session is 2,121 lines; artifact writer is 1,784 lines. Existing compiler-core modules range from roughly 5,400 to 8,000 lines. Exact per-module ratchets now prevent all seven named monoliths from growing. | Extract effect boundaries and semantic subcomponents without creating parallel execution paths, lowering each ratchet as code moves out. |
 | Delivery truthfulness | Good | Production Worker/controller paths remain capability-blocked; CPU, parser, Wasm, Worker, and WebGPU claims are distinct. | Do not relax blockers until reviewed factory/Wasm bytes execute in the package Worker. |
 
@@ -119,6 +120,14 @@ build to discover.
 16. The four largest compiler-core modules, build executor, native compile
     session, and artifact writer have exact file-specific line ratchets.
     Duplicate, invalid, or stale ratchet entries fail closed.
+17. The build container no longer mounts the whole checkout. Its read-only
+    workspace inputs are limited to `browsergrad-compiler` and
+    `browsergrad-semantic-core`, and the runner observes both effective mount
+    modes before execution.
+18. The VFS call-ceiling test no longer performs one million full memory-
+    validated calls. The exact ABI-owned budget transition has direct boundary
+    coverage, while live-handle and aggregate-byte ceilings remain integration
+    tests. Exact-source Node 20 CI passes the revised suite.
 
 ## Recommended decomposition order
 
@@ -155,13 +164,14 @@ The modules need seam-specific decomposition after the active Gate 3 execution
 chain is stabilized; a broad rewrite during the first Wasm/Worker integration
 would mix correctness risk with organizational work.
 
-The build container's writable authority is narrow, but its readable authority
-is broader than the lock: the workflow mounts the complete checkout and
-installed workspace read-only so the verification code and package graph can
-execute. Network isolation prevents remote exfiltration, and current receipts
-grant no output-identity or release authority. Even so, release-grade
-hermeticity requires either a minimal staged harness closure or an independently
-recorded revision/content identity for every readable harness input.
+The build container's writable authority is narrow, and its unrelated checkout
+read authority has been removed. The workflow now mounts only the compiler and
+semantic-core package trees read-only so the verification code, locked C++
+source, and schema dependency can execute. That is still broader than the exact
+runtime file closure, and current success receipts do not bind the harness
+revision. Release-grade hermeticity therefore still requires a minimal staged
+harness closure or an independently recorded revision/content identity for
+every readable harness input.
 
 ## Open high-priority findings
 
