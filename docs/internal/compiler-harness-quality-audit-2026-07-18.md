@@ -41,6 +41,22 @@ generated-header include directories. The target now declares both directories,
 and the configured-target review rejects either missing `-I` path before the
 expensive Wasm build begins.
 
+The next validation exercised that preflight and stopped after 9 minutes 36
+seconds of isolated execution, before the Wasm build step existed. Code and
+configuration inspection identified CMake's preserved source spelling
+`llvm/../clang/include` while the reviewer required its canonical path. Both
+verified include candidates are
+now resolved with CMake `REAL_PATH` before target attachment. This converted the
+same class of integration defect from an 85-to-95-minute discovery into a
+roughly ten-minute discovery.
+
+Exact-source CI run `29658159688` is green at `cd112795`, including Node 20,
+24, and 25, the exact-Clang native harness checks, Pyodide integration, and the
+real Chromium/WebGPU CUDA corpus. Replacement build run `29658164083` remained
+in isolated execution beyond the prior preflight failure point, proving the
+canonical include-root review passed and the expensive compile began. It is
+still not completed-build, ABI, reproducibility, Worker, or release evidence.
+
 That cost is partly an honest reproducibility cost and partly a harness design
 failure: configuration mismatches should not require an almost-complete LLVM
 build to discover.
@@ -53,8 +69,8 @@ build to discover.
 | Build isolation | Strong containment; incomplete hermeticity | No network, read-only root and inputs, private work mount, zero capabilities, and no-new-privileges are observed. The container can still read the whole checkout and installed workspace. | Minimize or independently bind the read-only workspace closure and preserve the same boundary in reproducibility runs. |
 | Native semantic coverage | Good but incomplete | Exact Clang 22 pass integration plus native behavioral, UBSan, and ASan lanes are required in CI. | Keep the exact-version lane blocking and add executed-Wasm coverage. |
 | Evidence quality | Mixed | Bounded immutable logs, raw-Wasm inspection, authority-specific records, and a failure-only observation for available partial logs exist. | Complete successful and reproducible build evidence. |
-| Feedback speed | Weak | The clean serial toolchain build dominates iteration time. | Use cheap target-configuration review, then validate a safe higher parallelism only through reproducibility evidence. |
-| Maintainability | Weak | The build executor remains over 2,200 lines; native compile session is 2,121 lines; artifact writer is 1,784 lines. Existing compiler-core modules range from roughly 5,400 to 8,000 lines. | Extract effect boundaries and semantic subcomponents without creating parallel execution paths; replace the permissive 8,500-line source ceiling with ratcheting per-module budgets. |
+| Feedback speed | Weak but improving | The clean serial toolchain build dominates successful validation, but target-configuration defects now stop after native TableGen plus Wasm configuration instead of an almost-complete compile. | Validate a safe higher parallelism only through reproducibility evidence. |
+| Maintainability | Weak | The build executor remains over 2,200 lines; native compile session is 2,121 lines; artifact writer is 1,784 lines. Existing compiler-core modules range from roughly 5,400 to 8,000 lines. Exact per-module ratchets now prevent all seven named monoliths from growing. | Extract effect boundaries and semantic subcomponents without creating parallel execution paths, lowering each ratchet as code moves out. |
 | Delivery truthfulness | Good | Production Worker/controller paths remain capability-blocked; CPU, parser, Wasm, Worker, and WebGPU claims are distinct. | Do not relax blockers until reviewed factory/Wasm bytes execute in the package Worker. |
 
 ## Findings closed during this audit
@@ -88,8 +104,10 @@ build to discover.
 12. Architecture governance includes the production harness, native extractor
     closure, tests, dependency cycles, source coverage, and line budgets.
 13. Failed builds emit a canonical failure-only observation that binds the
-    typed error to every available immutable partial log. It explicitly grants
-    no successful-build, output, ABI, reproducibility, or release authority.
+    typed error to every available immutable partial log. Version 2 preserves
+    a bounded four-error typed cause chain, marks cycles/truncation, and does
+    not invoke accessors. It explicitly grants no successful-build, output,
+    ABI, reproducibility, or release authority.
 14. Node 25 has a dedicated compatibility lane for the workspace build,
     architecture checks, ordinary test suites, compiler typecheck and lint, and
     the Node-only Docker-shell contract. Exact Clang and sanitizer semantics
@@ -98,6 +116,9 @@ build to discover.
     include roots and depends on Clang's generated-header targets. Missing
     include wiring now fails configured-target review before the expensive Wasm
     compile instead of after the selected Clang libraries have built.
+16. The four largest compiler-core modules, build executor, native compile
+    session, and artifact writer have exact file-specific line ratchets.
+    Duplicate, invalid, or stale ratchet entries fail closed.
 
 ## Recommended decomposition order
 
@@ -114,8 +135,8 @@ existing responsibilities in this order:
 3. Split the artifact writer's canonical JSON serializer, source/identity graph
    projection, and diagnostic projection from final artifact assembly. Keep the
    existing writer as the sole entry point until byte-for-byte parity tests pass.
-4. Tighten line budgets after each extraction so decomposition cannot regress
-   into a second set of monoliths.
+4. Lower the installed file-specific ratchets after each extraction so
+   decomposition cannot regress into a second set of monoliths.
 
 ## Broader compiler shape
 
@@ -126,12 +147,13 @@ shape healthy.
 
 The largest production modules are `semantic_wgsl.ts` at 7,972 lines,
 `semantic_ir.ts` at 7,178, `semantic_reference.ts` at 6,999, and `analyzer.ts`
-at 5,437. The general source budget was 8,500 lines and has been ratcheted to
-8,000, leaving only 28 lines of headroom for the largest module. This prevents
-further unbounded growth but is still not a design-quality target. These modules
-need seam-specific decomposition and per-module ratchets after the active Gate
-3 execution chain is stabilized; a broad rewrite during the first Wasm/Worker
-integration would mix correctness risk with organizational work.
+at 5,437. The general source budget was reduced from 8,500 to 8,000, and each of
+these modules is now pinned to its exact current line count. The executor is
+pinned at 2,237 lines, compile session at 2,121, and artifact writer at 1,784.
+These ratchets prevent further growth but are still not design-quality targets.
+The modules need seam-specific decomposition after the active Gate 3 execution
+chain is stabilized; a broad rewrite during the first Wasm/Worker integration
+would mix correctness risk with organizational work.
 
 The build container's writable authority is narrow, but its readable authority
 is broader than the lock: the workflow mounts the complete checkout and
@@ -163,9 +185,11 @@ recorded revision/content identity for every readable harness input.
 
 ## Capability boundary after the audit
 
-The project can now fail fast on the known exception/RTTI wiring class, run
-the owned native producer against exact Clang 22, enforce its sanitizer lanes,
-derive build-lock authoring identities, and distinguish validation from
-reproducibility. It still cannot honestly claim that the C++/CuTe frontend is
-available in the browser product. That claim begins only after the successful
-build, ABI, Worker, semantic-lowering, and real-WebGPU chain is complete.
+The project can now fail fast on the known exception/RTTI/include wiring class,
+preserve actionable bounded failure causes, prevent the seven named monoliths
+from growing, run the owned native producer against exact Clang 22, enforce its
+sanitizer lanes, derive build-lock authoring identities, and distinguish
+validation from reproducibility. It still cannot honestly claim that the
+C++/CuTe frontend is available in the browser product. That claim begins only
+after the successful build, ABI, Worker, semantic-lowering, and real-WebGPU
+chain is complete.

@@ -23,13 +23,18 @@ implemented. A pinned no-shell Clang-Wasm executor, isolated manual build lane,
 two-clean-build comparator, native TableGen identity observation, and raw-Wasm
 ABI review producer are on `main` through `1eac0a1c`.
 
-Harness hardening and build fixes are on `main` through `34ddd7ca`. Validation
+Harness hardening and build fixes are on `main` through `cd112795`. Validation
 run `29650211276` exposed a target exception-mode mismatch after 86 minutes 45
 seconds; run `29653908647` cleared that failure and exposed missing Clang source
 and generated include roots after 94 minutes 45 seconds. Both failures occurred
-before any factory/Wasm output was admitted. The target now binds both include
-roots and the configured-target preflight requires them before the expensive
-Wasm compile. A new validation is running as `29657388282`.
+before any factory/Wasm output was admitted. Run `29657388282` exercised the
+new configured-target preflight and rejected a noncanonical include-path
+spelling after 9 minutes 36 seconds, before the expensive Wasm compile. Failure
+receipts now preserve bounded typed cause chains, both include roots are
+canonicalized before target attachment, and exact-source CI `29658159688` is
+green at `cd112795`, including Node 25 and the real Chromium/WebGPU CUDA corpus.
+Validation `29658164083` passed the configured-target preflight and entered the
+expensive compile.
 
 An active or failed run is not build, ABI, reproducibility, Worker, browser, or
 release evidence. The package Worker remains capability-blocked until real
