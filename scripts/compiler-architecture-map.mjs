@@ -29,32 +29,50 @@ const maxSourceLines = Number.parseInt(option("--max-source-lines", "5500"), 10)
 const maxTestLines = Number.parseInt(option("--max-test-lines", "4500"), 10);
 const maxHarnessLines = Number.parseInt(option("--max-harness-lines", "2500"), 10);
 const maxNativeLines = Number.parseInt(option("--max-native-lines", "2500"), 10);
-const sourceLineBudgets = parseSourceLineBudgets(options("--source-line-budget"));
+const sourceLineBudgets = parseLineBudgets(
+  "--source-line-budget",
+  options("--source-line-budget"),
+  /\.ts$/u,
+  "compiler-src-relative .ts path",
+);
+const harnessLineBudgets = parseLineBudgets(
+  "--harness-line-budget",
+  options("--harness-line-budget"),
+  /\.(?:mjs|d\.mts)$/u,
+  "build-harness-relative .mjs or .d.mts path",
+);
+const nativeLineBudgets = parseLineBudgets(
+  "--native-line-budget",
+  options("--native-line-budget"),
+  /(?:\.(?:cpp|h|inc)|^CMakeLists\.txt)$/u,
+  "native-extractor-relative source path",
+);
 const check = args.has("--check");
 const json = args.has("--json");
 const includeTests = args.has("--include-tests") || check;
 
-function parseSourceLineBudgets(values) {
+function parseLineBudgets(name, values, filePattern, expectedPath) {
   const budgets = new Map();
   for (const [index, value] of values.entries()) {
     const separator = value.lastIndexOf(":");
     const relativeFile = separator < 1 ? "" : value.slice(0, separator);
     const limitText = separator < 1 ? "" : value.slice(separator + 1);
-    if (!/^[A-Za-z0-9._/-]+\.ts$/u.test(relativeFile) ||
+    if (!/^[A-Za-z0-9._/-]+$/u.test(relativeFile) ||
+        !filePattern.test(relativeFile) ||
         path.posix.isAbsolute(relativeFile) ||
         path.posix.normalize(relativeFile) !== relativeFile ||
         relativeFile.startsWith("../")) {
       throw new Error(
-        `invalid --source-line-budget at index ${index}: expected normalized compiler-src-relative .ts path`,
+        `invalid ${name} at index ${index}: expected normalized ${expectedPath}`,
       );
     }
     if (!/^[1-9][0-9]{0,5}$/u.test(limitText)) {
       throw new Error(
-        `invalid --source-line-budget at index ${index}: expected an integer from 1 through 999999`,
+        `invalid ${name} at index ${index}: expected an integer from 1 through 999999`,
       );
     }
     if (budgets.has(relativeFile)) {
-      throw new Error(`duplicate --source-line-budget for ${relativeFile}`);
+      throw new Error(`duplicate ${name} for ${relativeFile}`);
     }
     budgets.set(relativeFile, Number.parseInt(limitText, 10));
   }
@@ -348,11 +366,6 @@ const allRows = [...sourceRows, ...harnessRows, ...nativeRows, ...testRows]
   .sort((left, right) => right.lines - left.lines);
 const cycles = dependencyCycles(allRows);
 const coverageFailures = architectureCoverageFailures(harnessRows, nativeRows);
-const observedSourceFiles = new Set(sourceRows.map((row) => (
-  path.relative(compilerSrc, row.file).split(path.sep).join("/")
-)));
-const staleSourceLineBudgets = [...sourceLineBudgets.keys()]
-  .filter((relativeFile) => !observedSourceFiles.has(relativeFile));
 const report = {
   source: sourceRows.map(({ source, ...row }) => row),
   harness: harnessRows.map(({ source, ...row }) => row),
@@ -368,7 +381,9 @@ const report = {
     maxSourceLines,
     sourceLineBudgets: Object.fromEntries(sourceLineBudgets),
     maxHarnessLines,
+    harnessLineBudgets: Object.fromEntries(harnessLineBudgets),
     maxNativeLines,
+    nativeLineBudgets: Object.fromEntries(nativeLineBudgets),
     maxTestLines,
   },
 };
@@ -403,27 +418,21 @@ if (json) {
 
 if (check) {
   const failures = [
-    ...sourceRows
-      .map((row) => {
-        const relativeFile = path.relative(compilerSrc, row.file).split(path.sep).join("/");
-        const ratchet = sourceLineBudgets.get(relativeFile);
-        const limit = ratchet === undefined ? maxSourceLines : Math.min(maxSourceLines, ratchet);
-        return { row, limit, ratchet };
-      })
-      .filter(({ row, limit }) => row.lines > limit)
-      .map(({ row, limit, ratchet }) => (
-        `${row.relativeFile} has ${row.lines} lines (` +
-        `${ratchet === undefined ? "source" : "module ratchet"} limit ${limit})`
-      )),
-    ...staleSourceLineBudgets.map((relativeFile) => (
-      `source line budget names missing compiler module ${relativeFile}`
-    )),
-    ...harnessRows
-      .filter((row) => row.lines > maxHarnessLines)
-      .map((row) => `${row.relativeFile} has ${row.lines} lines (harness limit ${maxHarnessLines})`),
-    ...nativeRows
-      .filter((row) => row.lines > maxNativeLines)
-      .map((row) => `${row.relativeFile} has ${row.lines} lines (native limit ${maxNativeLines})`),
+    ...lineBudgetFailures(sourceRows, compilerSrc, sourceLineBudgets, maxSourceLines, "source"),
+    ...lineBudgetFailures(
+      harnessRows,
+      compilerBuildHarness,
+      harnessLineBudgets,
+      maxHarnessLines,
+      "harness",
+    ),
+    ...lineBudgetFailures(
+      nativeRows,
+      compilerNativeExtractor,
+      nativeLineBudgets,
+      maxNativeLines,
+      "native",
+    ),
     ...testRows
       .filter((row) => row.lines > maxTestLines)
       .map((row) => `${row.relativeFile} has ${row.lines} lines (limit ${maxTestLines})`),
@@ -438,6 +447,28 @@ if (check) {
     for (const failure of failures) console.error(`  ${failure}`);
     process.exitCode = 1;
   }
+}
+
+function lineBudgetFailures(rows, root, budgets, globalLimit, kind) {
+  const observed = new Set();
+  const failures = rows.flatMap((row) => {
+    const relativeFile = path.relative(root, row.file).split(path.sep).join("/");
+    observed.add(relativeFile);
+    const ratchet = budgets.get(relativeFile);
+    const limit = ratchet === undefined ? globalLimit : Math.min(globalLimit, ratchet);
+    return row.lines > limit
+      ? [
+          `${row.relativeFile} has ${row.lines} lines (` +
+          `${ratchet === undefined ? kind : "module ratchet"} limit ${limit})`,
+        ]
+      : [];
+  });
+  for (const relativeFile of budgets.keys()) {
+    if (!observed.has(relativeFile)) {
+      failures.push(`${kind} line budget names missing ${kind} module ${relativeFile}`);
+    }
+  }
+  return failures;
 }
 
 function architectureCoverageFailures(harness, native) {
