@@ -47,7 +47,17 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("--security-opt no-new-privileges:true");
     expect(workflow).toContain("--user \"$(id -u):$(id -g)\"");
     expect(workflow).toContain("dst=/workspace,readonly");
-    expect(workflow).toContain("dst=/browsergrad/inputs,readonly");
+    expect(workflow).toContain("dst=/browsergrad/inputs/build-${BG_CLANG_BUILD_ORDINAL},readonly");
+  });
+
+  it("runs two clean paths and verifies their bounded downloaded artifacts", () => {
+    expect(workflow).toContain("buildOrdinal: [1, 2]");
+    expect(workflow).toContain("work/build-${BG_CLANG_BUILD_ORDINAL}");
+    expect(workflow).toContain("inputs/build-${BG_CLANG_BUILD_ORDINAL}");
+    expect(workflow).toContain("needs: build");
+    expect(workflow).toContain("cpp_cute_browser_build_reproducibility.mjs");
+    expect(workflow).toContain("--first-root=\"${BG_CLANG_REPRO_ROOT}/first\"");
+    expect(workflow).toContain("--second-root=\"${BG_CLANG_REPRO_ROOT}/second\"");
   });
 
   it("pins every third-party workflow action to a full commit", () => {
