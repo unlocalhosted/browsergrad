@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Run one validation build or two clean reproducibility builds
+        description: Run cached fast feedback, one clean build, or two clean reproducibility builds
         required: true
-        default: validation
+        default: fast-validation
         type: choice
         options:
-          - validation
+          - fast-validation
+          - clean-validation
           - reproducibility
 
 permissions:
@@ -50,6 +51,15 @@ jobs:
           pnpm -r build
           pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:run
 
+      - name: Project the diagnostic toolchain cache key
+        id: toolchain-cache-key
+        if: ${{ inputs.mode == 'fast-validation' }}
+        run: |
+          set -euo pipefail
+          node \
+            packages/browsergrad-compiler/scripts/cpp_cute_browser_build/cpp_cute_browser_toolchain_cache.mjs \
+            --github-output >> "${GITHUB_OUTPUT}"
+
       - name: Allocate private acquisition and build roots
         run: |
           set -euo pipefail
@@ -60,6 +70,16 @@ jobs:
             "${bg_clang_build_root}/work" \
             "${bg_clang_build_root}/work/build-${BG_CLANG_BUILD_ORDINAL}"
           echo "BG_CLANG_BUILD_ROOT=${bg_clang_build_root}" >> "${GITHUB_ENV}"
+
+      - name: Restore the untrusted diagnostic toolchain cache
+        id: toolchain-cache
+        if: ${{ inputs.mode == 'fast-validation' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/native-tablegen
+            ${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
+          key: linux-amd64-${{ steps.toolchain-cache-key.outputs.cache-key }}
 
       - name: Stage the exact build runtime closure
         run: |
@@ -141,17 +161,32 @@ jobs:
             "${bg_builder_ref}" \
             scripts/cpp_cute_browser_build/cpp_cute_browser_build_runner.mjs \
             --workspace-root=/workspace \
+            --execution-mode="${{ inputs.mode == 'fast-validation' && 'cached-diagnostic' || 'clean' }}" \
             --llvm-archive=/browsergrad/inputs/build-${BG_CLANG_BUILD_ORDINAL}/llvm-project-22.1.8.src.tar.xz \
             --llvm-source-root=/browsergrad/inputs/build-${BG_CLANG_BUILD_ORDINAL}/llvm-project \
             --work-root=/browsergrad/work/build-${BG_CLANG_BUILD_ORDINAL} \
             --builder-observation=/browsergrad/inputs/build-${BG_CLANG_BUILD_ORDINAL}/builder-observation.json
 
+      - name: Save the untrusted diagnostic toolchain cache
+        if: ${{ always() && inputs.mode == 'fast-validation' && steps.toolchain-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/native-tablegen
+            ${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
+          key: linux-amd64-${{ steps.toolchain-cache-key.outputs.cache-key }}
+
       - name: Summarize exact build outputs
         if: success()
         run: |
           set -euo pipefail
+          if [[ "${{ inputs.mode }}" == 'fast-validation' ]]; then
+            bg_build_observation="${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/output/fast-validation-observation.v1.json"
+          else
+            bg_build_observation="${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/output/build-execution-observation.v2.json"
+          fi
           sha256sum \
-            "${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/output/build-execution-observation.v2.json" \
+            "${bg_build_observation}" \
             "${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/output/browsergrad-cpp-cute/clang-extractor.wasm"
           du --human-readable --summarize \
             "${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/output" \
@@ -161,7 +196,7 @@ jobs:
         if: ${{ always() && env.BG_CLANG_BUILD_ROOT != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: clang-wasm-build-${{ github.run_id }}-${{ matrix.buildOrdinal }}
+          name: ${{ inputs.mode == 'fast-validation' && 'clang-wasm-fast-validation' || 'clang-wasm-build' }}-${{ github.run_id }}-${{ matrix.buildOrdinal }}
           path: |
             ${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/output
             ${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/state/evidence

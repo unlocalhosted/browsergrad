@@ -20,6 +20,8 @@ export interface CppCuteBrowserBuildExecutorOptions {
 export interface CppCuteBrowserBuildExecutionOptions extends CppCuteBrowserBuildExecutorOptions {
   /** Mirrors the already-bounded build logs while retaining immutable evidence. */
   readonly mirrorOutput?: boolean;
+  /** Reuse is reserved for a non-authoritative diagnostic caller. */
+  readonly buildDirectoryPolicy?: "clean" | "reuse-untrusted-diagnostic";
 }
 
 declare const preparedCppCuteClangWasmBuildSourceBrand: unique symbol;

@@ -629,6 +629,39 @@ describe("exact Clang-Wasm build executor", () => {
     await expect(lstat(destination(input))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("reuses admitted build directories only under the diagnostic policy", async () => {
+    const clean = await fixture(true);
+    await Promise.all([
+      mkdir(clean.input.roots.nativeBuildRoot),
+      mkdir(clean.input.roots.wasmBuildRoot),
+    ]);
+    const cleanPrepared = await prepareCppCuteClangWasmBuildSource(clean.input);
+    await expect(executeCppCuteClangWasmBuild(cleanPrepared)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-CONFLICT",
+      path: "$.roots.nativeBuildRoot",
+    });
+
+    const diagnostic = await fixture(true);
+    await Promise.all([
+      mkdir(diagnostic.input.roots.nativeBuildRoot),
+      mkdir(diagnostic.input.roots.wasmBuildRoot),
+    ]);
+    const nativeSentinel = join(diagnostic.input.roots.nativeBuildRoot, "cached.txt");
+    const wasmSentinel = join(diagnostic.input.roots.wasmBuildRoot, "cached.txt");
+    await Promise.all([
+      writeFile(nativeSentinel, "cached native toolchain\n"),
+      writeFile(wasmSentinel, "cached wasm toolchain\n"),
+    ]);
+    const diagnosticPrepared = await prepareCppCuteClangWasmBuildSource(diagnostic.input);
+    const executed = await executeCppCuteClangWasmBuild(diagnosticPrepared, {
+      buildDirectoryPolicy: "reuse-untrusted-diagnostic",
+    });
+
+    expect(executed.buildExecuted).toBe(true);
+    await expect(readFile(nativeSentinel, "utf8")).resolves.toBe("cached native toolchain\n");
+    await expect(readFile(wasmSentinel, "utf8")).resolves.toBe("cached wasm toolchain\n");
+  });
+
   it("persists failed-step logs and halts before later build steps", async () => {
     const { input } = await fixture(true);
     const prepared = await prepareCppCuteClangWasmBuildSource(input);

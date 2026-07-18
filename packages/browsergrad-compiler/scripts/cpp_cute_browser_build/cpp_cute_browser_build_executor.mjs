@@ -23,6 +23,9 @@ import {
   CPP_CUTE_BROWSER_BUILD_EXECUTOR_PROCESS,
   CppCuteBrowserBuildProcessError,
 } from "./cpp_cute_browser_build_executor_process.mjs";
+import {
+  normalizeCppCuteBrowserBuildExecutorOptions,
+} from "./cpp_cute_browser_build_executor_options.mjs";
 
 const CANCELLED = "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-CANCELLED";
 const INVALID = "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-INVALID";
@@ -90,7 +93,7 @@ export class CppCuteBrowserBuildExecutorError extends Error {
  * @returns {Promise<import("./cpp_cute_browser_build_executor.mjs").PreparedCppCuteClangWasmBuildSource>}
  */
 export async function prepareCppCuteClangWasmBuildSource(input, options = {}) {
-  const { signal } = normalizeOptions(options, false);
+  const { signal } = normalizeCppCuteBrowserBuildExecutorOptions(options, false, invalid);
   throwIfAborted(signal);
   const selected = snapshotInput(input);
   let plan;
@@ -207,7 +210,8 @@ export async function prepareCppCuteClangWasmBuildSource(input, options = {}) {
  * @returns {Promise<import("./cpp_cute_browser_build_executor.mjs").ExecutedCppCuteClangWasmBuild>}
  */
 export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
-  const { signal, mirrorOutput } = normalizeOptions(options, true);
+  const { signal, mirrorOutput, buildDirectoryPolicy } =
+    normalizeCppCuteBrowserBuildExecutorOptions(options, true, invalid);
   throwIfAborted(signal);
   const stored = storedPreparedSource(prepared);
   const { plan, roots, tools } = stored;
@@ -228,7 +232,7 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
   let inputBindings;
   try {
     inputBindings = await snapshotBuildInputBindings(roots, tools);
-    await prepareBuildExecutionDirectories(roots, plan);
+    await prepareBuildExecutionDirectories(roots, plan, buildDirectoryPolicy);
   } catch (cause) {
     rethrowExecutorOrIo(cause, "$.buildInputs", "failed to admit the materialized build inputs");
   }
@@ -527,7 +531,7 @@ async function observeBoundRegularFile(binding, maximumByteLength, signal) {
  * @returns {Promise<import("./cpp_cute_browser_build_executor.mjs").MaterializedCppCuteClangWasmSidecar>}
  */
 export async function materializeCppCuteClangWasmSidecar(prepared, options = {}) {
-  const { signal } = normalizeOptions(options, false);
+  const { signal } = normalizeCppCuteBrowserBuildExecutorOptions(options, false, invalid);
   throwIfAborted(signal);
   const stored = storedPreparedSource(prepared);
   const { plan } = stored;
@@ -802,7 +806,7 @@ function decodeMountInfoPath(value) {
  * @param {import("./cpp_cute_browser_build_plan.mjs").CppCuteClangWasmBuildRoots} roots
  * @param {import("./cpp_cute_browser_build_plan.mjs").CppCuteClangWasmBuildPlan} plan
  */
-async function prepareBuildExecutionDirectories(roots, plan) {
+async function prepareBuildExecutionDirectories(roots, plan, buildDirectoryPolicy) {
   const evidenceRoot = join(roots.stateRoot, "evidence");
   const generatedRoot = join(evidenceRoot, "generated");
   const logRoot = join(evidenceRoot, "build-logs");
@@ -814,10 +818,14 @@ async function prepareBuildExecutionDirectories(roots, plan) {
   for (const [path, diagnosticPath] of [
     [roots.nativeBuildRoot, "$.roots.nativeBuildRoot"],
     [roots.wasmBuildRoot, "$.roots.wasmBuildRoot"],
-    [roots.stateRoot, "$.roots.stateRoot"],
   ]) {
-    await createPrivateEmptyDirectory(path, diagnosticPath);
+    if (buildDirectoryPolicy === "reuse-untrusted-diagnostic") {
+      await createOrReusePrivateBuildDirectory(path, diagnosticPath);
+    } else {
+      await createPrivateEmptyDirectory(path, diagnosticPath);
+    }
   }
+  await createPrivateEmptyDirectory(roots.stateRoot, "$.roots.stateRoot");
   await createPrivateEmptyDirectory(evidenceRoot, "$.buildEvidence");
   await createPrivateEmptyDirectory(generatedRoot, "$.generatedExtractor");
   await createPrivateEmptyDirectory(logRoot, "$.buildEvidence.logs");
@@ -828,6 +836,16 @@ async function prepareBuildExecutionDirectories(roots, plan) {
     "$.buildState.emptyPkgConfig",
   );
   await createPrivateEmptyDirectory(join(roots.stateRoot, "em-cache"), "$.buildState.emCache");
+}
+
+/** @param {string} path @param {string} diagnosticPath */
+async function createOrReusePrivateBuildDirectory(path, diagnosticPath) {
+  await assertPrivateOwnedDirectory(dirname(path), `${diagnosticPath}.parent`);
+  if (await lstatIfExists(path, diagnosticPath) === undefined) {
+    await createPrivateEmptyDirectory(path, diagnosticPath);
+    return;
+  }
+  await assertPrivateOwnedDirectory(path, diagnosticPath);
 }
 
 /** @param {string} path @param {string} diagnosticPath */
@@ -2069,63 +2087,6 @@ function pathString(value, path) {
     invalid(path, "expected a normalized portable absolute POSIX path");
   }
   return value;
-}
-
-/**
- * @param {import("./cpp_cute_browser_build_executor.mjs").CppCuteBrowserBuildExecutorOptions | import("./cpp_cute_browser_build_executor.mjs").CppCuteBrowserBuildExecutionOptions} options
- * @param {boolean} execution
- */
-function normalizeOptions(options, execution) {
-  const descriptors = exactDataObjectOptional(
-    options,
-    execution ? ["mirrorOutput", "signal"] : ["signal"],
-    "$options",
-  );
-  const signal = descriptors.signal?.value;
-  if (signal !== undefined && !isAbortSignal(signal)) {
-    invalid("$options.signal", "signal must be an AbortSignal");
-  }
-  const mirrorOutput = descriptors.mirrorOutput?.value ?? false;
-  if (typeof mirrorOutput !== "boolean") {
-    invalid("$options.mirrorOutput", "mirrorOutput must be a boolean");
-  }
-  return Object.freeze({ signal, mirrorOutput });
-}
-
-/** @param {unknown} value @param {readonly string[]} allowedKeys @param {string} path */
-function exactDataObjectOptional(value, allowedKeys, path) {
-  let prototype;
-  let descriptors;
-  try {
-    prototype = Object.getPrototypeOf(value);
-    descriptors = Object.getOwnPropertyDescriptors(value);
-  } catch (cause) {
-    invalid(path, "expected an inspectable plain object", { cause });
-  }
-  if (typeof value !== "object" || value === null || prototype !== Object.prototype) {
-    invalid(path, "expected a plain object");
-  }
-  const keys = Reflect.ownKeys(descriptors);
-  if (keys.some((key) => typeof key !== "string" || !allowedKeys.includes(key))) {
-    invalid(path, "object contains unknown fields");
-  }
-  for (const key of keys) {
-    const descriptor = descriptors[/** @type {string} */ (key)];
-    if (descriptor === undefined || !("value" in descriptor) || descriptor.enumerable !== true) {
-      invalid(`${path}.${String(key)}`, "field must be an enumerable data property");
-    }
-  }
-  return descriptors;
-}
-
-/** @param {unknown} value */
-function isAbortSignal(value) {
-  if (ABORTED_GETTER === undefined) return false;
-  try {
-    return typeof ABORTED_GETTER.call(value) === "boolean";
-  } catch {
-    return false;
-  }
 }
 
 /** @param {AbortSignal | undefined} signal */

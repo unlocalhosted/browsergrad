@@ -23,12 +23,14 @@ describe("Clang-Wasm build runner boundary", () => {
   it("parses only the exact named absolute-path arguments", () => {
     expect(parseCppCuteBrowserBuildRunnerArguments([
       "--workspace-root=/workspace",
+      "--execution-mode=clean",
       "--llvm-source-root=/inputs/llvm-project",
       "--work-root=/work",
       "--llvm-archive=/inputs/llvm.tar.xz",
       "--builder-observation=/inputs/builder.json",
     ])).toEqual({
       "builder-observation": "/inputs/builder.json",
+      "execution-mode": "clean",
       "llvm-archive": "/inputs/llvm.tar.xz",
       "llvm-source-root": "/inputs/llvm-project",
       "work-root": "/work",
@@ -40,6 +42,7 @@ describe("Clang-Wasm build runner boundary", () => {
     ["missing", ["--workspace-root=/workspace"]],
     ["unknown", [
       "--workspace-root=/workspace",
+      "--execution-mode=clean",
       "--llvm-source-root=/inputs/llvm-project",
       "--work-root=/work",
       "--llvm-archive=/inputs/llvm.tar.xz",
@@ -47,6 +50,7 @@ describe("Clang-Wasm build runner boundary", () => {
     ]],
     ["duplicate", [
       "--workspace-root=/workspace",
+      "--execution-mode=clean",
       "--llvm-source-root=/inputs/llvm-project",
       "--work-root=/work",
       "--llvm-archive=/inputs/llvm.tar.xz",
@@ -54,6 +58,15 @@ describe("Clang-Wasm build runner boundary", () => {
     ]],
     ["relative", [
       "--workspace-root=workspace",
+      "--execution-mode=clean",
+      "--llvm-source-root=/inputs/llvm-project",
+      "--work-root=/work",
+      "--llvm-archive=/inputs/llvm.tar.xz",
+      "--builder-observation=/inputs/builder.json",
+    ]],
+    ["invalid execution mode", [
+      "--workspace-root=/workspace",
+      "--execution-mode=trusted-cache",
       "--llvm-source-root=/inputs/llvm-project",
       "--work-root=/work",
       "--llvm-archive=/inputs/llvm.tar.xz",

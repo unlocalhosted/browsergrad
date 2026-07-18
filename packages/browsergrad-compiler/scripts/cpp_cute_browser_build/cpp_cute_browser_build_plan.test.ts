@@ -101,10 +101,10 @@ describe("C++/CuTe opaque Clang-WASM build plan", () => {
       "-DCMAKE_MAKE_PROGRAM=/usr/bin/make",
     ]);
     expect(plan.steps[1]?.arguments).toEqual([
-      "--build", "/build/native", "--target", "clang-tblgen", "llvm-tblgen", "--parallel", "1",
+      "--build", "/build/native", "--target", "clang-tblgen", "llvm-tblgen", "--parallel", "4",
     ]);
     expect(plan.steps[3]?.arguments).toEqual([
-      "--build", "/build/wasm", "--target", "browsergrad-cpp-cute-extractor", "--parallel", "1",
+      "--build", "/build/wasm", "--target", "browsergrad-cpp-cute-extractor", "--parallel", "4",
     ]);
   });
 

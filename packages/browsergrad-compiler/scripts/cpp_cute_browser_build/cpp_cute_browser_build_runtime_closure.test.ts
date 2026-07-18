@@ -78,7 +78,7 @@ describe("Clang-Wasm exact build runtime closure", () => {
       join(runnerRoot, "scripts/cpp_cute_browser_build/cpp_cute_browser_build_runner.mjs"),
     ], runnerRoot);
     expect(runner.exitCode).toBe(1);
-    expect(runner.stderr).toContain("expected exactly 5 named arguments");
+    expect(runner.stderr).toContain("expected exactly 6 named arguments");
     expect(runner.stderr).not.toContain("ERR_MODULE_NOT_FOUND");
   });
 

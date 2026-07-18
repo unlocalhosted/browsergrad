@@ -43,6 +43,7 @@ export const CPP_CUTE_BROWSER_BUILD_RUNTIME_SOURCE_PATHS = Object.freeze([
   "packages/browsergrad-compiler/dist/resources/cpp_cute_browser_runtime_abi_v1.js",
   "packages/browsergrad-compiler/scripts/cpp_cute_browser_build/cpp_cute_browser_build_executor.mjs",
   "packages/browsergrad-compiler/scripts/cpp_cute_browser_build/cpp_cute_browser_build_executor_fs.mjs",
+  "packages/browsergrad-compiler/scripts/cpp_cute_browser_build/cpp_cute_browser_build_executor_options.mjs",
   "packages/browsergrad-compiler/scripts/cpp_cute_browser_build/cpp_cute_browser_build_executor_process.mjs",
   "packages/browsergrad-compiler/scripts/cpp_cute_browser_build/cpp_cute_browser_build_failure_observation.mjs",
   "packages/browsergrad-compiler/scripts/cpp_cute_browser_build/cpp_cute_browser_build_log_sink.mjs",

@@ -65,9 +65,10 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).not.toContain("build-execution-observation.v1.json");
   });
 
-  it("separates one-build validation from two-build reproducibility", () => {
-    expect(workflow).toContain("default: validation");
-    expect(workflow).toContain("- validation");
+  it("separates cached feedback, clean validation, and reproducibility", () => {
+    expect(workflow).toContain("default: fast-validation");
+    expect(workflow).toContain("- fast-validation");
+    expect(workflow).toContain("- clean-validation");
     expect(workflow).toContain("- reproducibility");
     expect(workflow).toContain(
       "buildOrdinal: ${{ fromJSON(inputs.mode == 'reproducibility' && '[1,2]' || '[1]') }}",
@@ -85,11 +86,26 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("clang-wasm-runtime-abi-review.v1.json");
   });
 
+  it("keeps cached feedback content-addressed and non-authoritative", () => {
+    expect(workflow).toContain("cpp_cute_browser_toolchain_cache.mjs");
+    expect(workflow).toContain(
+      "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
+    );
+    expect(workflow).toContain(
+      "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
+    );
+    expect(workflow).toContain("--execution-mode=\"${{ inputs.mode == 'fast-validation' && 'cached-diagnostic' || 'clean' }}\"");
+    expect(workflow).toContain("fast-validation-observation.v1.json");
+    expect(workflow).not.toContain("restore-keys:");
+  });
+
   it("pins every third-party workflow action to a full commit", () => {
     const actionLines = workflow.split("\n").filter((line) => line.includes("uses:"));
     expect(actionLines.length).toBeGreaterThan(0);
     for (const line of actionLines) {
-      expect(line).toMatch(/uses:\s+[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}(?:\s+#.*)?$/u);
+      expect(line).toMatch(
+        /uses:\s+[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*@[0-9a-f]{40}(?:\s+#.*)?$/u,
+      );
     }
   });
 
@@ -119,7 +135,9 @@ describe("Clang-Wasm evidence workflow", () => {
     const actionLines = ciWorkflow.split("\n").filter((line) => line.includes("uses:"));
     expect(actionLines.length).toBeGreaterThan(0);
     for (const line of actionLines) {
-      expect(line).toMatch(/uses:\s+[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}(?:\s+#.*)?$/u);
+      expect(line).toMatch(
+        /uses:\s+[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*@[0-9a-f]{40}(?:\s+#.*)?$/u,
+      );
     }
   });
 

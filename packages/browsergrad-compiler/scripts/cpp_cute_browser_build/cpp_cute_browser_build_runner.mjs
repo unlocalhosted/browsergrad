@@ -33,6 +33,7 @@ import {
 
 const ARGUMENT_NAMES = Object.freeze([
   "builder-observation",
+  "execution-mode",
   "llvm-archive",
   "llvm-source-root",
   "work-root",
@@ -44,6 +45,12 @@ const BUILDER_OBSERVATION_SCHEMA =
 const BUILD_EXECUTION_SCHEMA =
   "browsergrad.compiler.cpp-cute.clang-wasm-build-execution-observation";
 const MAX_BUILDER_OBSERVATION_BYTE_LENGTH = 8 * 1024;
+const CLEAN_EXECUTION_MODE = "clean";
+const CACHED_EXECUTION_MODE = "cached-diagnostic";
+const FAST_CONTEXT_SCHEMA =
+  "browsergrad.compiler.cpp-cute.clang-wasm-fast-validation-context";
+const FAST_EXECUTION_SCHEMA =
+  "browsergrad.compiler.cpp-cute.clang-wasm-fast-validation-observation";
 
 export class CppCuteBrowserBuildRunnerError extends Error {
   /** @param {string} path @param {string} message @param {ErrorOptions} [options] */
@@ -70,7 +77,12 @@ export function parseCppCuteBrowserBuildRunnerArguments(argv) {
     const value = argument.slice(equals + 1);
     if (!ARGUMENT_NAMES.includes(name)) fail(`$argv[${index}]`, `unknown argument ${name}`);
     if (values.has(name)) fail(`$argv[${index}]`, `duplicate argument ${name}`);
-    values.set(name, portableAbsolutePath(value, `$argv.${name}`));
+    values.set(
+      name,
+      name === "execution-mode"
+        ? executionMode(value, `$argv.${name}`)
+        : portableAbsolutePath(value, `$argv.${name}`),
+    );
   }
   return Object.freeze(Object.fromEntries(ARGUMENT_NAMES.map((name) => [name, values.get(name)])));
 }
@@ -149,9 +161,32 @@ export async function runCppCuteBrowserBuild(argv) {
     BigInt(llvm.archiveByteLength),
     llvm.archiveSha256,
   );
-  await assertPrivateEmptyDirectory(arguments_["work-root"], "$workRoot");
+  const workRootAdmission = await admitWorkRoot(
+    arguments_["work-root"],
+    arguments_["execution-mode"],
+    "$workRoot",
+  );
   const outputRoot = join(arguments_["work-root"], "output");
   await mkdir(outputRoot, { mode: 0o700 });
+  if (arguments_["execution-mode"] === CACHED_EXECUTION_MODE) {
+    await writeExclusiveReadOnlyFile(
+      join(outputRoot, "fast-validation-context.v1.json"),
+      canonicalJsonBytes({
+        schema: FAST_CONTEXT_SCHEMA,
+        version: 1,
+        authority: "untrusted-diagnostic-cache-observation-only",
+        lockId: lock.lockId,
+        workRootAdmission,
+        claims: {
+          cacheContentsTrusted: false,
+          cleanBuild: false,
+          buildExecuted: false,
+          reproducibilityVerified: false,
+          releaseReady: false,
+        },
+      }),
+    );
+  }
 
   const roots = Object.freeze({
     llvmProjectSourceRoot: arguments_["llvm-source-root"],
@@ -178,12 +213,14 @@ export async function runCppCuteBrowserBuild(argv) {
       roots,
       extractorSourceInputRoot,
     });
-    const executed = await executeCppCuteClangWasmBuild(prepared, { mirrorOutput: true });
+    const executed = await executeCppCuteClangWasmBuild(prepared, {
+      mirrorOutput: true,
+      buildDirectoryPolicy: arguments_["execution-mode"] === CACHED_EXECUTION_MODE
+        ? "reuse-untrusted-diagnostic"
+        : "clean",
+    });
     const materialized = await materializeCppCuteClangWasmSidecar(prepared);
-    const evidence = Object.freeze({
-      schema: BUILD_EXECUTION_SCHEMA,
-      version: 2,
-      authority: "build-execution-observation-only",
+    const commonEvidence = {
       lockId: lock.lockId,
       builder,
       runtimeClosure: Object.freeze({
@@ -195,19 +232,50 @@ export async function runCppCuteBrowserBuild(argv) {
       llvmSourceArchive: archive,
       execution: executed,
       sidecarMaterialization: materialized,
-      claims: Object.freeze({
-        sourceArchiveVerified: true,
-        buildExecuted: true,
-        networkDuringBuildObservedDisabled: true,
-        exactReadableWorkspaceClosureVerified: true,
-        outputIdentityAuthorized: false,
-        reproducibilityVerified: false,
-        producerAttested: false,
-        releaseReady: false,
-      }),
-    });
+    };
+    const evidence = arguments_["execution-mode"] === CLEAN_EXECUTION_MODE
+      ? Object.freeze({
+        schema: BUILD_EXECUTION_SCHEMA,
+        version: 2,
+        authority: "build-execution-observation-only",
+        ...commonEvidence,
+        claims: Object.freeze({
+          sourceArchiveVerified: true,
+          buildExecuted: true,
+          networkDuringBuildObservedDisabled: true,
+          exactReadableWorkspaceClosureVerified: true,
+          outputIdentityAuthorized: false,
+          reproducibilityVerified: false,
+          producerAttested: false,
+          releaseReady: false,
+        }),
+      })
+      : Object.freeze({
+        schema: FAST_EXECUTION_SCHEMA,
+        version: 1,
+        authority: "untrusted-diagnostic-cache-build-observation-only",
+        ...commonEvidence,
+        workRootAdmission,
+        claims: Object.freeze({
+          sourceArchiveVerified: true,
+          buildExecuted: true,
+          networkDuringBuildObservedDisabled: true,
+          exactReadableWorkspaceClosureVerified: true,
+          cacheContentsTrusted: false,
+          cleanBuild: false,
+          outputIdentityAuthorized: false,
+          reproducibilityVerified: false,
+          producerAttested: false,
+          releaseReady: false,
+        }),
+      });
     const evidenceBytes = canonicalJsonBytes(evidence);
-    const evidencePath = join(outputRoot, "build-execution-observation.v2.json");
+    const evidencePath = join(
+      outputRoot,
+      arguments_["execution-mode"] === CLEAN_EXECUTION_MODE
+        ? "build-execution-observation.v2.json"
+        : "fast-validation-observation.v1.json",
+    );
     await writeExclusiveReadOnlyFile(evidencePath, evidenceBytes);
     return Object.freeze({
       evidencePath,
@@ -410,15 +478,48 @@ async function readBoundedRegularFile(path, maximumByteLength, diagnosticPath) {
   }
 }
 
-/** @param {string} path @param {string} diagnosticPath */
-async function assertPrivateEmptyDirectory(path, diagnosticPath) {
+/**
+ * @param {string} path
+ * @param {"clean" | "cached-diagnostic"} mode
+ * @param {string} diagnosticPath
+ */
+async function admitWorkRoot(path, mode, diagnosticPath) {
   const stat = await lstat(path, { bigint: true });
   if (!stat.isDirectory() || stat.isSymbolicLink() ||
       typeof process.getuid !== "function" || stat.uid !== BigInt(process.getuid()) ||
       (stat.mode & 0o022n) !== 0n) {
     fail(diagnosticPath, "work root must be a private current-user-owned directory");
   }
-  if ((await readdir(path)).length !== 0) fail(diagnosticPath, "work root must be empty");
+  const entries = (await readdir(path)).sort();
+  if (mode === CLEAN_EXECUTION_MODE) {
+    if (entries.length !== 0) fail(diagnosticPath, "clean work root must be empty");
+  } else {
+    const allowed = new Set(["clang-extractor-wasm", "native-tablegen"]);
+    if (entries.some((entry) => !allowed.has(entry))) {
+      fail(diagnosticPath, "cached diagnostic work root contains an unexpected entry");
+    }
+    for (const entry of entries) {
+      const cached = await lstat(join(path, entry), { bigint: true });
+      if (!cached.isDirectory() || cached.isSymbolicLink() ||
+          cached.uid !== BigInt(process.getuid()) || (cached.mode & 0o022n) !== 0n) {
+        fail(`${diagnosticPath}.${entry}`, "cached build root must be a private owned directory");
+      }
+    }
+  }
+  return Object.freeze({
+    executionMode: mode,
+    admittedEntryNames: Object.freeze(entries),
+    cacheContentsTrusted: false,
+    cleanBuild: mode === CLEAN_EXECUTION_MODE,
+  });
+}
+
+/** @param {string} value @param {string} path */
+function executionMode(value, path) {
+  if (value !== CLEAN_EXECUTION_MODE && value !== CACHED_EXECUTION_MODE) {
+    fail(path, "expected clean or cached-diagnostic");
+  }
+  return value;
 }
 
 /** @param {readonly string[]} candidates @param {string} diagnosticPath */

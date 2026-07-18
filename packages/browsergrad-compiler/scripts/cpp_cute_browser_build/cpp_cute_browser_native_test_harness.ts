@@ -9,7 +9,13 @@ import { spawnSync } from "node:child_process";
 
 const configuredCompiler = process.env["BROWSERGRAD_NATIVE_CXX"];
 const compilerCandidates = configuredCompiler === undefined
-  ? ["/usr/bin/clang++", "/usr/bin/c++", "/usr/bin/g++"]
+  ? [
+      "/opt/homebrew/opt/llvm/bin/clang++",
+      "/usr/local/opt/llvm/bin/clang++",
+      "/usr/bin/clang++",
+      "/usr/bin/c++",
+      "/usr/bin/g++",
+    ]
   : [configuredCompiler];
 
 export interface NativeCompilerDiscovery {
