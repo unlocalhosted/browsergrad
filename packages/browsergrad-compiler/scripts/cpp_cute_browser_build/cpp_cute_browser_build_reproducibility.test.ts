@@ -354,6 +354,18 @@ describe("Clang-Wasm clean-build reproducibility authority", () => {
     });
     await chmod(outputPath, 0o600);
   });
+
+  it("refuses to serialize forged reproducibility objects", async () => {
+    const { root, firstRoot, secondRoot } = await fixture();
+    const evidence = await verifyCppCuteClangWasmReproducibility({ firstRoot, secondRoot });
+    await expect(writeCppCuteClangWasmReproducibilityEvidence(
+      join(root, "forged.json"),
+      { ...evidence },
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-INVALID",
+      path: "$evidence",
+    });
+  });
 });
 
 describe("Clang-Wasm reproducibility CLI arguments", () => {

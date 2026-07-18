@@ -56,8 +56,10 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("inputs/build-${BG_CLANG_BUILD_ORDINAL}");
     expect(workflow).toContain("needs: build");
     expect(workflow).toContain("cpp_cute_browser_build_reproducibility.mjs");
+    expect(workflow).toContain("cpp_cute_browser_wasm_review.mjs");
     expect(workflow).toContain("--first-root=\"${BG_CLANG_REPRO_ROOT}/first\"");
     expect(workflow).toContain("--second-root=\"${BG_CLANG_REPRO_ROOT}/second\"");
+    expect(workflow).toContain("clang-wasm-runtime-abi-review.v1.json");
   });
 
   it("pins every third-party workflow action to a full commit", () => {

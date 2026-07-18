@@ -41,6 +41,7 @@ const STEP_PROFILES = Object.freeze([
   Object.freeze({ id: "clang-extractor-wasm-configure", stageId: "clang-extractor-wasm", kind: "configure" }),
   Object.freeze({ id: "clang-extractor-wasm-build", stageId: "clang-extractor-wasm", kind: "build" }),
 ]);
+const VERIFIED_REPRODUCIBILITY = new WeakSet();
 
 export class CppCuteClangWasmReproducibilityError extends Error {
   /** @param {string} code @param {string} path @param {string} message @param {ErrorOptions} [options] */
@@ -129,6 +130,7 @@ export async function verifyCppCuteClangWasmReproducibility(input) {
       releaseReady: false,
     }),
   });
+  VERIFIED_REPRODUCIBILITY.add(evidence);
   return /** @type {import("./cpp_cute_browser_build_reproducibility.mjs").VerifiedCppCuteClangWasmReproducibility} */ (evidence);
 }
 
@@ -137,6 +139,9 @@ export async function verifyCppCuteClangWasmReproducibility(input) {
  * @param {import("./cpp_cute_browser_build_reproducibility.mjs").VerifiedCppCuteClangWasmReproducibility} evidence
  */
 export async function writeCppCuteClangWasmReproducibilityEvidence(outputPath, evidence) {
+  if (typeof evidence !== "object" || evidence === null || !VERIFIED_REPRODUCIBILITY.has(evidence)) {
+    invalid("$evidence", "expected verifier-issued reproducibility evidence");
+  }
   const path = portableAbsolutePath(outputPath, "$outputPath");
   await admitPrivateDirectory(dirname(path), "$outputPath.parent");
   const bytes = canonicalJsonBytes(evidence);
