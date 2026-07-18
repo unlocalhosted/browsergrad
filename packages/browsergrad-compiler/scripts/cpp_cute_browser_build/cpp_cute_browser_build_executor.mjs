@@ -538,7 +538,7 @@ async function snapshotRegularFileBindings(specs) {
     if ((stat.mode & 0o6000n) !== 0n) {
       invalid(spec.diagnosticPath, "build input must not carry setuid or setgid mode bits");
     }
-    await assertTrustedPosixAncestry(dirname(spec.path), spec.diagnosticPath);
+    await assertTrustedBuildInputAncestry(dirname(spec.path), spec.diagnosticPath);
     bindings.push(Object.freeze({
       ...spec,
       identity: fileVersionIdentity(stat),
@@ -577,7 +577,7 @@ async function snapshotDirectoryBindings(specs) {
       invalid(spec.diagnosticPath, "expected a non-symlink directory");
     }
     await assertTrustedOwnerAndMode(stat, spec.path, spec.diagnosticPath);
-    await assertTrustedPosixAncestry(spec.path, spec.diagnosticPath);
+    await assertTrustedBuildInputAncestry(spec.path, spec.diagnosticPath);
     bindings.push(Object.freeze({
       ...spec,
       identity: fileVersionIdentity(stat),
@@ -650,6 +650,18 @@ async function assertPathOnReadOnlyLinuxMount(path, diagnosticPath) {
       diagnosticPath,
       "foreign-owned build input is not protected by a kernel-observed read-only mount",
     );
+  }
+}
+
+/** @param {string} path @param {string} diagnosticPath */
+async function assertTrustedBuildInputAncestry(path, diagnosticPath) {
+  try {
+    await assertTrustedPosixAncestry(path, diagnosticPath);
+  } catch (cause) {
+    if (!(cause instanceof CppCuteBrowserBuildExecutorError) || cause.code !== INVALID) {
+      throw cause;
+    }
+    await assertPathOnReadOnlyLinuxMount(path, diagnosticPath);
   }
 }
 
