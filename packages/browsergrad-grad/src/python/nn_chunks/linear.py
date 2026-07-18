@@ -11,8 +11,9 @@ class Linear(Module):
         self.in_features = in_features
         self.out_features = out_features
         bound = 1.0 / math.sqrt(in_features)
-        rng = np.random.default_rng()
-        W_data = rng.uniform(-bound, bound, size=(out_features, in_features)).astype(np.float32)
+        W_data = np.random.uniform(
+            -bound, bound, size=(out_features, in_features)
+        ).astype(np.float32)
         self.weight = Tensor(W_data, requires_grad=True)
         if bias:
             self.bias = Tensor(np.zeros(out_features, dtype=np.float32), requires_grad=True)

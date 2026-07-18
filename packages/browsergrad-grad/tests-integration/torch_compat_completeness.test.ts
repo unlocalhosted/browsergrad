@@ -167,6 +167,34 @@ r2 = torch.randn(5).tolist()
 `);
     expect(result.run1).toEqual(result.run2);
   });
+
+  it("torch.manual_seed controls every parameterized layer initializer", async () => {
+    const result = await target.run<{ matched: boolean[]; changed: boolean }>(`
+${PRELUDE}
+def initialized_weights():
+    return [
+        nn.Linear(3, 4).weight.data.copy(),
+        nn.Conv1d(2, 3, 3).weight.data.copy(),
+        nn.Conv2d(2, 3, 3).weight.data.copy(),
+        nn.ConvTranspose2d(2, 3, 3).weight.data.copy(),
+        nn.Conv3d(2, 3, 3).weight.data.copy(),
+        nn.Embedding(5, 3).weight.data.copy(),
+    ]
+
+torch.manual_seed(42)
+first = initialized_weights()
+torch.manual_seed(42)
+second = initialized_weights()
+torch.manual_seed(43)
+different = initialized_weights()
+{
+    "matched": [bool(np.array_equal(a, b)) for a, b in zip(first, second)],
+    "changed": bool(any(not np.array_equal(a, b) for a, b in zip(first, different))),
+}
+`);
+    expect(result.matched).toEqual([true, true, true, true, true, true]);
+    expect(result.changed).toBe(true);
+  });
 });
 
 describe("top-level math functions on torch namespace", () => {

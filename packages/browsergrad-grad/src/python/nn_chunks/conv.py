@@ -47,8 +47,7 @@ class Conv2d(Module):
         kh, kw = self.kernel_size
         fan_in = (in_channels // groups) * kh * kw
         bound = 1.0 / math.sqrt(fan_in)
-        rng = np.random.default_rng()
-        W = rng.uniform(
+        W = np.random.uniform(
             -bound, bound,
             size=(out_channels, in_channels // groups, kh, kw),
         ).astype(np.float32)
@@ -190,8 +189,7 @@ class ConvTranspose2d(Module):
         kh, kw = self.kernel_size
         fan_in = (out_channels // groups) * kh * kw
         bound = 1.0 / math.sqrt(fan_in)
-        rng = np.random.default_rng()
-        W = rng.uniform(
+        W = np.random.uniform(
             -bound, bound,
             size=(in_channels, out_channels // groups, kh, kw),
         ).astype(np.float32)
@@ -303,8 +301,7 @@ class Conv1d(Module):
         self.padding = padding
         fan_in = in_channels * kernel_size
         bound = 1.0 / math.sqrt(fan_in)
-        rng = np.random.default_rng()
-        W = rng.uniform(
+        W = np.random.uniform(
             -bound, bound,
             size=(out_channels, in_channels, kernel_size),
         ).astype(np.float32)
@@ -395,8 +392,7 @@ class Conv3d(Module):
         kd, kh, kw = self.kernel_size
         fan_in = (in_channels // groups) * kd * kh * kw
         bound = 1.0 / math.sqrt(fan_in)
-        rng = np.random.default_rng()
-        W = rng.uniform(
+        W = np.random.uniform(
             -bound, bound,
             size=(out_channels, in_channels // groups, kd, kh, kw),
         ).astype(np.float32)
