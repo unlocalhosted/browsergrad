@@ -20,18 +20,19 @@ execution is claimed by this audit.
 
 ## Why feedback was slow
 
-The locked recipe intentionally performs a clean LLVM/Clang 22.1.8 build with
+The locked recipe originally performed a clean LLVM/Clang 22.1.8 build with
 `parallelJobs: 1`, no network, no compiler cache, and no reusable build tree.
 The first real run reached 97 percent and failed after roughly 86 minutes
 because BrowserGrad used C++ exceptions while the target inherited
 `-fno-exceptions`. Before this audit, validation and two-build reproducibility
 also shared the same expensive workflow shape.
 
-The failed run's timestamps make the split concrete: workflow setup, verified
-source acquisition, and builder acquisition took 2 minutes 55 seconds; the
-isolated build step took 86 minutes 45 seconds. Its Wasm CMake configure report
-accounted for about 111 seconds. The dominant cost was therefore the clean,
-single-job LLVM/Clang compile, not GitHub setup or artifact transfer.
+The final-link run's timestamps make the split concrete: native TableGen took
+about 9 minutes 36 seconds, reusable Wasm LLVM/Clang dependencies took about 86
+minutes 9 seconds, and all BrowserGrad translation units plus the final link
+took about 67 seconds. The dominant cost was therefore repeatedly rebuilding
+the reusable toolchain, not BrowserGrad iteration, GitHub setup, or artifact
+transfer.
 
 A second validation ran for 94 minutes 45 seconds inside the isolated build.
 It cleared the exception failure, built the selected Clang libraries, compiled
@@ -52,23 +53,65 @@ roughly ten-minute discovery.
 
 Exact-source CI run `29658935991` is green at `3e17a744`, including Node 20,
 24, and 25, the exact-Clang native harness checks, Pyodide integration, and the
-real Chromium/WebGPU CUDA corpus. Replacement build run `29658164083` remained
-in isolated execution beyond the prior preflight failure point, proving the
-canonical include-root review passed and the expensive compile began. It still
-targets the unchanged extractor/build lock at `cd112795` and is not completed-
-build, ABI, reproducibility, Worker, or release evidence.
+real Chromium/WebGPU CUDA corpus. Replacement build run `29658164083` compiled
+every BrowserGrad translation unit and reached the final Wasm link after 97
+minutes 5 seconds of isolated execution. The link correctly failed closed: the
+LLVM/Clang libraries were still built without RTTI while the extractor required
+it, and LLVM Support referenced POSIX user, process, resource, and signal-stack
+services that a browser Worker must not acquire implicitly. No factory or Wasm
+was admitted.
 
 Commit `df849d95` replaces the remaining two-package runtime mount for future
-runs with a staged closure containing 25 exact JavaScript/package files and the
-36 lock-listed extractor files. The stager uses no shell, refuses non-private
+runs with a staged closure containing exact JavaScript/package files and the
+lock-listed extractor files. The stager uses no shell, refuses non-private
 or overlapping roots, copies through no-follow handles with before/after file
 identity checks, bounds file/node/byte counts, seals the tree, and then
 re-enumerates and re-hashes it. The container verifies the same closure again;
 build-execution evidence v2 records every file identity, and reproducibility
 evidence v2 requires the two runtime-closure observations to match. The focused
-boundary passes 24 files with 157 tests and 9 intentional platform skips. The
-active `29658164083` run predates this capability and remains evidence only for
-the prior package-tree mount.
+boundary at `37dacbf6` passes 25 files with 161 tests and 9 intentional platform
+skips over a 37-file extractor closure. Run `29658164083` predates this
+capability and remains evidence only for the prior package-tree mount.
+
+Commit `37dacbf6` closes the observed link boundary without enabling ambient
+host authority. The Wasm LLVM/Clang libraries are built with RTTI; a dedicated
+BrowserGrad translation unit resolves unsupported user-database, process,
+resource, and signal-stack calls inside the module with deterministic
+identity-free or `ENOSYS` behavior; and the linker now reports every unresolved
+symbol. The configured-target reviewer independently reads `CMakeCache.txt` and
+rejects `LLVM_ENABLE_RTTI=OFF` before compilation. Validation `29661850267`
+stopped in the JavaScript verification boundary before root allocation,
+acquisition, or build: Linux system headers correctly mark several POSIX
+arguments non-null, while the new native test passed null and the shim made
+tautological defensive checks under `-Werror`. Commit `60a3d9f9` makes the test
+obey those contracts, removes the tautological checks, and advances the exact
+build lock to
+`bg.cpp.browser-build-input-lock.sha256.74a783b4b283f533ca599b0bf3197346d20f9f2bf90ad612a1f557b5e1df662b`.
+The full required-native harness again passes 25 files with 161 tests and 9
+intentional platform skips. Replacement validation `29662148150` was cancelled
+during its JavaScript boundary, before root allocation or acquisition, when
+fast iteration became the immediate priority.
+
+Commits `d0f970ee` and `09dc21a2` separate engineering feedback from release
+proof. Clean builds now use four locked jobs, advancing the build-input lock to
+`bg.cpp.browser-build-input-lock.sha256.15a71eedf31da3ec752332f90ce74c3d2f7308bb81d3eeba698fc466b683fe14`.
+The default manual mode restores only the native TableGen and Wasm LLVM/Clang
+build directories under exact cache key
+`bg.cpp.clang-wasm-toolchain-cache.sha256.9bd5cebfd49382887f2ee4c2f8841b477446a907e1d27634185ea6b1d4f93b0d`.
+The key excludes ordinary extractor implementation edits but includes the
+locked LLVM source, Emscripten builder, build recipe, selected libraries, and
+extractor CMake graph. Restored contents are treated as untrusted, run only
+inside the existing networkless/capability-free container, use no prefix
+fallback, and emit a distinct diagnostic schema with `cleanBuild: false` and
+`cacheContentsTrusted: false`. Clean validation and two-clean-build
+reproducibility remain cache-free. Cold provisioning run `29663494490` is
+active; no warm timing or build output is claimed yet.
+
+The same capability moves executor option admission into the exact 26-file
+runtime closure, reducing the executor from 2,237 to 2,198 lines, and makes the
+local native harness prefer installed Clang 22.1.8 over Apple Clang 15. The full
+required-native boundary passes 26 files with 166 tests and 9 intentional skips
+in 89.31 seconds locally.
 
 The first exact-source CI run containing that closure exposed an independent
 Grad reproducibility defect: parameterized layer constructors used fresh NumPy
@@ -88,12 +131,12 @@ build to discover.
 
 | Area | Rating | Evidence | Required improvement |
 | --- | --- | --- | --- |
-| Locked input integrity | Good but incomplete | Exact LLVM archive, builder manifest/config, recipe, ABI, extractor source, and 25-file harness runtime closure are checked and content-bound in build evidence v2. Successful factory/Wasm identities and reviewed ABI projections remain unproven. | Complete a build under the v2 boundary, then bind reviewed outputs before distribution. |
+| Locked input integrity | Good but incomplete | Exact LLVM archive, builder manifest/config, recipe, ABI, extractor source, and 26-file harness runtime closure are checked and content-bound in build evidence v2. Successful factory/Wasm identities and reviewed ABI projections remain unproven. | Complete a build under the v2 boundary, then bind reviewed outputs before distribution. |
 | Build isolation | Strong containment; new boundary not yet exercised by a completed build | No network, read-only root and declared inputs, private work mount, zero capabilities, and no-new-privileges are observed. Future runs mount only the sealed exact runtime/extractor closure instead of checkout or package trees. | Preserve the same closure in a successful validation and both reproducibility builds. |
 | Native semantic coverage | Good but incomplete | Exact Clang 22 pass integration plus native behavioral, UBSan, and ASan lanes are required in CI. | Keep the exact-version lane blocking and add executed-Wasm coverage. |
 | Evidence quality | Mixed | Bounded immutable logs, raw-Wasm inspection, authority-specific records, and a failure-only observation for available partial logs exist. | Complete successful and reproducible build evidence. |
-| Feedback speed | Weak but improving | The clean serial toolchain build dominates successful validation, but target-configuration defects now stop after native TableGen plus Wasm configuration instead of an almost-complete compile. A million-call VFS test was replaced by direct exact-boundary coverage after it timed out only under the Node 20 CI load. | Validate a safe higher parallelism only through reproducibility evidence. |
-| Maintainability | Weak | The build executor remains over 2,200 lines; native compile session is 2,121 lines; artifact writer is 1,784 lines. Existing compiler-core modules range from roughly 5,400 to 8,000 lines. Exact per-module ratchets now prevent all seven named monoliths from growing. | Extract effect boundaries and semantic subcomponents without creating parallel execution paths, lowering each ratchet as code moves out. |
+| Feedback speed | Improving; warm timing pending | Clean builds now use four jobs, and ordinary extractor edits reuse a content-addressed untrusted toolchain layer. Diagnostic cache output cannot satisfy clean/reproducibility gates. Local required-native feedback is back to 89 seconds with exact Clang 22. | Measure cold and warm workflow runs; keep clean cache-free proof runs off the edit loop. |
+| Maintainability | Weak but improving | The build executor is down to 2,198 lines; native compile session is 2,121 lines; artifact writer is 1,784 lines. Existing compiler-core modules range from roughly 5,400 to 8,000 lines. Exact per-module ratchets prevent all named monoliths from growing. | Continue extracting effect boundaries and semantic subcomponents without creating parallel execution paths, lowering each ratchet as code moves out. |
 | Delivery truthfulness | Good | Production Worker/controller paths remain capability-blocked; CPU, parser, Wasm, Worker, and WebGPU claims are distinct. | Do not relax blockers until reviewed factory/Wasm bytes execute in the package Worker. |
 
 ## Findings closed during this audit

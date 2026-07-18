@@ -23,7 +23,8 @@ implemented. A pinned no-shell Clang-Wasm executor, isolated manual build lane,
 two-clean-build comparator, native TableGen identity observation, and raw-Wasm
 ABI review producer are on `main` through `1eac0a1c`.
 
-Harness hardening and build fixes are on `main` through `df849d95`. Validation
+Harness hardening, build fixes, and fast feedback are on `main` through
+`09dc21a2`. Validation
 run `29650211276` exposed a target exception-mode mismatch after 86 minutes 45
 seconds; run `29653908647` cleared that failure and exposed missing Clang source
 and generated include roots after 94 minutes 45 seconds. Both failures occurred
@@ -32,16 +33,50 @@ new configured-target preflight and rejected a noncanonical include-path
 spelling after 9 minutes 36 seconds, before the expensive Wasm compile. Failure
 receipts now preserve bounded typed cause chains, and both include roots are
 canonicalized before target attachment. Future validation and reproducibility
-runs stage only 25 exact JavaScript/package runtime files plus the lock-listed
+runs stage only the exact JavaScript/package runtime files plus the lock-listed
 extractor source files, reject altered, missing, or ambient entries, mount that
 sealed tree instead of package or checkout trees, and bind its per-file identity
 into build-execution evidence v2. The million-call VFS limit test has direct
 exact-boundary coverage. Exact-source CI `29658935991` is green at `3e17a744`,
 including Node 20/24/25 and the real Chromium/WebGPU CUDA corpus. Validation
-`29658164083` passed the configured-target preflight and entered the expensive
-compile against the unchanged extractor/build lock at `cd112795`; because it
-started before `df849d95`, it retains the prior two-package read-only mount and
+`29658164083` passed the configured-target preflight, compiled every BrowserGrad
+translation unit, and reached the final Wasm link after 97 minutes 5 seconds of
+isolated execution. It then failed closed on two exact platform mismatches: the
+LLVM/Clang libraries lacked RTTI, and LLVM Support referenced POSIX user,
+process, resource, and signal-stack services unavailable to the browser
+product. It admitted no factory/Wasm and, because it started before `df849d95`,
 cannot evidence the newer exact runtime-closure boundary.
+
+Commit `37dacbf6` enables RTTI on the actual Wasm LLVM/Clang libraries and adds
+a BrowserGrad-owned in-module host boundary that returns deterministic
+identity-free values or `ENOSYS` for those unsupported services. It does not
+grant process or ambient-filesystem capability. The configured-target preflight
+now reads the sealed CMake cache and rejects RTTI-disabled libraries before the
+expensive compile; the linker reports the complete unresolved-symbol set. The
+new build lock covers 37 extractor files, and its required-native harness passes
+25 files with 161 tests and 9 intentional platform skips. Validation
+`29661850267` then failed in that native harness before root allocation,
+acquisition, or build because its POSIX test violated Linux non-null parameter
+contracts and the shim retained tautological null checks under `-Werror`.
+Commit `60a3d9f9` makes the test and shim portable without weakening the browser
+authority boundary and advances the content-addressed lock to
+`bg.cpp.browser-build-input-lock.sha256.74a783b4b283f533ca599b0bf3197346d20f9f2bf90ad612a1f557b5e1df662b`.
+Replacement validation `29662148150` was cancelled during JavaScript
+verification, before root allocation or acquisition, when feedback latency
+became the immediate priority.
+
+Commit `d0f970ee` pins four-way clean compilation and advances the lock to
+`bg.cpp.browser-build-input-lock.sha256.15a71eedf31da3ec752332f90ce74c3d2f7308bb81d3eeba698fc466b683fe14`.
+Commit `09dc21a2` makes cached fast validation the default manual mode. Its exact
+cache key binds LLVM, Emscripten, recipe, selected-library, and extractor-CMake
+inputs while excluding ordinary extractor implementation edits. Cache contents
+remain untrusted, run only inside the networkless/capability-free container,
+and emit a separate non-clean diagnostic observation. Clean validation and
+two-build reproducibility never restore this cache. Executor option admission
+is now a separate exact runtime-closure module, reducing the executor to 2,198
+lines; the 26-file required-native harness passes 166 tests with 9 platform
+skips in 89.31 seconds locally under Clang 22. Cold provisioning run
+`29663494490` is active; no warm timing or build output is claimed yet.
 
 CI `29660204901` then exposed an unrelated Grad reproducibility defect: fresh
 NumPy generators in parameterized layer constructors bypassed
