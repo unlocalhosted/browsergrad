@@ -71,6 +71,9 @@ build to discover.
     manual sequence of ad hoc hash edits.
 12. Architecture governance includes the production harness, native extractor
     closure, tests, dependency cycles, source coverage, and line budgets.
+13. Failed builds emit a canonical failure-only observation that binds the
+    typed error to every available immutable partial log. It explicitly grants
+    no successful-build, output, ABI, reproducibility, or release authority.
 
 ## Open high-priority findings
 
@@ -88,8 +91,6 @@ build to discover.
    review.
 7. Decompose the build executor, compile session, and artifact writer along
    existing authority and semantic seams.
-8. Add a canonical failed-build receipt that binds the typed failure to every
-   immutable partial log without granting successful-build authority.
 
 ## Capability boundary after the audit
 

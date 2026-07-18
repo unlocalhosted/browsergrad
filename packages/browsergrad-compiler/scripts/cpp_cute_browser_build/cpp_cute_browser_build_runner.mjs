@@ -23,6 +23,9 @@ import {
   materializeCppCuteClangWasmSidecar,
   prepareCppCuteClangWasmBuildSource,
 } from "./cpp_cute_browser_build_executor.mjs";
+import {
+  persistCppCuteBrowserBuildFailureObservation,
+} from "./cpp_cute_browser_build_failure_observation.mjs";
 
 const ARGUMENT_NAMES = Object.freeze([
   "builder-observation",
@@ -141,7 +144,6 @@ export async function runCppCuteBrowserBuild(argv) {
   const outputRoot = join(arguments_["work-root"], "output");
   await mkdir(outputRoot, { mode: 0o700 });
 
-  const tools = await discoverPinnedBuilderTools();
   const roots = Object.freeze({
     llvmProjectSourceRoot: arguments_["llvm-source-root"],
     extractorSourceRoot: join(arguments_["work-root"], "staged-extractor-source"),
@@ -158,46 +160,66 @@ export async function runCppCuteBrowserBuild(argv) {
     "cpp_cute_browser_build",
     "extractor",
   );
-  const prepared = await prepareCppCuteClangWasmBuildSource({
-    lock,
-    tools,
-    roots,
-    extractorSourceInputRoot,
-  });
-  const executed = await executeCppCuteClangWasmBuild(prepared, { mirrorOutput: true });
-  const materialized = await materializeCppCuteClangWasmSidecar(prepared);
-  const evidence = Object.freeze({
-    schema: BUILD_EXECUTION_SCHEMA,
-    version: 1,
-    authority: "build-execution-observation-only",
-    lockId: lock.lockId,
-    builder,
-    isolation,
-    llvmSourceArchive: archive,
-    execution: executed,
-    sidecarMaterialization: materialized,
-    claims: Object.freeze({
-      sourceArchiveVerified: true,
-      buildExecuted: true,
-      networkDuringBuildObservedDisabled: true,
-      outputIdentityAuthorized: false,
-      reproducibilityVerified: false,
-      producerAttested: false,
-      releaseReady: false,
-    }),
-  });
-  const evidenceBytes = canonicalJsonBytes(evidence);
-  const evidencePath = join(outputRoot, "build-execution-observation.v1.json");
-  await writeExclusiveReadOnlyFile(evidencePath, evidenceBytes);
-  return Object.freeze({
-    evidencePath,
-    evidenceSha256: createHash("sha256").update(evidenceBytes).digest("hex"),
-    evidenceByteLength: evidenceBytes.byteLength,
-    wasmSha256: executed.wasmSha256,
-    wasmByteLength: executed.wasmByteLength,
-    factoryModuleSha256: executed.factoryModuleSha256,
-    factoryModuleByteLength: executed.factoryModuleByteLength,
-  });
+  try {
+    const tools = await discoverPinnedBuilderTools();
+    const prepared = await prepareCppCuteClangWasmBuildSource({
+      lock,
+      tools,
+      roots,
+      extractorSourceInputRoot,
+    });
+    const executed = await executeCppCuteClangWasmBuild(prepared, { mirrorOutput: true });
+    const materialized = await materializeCppCuteClangWasmSidecar(prepared);
+    const evidence = Object.freeze({
+      schema: BUILD_EXECUTION_SCHEMA,
+      version: 1,
+      authority: "build-execution-observation-only",
+      lockId: lock.lockId,
+      builder,
+      isolation,
+      llvmSourceArchive: archive,
+      execution: executed,
+      sidecarMaterialization: materialized,
+      claims: Object.freeze({
+        sourceArchiveVerified: true,
+        buildExecuted: true,
+        networkDuringBuildObservedDisabled: true,
+        outputIdentityAuthorized: false,
+        reproducibilityVerified: false,
+        producerAttested: false,
+        releaseReady: false,
+      }),
+    });
+    const evidenceBytes = canonicalJsonBytes(evidence);
+    const evidencePath = join(outputRoot, "build-execution-observation.v1.json");
+    await writeExclusiveReadOnlyFile(evidencePath, evidenceBytes);
+    return Object.freeze({
+      evidencePath,
+      evidenceSha256: createHash("sha256").update(evidenceBytes).digest("hex"),
+      evidenceByteLength: evidenceBytes.byteLength,
+      wasmSha256: executed.wasmSha256,
+      wasmByteLength: executed.wasmByteLength,
+      factoryModuleSha256: executed.factoryModuleSha256,
+      factoryModuleByteLength: executed.factoryModuleByteLength,
+    });
+  } catch (cause) {
+    try {
+      await persistCppCuteBrowserBuildFailureObservation({
+        outputRoot,
+        stateRoot: roots.stateRoot,
+        lockId: lock.lockId,
+        sourceSetSha256: lock.extractorSourceSetSha256,
+        cause,
+      });
+    } catch (observationCause) {
+      fail(
+        "$failureObservation",
+        "build failed and its canonical failure observation could not be persisted",
+        { cause: new AggregateError([cause, observationCause]) },
+      );
+    }
+    throw cause;
+  }
 }
 
 async function discoverPinnedBuilderTools() {
