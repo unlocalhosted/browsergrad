@@ -68,16 +68,23 @@ add_llvm_executable(browsergrad-cpp-cute-extractor
 # clang/CMakeLists.txt, so they do not inherit Clang's directory-scoped source
 # and generated-header include paths. Use the exact equivalent paths owned by
 # the in-tree Clang build and fail at configuration if that layout drifts.
-set(BROWSERGRAD_CLANG_SOURCE_INCLUDE_DIRECTORY
+set(BROWSERGRAD_CLANG_SOURCE_INCLUDE_CANDIDATE
   "${LLVM_MAIN_SRC_DIR}/../clang/include")
-set(BROWSERGRAD_CLANG_BINARY_INCLUDE_DIRECTORY
+set(BROWSERGRAD_CLANG_BINARY_INCLUDE_CANDIDATE
   "${LLVM_BINARY_DIR}/tools/clang/include")
-if(NOT IS_DIRECTORY "${BROWSERGRAD_CLANG_SOURCE_INCLUDE_DIRECTORY}")
+if(NOT IS_DIRECTORY "${BROWSERGRAD_CLANG_SOURCE_INCLUDE_CANDIDATE}")
   message(FATAL_ERROR "the pinned Clang source include directory is missing")
 endif()
-if(NOT IS_DIRECTORY "${BROWSERGRAD_CLANG_BINARY_INCLUDE_DIRECTORY}")
+if(NOT IS_DIRECTORY "${BROWSERGRAD_CLANG_BINARY_INCLUDE_CANDIDATE}")
   message(FATAL_ERROR "the configured Clang generated include directory is missing")
 endif()
+# CMake otherwise preserves the llvm/../clang spelling in flags.make. Resolve
+# both existing directories before attaching them so the configured target and
+# the independent pre-build reviewer bind one canonical path spelling.
+file(REAL_PATH "${BROWSERGRAD_CLANG_SOURCE_INCLUDE_CANDIDATE}"
+  BROWSERGRAD_CLANG_SOURCE_INCLUDE_DIRECTORY)
+file(REAL_PATH "${BROWSERGRAD_CLANG_BINARY_INCLUDE_CANDIDATE}"
+  BROWSERGRAD_CLANG_BINARY_INCLUDE_DIRECTORY)
 target_include_directories(browsergrad-cpp-cute-extractor PRIVATE
   "${BROWSERGRAD_CLANG_BINARY_INCLUDE_DIRECTORY}"
   "${BROWSERGRAD_CLANG_SOURCE_INCLUDE_DIRECTORY}"
