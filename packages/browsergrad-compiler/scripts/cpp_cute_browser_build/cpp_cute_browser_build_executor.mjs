@@ -41,7 +41,8 @@ const ABORTED_GETTER = typeof AbortSignal === "undefined"
   : Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")?.get;
 
 /** @typedef {Readonly<{ dev: bigint; ino: bigint }>} FileIdentity */
-/** @typedef {Readonly<{ path: string; identity: FileIdentity }>} StagedFileIdentity */
+/** @typedef {Readonly<{ dev: bigint; ino: bigint; ctimeNs: bigint; birthtimeNs: bigint }>} FileVersionIdentity */
+/** @typedef {Readonly<{ path: string; identity: FileVersionIdentity }>} StagedFileIdentity */
 /** @typedef {Readonly<{ root: FileIdentity; files: readonly StagedFileIdentity[] }>} StagedSourceIdentity */
 
 export class CppCuteBrowserBuildExecutorError extends Error {
@@ -519,10 +520,10 @@ async function verifyStagedSourceClosure(
       signal,
       snapshot.bytes.byteLength,
     );
-    const identity = fileIdentity(observed.stat);
+    const identity = fileVersionIdentity(observed.stat);
     const expectedIdentity = expectedIdentityByPath.get(snapshot.path);
     if (expectedFileIdentities !== undefined &&
-        (expectedIdentity === undefined || !sameFileIdentity(identity, expectedIdentity))) {
+        (expectedIdentity === undefined || !sameFileVersionIdentity(identity, expectedIdentity))) {
       conflict(
         `$.stagedSourceRoot/${snapshot.path}`,
         "staged source file identity changed after preparation",
@@ -1115,9 +1116,26 @@ function fileIdentity(stat) {
   return Object.freeze({ dev: stat.dev, ino: stat.ino });
 }
 
+/** @param {import("node:fs").BigIntStats} stat @returns {FileVersionIdentity} */
+function fileVersionIdentity(stat) {
+  return Object.freeze({
+    dev: stat.dev,
+    ino: stat.ino,
+    ctimeNs: stat.ctimeNs,
+    birthtimeNs: stat.birthtimeNs,
+  });
+}
+
 /** @param {FileIdentity} left @param {FileIdentity} right */
 function sameFileIdentity(left, right) {
   return left.dev === right.dev && left.ino === right.ino;
+}
+
+/** @param {FileVersionIdentity} left @param {FileVersionIdentity} right */
+function sameFileVersionIdentity(left, right) {
+  return sameFileIdentity(left, right) &&
+    left.ctimeNs === right.ctimeNs &&
+    left.birthtimeNs === right.birthtimeNs;
 }
 
 /** @param {string} path @param {string} diagnosticPath */
