@@ -942,11 +942,15 @@ function invoke(
 ): number {
   const stored = storedSession(session);
   if (stored.state !== "active") return CPP_CUTE_BROWSER_VFS_STATUS.sessionClosed;
-  if (stored.counters.totalSessionCalls >= BigInt(stored.maxSessionCalls)) {
+  const nextCallCount = nextCppCuteBrowserVfsSessionCallCount(
+    stored.counters.totalSessionCalls,
+    stored.maxSessionCalls,
+  );
+  if (nextCallCount === undefined) {
     disposeStored(stored, "resource-limit");
     return CPP_CUTE_BROWSER_VFS_STATUS.resourceLimit;
   }
-  stored.counters.totalSessionCalls += 1n;
+  stored.counters.totalSessionCalls = nextCallCount;
   stored.counters[counter] += 1n;
   let epoch: MemoryEpoch;
   try {
@@ -971,6 +975,15 @@ function invoke(
     disposeStored(stored, "internal-error");
     return CPP_CUTE_BROWSER_VFS_STATUS.internalError;
   }
+}
+
+/** Pure exact transition for the ABI-owned per-session call budget. */
+export function nextCppCuteBrowserVfsSessionCallCount(
+  totalSessionCalls: bigint,
+  maxSessionCalls: number,
+): bigint | undefined {
+  if (totalSessionCalls >= BigInt(maxSessionCalls)) return undefined;
+  return totalSessionCalls + 1n;
 }
 
 function successWrite(pointer: number, bytes: Uint8Array): CallPlan {

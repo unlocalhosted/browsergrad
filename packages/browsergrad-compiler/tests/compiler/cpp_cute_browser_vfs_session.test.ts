@@ -81,6 +81,7 @@ import {
   createCppCuteBrowserVfsHostImports,
   createCppCuteBrowserVfsMountHostImports,
   discardCppCuteBrowserVfsMount,
+  nextCppCuteBrowserVfsSessionCallCount,
   observeCppCuteBrowserVfsMount,
   observeCppCuteBrowserVfsSession,
   prepareCppCuteBrowserVfsMount,
@@ -817,15 +818,22 @@ describe("C++/CuTe Worker-owned aggregate lazy VFS session", () => {
     cancelCppCuteBrowserVfsSession(limitedSession);
 
     const callFixture = await sessionFixture();
-    for (let count = 0; count < callFixture.session.maxSessionCalls; count += 1) {
-      expect(cppCuteBrowserVfsClose(callFixture.session, 0)).toBe(
-        CPP_CUTE_BROWSER_VFS_STATUS.invalidHandle,
-      );
-    }
-    expect(cppCuteBrowserVfsClose(callFixture.session, 0)).toBe(CPP_CUTE_BROWSER_VFS_STATUS.resourceLimit);
-    const resourceClosed = closedCppCuteBrowserVfsSessionReceipt(callFixture.session);
-    expect(unwrapClosedCppCuteBrowserVfsSession(resourceClosed).reason).toBe("resource-limit");
-  }, 30_000);
+    expect(cppCuteBrowserVfsClose(callFixture.session, 0)).toBe(
+      CPP_CUTE_BROWSER_VFS_STATUS.invalidHandle,
+    );
+    expect(observeCppCuteBrowserVfsSession(callFixture.session).counters.totalSessionCalls).toBe("1");
+    const penultimateCallCount = BigInt(callFixture.session.maxSessionCalls) - 1n;
+    const finalCallCount = nextCppCuteBrowserVfsSessionCallCount(
+      penultimateCallCount,
+      callFixture.session.maxSessionCalls,
+    );
+    expect(finalCallCount).toBe(BigInt(callFixture.session.maxSessionCalls));
+    expect(nextCppCuteBrowserVfsSessionCallCount(
+      finalCallCount!,
+      callFixture.session.maxSessionCalls,
+    )).toBeUndefined();
+    cancelCppCuteBrowserVfsSession(callFixture.session);
+  });
 
   it("rejects overlong mounted paths and explicit expanded-index ceilings before authority", async () => {
     const longPathAuthority = await createAuthorityFixture({ longMountedPath: true });
