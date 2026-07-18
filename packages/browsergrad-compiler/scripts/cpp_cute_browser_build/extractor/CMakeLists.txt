@@ -21,6 +21,8 @@ endif()
 add_llvm_executable(browsergrad-cpp-cute-extractor
   BrowserGradCppCuteArtifactV3.cpp
   BrowserGradCppCuteArtifactV3.h
+  BrowserGradCppCuteArtifactWriter.cpp
+  BrowserGradCppCuteArtifactWriter.h
   BrowserGradCppCuteCanonicalJson.cpp
   BrowserGradCppCuteCanonicalJson.h
   BrowserGradCppCuteClangAction.cpp
@@ -28,17 +30,30 @@ add_llvm_executable(browsergrad-cpp-cute-extractor
   BrowserGradCppCuteCommandLine.cpp
   BrowserGradCppCuteCommandLine.h
   BrowserGradCppCuteCommandLinePolicy.inc
+  BrowserGradCppCuteCompilePlan.cpp
+  BrowserGradCppCuteCompilePlan.h
+  BrowserGradCppCuteCompileSession.cpp
+  BrowserGradCppCuteCompileSession.h
+  BrowserGradCppCuteDiagnostics.cpp
+  BrowserGradCppCuteDiagnostics.h
+  BrowserGradCppCuteDiagnosticsPolicy.inc
   BrowserGradCppCuteExtractor.cpp
   BrowserGradCppCuteImportedVfs.cpp
   BrowserGradCppCuteImportedVfs.h
+  BrowserGradCppCuteInvocation.cpp
+  BrowserGradCppCuteInvocation.h
   BrowserGradCppCuteMetrics.cpp
   BrowserGradCppCuteMetrics.h
   BrowserGradCppCutePreprocessorPolicy.cpp
   BrowserGradCppCutePreprocessorPolicy.h
+  BrowserGradCppCuteProducer.cpp
+  BrowserGradCppCuteProducer.h
   BrowserGradCppCuteRuntime.cpp
   BrowserGradCppCuteRuntime.h
   BrowserGradCppCuteSha256.cpp
   BrowserGradCppCuteSha256.h
+  BrowserGradCppCuteVirtualPath.cpp
+  BrowserGradCppCuteVirtualPath.h
 )
 
 target_compile_features(browsergrad-cpp-cute-extractor PRIVATE cxx_std_20)

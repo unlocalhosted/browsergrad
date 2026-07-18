@@ -51,6 +51,7 @@ import {
   type CppCuteFrontendRunnerProfile,
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
+import { findCppCuteVirtualPathError } from "./cpp_cute_virtual_path.js";
 
 export const CPP_CUTE_AOT_RECEIPT_SCHEMA = "browsergrad.compiler.cpp-cute.aot-runner-receipt";
 export const CPP_CUTE_AOT_RECEIPT_MAJOR = 3;
@@ -580,12 +581,23 @@ function parseExtractor(value: JsonValue, path: string): CppCuteFrontendExtracto
 }
 
 function parseCompiler(value: JsonValue, path: string): CppCuteFrontendCompilerProfile {
-  const object = closedObject(value, ["id", "version", "buildId", "binarySha256", "resourceDirectorySha256"], path);
+  const object = closedObject(value, [
+    "id",
+    "version",
+    "buildId",
+    "binarySha256",
+    "resourceDirectoryVirtualPath",
+    "resourceDirectorySha256",
+  ], path);
   return {
     id: boundedString(field(object, "id", path), `${path}.id`, 256),
     version: boundedString(field(object, "version", path), `${path}.version`, 128),
     buildId: boundedString(field(object, "buildId", path), `${path}.buildId`, 512),
     binarySha256: sha256(field(object, "binarySha256", path), `${path}.binarySha256`),
+    resourceDirectoryVirtualPath: canonicalVirtualPath(
+      field(object, "resourceDirectoryVirtualPath", path),
+      `${path}.resourceDirectoryVirtualPath`,
+    ),
     resourceDirectorySha256: sha256(
       field(object, "resourceDirectorySha256", path),
       `${path}.resourceDirectorySha256`,
@@ -992,6 +1004,13 @@ function patterned(value: JsonValue, path: string, pattern: RegExp, name: string
 
 function sha256(value: JsonValue, path: string): string {
   return patterned(value, path, SHA256_HEX, "SHA-256");
+}
+
+function canonicalVirtualPath(value: JsonValue, path: string): string {
+  const result = boundedString(value, path, 4_096);
+  const error = findCppCuteVirtualPathError(result);
+  if (error !== null) invalid(path, error);
+  return result;
 }
 
 function equalBytes(left: Uint8Array, right: Uint8Array): boolean {

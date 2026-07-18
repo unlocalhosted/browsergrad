@@ -78,9 +78,11 @@ struct SemanticPassView {
 };
 
 struct IncludeRootView {
+  std::uint32_t ordinal = 0;
   std::string_view include_root_id;
   std::string_view mode;
   std::string_view virtual_path;
+  std::string_view manifest_sha256;
   std::string_view owner_kind;
   std::string_view dependency_id;
 };
@@ -126,10 +128,15 @@ class DecodedCompileSession final {
   std::string_view profile_id() const noexcept;
   std::string_view profile_hash() const noexcept;
   std::string_view compilation_contract_hash() const noexcept;
+  std::string_view compiler_version() const noexcept;
+  std::string_view compiler_resource_directory_virtual_path() const noexcept;
   std::string_view request_id() const noexcept;
   std::string_view request_hash() const noexcept;
   std::string_view main_virtual_path() const noexcept;
   std::uint32_t maximum_output_byte_length() const noexcept;
+  std::uint32_t maximum_diagnostic_count() const noexcept;
+  std::uint32_t maximum_source_file_count() const noexcept;
+  std::uint32_t maximum_header_file_count() const noexcept;
 
   std::size_t compiler_option_count() const noexcept;
   CompilerOptionView compiler_option(std::size_t index) const noexcept;

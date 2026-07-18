@@ -1,20 +1,119 @@
 #include "BrowserGradCppCuteArtifactV3.h"
 
-namespace browsergrad::cpp_cute {
+#include "BrowserGradCppCuteArtifactWriter.h"
+#include "BrowserGradCppCuteCompilePlan.h"
+#include "BrowserGradCppCuteCompileSession.h"
+#include "BrowserGradCppCuteProducer.h"
 
-ArtifactV3CompileResult build_artifact_v3_placeholder(
+namespace browsergrad::cpp_cute {
+namespace {
+
+WireCompileStatus wire_status_for_decode(
+    const CompileSessionDecodeStatus status) noexcept {
+  switch (status) {
+    case CompileSessionDecodeStatus::kInvalidFrame:
+      return WireCompileStatus::kInvalidFrame;
+    case CompileSessionDecodeStatus::kAbiMismatch:
+      return WireCompileStatus::kAbiMismatch;
+    case CompileSessionDecodeStatus::kResourceLimit:
+      return WireCompileStatus::kResourceLimit;
+    case CompileSessionDecodeStatus::kInternalError:
+    case CompileSessionDecodeStatus::kReady:
+      return WireCompileStatus::kInternalError;
+  }
+  return WireCompileStatus::kInternalError;
+}
+
+WireCompileStatus wire_status_for_plan(const CompilePlanStatus status) noexcept {
+  switch (status) {
+    case CompilePlanStatus::kResourceLimit:
+      return WireCompileStatus::kResourceLimit;
+    case CompilePlanStatus::kInvalidSessionData:
+    case CompilePlanStatus::kInvocationRejected:
+      return WireCompileStatus::kInvalidFrame;
+    case CompilePlanStatus::kInternalError:
+    case CompilePlanStatus::kReady:
+      return WireCompileStatus::kInternalError;
+  }
+  return WireCompileStatus::kInternalError;
+}
+
+ArtifactV3CompileResult result_for_producer(
+    const ProducerReviewResult& producer,
+    const DecodedCompileSession& session,
+    ArtifactV3ResultSink& result_sink) noexcept {
+  const auto write_artifact = [&]() -> ArtifactV3CompileResult {
+    switch (write_cpp_cute_artifact_v3(producer, session, result_sink)) {
+      case ArtifactV3WriteStatus::kReady:
+        return {WireCompileStatus::kArtifactReady, std::nullopt};
+      case ArtifactV3WriteStatus::kInvalidObservation:
+        return {WireCompileStatus::kInvalidFrame,
+                ReviewOnlyBlocker::kCanonicalArtifactV3Unavailable};
+      case ArtifactV3WriteStatus::kResourceLimit:
+        return {WireCompileStatus::kResourceLimit,
+                ReviewOnlyBlocker::kCanonicalArtifactV3Unavailable};
+      case ArtifactV3WriteStatus::kInternalError:
+        return {WireCompileStatus::kInternalError,
+                ReviewOnlyBlocker::kCanonicalArtifactV3Unavailable};
+    }
+    return {WireCompileStatus::kInternalError,
+            ReviewOnlyBlocker::kCanonicalArtifactV3Unavailable};
+  };
+  switch (producer.status) {
+    case ProducerReviewStatus::kReviewComplete: {
+      if (producer.completed_pass_count != 2U ||
+          !producer.shared_surface_converged) {
+        return {WireCompileStatus::kInternalError,
+                ReviewOnlyBlocker::kCudaDualPassUnavailable};
+      }
+      return write_artifact();
+    }
+    case ProducerReviewStatus::kReviewCompleteWithBlockingDiagnostics:
+      return write_artifact();
+    case ProducerReviewStatus::kInvalidPlan:
+      return {WireCompileStatus::kInvalidFrame,
+              ReviewOnlyBlocker::kCudaDualPassUnavailable};
+    case ProducerReviewStatus::kResourceLimit:
+      return {WireCompileStatus::kResourceLimit,
+              ReviewOnlyBlocker::kCudaDualPassUnavailable};
+    case ProducerReviewStatus::kVfsError:
+      return {WireCompileStatus::kVfsError,
+              ReviewOnlyBlocker::kCudaDualPassUnavailable};
+    case ProducerReviewStatus::kInternalError:
+      return {WireCompileStatus::kInternalError,
+              ReviewOnlyBlocker::kCudaDualPassUnavailable};
+  }
+  return {WireCompileStatus::kInternalError,
+          ReviewOnlyBlocker::kCudaDualPassUnavailable};
+}
+
+}  // namespace
+
+ArtifactV3CompileResult build_artifact_v3(
     const ValidatedInputFrameRegions& input,
     ArtifactV3ResultSink& result_sink) {
-  static_cast<void>(input);
-  static_cast<void>(result_sink);
+  CompileSessionDecodeResult decoded = decode_compile_session(input);
+  if (decoded.status != CompileSessionDecodeStatus::kReady ||
+      !decoded.session) {
+    return {wire_status_for_decode(decoded.status),
+            ReviewOnlyBlocker::kCudaDualPassUnavailable};
+  }
 
-  // Gate 3 establishes ownership only. A review trace is not an artifact.
-  // Explicit CUDA device/host passes and the canonical artifact-v3 writer are
-  // still absent, so the existing internal-error behavior remains mandatory.
-  return {
-      WireCompileStatus::kInternalError,
-      ReviewOnlyBlocker::kCudaDualPassUnavailable,
-  };
+  PrepareCppCuteCompilePlanResult prepared =
+      prepare_cpp_cute_compile_plan(*decoded.session);
+  if (prepared.status != CompilePlanStatus::kReady || !prepared.plan) {
+    return {wire_status_for_plan(prepared.status),
+            ReviewOnlyBlocker::kCudaDualPassUnavailable};
+  }
+  if (!result_sink.bind_invocation_maximum_byte_length(
+          prepared.plan->maximum_output_byte_length())) {
+    return {WireCompileStatus::kInternalError,
+            ReviewOnlyBlocker::kCudaDualPassUnavailable};
+  }
+
+  const ProducerReviewResult producer =
+      run_cpp_cute_producer_review(*prepared.plan, *decoded.session);
+  return result_for_producer(producer, *decoded.session, result_sink);
 }
 
 }  // namespace browsergrad::cpp_cute

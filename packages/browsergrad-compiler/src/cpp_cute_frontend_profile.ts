@@ -1386,7 +1386,7 @@ function parseCompilerOptions(value: JsonValue, path: string): readonly CppCuteF
   const values = arrayValue(value, path);
   if (values.length > 4_096) resource(path, "compiler option count exceeds 4096");
   const seen = new Set<string>();
-  return values.map((entry, index) => {
+  const options = values.map((entry, index) => {
     const optionPath = `${path}[${index}]`;
     if (!isJsonObject(entry)) invalid(optionPath, "compiler option must be an object");
     const kind = stringValue(field(entry, "kind", optionPath), `${optionPath}.kind`);
@@ -1462,6 +1462,12 @@ function parseCompilerOptions(value: JsonValue, path: string): readonly CppCuteF
     seen.add(singleton);
     return option;
   });
+  for (const required of ["syntax-only", "error-limit"] as const) {
+    if (!seen.has(`frontend:${required}`)) {
+      invalid(path, `compiler options must contain exactly one ${required} frontend option`);
+    }
+  }
+  return options;
 }
 
 function parseTarget(value: JsonValue, path: string): CppCuteFrontendTargetProfile {

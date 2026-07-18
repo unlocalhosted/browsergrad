@@ -1,5 +1,7 @@
 #pragma once
 
+#include "BrowserGradCppCuteVirtualPath.h"
+
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/Support/VirtualFileSystem.h"
 
@@ -7,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -47,10 +50,17 @@ struct ImportedVfsIncludeEdgeObservation {
       kImportedVfsNoCompilerOptionOrdinal;
 };
 
+struct ImportedVfsOpenedFileObservation {
+  std::string virtual_path;
+  std::string content_sha256;
+  std::uint64_t byte_length = 0U;
+};
+
 struct ImportedVfsPassObservation {
   // Despite the artifact field name, a path enters this set only after its
   // complete contents have been read successfully into stable Wasm memory.
   std::vector<std::string> opened_file_paths;
+  std::vector<ImportedVfsOpenedFileObservation> opened_files;
   std::vector<ImportedVfsIncludeEdgeObservation> include_edges;
 };
 
@@ -113,31 +123,6 @@ inline bool valid_utf8(std::string_view value) {
       continue;
     }
     return false;
-  }
-  return true;
-}
-
-inline bool valid_canonical_path(std::string_view path) {
-  constexpr std::size_t kMaximumPathByteLength = 4096U;
-  if (path.empty() || path.size() > kMaximumPathByteLength ||
-      path.front() != '/' || !valid_utf8(path) ||
-      (path.size() > 1U && path.back() == '/')) {
-    return false;
-  }
-  if (path == "/") return true;
-
-  std::size_t segment_begin = 1U;
-  for (std::size_t index = 1U; index <= path.size(); ++index) {
-    if (index < path.size()) {
-      const auto byte = static_cast<unsigned char>(path[index]);
-      if (byte == '\\' || byte == 0U || byte < 0x20U || byte == 0x7fU) {
-        return false;
-      }
-      if (byte != '/') continue;
-    }
-    const auto segment = path.substr(segment_begin, index - segment_begin);
-    if (segment.empty() || segment == "." || segment == "..") return false;
-    segment_begin = index + 1U;
   }
   return true;
 }
@@ -221,18 +206,35 @@ class ImportedVfsObserver final {
 
   // ImportedVfsFile calls this only after every read chunk has committed.
   // Status, directory lookup, open, and failed/partial reads must not call it.
-  std::error_code record_successful_read(std::string_view canonical_path) {
+  std::error_code record_successful_read(
+      std::string_view canonical_path, std::string_view content_sha256,
+      std::uint64_t byte_length) {
     if (terminal_error_) return terminal_error_;
-    if (!imported_vfs_detail::valid_canonical_path(canonical_path)) {
+    if (!cpp_cute_valid_canonical_virtual_path(canonical_path) ||
+        content_sha256.size() != 64U ||
+        !std::all_of(content_sha256.begin(), content_sha256.end(),
+                     [](const char byte) {
+                       return (byte >= '0' && byte <= '9') ||
+                              (byte >= 'a' && byte <= 'f');
+                     })) {
       return poison(std::make_error_code(std::errc::invalid_argument));
     }
-    if (opened_file_paths_.find(canonical_path) != opened_file_paths_.end()) {
+    if (const auto found = opened_files_.find(canonical_path);
+        found != opened_files_.end()) {
+      if (found->second.content_sha256 != content_sha256 ||
+          found->second.byte_length != byte_length) {
+        return poison(std::make_error_code(std::errc::state_not_recoverable));
+      }
       return {};
     }
-    if (opened_file_paths_.size() >= limits_.max_opened_file_count) {
+    if (opened_files_.size() >= limits_.max_opened_file_count) {
       return poison(std::make_error_code(std::errc::value_too_large));
     }
-    opened_file_paths_.emplace(canonical_path);
+    opened_files_.emplace(
+        std::string(canonical_path),
+        ImportedVfsOpenedFileObservation{
+            std::string(canonical_path), std::string(content_sha256),
+            byte_length});
     return {};
   }
 
@@ -258,17 +260,21 @@ class ImportedVfsObserver final {
   std::error_code snapshot(ImportedVfsPassObservation& observation) const {
     if (terminal_error_) return terminal_error_;
     ImportedVfsPassObservation candidate;
-    candidate.opened_file_paths.assign(opened_file_paths_.begin(),
-                                        opened_file_paths_.end());
+    candidate.opened_file_paths.reserve(opened_files_.size());
+    candidate.opened_files.reserve(opened_files_.size());
+    for (const auto& [path, file] : opened_files_) {
+      candidate.opened_file_paths.push_back(path);
+      candidate.opened_files.push_back(file);
+    }
     candidate.include_edges.reserve(include_edges_.size());
     for (const auto& edge : include_edges_) {
-      if (opened_file_paths_.find(edge.resolved_file_path) ==
-          opened_file_paths_.end()) {
+      if (opened_files_.find(edge.resolved_file_path) ==
+          opened_files_.end()) {
         continue;
       }
       if (edge.kind != ImportedVfsIncludeKind::kCompilerForced &&
-          opened_file_paths_.find(edge.including_file_path) ==
-              opened_file_paths_.end()) {
+          opened_files_.find(edge.including_file_path) ==
+              opened_files_.end()) {
         continue;
       }
       candidate.include_edges.push_back(edge);
@@ -282,14 +288,13 @@ class ImportedVfsObserver final {
  private:
   static bool valid_include_edge(
       const ImportedVfsIncludeEdgeObservation& edge) {
-    if (!imported_vfs_detail::valid_canonical_path(
-            edge.resolved_file_path)) {
+    if (!cpp_cute_valid_canonical_virtual_path(edge.resolved_file_path)) {
       return false;
     }
     switch (edge.kind) {
       case ImportedVfsIncludeKind::kSourceQuote:
       case ImportedVfsIncludeKind::kSourceAngle:
-        return imported_vfs_detail::valid_canonical_path(
+        return cpp_cute_valid_canonical_virtual_path(
                    edge.including_file_path) &&
                imported_vfs_detail::valid_include_spelling(edge.spelling) &&
                edge.directive_start_byte_offset <
@@ -312,8 +317,8 @@ class ImportedVfsObserver final {
   }
 
   ImportedVfsObservationLimits limits_;
-  std::set<std::string, imported_vfs_detail::Utf8ByteLess>
-      opened_file_paths_;
+  std::map<std::string, ImportedVfsOpenedFileObservation,
+           imported_vfs_detail::Utf8ByteLess> opened_files_;
   std::set<ImportedVfsIncludeEdgeObservation,
            imported_vfs_detail::IncludeEdgeLess>
       include_edges_;

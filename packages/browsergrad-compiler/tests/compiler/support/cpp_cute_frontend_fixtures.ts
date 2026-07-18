@@ -161,6 +161,7 @@ export function createCppCuteProfileInput(
           virtualPath: "/toolchain/clang/lib/clang/22/include/__clang_cuda_runtime_wrapper.h",
         },
         { kind: "frontend-option", id: "syntax-only", value: null },
+        { kind: "frontend-option", id: "error-limit", value: "100000" },
       ],
     },
     target: {

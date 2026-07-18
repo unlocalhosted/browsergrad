@@ -11,7 +11,7 @@ import {
 const CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.diagnostic-normalization",
   version: { major: 1, minor: 0 },
-  manifestId: "bg.cpp.diagnostic-normalization.sha256.77434d0a71c7ada7ee6345d0460184b3611c824f0e51ffc3b7a9cccb4d0875d8",
+  manifestId: "bg.cpp.diagnostic-normalization.sha256.21d60795bc3da39c9003316f0e6c489c98f7db94cf24a0707bc0fae94001a10a",
   body: {
     policyId: "browsergrad.compiler.cpp-cute.clang-diagnostic-normalization@1",
     clang: {
@@ -168,6 +168,20 @@ const CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_VALUE = {
         producerStage: "artifact-extractor",
         category: "artifact-extraction",
         artifactSeverity: "fatal",
+        blocking: true,
+      },
+      {
+        customCode: "browsergrad.cpp-cute:semantic-extraction-failed",
+        producerStage: "artifact-extractor",
+        category: "artifact-extraction",
+        artifactSeverity: "error",
+        blocking: true,
+      },
+      {
+        customCode: "browsergrad.cpp-cute:host-device-surface-divergence",
+        producerStage: "artifact-extractor",
+        category: "artifact-extraction",
+        artifactSeverity: "error",
         blocking: true,
       },
     ],

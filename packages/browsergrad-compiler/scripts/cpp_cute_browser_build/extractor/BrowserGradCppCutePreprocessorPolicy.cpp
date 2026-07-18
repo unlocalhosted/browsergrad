@@ -20,17 +20,13 @@ class CppCuteTemporalMacroCallbacks final : public clang::PPCallbacks {
  public:
   CppCuteTemporalMacroCallbacks(
       clang::Preprocessor& preprocessor,
-      std::shared_ptr<CppCutePreprocessorPolicyState> state)
+      std::shared_ptr<CppCutePreprocessorPolicyState> state,
+      const unsigned consultation_diagnostic_id,
+      const unsigned mutation_diagnostic_id)
       : preprocessor_(preprocessor),
         state_(std::move(state)),
-        consultation_diagnostic_id_(
-            preprocessor_.getDiagnostics().getCustomDiagID(
-                clang::DiagnosticsEngine::Error,
-                kTemporalMacroForbiddenDiagnosticMessage)),
-        mutation_diagnostic_id_(
-            preprocessor_.getDiagnostics().getCustomDiagID(
-                clang::DiagnosticsEngine::Error,
-                kTemporalMacroMutationForbiddenDiagnosticMessage)) {}
+        consultation_diagnostic_id_(consultation_diagnostic_id),
+        mutation_diagnostic_id_(mutation_diagnostic_id) {}
 
   void MacroExpands(const clang::Token& macro_name_token,
                     const clang::MacroDefinition&, clang::SourceRange,
@@ -141,16 +137,27 @@ CppCutePreprocessorPolicyInstallation install_cpp_cute_preprocessor_policy(
 
   auto state = std::make_shared<CppCutePreprocessorPolicyState>();
   clang::Preprocessor& preprocessor = compiler.getPreprocessor();
+  const unsigned consultation_diagnostic_id =
+      preprocessor.getDiagnostics().getCustomDiagID(
+          clang::DiagnosticsEngine::Error,
+          kTemporalMacroForbiddenDiagnosticMessage);
+  const unsigned mutation_diagnostic_id =
+      preprocessor.getDiagnostics().getCustomDiagID(
+          clang::DiagnosticsEngine::Error,
+          kTemporalMacroMutationForbiddenDiagnosticMessage);
   // PPCallbacks observes a builtin macro before Clang materializes its value,
   // but it cannot cancel Clang's error-recovery expansion. Pin that rejected
   // recovery path so neither the wall clock nor source-file mtime is observed.
   compiler.getPreprocessorOpts().SourceDateEpoch =
       kTemporalMacroRejectedRecoveryEpoch;
   preprocessor.addPPCallbacks(std::make_unique<CppCuteTemporalMacroCallbacks>(
-      preprocessor, state));
+      preprocessor, state, consultation_diagnostic_id,
+      mutation_diagnostic_id));
   return CppCutePreprocessorPolicyInstallation{
       CppCutePreprocessorPolicyInstallStatus::kInstalled,
       std::move(state),
+      consultation_diagnostic_id,
+      mutation_diagnostic_id,
   };
 }
 

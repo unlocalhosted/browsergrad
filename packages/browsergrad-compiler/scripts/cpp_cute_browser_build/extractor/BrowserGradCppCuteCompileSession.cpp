@@ -2,6 +2,7 @@
 
 #include "BrowserGradCppCuteCanonicalJson.h"
 #include "BrowserGradCppCuteSha256.h"
+#include "BrowserGradCppCuteVirtualPath.h"
 
 #include <algorithm>
 #include <array>
@@ -40,7 +41,7 @@ constexpr std::string_view kTemporalPolicyId =
 constexpr std::string_view kWarningRegistryId =
     "browsergrad.compiler.cpp-cute.clang-warning-registry@1";
 constexpr std::string_view kDiagnosticNormalizationManifestSha256 =
-    "805db4268cb63090d53bbb16940ba4362234f89a1059aa8f25df5591867f6467";
+    "6de153792fb09711a9f71ee470433f58ce4183a09fe4e8eb987c9d9bf6a46997";
 constexpr std::int64_t kProfileMajor = 2;
 constexpr std::int64_t kProfileMinor = 6;
 constexpr std::int64_t kContractMajor = 1;
@@ -179,6 +180,8 @@ struct SessionStorage final {
         compilation_contract_hash(&memory), request_id(&memory),
         request_hash(&memory), main_virtual_path(&memory),
         extractor_binary_sha256(&memory), compiler_binary_sha256(&memory),
+        compiler_version(&memory),
+        compiler_resource_virtual_path(&memory),
         compiler_resource_sha256(&memory), source_roots(&memory),
         options(&memory), passes(&memory), include_roots(&memory),
         dependencies(&memory), source_files(&memory), entry(&memory) {}
@@ -193,6 +196,8 @@ struct SessionStorage final {
   PmrString main_virtual_path;
   PmrString extractor_binary_sha256;
   PmrString compiler_binary_sha256;
+  PmrString compiler_version;
+  PmrString compiler_resource_virtual_path;
   PmrString compiler_resource_sha256;
   std::pmr::vector<PmrString> source_roots;
   std::pmr::vector<OwnedCompilerOption> options;
@@ -535,31 +540,6 @@ bool canonical_u64(std::string_view value, std::uint64_t* parsed) {
   for (char byte : value) if (byte < '0' || byte > '9') return false;
   const auto result = std::from_chars(value.data(), value.data() + value.size(), *parsed);
   return result.ec == std::errc{} && result.ptr == value.data() + value.size();
-}
-
-bool valid_virtual_path(std::string_view value) {
-  if (value.empty() || value.size() > 4096U || value.front() != '/') return false;
-  if (value == "/") return true;
-  std::size_t segment = 1U;
-  for (std::size_t index = 0; index <= value.size(); ++index) {
-    if (index < value.size()) {
-      const unsigned char byte = static_cast<unsigned char>(value[index]);
-      if (byte == '\\' || byte <= 0x1fU || byte == 0x7fU) return false;
-      if (byte != '/') continue;
-    }
-    const std::string_view part = value.substr(segment, index - segment);
-    if (part.empty() || part == "." || part == "..") return false;
-    segment = index + 1U;
-  }
-  return true;
-}
-
-bool below_root(std::string_view candidate, std::string_view root) {
-  return root == "/" ? candidate.starts_with('/')
-                     : candidate == root ||
-                           (candidate.size() > root.size() &&
-                            candidate.starts_with(root) &&
-                            candidate[root.size()] == '/');
 }
 
 class Utf16StringIterator final {
@@ -1187,7 +1167,7 @@ void validate_language(const JsonDocument& document, const JsonNode& language,
                   required_field(document, option, "virtualPath", region),
                   output.virtual_path, region);
       if (!dependency_id(output.include_root_id) ||
-          !valid_virtual_path(output.virtual_path)) {
+          !cpp_cute_valid_canonical_virtual_path(output.virtual_path)) {
         reject(CompileSessionDecodeStatus::kInvalidFrame, region,
                CompileSessionDecodeReason::kSchema, option.begin);
       }
@@ -1205,6 +1185,15 @@ void validate_language(const JsonDocument& document, const JsonNode& language,
              CompileSessionDecodeReason::kSchema, option.begin);
     }
     singletons.push_back(std::move(singleton));
+  }
+  for (const std::string_view required : {
+           std::string_view("frontend:syntax-only"),
+           std::string_view("frontend:error-limit")}) {
+    if (std::find(singletons.begin(), singletons.end(), required) ==
+        singletons.end()) {
+      reject(CompileSessionDecodeStatus::kInvalidFrame, region,
+             CompileSessionDecodeReason::kSchema, options.begin);
+    }
   }
 }
 
@@ -1263,18 +1252,38 @@ void validate_toolchain(const JsonDocument& document, const JsonNode& toolchain,
   const JsonNode& compiler = required_field(document, toolchain, "compiler", region);
   closed_object(document, compiler,
                 {"id", "version", "buildId", "binarySha256",
-                 "resourceDirectorySha256"}, region);
+                 "resourceDirectoryVirtualPath", "resourceDirectorySha256"},
+                region);
   require_literal(document, required_field(document, compiler, "id", region),
                   "clang", region, CompileSessionDecodeStatus::kAbiMismatch,
                   CompileSessionDecodeReason::kCompilerIdentity);
-  require_literal(document, required_field(document, compiler, "version", region),
-                  "22.1.8", region, CompileSessionDecodeStatus::kAbiMismatch,
+  const JsonNode& compiler_version =
+      required_field(document, compiler, "version", region);
+  require_literal(document, compiler_version, "22.1.8", region,
+                  CompileSessionDecodeStatus::kAbiMismatch,
                   CompileSessionDecodeReason::kCompilerIdentity);
+  copy_string(document, compiler_version, storage.compiler_version, region);
   require_string(required_field(document, compiler, "buildId", region), region);
   require_sha256(document, required_field(document, compiler, "binarySha256", region), region);
   require_sha256(document,
                  required_field(document, compiler, "resourceDirectorySha256", region),
                  region);
+  copy_string(document,
+              required_field(document, compiler,
+                             "resourceDirectoryVirtualPath", region),
+              storage.compiler_resource_virtual_path, region);
+  if (!cpp_cute_valid_canonical_virtual_path(
+          storage.compiler_resource_virtual_path) ||
+      storage.compiler_resource_virtual_path == "/" ||
+      storage.compiler_resource_virtual_path.size() +
+              std::string_view("/include").size() >
+          4096U) {
+    reject(CompileSessionDecodeStatus::kInvalidFrame, region,
+           CompileSessionDecodeReason::kSchema,
+           required_field(document, compiler,
+                          "resourceDirectoryVirtualPath", region)
+               .begin);
+  }
   copy_string(document, required_field(document, compiler, "binarySha256", region),
               storage.compiler_binary_sha256, region);
   copy_string(document,
@@ -1363,7 +1372,7 @@ void validate_virtual_file_system(const JsonDocument& document,
     const JsonNode& root = *document.element(source_roots, index);
     PmrString value(&storage.memory);
     copy_string(document, root, value, region);
-    if (!valid_virtual_path(value) ||
+    if (!cpp_cute_valid_canonical_virtual_path(value) ||
         std::find(storage.source_roots.begin(), storage.source_roots.end(), value) !=
             storage.source_roots.end()) {
       reject(CompileSessionDecodeStatus::kInvalidFrame, region,
@@ -1397,7 +1406,7 @@ void validate_virtual_file_system(const JsonDocument& document,
                 output.manifest_sha256, region);
     if (!dependency_id(output.include_root_id) ||
         (output.mode != "quote" && output.mode != "system") ||
-        !valid_virtual_path(output.virtual_path) ||
+        !cpp_cute_valid_canonical_virtual_path(output.virtual_path) ||
         !lowercase_sha256(output.manifest_sha256)) {
       reject(CompileSessionDecodeStatus::kInvalidFrame, region,
              CompileSessionDecodeReason::kSchema, root.begin);
@@ -1419,7 +1428,8 @@ void validate_virtual_file_system(const JsonDocument& document,
         const std::size_t containers = static_cast<std::size_t>(std::count_if(
             storage.source_roots.begin(), storage.source_roots.end(),
             [&output](const PmrString& source) {
-              return below_root(output.virtual_path, source);
+              return cpp_cute_virtual_path_contains(source,
+                                                     output.virtual_path);
             }));
         if (containers != 1U) {
           reject(CompileSessionDecodeStatus::kInvalidFrame, region,
@@ -1427,7 +1437,12 @@ void validate_virtual_file_system(const JsonDocument& document,
         }
       } else {
         ++compiler_resource_roots;
-        if (output.manifest_sha256 != storage.compiler_resource_sha256) {
+        PmrString expected_virtual_path(
+            storage.compiler_resource_virtual_path, &storage.memory);
+        expected_virtual_path += "/include";
+        if (output.mode != "system" ||
+            output.virtual_path != expected_virtual_path ||
+            output.manifest_sha256 != storage.compiler_resource_sha256) {
           reject(CompileSessionDecodeStatus::kInvalidFrame, region,
                  CompileSessionDecodeReason::kSchema, root.begin);
         }
@@ -1470,7 +1485,8 @@ void validate_virtual_file_system(const JsonDocument& document,
     if (option.kind != CompilerOptionKind::kForcedInclude) continue;
     const OwnedIncludeRoot* root = find_include_root(storage, option.include_root_id);
     if (root == nullptr || root->virtual_path == option.virtual_path ||
-        !below_root(option.virtual_path, root->virtual_path)) {
+        !cpp_cute_virtual_path_contains(root->virtual_path,
+                                        option.virtual_path)) {
       reject(CompileSessionDecodeStatus::kInvalidFrame, region,
              CompileSessionDecodeReason::kSchema, include_roots.begin);
     }
@@ -1605,7 +1621,8 @@ std::string hash_compilation_contract(const JsonDocument& profile) {
   emit_member(writer, profile, "compatibility", *profile.field(root, "compatibility"), first);
   writer.text(",\"compiler\":{");
   bool compiler_first = true;
-  for (std::string_view key : {"buildId", "id", "resourceDirectorySha256", "version"}) {
+  for (std::string_view key : {"buildId", "id", "resourceDirectorySha256",
+                               "resourceDirectoryVirtualPath", "version"}) {
     emit_member(writer, profile, key, *profile.field(compiler, key), compiler_first);
   }
   writer.text("}");
@@ -1725,10 +1742,11 @@ void validate_request(const JsonDocument& document, SessionStorage& storage) {
   }
   copy_string(document, required_field(document, root, "mainVirtualPath", region),
               storage.main_virtual_path, region);
-  if (!valid_virtual_path(storage.main_virtual_path) ||
+  if (!cpp_cute_valid_canonical_virtual_path(storage.main_virtual_path) ||
       std::none_of(storage.source_roots.begin(), storage.source_roots.end(),
                    [&storage](const PmrString& source_root) {
-                     return below_root(storage.main_virtual_path, source_root);
+                     return cpp_cute_virtual_path_contains(
+                         source_root, storage.main_virtual_path);
                    })) {
     reject(CompileSessionDecodeStatus::kInvalidFrame, region,
            CompileSessionDecodeReason::kSchema,
@@ -1765,12 +1783,13 @@ void validate_request(const JsonDocument& document, SessionStorage& storage) {
                 output.byte_length, region);
     if (!output.file_id.starts_with("bg.cpp.file.sha256.") ||
         output.file_id.size() != 83U || !lowercase_sha256(output.content_sha256) ||
-        !valid_virtual_path(output.virtual_path) ||
+        !cpp_cute_valid_canonical_virtual_path(output.virtual_path) ||
         !canonical_u64(output.byte_length, &output.byte_length_value) ||
         output.byte_length_value == 0U ||
         std::none_of(storage.source_roots.begin(), storage.source_roots.end(),
                      [&output](const PmrString& source_root) {
-                       return below_root(output.virtual_path, source_root);
+                       return cpp_cute_virtual_path_contains(
+                           source_root, output.virtual_path);
                      }) ||
         (index != 0U && compare_canonical_strings(
                             output.virtual_path,
@@ -1798,7 +1817,8 @@ void validate_request(const JsonDocument& document, SessionStorage& storage) {
       output.has_include_root = true;
       const OwnedIncludeRoot* root = find_include_root(storage, output.include_root_id);
       if (root == nullptr || root->owner_kind != "source" ||
-          !below_root(output.virtual_path, root->virtual_path)) {
+          !cpp_cute_virtual_path_contains(root->virtual_path,
+                                          output.virtual_path)) {
         reject(CompileSessionDecodeStatus::kInvalidFrame, region,
                CompileSessionDecodeReason::kSchema, file.begin);
       }
@@ -1931,8 +1951,8 @@ SemanticPassView pass_view(const OwnedSemanticPass& pass) noexcept {
 }
 
 IncludeRootView root_view(const OwnedIncludeRoot& root) noexcept {
-  return {root.include_root_id, root.mode, root.virtual_path,
-          root.owner_kind, root.dependency_id};
+  return {0U, root.include_root_id, root.mode, root.virtual_path,
+          root.manifest_sha256, root.owner_kind, root.dependency_id};
 }
 
 SourceFileView file_view(const OwnedSourceFile& file) noexcept {
@@ -1966,6 +1986,15 @@ std::string_view DecodedCompileSession::compilation_contract_hash() const noexce
   return implementation_->storage.compilation_contract_hash;
 }
 
+std::string_view DecodedCompileSession::compiler_version() const noexcept {
+  return implementation_->storage.compiler_version;
+}
+
+std::string_view
+DecodedCompileSession::compiler_resource_directory_virtual_path() const noexcept {
+  return implementation_->storage.compiler_resource_virtual_path;
+}
+
 std::string_view DecodedCompileSession::request_id() const noexcept {
   return implementation_->storage.request_id;
 }
@@ -1980,6 +2009,21 @@ std::string_view DecodedCompileSession::main_virtual_path() const noexcept {
 
 std::uint32_t DecodedCompileSession::maximum_output_byte_length() const noexcept {
   return implementation_->storage.maximum_output_byte_length;
+}
+
+std::uint32_t DecodedCompileSession::maximum_diagnostic_count() const noexcept {
+  return static_cast<std::uint32_t>(
+      implementation_->storage.request_semantic_limits[18U]);
+}
+
+std::uint32_t DecodedCompileSession::maximum_source_file_count() const noexcept {
+  return static_cast<std::uint32_t>(
+      implementation_->storage.request_semantic_limits[0U]);
+}
+
+std::uint32_t DecodedCompileSession::maximum_header_file_count() const noexcept {
+  return static_cast<std::uint32_t>(
+      implementation_->storage.request_semantic_limits[2U]);
 }
 
 std::size_t DecodedCompileSession::compiler_option_count() const noexcept {
@@ -2009,7 +2053,9 @@ std::size_t DecodedCompileSession::include_root_count() const noexcept {
 IncludeRootView DecodedCompileSession::include_root(
     std::size_t index) const noexcept {
   if (index >= implementation_->storage.include_roots.size()) return {};
-  return root_view(implementation_->storage.include_roots[index]);
+  IncludeRootView result = root_view(implementation_->storage.include_roots[index]);
+  result.ordinal = static_cast<std::uint32_t>(index);
+  return result;
 }
 
 std::size_t DecodedCompileSession::source_file_count() const noexcept {

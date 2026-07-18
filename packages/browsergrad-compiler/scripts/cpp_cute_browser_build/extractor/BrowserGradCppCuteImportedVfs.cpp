@@ -1,5 +1,7 @@
 #include "BrowserGradCppCuteImportedVfs.h"
 
+#include "BrowserGradCppCuteSha256.h"
+
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -159,7 +161,7 @@ bool wasm_pointer(const void* pointer, std::uint32_t& result) {
 }
 
 bool valid_canonical_path(llvm::StringRef path) {
-  return imported_vfs_detail::valid_canonical_path(
+  return cpp_cute_valid_canonical_virtual_path(
       std::string_view(path.data(), path.size()));
 }
 
@@ -342,7 +344,19 @@ class ImportedVfsFile final : public llvm::vfs::File {
       }
     }
     if (observer_ != nullptr) {
-      if (const auto error = observer_->record_successful_read(path_)) {
+      Sha256 hasher;
+      Sha256Digest digest{};
+      if (!hasher.update(destination,
+                         static_cast<std::size_t>(file_byte_length_)) ||
+          !hasher.finalize(digest)) {
+        const auto error = std::make_error_code(std::errc::io_error);
+        poison_handle_budget(handle_budget_, error);
+        return error;
+      }
+      const Sha256LowercaseHex content_sha256 = sha256_lowercase_hex(digest);
+      if (const auto error = observer_->record_successful_read(
+              path_, std::string_view(content_sha256.data(), 64U),
+              file_byte_length_)) {
         poison_handle_budget(handle_budget_, error);
         return error;
       }

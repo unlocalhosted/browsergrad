@@ -23,6 +23,11 @@ const importedVfsSource = join(
   "extractor",
   "BrowserGradCppCuteImportedVfs.cpp",
 );
+const virtualPathSource = join(
+  scriptRoot,
+  "extractor",
+  "BrowserGradCppCuteVirtualPath.cpp",
+);
 const compiler = [
   "/usr/bin/clang++",
   "/usr/bin/c++",
@@ -70,6 +75,7 @@ function compileAndRun(extraFlags: readonly string[]): void {
       "-I",
       workingDirectory,
       nativeSource,
+      virtualPathSource,
       "-o",
       executable,
     ], {
@@ -112,7 +118,7 @@ describe("Clang-Wasm pass-scoped ImportedVFS observer", () => {
       readCall,
     );
     const observationCommit = getBuffer.indexOf(
-      "observer_->record_successful_read(path_)",
+      "observer_->record_successful_read(",
       failedReadReturn,
     );
     expect(getBufferStart).toBeGreaterThanOrEqual(0);

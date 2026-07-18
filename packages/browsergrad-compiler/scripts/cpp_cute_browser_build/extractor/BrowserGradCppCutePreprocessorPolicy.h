@@ -128,6 +128,8 @@ struct CppCutePreprocessorPolicyInstallation {
   CppCutePreprocessorPolicyInstallStatus status =
       CppCutePreprocessorPolicyInstallStatus::kMissingPreprocessor;
   std::shared_ptr<CppCutePreprocessorPolicyState> state;
+  std::uint32_t consultation_diagnostic_id = 0U;
+  std::uint32_t mutation_diagnostic_id = 0U;
 
   explicit operator bool() const noexcept {
     return status == CppCutePreprocessorPolicyInstallStatus::kInstalled &&

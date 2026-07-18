@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -51,6 +52,34 @@ function cppString(value) {
   return JSON.stringify(value);
 }
 
+/** @param {unknown} value */
+function canonicalJson(value) {
+  if (value === null || typeof value === "boolean" || typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || Object.is(value, -0)) {
+      throw new TypeError("diagnostic policy contains a noncanonical number");
+    }
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  const object = record(value, "$canonical");
+  const keys = Object.keys(object).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(",")}}`;
+}
+
+/** @param {unknown} body */
+function diagnosticManifestId(body) {
+  const canonical = canonicalJson({
+    domain: "browsergrad.compiler.cpp-cute.diagnostic-normalization-manifest-id.v1",
+    body,
+  });
+  return `bg.cpp.diagnostic-normalization.sha256.${createHash("sha256").update(canonical).digest("hex")}`;
+}
+
 const STAGES = new Map([
   ["preprocessor", ["kPreprocessor", "kPreprocessing", "kPreprocessing"]],
   ["parser", ["kParser", "kParsing", "kParsing"]],
@@ -73,6 +102,8 @@ const CUSTOM_CODES = new Map([
   ["browsergrad.cpp-cute:temporal-macro-mutation-forbidden", "kTemporalMacroMutationForbidden"],
   ["browsergrad.cpp-cute:diagnostic-resource-limit", "kDiagnosticResourceLimit"],
   ["browsergrad.cpp-cute:diagnostic-normalization-failed", "kDiagnosticNormalizationFailed"],
+  ["browsergrad.cpp-cute:semantic-extraction-failed", "kSemanticExtractionFailed"],
+  ["browsergrad.cpp-cute:host-device-surface-divergence", "kHostDeviceSurfaceDivergence"],
 ]);
 const CATEGORIES = new Map([
   ["preprocessing", "kPreprocessing"],
@@ -95,7 +126,17 @@ const CATEGORIES = new Map([
  */
 export function renderCppCuteDiagnosticsPolicyInclude(normalization) {
   const root = record(normalization, "$normalization");
+  exact(root.schema, "browsergrad.compiler.cpp-cute.diagnostic-normalization", "$normalization.schema");
+  exact(root.version, { major: 1, minor: 0 }, "$normalization.version");
   const body = record(root.body, "$normalization.body");
+  exact(root.manifestId, diagnosticManifestId(body), "$normalization.manifestId");
+  exact(body.policyId, "browsergrad.compiler.cpp-cute.clang-diagnostic-normalization@1", "$normalization.body.policyId");
+  exact(body.artifactBinding, {
+    schema: "browsergrad.compiler.cpp-cute.frontend-artifact",
+    major: 3,
+    diagnosticShape: "browsergrad.compiler.cpp-cute.frontend-diagnostic@3",
+    fixItsRepresented: false,
+  }, "$normalization.body.artifactBinding");
   const clang = record(body.clang, "$normalization.body.clang");
   exact(clang, { compilerId: "clang", version: "22.1.8" }, "$normalization.body.clang");
   const classification = record(body.classification, "$normalization.body.classification");

@@ -1,5 +1,7 @@
 #include "BrowserGradCppCuteInvocation.h"
 
+#include "BrowserGradCppCuteVirtualPath.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -15,7 +17,6 @@ namespace {
 constexpr std::string_view kCanonicalArgv0 = "clang++";
 constexpr std::string_view kPinnedClangVersion = "22.1.8";
 constexpr std::string_view kCudaDeviceTriple = "nvptx64-nvidia-cuda";
-constexpr std::size_t kMaximumVirtualPathByteLength = 4'096U;
 constexpr std::size_t kMaximumIncludeRootCount = 256U;
 constexpr std::uint32_t kMaximumCompilerOptionCount = 4'096U;
 constexpr std::uint32_t kMaximumErrorLimit = 999'999U;
@@ -60,79 +61,6 @@ bool is_ascii_lower(unsigned char value) noexcept {
          value <= static_cast<unsigned char>('z');
 }
 
-bool valid_utf8(std::string_view value) noexcept {
-  std::size_t index = 0U;
-  while (index < value.size()) {
-    const auto first = static_cast<unsigned char>(value[index]);
-    if (first <= 0x7fU) {
-      ++index;
-      continue;
-    }
-    const auto continuation = [&value](std::size_t at) {
-      return at < value.size() &&
-             (static_cast<unsigned char>(value[at]) & 0xc0U) == 0x80U;
-    };
-    if (first >= 0xc2U && first <= 0xdfU) {
-      if (!continuation(index + 1U)) return false;
-      index += 2U;
-      continue;
-    }
-    if (first >= 0xe0U && first <= 0xefU) {
-      if (index + 2U >= value.size() || !continuation(index + 1U) ||
-          !continuation(index + 2U)) {
-        return false;
-      }
-      const auto second = static_cast<unsigned char>(value[index + 1U]);
-      if ((first == 0xe0U && second < 0xa0U) ||
-          (first == 0xedU && second >= 0xa0U)) {
-        return false;
-      }
-      index += 3U;
-      continue;
-    }
-    if (first >= 0xf0U && first <= 0xf4U) {
-      if (index + 3U >= value.size() || !continuation(index + 1U) ||
-          !continuation(index + 2U) || !continuation(index + 3U)) {
-        return false;
-      }
-      const auto second = static_cast<unsigned char>(value[index + 1U]);
-      if ((first == 0xf0U && second < 0x90U) ||
-          (first == 0xf4U && second >= 0x90U)) {
-        return false;
-      }
-      index += 4U;
-      continue;
-    }
-    return false;
-  }
-  return true;
-}
-
-bool valid_canonical_virtual_path(std::string_view path) noexcept {
-  if (path.empty() || path.size() > kMaximumVirtualPathByteLength ||
-      path.front() != '/' || !valid_utf8(path) ||
-      (path.size() > 1U && path.back() == '/')) {
-    return false;
-  }
-  if (path == "/") return true;
-
-  std::size_t segment_begin = 1U;
-  for (std::size_t index = 1U; index <= path.size(); ++index) {
-    if (index < path.size()) {
-      const auto byte = static_cast<unsigned char>(path[index]);
-      if (byte == '\\' || byte == 0U || byte < 0x20U || byte == 0x7fU) {
-        return false;
-      }
-      if (byte != '/') continue;
-    }
-    const std::string_view segment =
-        path.substr(segment_begin, index - segment_begin);
-    if (segment.empty() || segment == "." || segment == "..") return false;
-    segment_begin = index + 1U;
-  }
-  return true;
-}
-
 bool valid_identifier(std::string_view value) noexcept {
   if (value.empty() || value.size() > 128U ||
       !is_ascii_lower(static_cast<unsigned char>(value.front()))) {
@@ -171,15 +99,6 @@ bool valid_device_architecture(std::string_view value) noexcept {
   }
   return value.size() == 5U ||
          (value[5] >= 'a' && value[5] <= 'z');
-}
-
-bool virtual_path_contains(std::string_view root,
-                           std::string_view candidate) noexcept {
-  return root == "/" ? candidate.starts_with('/')
-                     : candidate == root ||
-                           (candidate.size() > root.size() &&
-                            candidate.starts_with(root) &&
-                            candidate[root.size()] == '/');
 }
 
 MaterializedCppCuteInvocation reject(
@@ -260,7 +179,7 @@ MaterializedCppCuteInvocation materialize_cpp_cute_invocation(
     return reject(InvocationMaterializationStatus::kWrongClangVersion,
                   InvocationErrorField::kClangVersion);
   }
-  if (!valid_canonical_virtual_path(input.main_source_virtual_path) ||
+  if (!cpp_cute_valid_canonical_virtual_path(input.main_source_virtual_path) ||
       input.main_source_virtual_path == "/") {
     return reject(InvocationMaterializationStatus::kInvalidMainSourcePath,
                   InvocationErrorField::kMainSource);
@@ -312,12 +231,12 @@ MaterializedCppCuteInvocation materialize_cpp_cute_invocation(
         InvocationMaterializationStatus::kInvalidDeviceArchitecture,
         InvocationErrorField::kSemanticPass);
   }
-  if (!valid_canonical_virtual_path(
+  if (!cpp_cute_valid_canonical_virtual_path(
           input.resource_directory_virtual_path) ||
       input.resource_directory_virtual_path == "/" ||
       input.resource_directory_virtual_path.size() +
               std::string_view("/include").size() >
-          kMaximumVirtualPathByteLength) {
+          kCppCuteMaximumVirtualPathByteLength) {
     return reject(
         InvocationMaterializationStatus::kInvalidResourceDirectoryPath,
         InvocationErrorField::kResourceDirectory);
@@ -356,7 +275,7 @@ MaterializedCppCuteInvocation materialize_cpp_cute_invocation(
       return reject(InvocationMaterializationStatus::kInvalidIncludeRootMode,
                     InvocationErrorField::kIncludeRoot, index);
     }
-    if (!valid_canonical_virtual_path(root.virtual_path)) {
+    if (!cpp_cute_valid_canonical_virtual_path(root.virtual_path)) {
       return reject(InvocationMaterializationStatus::kInvalidIncludeRootPath,
                     InvocationErrorField::kIncludeRoot, index);
     }
@@ -380,8 +299,8 @@ MaterializedCppCuteInvocation materialize_cpp_cute_invocation(
       has_resource_include_root = true;
     }
     if (root.mode == InvocationIncludeMode::kQuote &&
-        virtual_path_contains(root.virtual_path,
-                              input.main_source_virtual_path)) {
+        cpp_cute_virtual_path_contains(root.virtual_path,
+                                       input.main_source_virtual_path)) {
       has_main_source_include_root = true;
     }
   }
@@ -473,15 +392,15 @@ MaterializedCppCuteInvocation materialize_cpp_cute_invocation(
           InvocationMaterializationStatus::kUnknownForcedIncludeRoot,
           InvocationErrorField::kCompilerOption, index);
     }
-    if (!valid_canonical_virtual_path(forced->virtual_path) ||
+    if (!cpp_cute_valid_canonical_virtual_path(forced->virtual_path) ||
         forced->virtual_path == "/") {
       return reject(
           InvocationMaterializationStatus::kInvalidForcedIncludePath,
           InvocationErrorField::kCompilerOption, index);
     }
     if (forced->virtual_path == root->second.virtual_path ||
-        !virtual_path_contains(root->second.virtual_path,
-                               forced->virtual_path)) {
+        !cpp_cute_virtual_path_contains(root->second.virtual_path,
+                                        forced->virtual_path)) {
       return reject(
           InvocationMaterializationStatus::kForcedIncludeOutsideRoot,
           InvocationErrorField::kCompilerOption, index);

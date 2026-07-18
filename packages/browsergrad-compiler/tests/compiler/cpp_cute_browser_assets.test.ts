@@ -76,12 +76,12 @@ describe("C++/CuTe browser-local asset manifest", () => {
       minor: CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR,
     });
     expect(fixture.input.manifestId).toBe(
-      "bg.cpp.browser-assets.sha256.53cc37e992b82605081f2fc88e390910902885225aa71dfd8a7e4e64bad153e5",
+      "bg.cpp.browser-assets.sha256.f7439c717971354554165fdf718ed3d8a6fd74e49dcbf9fedc5b7e4dc7e54f79",
     );
-    expect(first.assetSetSha256).toBe("a41ded9c203c54a2a92c41e4c910de358337d58eade294e91ef966e55e340b22");
-    expect(first.assetCount).toBe(8);
-    expect(first.manifestSha256).toBe("182980251cfa4cc96cb7af69c9dd7d3a831779c53c271e8fba6db86bab4e3e8c");
-    expect(first.manifestByteLength).toBe("10403");
+    expect(first.assetSetSha256).toBe("3f128683a9f4e5f15e2a5e3c3c0f0268c6ee2eb4548f92341baadad023b0ad61");
+    expect(first.assetCount).toBe(9);
+    expect(first.manifestSha256).toBe("93c1a14a7260c2462550150d251f2f43bcdfbccc224aa728948df8029aaafd79");
+    expect(first.manifestByteLength).toBe("11058");
     expect(Object.isFrozen(first)).toBe(true);
     const record = unwrapPreparedCppCuteBrowserAssetManifest(first);
     expect(record.profile).toBe(fixture.profile);
@@ -231,22 +231,24 @@ describe("C++/CuTe browser-local asset manifest", () => {
     const crossWired = cloneCppCuteBrowserAssetInput(fixture.input);
     const crossWiredRuntime = assets(crossWired).find((asset) => asset["kind"] === "runtime-abi-manifest");
     if (crossWiredRuntime === undefined) throw new Error("fixture lost runtime ABI");
+    const crossWiredRuntimeIndex = assets(crossWired).indexOf(crossWiredRuntime);
     crossWiredRuntime["runtimeAbiManifestId"] = `bg.cpp.browser-runtime-abi.sha256.${"0".repeat(64)}`;
     await expectAssetError(
       prepareCppCuteBrowserAssetManifest(crossWired, fixture.profile),
       "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-INVALID",
-      "$.body.assets[7].runtimeAbiManifestId",
+      `$.body.assets[${crossWiredRuntimeIndex}].runtimeAbiManifestId`,
     );
 
     const structuralLookalike = cloneCppCuteBrowserAssetInput(fixture.input);
     const structuralRuntime = assets(structuralLookalike).find((asset) =>
       asset["kind"] === "runtime-abi-manifest");
     if (structuralRuntime === undefined) throw new Error("fixture lost runtime ABI");
+    const structuralRuntimeIndex = assets(structuralLookalike).indexOf(structuralRuntime);
     delete structuralRuntime["runtimeAbiId"];
     await expectAssetError(
       prepareCppCuteBrowserAssetManifest(structuralLookalike, fixture.profile),
       "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-INVALID",
-      "$.body.assets[7]",
+      `$.body.assets[${structuralRuntimeIndex}]`,
     );
 
   });
@@ -279,7 +281,7 @@ describe("C++/CuTe browser-local asset manifest", () => {
     );
   });
 
-  it("requires sorted identities and accepts root virtual mount", async () => {
+  it("requires sorted identities and rejects a root compiler-resource mount", async () => {
     const fixture = await createCppCuteBrowserAssetFixture();
     const unsortedAssets = cloneCppCuteBrowserAssetInput(fixture.input);
     assets(unsortedAssets).reverse();
@@ -302,9 +304,11 @@ describe("C++/CuTe browser-local asset manifest", () => {
     const compilerRoot = roots.find((root) => root.owner.kind === "compiler-resource-directory");
     if (compilerRoot === undefined) throw new Error("fixture lost compiler root");
     (compilerRoot as { virtualPath: string }).virtualPath = "/";
-    const rootFixture = await createCppCuteBrowserAssetFixture({ profile: { includeRoots: roots } });
-    await expect(prepareCppCuteBrowserAssetManifest(rootFixture.input, rootFixture.profile)).resolves.toMatchObject({
-      assetCount: 8,
+    await expect(
+      createCppCuteBrowserAssetFixture({ profile: { includeRoots: roots } }),
+    ).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      path: "$.virtualFileSystem.includeRoots[1]",
     });
   });
 

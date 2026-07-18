@@ -33,6 +33,10 @@ import {
   cppCuteBrowserRuntimeAbiManifestResourceBytes,
 } from "../../src/cpp_cute_browser_runtime_abi.js";
 import {
+  CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256,
+  cppCuteDiagnosticNormalizationResourceBytes,
+} from "../../src/cpp_cute_diagnostic_normalization.js";
+import {
   cppCuteSemanticAdapterManifestResourceBytes,
 } from "../../src/cpp_cute_semantic_adapter_manifest.js";
 import {
@@ -895,6 +899,8 @@ async function createAuthorityFixture(
   const adapterBytes = cppCuteSemanticAdapterManifestResourceBytes();
   const wasmBytes = Uint8Array.of(4, 5, 6, 7);
   const runtimeAbiBytes = cppCuteBrowserRuntimeAbiManifestResourceBytes();
+  const diagnosticNormalizationBytes =
+    cppCuteDiagnosticNormalizationResourceBytes();
   const adapterSha256 = await sha256Hex(adapterBytes);
   const wasmSha256 = await sha256Hex(wasmBytes);
   (input.toolchain.compiler as { binarySha256: string }).binarySha256 = wasmSha256;
@@ -982,6 +988,19 @@ async function createAuthorityFixture(
       sourceAbiSha256,
     },
     {
+      assetId: "diagnostic-normalization",
+      kind: "diagnostic-normalization-manifest",
+      url: "/assets/diagnostic-normalization.json",
+      urlPolicy: "same-origin-root-relative",
+      sha256: CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256,
+      byteLength: wire(diagnosticNormalizationBytes.byteLength),
+      unpackedByteLength: wire(diagnosticNormalizationBytes.byteLength),
+      mediaType:
+        "application/vnd.browsergrad.cpp-cute.diagnostic-normalization.v1+json",
+      compression: "identity",
+      buildProvenanceId: PROVENANCE_ID,
+    },
+    {
       assetId: "runtime-abi",
       kind: "runtime-abi-manifest",
       url: "/assets/runtime-abi-manifest.json",
@@ -1044,6 +1063,8 @@ async function createAuthorityFixture(
   const bytesByUrl = new Map<string, Uint8Array>([
     [`${ORIGIN}/assets/adapter.json`, adapterBytes],
     [`${ORIGIN}/assets/clang.wasm`, wasmBytes],
+    [`${ORIGIN}/assets/diagnostic-normalization.json`,
+      diagnosticNormalizationBytes],
     [`${ORIGIN}/assets/runtime-abi-manifest.json`, runtimeAbiBytes],
   ]);
   for (const [rootId, pack] of packs) bytesByUrl.set(`${ORIGIN}/assets/${rootId}.bgvfs`, pack.bytes);

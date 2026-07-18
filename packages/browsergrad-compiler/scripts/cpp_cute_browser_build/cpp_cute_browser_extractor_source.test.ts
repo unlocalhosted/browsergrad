@@ -21,6 +21,8 @@ const extractorRoot = join(dirname(fileURLToPath(import.meta.url)), "extractor")
 const expectedSourcePaths = [
   "BrowserGradCppCuteArtifactV3.cpp",
   "BrowserGradCppCuteArtifactV3.h",
+  "BrowserGradCppCuteArtifactWriter.cpp",
+  "BrowserGradCppCuteArtifactWriter.h",
   "BrowserGradCppCuteCanonicalJson.cpp",
   "BrowserGradCppCuteCanonicalJson.h",
   "BrowserGradCppCuteClangAction.cpp",
@@ -28,17 +30,30 @@ const expectedSourcePaths = [
   "BrowserGradCppCuteCommandLine.cpp",
   "BrowserGradCppCuteCommandLine.h",
   "BrowserGradCppCuteCommandLinePolicy.inc",
+  "BrowserGradCppCuteCompilePlan.cpp",
+  "BrowserGradCppCuteCompilePlan.h",
+  "BrowserGradCppCuteCompileSession.cpp",
+  "BrowserGradCppCuteCompileSession.h",
+  "BrowserGradCppCuteDiagnostics.cpp",
+  "BrowserGradCppCuteDiagnostics.h",
+  "BrowserGradCppCuteDiagnosticsPolicy.inc",
   "BrowserGradCppCuteExtractor.cpp",
   "BrowserGradCppCuteImportedVfs.cpp",
   "BrowserGradCppCuteImportedVfs.h",
+  "BrowserGradCppCuteInvocation.cpp",
+  "BrowserGradCppCuteInvocation.h",
   "BrowserGradCppCuteMetrics.cpp",
   "BrowserGradCppCuteMetrics.h",
   "BrowserGradCppCutePreprocessorPolicy.cpp",
   "BrowserGradCppCutePreprocessorPolicy.h",
+  "BrowserGradCppCuteProducer.cpp",
+  "BrowserGradCppCuteProducer.h",
   "BrowserGradCppCuteRuntime.cpp",
   "BrowserGradCppCuteRuntime.h",
   "BrowserGradCppCuteSha256.cpp",
   "BrowserGradCppCuteSha256.h",
+  "BrowserGradCppCuteVirtualPath.cpp",
+  "BrowserGradCppCuteVirtualPath.h",
   "CMakeLists.txt",
 ] as const;
 
@@ -285,16 +300,23 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect(action).toContain("class LayoutTraceVisitor final");
     expect(action).toContain("class LayoutTraceAction final");
     expect(action).toContain("clang::tooling::ToolInvocation invocation");
-    expect(action).toContain("clang::FileManager files(file_system_options, imported_closed_vfs())");
+    expect(action).toContain("llvm::makeIntrusiveRefCnt<clang::FileManager>");
+    expect(action).toContain("imported_closed_vfs(observer)");
     expect(allSource).not.toMatch(
       /getRealFileSystem|createPhysicalFileSystem|std::ifstream|std::filesystem|\bfopen\(|\bfetch\(/u,
     );
   });
 
-  it("keeps artifact-v3 as a wired non-authoritative placeholder", async () => {
+  it("writes Artifact V3 only after the complete two-pass review", async () => {
     const artifact = await extractorSource("BrowserGradCppCuteArtifactV3.cpp");
-    expect(artifact).toContain("ReviewOnlyBlocker::kCudaDualPassUnavailable");
-    expect(artifact).toContain("WireCompileStatus::kInternalError");
+    const writer = await extractorSource("BrowserGradCppCuteArtifactWriter.cpp");
+    expect(artifact).toContain("run_cpp_cute_producer_review");
+    expect(artifact).toContain("write_cpp_cute_artifact_v3");
+    expect(artifact).toContain("WireCompileStatus::kArtifactReady");
     expect(artifact).not.toContain("run_layout_trace_for_review");
+    expect(writer).toContain("validate_canonical_json");
+    expect(writer.indexOf("validate_canonical_json")).toBeLessThan(
+      writer.indexOf("result_sink.allocate"),
+    );
   });
 });

@@ -31,7 +31,7 @@ BG_CPP_CUTE_EXPORT std::int32_t bg_cpp_cute_compile(
     std::uint32_t input_pointer, std::uint32_t input_length) {
   return browsergrad::cpp_cute::runtime_compile(
       input_pointer, input_length,
-      browsergrad::cpp_cute::build_artifact_v3_placeholder);
+      browsergrad::cpp_cute::build_artifact_v3);
 }
 
 BG_CPP_CUTE_EXPORT void bg_cpp_cute_free(std::uint32_t pointer,

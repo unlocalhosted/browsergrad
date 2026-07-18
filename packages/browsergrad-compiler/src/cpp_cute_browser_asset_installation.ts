@@ -26,6 +26,11 @@ import {
   type PreparedCppCuteSemanticAdapterManifest,
 } from "./cpp_cute_semantic_adapter_manifest.js";
 import {
+  CppCuteDiagnosticNormalizationError,
+  decodeCppCuteDiagnosticNormalization,
+  type PreparedCppCuteDiagnosticNormalization,
+} from "./cpp_cute_diagnostic_normalization.js";
+import {
   CppCuteBrowserVfsPackError,
   unwrapVerifiedCppCuteBrowserVfsPack,
   verifyCppCuteBrowserVfsPackAsset,
@@ -81,6 +86,8 @@ const ARRAY_BUFFER_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
 const VERIFIED_ASSET_SETS = new WeakMap<object, StoredVerifiedAssetSet>();
 const VERIFIED_RUNTIME_ABI_ASSETS = new WeakMap<object, StoredVerifiedRuntimeAbiAsset>();
 const VERIFIED_SEMANTIC_ADAPTER_ASSETS = new WeakMap<object, StoredVerifiedSemanticAdapterAsset>();
+const VERIFIED_DIAGNOSTIC_NORMALIZATION_ASSETS =
+  new WeakMap<object, StoredVerifiedDiagnosticNormalizationAsset>();
 const CACHE_ADMISSIONS = new WeakMap<object, StoredCacheAdmission>();
 const VFS_INSTALLATIONS = new WeakMap<object, StoredVfsInstallation>();
 
@@ -193,6 +200,34 @@ interface StoredVerifiedSemanticAdapterAsset {
   readonly record: VerifiedCppCuteBrowserSemanticAdapterAssetRecord;
 }
 
+declare const verifiedDiagnosticNormalizationAssetBrand: unique symbol;
+
+/** Strict-decoded diagnostic policy bound to one exact acquired asset set. */
+export interface VerifiedCppCuteBrowserDiagnosticNormalizationAsset {
+  readonly [verifiedDiagnosticNormalizationAssetBrand]: true;
+  readonly assetManifestId: string;
+  readonly assetSetSha256: string;
+  readonly assetId: string;
+  readonly diagnosticNormalizationManifestId: string;
+  readonly diagnosticNormalizationPolicyId: string;
+  readonly clangVersion: string;
+  readonly diagnosticNormalizationResourceSha256: string;
+  readonly diagnosticNormalizationResourceByteLength: WireU64;
+  readonly designAuthority: true;
+  readonly diagnosticNormalizationPerformed: false;
+  readonly workerExecutionReady: false;
+  readonly releaseReady: false;
+}
+
+export interface VerifiedCppCuteBrowserDiagnosticNormalizationAssetRecord {
+  readonly assetSet: VerifiedCppCuteBrowserAssetSet;
+  readonly diagnosticNormalization: PreparedCppCuteDiagnosticNormalization;
+}
+
+interface StoredVerifiedDiagnosticNormalizationAsset {
+  readonly record: VerifiedCppCuteBrowserDiagnosticNormalizationAssetRecord;
+}
+
 declare const cacheAdmissionBrand: unique symbol;
 
 /** Temporal proof that one cache adapter accepted copies of the exact set. */
@@ -268,6 +303,7 @@ export type CppCuteBrowserAssetInstallationErrorCode =
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-PACK-INVALID"
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-RUNTIME-ABI-INVALID"
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-SEMANTIC-ADAPTER-INVALID"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-DIAGNOSTIC-NORMALIZATION-INVALID"
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-MOUNT-COLLISION"
   | "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-UNVERIFIED";
 
@@ -569,6 +605,99 @@ export function unwrapVerifiedCppCuteBrowserSemanticAdapterAsset(
   if (typeof verified !== "object" || verified === null) unverified("$.semanticAdapter");
   const stored = VERIFIED_SEMANTIC_ADAPTER_ASSETS.get(verified as object);
   if (stored === undefined) unverified("$.semanticAdapter");
+  return stored.record;
+}
+
+/** Strict-decodes the acquired diagnostic policy before native codegen use. */
+export async function decodeAcquiredCppCuteBrowserDiagnosticNormalizationAsset(
+  assetSet: VerifiedCppCuteBrowserAssetSet,
+  options: CppCuteBrowserAssetOperationOptions = {},
+): Promise<VerifiedCppCuteBrowserDiagnosticNormalizationAsset> {
+  const signal = normalizeSignal(options.signal);
+  throwIfAborted(signal);
+  const stored = storedAssetSet(assetSet);
+  const entry = stored.assets.find(
+    (candidate) => candidate.asset.kind === "diagnostic-normalization-manifest",
+  );
+  if (entry?.asset.kind !== "diagnostic-normalization-manifest") {
+    invalid(
+      "$.diagnosticNormalization",
+      "verified asset set has no diagnostic-normalization manifest asset",
+    );
+  }
+  let diagnosticNormalization: PreparedCppCuteDiagnosticNormalization;
+  try {
+    diagnosticNormalization = await decodeCppCuteDiagnosticNormalization(
+      entry.bytes,
+      signal === undefined ? {} : { signal },
+    );
+  } catch (cause) {
+    if (isAborted(signal) || (
+      cause instanceof CppCuteDiagnosticNormalizationError &&
+      cause.code === "BG-COMPILER-CPP-CUTE-DIAGNOSTIC-NORMALIZATION-CANCELLED"
+    )) {
+      cancelled();
+    }
+    if (cause instanceof CppCuteDiagnosticNormalizationError) {
+      fail(
+        "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-DIAGNOSTIC-NORMALIZATION-INVALID",
+        "$.diagnosticNormalization",
+        "acquired diagnostic-normalization bytes failed strict canonical decoding",
+        { cause },
+      );
+    }
+    throw cause;
+  }
+  throwIfAborted(signal);
+  const manifestRecord = unwrapPreparedCppCuteBrowserAssetManifest(stored.manifest);
+  const profile = unwrapPreparedCppCuteBrowserFrontendProfile(manifestRecord.profile).profile;
+  if (
+    diagnosticNormalization.resourceSha256 !== entry.asset.sha256 ||
+    BigInt(diagnosticNormalization.resourceByteLength) !==
+      wireIntegerToBigInt(entry.asset.byteLength) ||
+    diagnosticNormalization.resourceSha256 !==
+      profile.language.diagnostics.normalizationManifestSha256
+  ) {
+    fail(
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-DIAGNOSTIC-NORMALIZATION-INVALID",
+      "$.diagnosticNormalization",
+      "decoded diagnostic-normalization authority differs from asset or profile binding",
+    );
+  }
+  const verified = Object.freeze({
+    assetManifestId: assetSet.manifestId,
+    assetSetSha256: assetSet.assetSetSha256,
+    assetId: entry.asset.assetId,
+    diagnosticNormalizationManifestId: diagnosticNormalization.manifestId,
+    diagnosticNormalizationPolicyId: diagnosticNormalization.policyId,
+    clangVersion: diagnosticNormalization.clangVersion,
+    diagnosticNormalizationResourceSha256: diagnosticNormalization.resourceSha256,
+    diagnosticNormalizationResourceByteLength: encodeWireU64(
+      BigInt(diagnosticNormalization.resourceByteLength),
+    ),
+    designAuthority: true,
+    diagnosticNormalizationPerformed: false,
+    workerExecutionReady: false,
+    releaseReady: false,
+  }) as VerifiedCppCuteBrowserDiagnosticNormalizationAsset;
+  const record = Object.freeze({ assetSet, diagnosticNormalization });
+  VERIFIED_DIAGNOSTIC_NORMALIZATION_ASSETS.set(
+    verified,
+    Object.freeze({ record }),
+  );
+  return verified;
+}
+
+export function unwrapVerifiedCppCuteBrowserDiagnosticNormalizationAsset(
+  verified: VerifiedCppCuteBrowserDiagnosticNormalizationAsset,
+): VerifiedCppCuteBrowserDiagnosticNormalizationAssetRecord {
+  if (typeof verified !== "object" || verified === null) {
+    unverified("$.diagnosticNormalization");
+  }
+  const stored = VERIFIED_DIAGNOSTIC_NORMALIZATION_ASSETS.get(
+    verified as object,
+  );
+  if (stored === undefined) unverified("$.diagnosticNormalization");
   return stored.record;
 }
 

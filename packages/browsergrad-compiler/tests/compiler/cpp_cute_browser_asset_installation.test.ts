@@ -10,15 +10,18 @@ import {
   copyVerifiedCppCuteBrowserAssetBytes,
   CppCuteBrowserAssetInstallationError,
   decodeAcquiredCppCuteBrowserRuntimeAbiAsset,
+  decodeAcquiredCppCuteBrowserDiagnosticNormalizationAsset,
   decodeAcquiredCppCuteBrowserSemanticAdapterAsset,
   installCppCuteBrowserVfs,
   loadCppCuteBrowserAssetSetFromCache,
   unwrapVerifiedCppCuteBrowserRuntimeAbiAsset,
+  unwrapVerifiedCppCuteBrowserDiagnosticNormalizationAsset,
   unwrapVerifiedCppCuteBrowserSemanticAdapterAsset,
   unwrapVerifiedCppCuteBrowserVfsInstallation,
   verifyTransferredCppCuteBrowserAssetSet,
   type CppCuteBrowserTransferredAssetInput,
   type VerifiedCppCuteBrowserRuntimeAbiAsset,
+  type VerifiedCppCuteBrowserDiagnosticNormalizationAsset,
   type VerifiedCppCuteBrowserSemanticAdapterAsset,
   type CppCuteBrowserContentCache,
   type CppCuteBrowserHostFetch,
@@ -42,6 +45,11 @@ import {
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
   cppCuteBrowserRuntimeAbiManifestResourceBytes,
 } from "../../src/cpp_cute_browser_runtime_abi.js";
+import {
+  CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_MANIFEST_ID,
+  CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256,
+  cppCuteDiagnosticNormalizationResourceBytes,
+} from "../../src/cpp_cute_diagnostic_normalization.js";
 import {
   CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_MANIFEST_ID,
   CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256,
@@ -139,6 +147,7 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
   }
 
   const adapterBytes = cppCuteSemanticAdapterManifestResourceBytes();
+  const diagnosticNormalizationBytes = cppCuteDiagnosticNormalizationResourceBytes();
   const wasmBytes = Uint8Array.of(4, 5, 6, 7);
   const runtimeAbiBytes = cppCuteBrowserRuntimeAbiManifestResourceBytes();
   const adapterSha256 = await sha256Hex(adapterBytes);
@@ -222,6 +231,18 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
       compression: "identity",
       buildProvenanceId: PROVENANCE_ID,
       sourceAbiSha256,
+    },
+    {
+      assetId: "diagnostic-normalization",
+      kind: "diagnostic-normalization-manifest",
+      url: "/assets/diagnostic-normalization.json",
+      urlPolicy: "same-origin-root-relative",
+      sha256: CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256,
+      byteLength: wire(diagnosticNormalizationBytes.byteLength),
+      unpackedByteLength: wire(diagnosticNormalizationBytes.byteLength),
+      mediaType: "application/vnd.browsergrad.cpp-cute.diagnostic-normalization.v1+json",
+      compression: "identity",
+      buildProvenanceId: PROVENANCE_ID,
     },
     {
       assetId: "runtime-abi",
@@ -312,6 +333,7 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
   const bytesByUrl = new Map<string, Uint8Array>([
     [`${ORIGIN}/assets/adapter.json`, adapterBytes],
     [`${ORIGIN}/assets/clang.wasm`, wasmBytes],
+    [`${ORIGIN}/assets/diagnostic-normalization.json`, diagnosticNormalizationBytes],
     [`${ORIGIN}/assets/runtime-abi-manifest.json`, runtimeAbiBytes],
   ]);
   for (const root of provisionalProfile.virtualFileSystem.includeRoots) {
@@ -362,6 +384,14 @@ describe("C++/CuTe browser asset acquisition and VFS installation", () => {
     expect(semanticAdapter).toMatchObject({
       designAuthority: true,
       clangInvocationAuthorized: false,
+      workerExecutionReady: false,
+      releaseReady: false,
+    });
+    const diagnosticNormalization =
+      await decodeAcquiredCppCuteBrowserDiagnosticNormalizationAsset(assetSet);
+    expect(diagnosticNormalization).toMatchObject({
+      designAuthority: true,
+      diagnosticNormalizationPerformed: false,
       workerExecutionReady: false,
       releaseReady: false,
     });
@@ -499,9 +529,14 @@ describe("C++/CuTe browser asset acquisition and VFS installation", () => {
 
     const installation = await installCppCuteBrowserVfs(assetSet);
     const record = unwrapVerifiedCppCuteBrowserVfsInstallation(installation);
+    const expectedPackCount = unwrapPreparedCppCuteBrowserAssetManifest(
+      environment.manifest,
+    ).manifest.body.assets.filter((asset) =>
+      asset.kind === "compiler-resource-pack" ||
+      asset.kind === "dependency-header-pack").length;
     expect(installation.packCount).toBe(record.mounts.length);
     expect(installation.fileCount).toBe(record.files.length);
-    expect(record.mounts).toHaveLength(environment.bytesByUrl.size - 3);
+    expect(record.mounts).toHaveLength(expectedPackCount);
     expect(new Set(record.files.map((entry) => entry.virtualPath)).size).toBe(record.files.length);
     const onePackCopy = record.mounts.reduce((total, mount) => total + BigInt(mount.pack.packByteLength), 0n);
     expect(BigInt(installation.sourcePackByteLength)).toBe(onePackCopy);
@@ -560,9 +595,44 @@ describe("C++/CuTe browser asset acquisition and VFS installation", () => {
       code: "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-UNVERIFIED",
       path: "$.semanticAdapter",
     }));
+
+    const diagnosticNormalization =
+      await decodeAcquiredCppCuteBrowserDiagnosticNormalizationAsset(assetSet);
+    expect(diagnosticNormalization).toMatchObject({
+      assetManifestId: assetSet.manifestId,
+      assetSetSha256: assetSet.assetSetSha256,
+      assetId: "diagnostic-normalization",
+      diagnosticNormalizationManifestId:
+        CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_MANIFEST_ID,
+      diagnosticNormalizationPolicyId:
+        "browsergrad.compiler.cpp-cute.clang-diagnostic-normalization@1",
+      clangVersion: "22.1.8",
+      diagnosticNormalizationResourceSha256:
+        CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256,
+      diagnosticNormalizationResourceByteLength: String(
+        cppCuteDiagnosticNormalizationResourceBytes().byteLength,
+      ),
+      designAuthority: true,
+      diagnosticNormalizationPerformed: false,
+      workerExecutionReady: false,
+      releaseReady: false,
+    });
+    expect(
+      unwrapVerifiedCppCuteBrowserDiagnosticNormalizationAsset(
+        diagnosticNormalization,
+      ).assetSet,
+    ).toBe(assetSet);
+    expect(() => unwrapVerifiedCppCuteBrowserDiagnosticNormalizationAsset({
+      ...diagnosticNormalization,
+    } as VerifiedCppCuteBrowserDiagnosticNormalizationAsset)).toThrowError(
+      expect.objectContaining({
+        code: "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-UNVERIFIED",
+        path: "$.diagnosticNormalization",
+      }),
+    );
   });
 
-  it("fails closed on invalid acquired semantic policy and preserves cancellation", async () => {
+  it("fails closed on invalid acquired policies and preserves cancellation", async () => {
     const environment = await createEnvironment();
     const assetSet = await acquireCppCuteBrowserAssetSet(
       environment.manifest,
@@ -577,6 +647,11 @@ describe("C++/CuTe browser asset acquisition and VFS installation", () => {
         "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-SEMANTIC-ADAPTER-INVALID",
         "$.semanticAdapter",
       );
+      await expectIoError(
+        decodeAcquiredCppCuteBrowserDiagnosticNormalizationAsset(assetSet),
+        "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-DIAGNOSTIC-NORMALIZATION-INVALID",
+        "$.diagnosticNormalization",
+      );
     } finally {
       if (cryptoDescriptor === undefined) delete (globalThis as { crypto?: Crypto }).crypto;
       else Object.defineProperty(globalThis, "crypto", cryptoDescriptor);
@@ -589,6 +664,18 @@ describe("C++/CuTe browser asset acquisition and VFS installation", () => {
     controller.abort();
     await expectIoError(
       pending,
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-CANCELLED",
+      "$.signal",
+    );
+
+    const diagnosticController = new AbortController();
+    const diagnosticPending =
+      decodeAcquiredCppCuteBrowserDiagnosticNormalizationAsset(assetSet, {
+        signal: diagnosticController.signal,
+      });
+    diagnosticController.abort();
+    await expectIoError(
+      diagnosticPending,
       "BG-COMPILER-CPP-CUTE-BROWSER-ASSET-IO-CANCELLED",
       "$.signal",
     );

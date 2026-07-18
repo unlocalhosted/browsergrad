@@ -21,6 +21,11 @@ const commandLineSource = join(
   "extractor",
   "BrowserGradCppCuteCommandLine.cpp",
 );
+const virtualPathSource = join(
+  scriptRoot,
+  "extractor",
+  "BrowserGradCppCuteVirtualPath.cpp",
+);
 const compiler = [
   "/usr/bin/clang++",
   "/usr/bin/c++",
@@ -44,6 +49,7 @@ function compileAndRun(extraFlags: readonly string[]): void {
       nativeSource,
       invocationSource,
       commandLineSource,
+      virtualPathSource,
       "-o",
       executable,
     ], {

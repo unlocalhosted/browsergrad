@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -14,6 +14,12 @@ import { describe, expect, it } from "vitest";
 
 import { assembleCppCuteBrowserInputFrameRegions } from "../../src/cpp_cute_browser_input_frame.js";
 import {
+  decodeCppCuteFrontendArtifact,
+  unwrapVerifiedCppCuteFrontendArtifact,
+  unwrapVerifiedCppCuteFrontendArtifactResource,
+} from "../../src/cpp_cute_frontend_artifact.js";
+import { prepareCppCuteFrontendRequestBinding } from "../../src/cpp_cute_frontend_request_binding.js";
+import {
   deriveCppCuteFrontendEntryRequestId,
   deriveCppCuteFrontendRequestHash,
   deriveCppCuteFrontendSourceFileId,
@@ -25,6 +31,7 @@ import {
   type CppCuteFrontendRequestSourceFileV1,
   type CppCuteFrontendRequestV1,
   type CppCuteFrontendSourceSnapshotInput,
+  type PreparedCppCuteFrontendRequest,
 } from "../../src/cpp_cute_frontend_request.js";
 import {
   prepareCppCuteFrontendProfile,
@@ -59,6 +66,7 @@ interface GoldenFixture {
   readonly profileHash: string;
   readonly compilationContractHash: string;
   readonly requestHash: string;
+  readonly preparedRequest: PreparedCppCuteFrontendRequest;
 }
 
 async function goldenFixture(): Promise<GoldenFixture> {
@@ -131,6 +139,7 @@ async function goldenFixture(): Promise<GoldenFixture> {
     profileHash: preparedProfile.profileHash,
     compilationContractHash: preparedProfile.compilationContractHash,
     requestHash: preparedRequest.requestHash,
+    preparedRequest,
   };
 }
 
@@ -207,6 +216,18 @@ async function cases(): Promise<readonly {
   const compilerDrift = structuredClone(fixture.profile) as unknown as Record<string, unknown>;
   (((compilerDrift["toolchain"] as Record<string, unknown>)["compiler"] as Record<string, unknown>))["version"] =
     "22.1.9";
+  const compilerResourcePathDrift = structuredClone(fixture.profile) as unknown as Record<string, unknown>;
+  (((compilerResourcePathDrift["toolchain"] as Record<string, unknown>)["compiler"] as Record<string, unknown>))[
+    "resourceDirectoryVirtualPath"
+  ] = "/";
+  const compilerResourceRootDrift = structuredClone(fixture.profile) as unknown as Record<string, unknown>;
+  const resourceRoots = (
+    (compilerResourceRootDrift["virtualFileSystem"] as Record<string, unknown>)["includeRoots"]
+  ) as Record<string, unknown>[];
+  const compilerResourceRoot = resourceRoots.find((root) =>
+    (root["owner"] as Record<string, unknown>)["kind"] === "compiler-resource-directory");
+  if (compilerResourceRoot === undefined) throw new Error("fixture lost compiler resource root");
+  compilerResourceRoot["virtualPath"] = "/toolchain/clang/include";
   const runtimeDrift = structuredClone(fixture.profile) as unknown as Record<string, unknown>;
   const runtimeDeployment = runtimeDrift["deployment"] as Record<string, unknown>;
   ((runtimeDeployment["compilerRuntime"] as Record<string, unknown>))["runtimeAbiManifestSha256"] =
@@ -233,6 +254,16 @@ async function cases(): Promise<readonly {
     { name: "widened-limit", status: "resource", bytes: frame(fixture.profile, widened, fixture.snapshots) },
     { name: "contract-drift", status: "invalid", bytes: frame(fixture.profile, contractDrift, fixture.snapshots) },
     { name: "compiler-drift", status: "abi", bytes: frame(compilerDrift, fixture.request, fixture.snapshots) },
+    { name: "compiler-resource-path", status: "invalid", bytes: frame(
+      compilerResourcePathDrift,
+      fixture.request,
+      fixture.snapshots,
+    ) },
+    { name: "compiler-resource-root", status: "invalid", bytes: frame(
+      compilerResourceRootDrift,
+      fixture.request,
+      fixture.snapshots,
+    ) },
     { name: "runtime-drift", status: "abi", bytes: frame(runtimeDrift, fixture.request, fixture.snapshots) },
     { name: "diagnostic-drift", status: "abi", bytes: frame(diagnosticDrift, fixture.request, fixture.snapshots) },
     { name: "closed-schema", status: "invalid", bytes: frame(fixture.profile, unknown, fixture.snapshots) },
@@ -251,8 +282,15 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
       "-fno-omit-frame-pointer", ...extraFlags,
       nativeSource,
       join(extractorRoot, "BrowserGradCppCuteCompileSession.cpp"),
+      join(extractorRoot, "BrowserGradCppCuteCompilePlan.cpp"),
+      join(extractorRoot, "BrowserGradCppCuteArtifactV3.cpp"),
+      join(extractorRoot, "BrowserGradCppCuteArtifactWriter.cpp"),
+      join(extractorRoot, "BrowserGradCppCuteDiagnostics.cpp"),
+      join(extractorRoot, "BrowserGradCppCuteInvocation.cpp"),
+      join(extractorRoot, "BrowserGradCppCuteCommandLine.cpp"),
       join(extractorRoot, "BrowserGradCppCuteCanonicalJson.cpp"),
       join(extractorRoot, "BrowserGradCppCuteSha256.cpp"),
+      join(extractorRoot, "BrowserGradCppCuteVirtualPath.cpp"),
       "-I", scriptRoot,
       "-o", executable,
     ], { encoding: "utf8", timeout: 60_000 });
@@ -261,9 +299,12 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
 
     for (const testCase of testCases) {
       const fixturePath = join(workingDirectory, `${testCase.name}.frame`);
+      const artifactPath = join(workingDirectory, `${testCase.name}.artifact.json`);
       writeFileSync(fixturePath, testCase.bytes);
       const execution = spawnSync(executable, [
         fixturePath,
+        artifactPath,
+        "success",
         testCase.status,
         fixture.profileHash,
         fixture.compilationContractHash,
@@ -281,6 +322,72 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
       expect(execution.status,
         `${testCase.name}: signal=${execution.signal ?? "none"}\n${execution.stdout}\n${execution.stderr}`,
       ).toBe(0);
+      if (testCase.status === "ready") {
+        const resource = await decodeCppCuteFrontendArtifact(readFileSync(artifactPath));
+        const binding = await prepareCppCuteFrontendRequestBinding(
+          fixture.preparedRequest,
+          resource,
+        );
+        expect(binding.outcome).toBe("accepted");
+        expect(binding.requestId).toBe(fixture.request.requestId);
+        expect(binding.inputClosureSha256).toMatch(/^[0-9a-f]{64}$/u);
+        for (const producerMode of ["semantic-failure", "surface-divergence"] as const) {
+          const rejectedArtifactPath = join(workingDirectory, `${producerMode}.artifact.json`);
+          const rejectedExecution = spawnSync(executable, [
+            fixturePath,
+            rejectedArtifactPath,
+            producerMode,
+            testCase.status,
+            fixture.profileHash,
+            fixture.compilationContractHash,
+            fixture.requestHash,
+          ], { encoding: "utf8", timeout: 30_000 });
+          expect(rejectedExecution.error).toBeUndefined();
+          expect(rejectedExecution.status,
+            `${producerMode}: signal=${rejectedExecution.signal ?? "none"}\n${rejectedExecution.stdout}\n${rejectedExecution.stderr}`,
+          ).toBe(0);
+          const rejectedResource = await decodeCppCuteFrontendArtifact(
+            readFileSync(rejectedArtifactPath),
+          );
+          const rejectedBinding = await prepareCppCuteFrontendRequestBinding(
+            fixture.preparedRequest,
+            rejectedResource,
+          );
+          expect(rejectedBinding.outcome).toBe("rejected");
+          const rejectedArtifact = unwrapVerifiedCppCuteFrontendArtifact(
+            unwrapVerifiedCppCuteFrontendArtifactResource(rejectedResource),
+          ).envelope;
+          expect(rejectedArtifact.payload.outcome.kind).toBe("rejected");
+          expect(rejectedArtifact.payload.diagnostics).toHaveLength(1);
+          expect(rejectedArtifact.payload.diagnostics[0]?.code).toBe(
+            producerMode === "semantic-failure"
+              ? "browsergrad.cpp-cute:semantic-extraction-failed"
+              : "browsergrad.cpp-cute:host-device-surface-divergence",
+          );
+          expect(rejectedArtifact.payload.semanticPasses.map((pass) => pass.status)).toEqual(
+            producerMode === "semantic-failure"
+              ? ["failed", "not-run"]
+              : ["succeeded", "failed"],
+          );
+        }
+        for (const producerMode of ["layout-drift", "content-drift", "invalid-utf8"] as const) {
+          const hostileArtifactPath = join(workingDirectory, `${producerMode}.artifact.json`);
+          const hostile = spawnSync(executable, [
+            fixturePath,
+            hostileArtifactPath,
+            producerMode,
+            testCase.status,
+            fixture.profileHash,
+            fixture.compilationContractHash,
+            fixture.requestHash,
+          ], { encoding: "utf8", timeout: 30_000 });
+          expect(hostile.error).toBeUndefined();
+          expect(hostile.status,
+            `${producerMode}: signal=${hostile.signal ?? "none"}\n${hostile.stdout}\n${hostile.stderr}`,
+          ).toBe(0);
+          expect(existsSync(hostileArtifactPath)).toBe(false);
+        }
+      }
     }
   } finally {
     rmSync(workingDirectory, { recursive: true, force: true });

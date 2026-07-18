@@ -21,6 +21,13 @@ import {
 } from "./support/cpp_cute_frontend_fixtures.js";
 
 describe("C++/CuTe closed compiler policy", () => {
+  function requiredFrontendOptions(input: Record<string, unknown>): unknown[] {
+    const language = input["language"] as Record<string, unknown>;
+    return ((language["options"] as Record<string, unknown>[])
+      .filter((option) => option["kind"] === "frontend-option")
+      .map((option) => structuredClone(option)));
+  }
+
   it("binds temporal and diagnostic policy selections into the compilation contract", async () => {
     const prepared = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
     const contract = unwrapPreparedCppCuteFrontendProfile(prepared).compilationContract;
@@ -136,17 +143,24 @@ describe("C++/CuTe closed compiler policy", () => {
     for (const mapping of CPP_CUTE_FRONTEND_WARNING_POLICY_MAPPINGS) {
       for (const disposition of dispositions) {
         const input = cloneCppCuteProfileInput();
-        (input["language"] as Record<string, unknown>)["options"] = [{
-          kind: "warning-policy",
-          id: mapping.policyId,
-          disposition,
-        }];
+        const mandatory = requiredFrontendOptions(input);
+        (input["language"] as Record<string, unknown>)["options"] = [
+          ...mandatory,
+          {
+            kind: "warning-policy",
+            id: mapping.policyId,
+            disposition,
+          },
+        ];
         const prepared = await prepareCppCuteFrontendProfile(input);
-        expect(unwrapPreparedCppCuteFrontendProfile(prepared).profile.language.options).toEqual([{
-          kind: "warning-policy",
-          id: mapping.policyId,
-          disposition,
-        }]);
+        expect(unwrapPreparedCppCuteFrontendProfile(prepared).profile.language.options).toEqual([
+          ...mandatory,
+          {
+            kind: "warning-policy",
+            id: mapping.policyId,
+            disposition,
+          },
+        ]);
 
         const group = mapping.clangDiagnosticGroup;
         const expected = disposition === "ignore"
@@ -172,14 +186,20 @@ describe("C++/CuTe closed compiler policy", () => {
 
   it("preserves warning order and hashes policy semantics, not deployment", async () => {
     const ordered = cloneCppCuteProfileInput();
+    const mandatory = requiredFrontendOptions(ordered);
     (ordered["language"] as Record<string, unknown>)["options"] = [
+      ...mandatory,
       { kind: "warning-policy", id: "clang.unused-variable", disposition: "error" },
       { kind: "warning-policy", id: "clang.sign-compare", disposition: "warn" },
     ];
     const first = await prepareCppCuteFrontendProfile(ordered);
 
     const reversed = structuredClone(ordered) as typeof ordered;
-    ((reversed["language"] as Record<string, unknown>)["options"] as unknown[]).reverse();
+    const reversedOptions =
+      (reversed["language"] as Record<string, unknown>)["options"] as unknown[];
+    const firstWarning = reversedOptions[mandatory.length];
+    reversedOptions[mandatory.length] = reversedOptions[mandatory.length + 1];
+    reversedOptions[mandatory.length + 1] = firstWarning;
     const second = await prepareCppCuteFrontendProfile(reversed);
     expect(second.compilationContractHash).not.toBe(first.compilationContractHash);
 
