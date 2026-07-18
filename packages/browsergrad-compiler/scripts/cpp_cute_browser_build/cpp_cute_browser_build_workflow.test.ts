@@ -50,11 +50,17 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("dst=/browsergrad/inputs/build-${BG_CLANG_BUILD_ORDINAL},readonly");
   });
 
-  it("runs two clean paths and verifies their bounded downloaded artifacts", () => {
-    expect(workflow).toContain("buildOrdinal: [1, 2]");
+  it("separates one-build validation from two-build reproducibility", () => {
+    expect(workflow).toContain("default: validation");
+    expect(workflow).toContain("- validation");
+    expect(workflow).toContain("- reproducibility");
+    expect(workflow).toContain(
+      "buildOrdinal: ${{ fromJSON(inputs.mode == 'reproducibility' && '[1,2]' || '[1]') }}",
+    );
     expect(workflow).toContain("work/build-${BG_CLANG_BUILD_ORDINAL}");
     expect(workflow).toContain("inputs/build-${BG_CLANG_BUILD_ORDINAL}");
     expect(workflow).toContain("needs: build");
+    expect(workflow).toContain("if: ${{ inputs.mode == 'reproducibility' }}");
     expect(workflow).toContain("cpp_cute_browser_build_reproducibility.mjs");
     expect(workflow).toContain("cpp_cute_browser_wasm_review.mjs");
     expect(workflow).toContain("--first-root=\"${BG_CLANG_REPRO_ROOT}/first\"");
