@@ -67,6 +67,7 @@ jobs:
             "clang-22=${bg_llvm_package_version}" \
             "libclang-22-dev=${bg_llvm_package_version}" \
             "libclang-cpp22-dev=${bg_llvm_package_version}" \
+            "libclang-rt-22-dev=${bg_llvm_package_version}" \
             "llvm-22-dev=${bg_llvm_package_version}"
           bg_llvm_config="/usr/lib/llvm-22/bin/llvm-config"
           test -x "${bg_llvm_config}"

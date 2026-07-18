@@ -83,6 +83,7 @@ describe("Clang-Wasm evidence workflow", () => {
 
   it("requires the exact native Clang version used by the locked source", () => {
     expect(ciWorkflow).toContain("llvm-toolchain-noble-22");
+    expect(ciWorkflow).toContain("libclang-rt-22-dev");
     expect(ciWorkflow).toContain("/usr/lib/llvm-22/bin/llvm-config");
     expect(ciWorkflow).toContain("--version)\" = \"22.1.8\"");
     expect(ciWorkflow).toContain(
