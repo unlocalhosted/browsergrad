@@ -2,11 +2,11 @@
 
 - **Normative source:**
   [`docs/platform/package-requirements-lld.md`](../platform/package-requirements-lld.md)
-- **Ledger status:** paused
-- **Last updated:** 2026-07-17
-- **Paused handover:**
+- **Ledger status:** active
+- **Last updated:** 2026-07-18
+- **Historical handover:**
   [`package-requirements-handover-2026-07-17.md`](./package-requirements-handover-2026-07-17.md)
-- **Current implementation slice:** Gate 3 typed compile-session and sealed Clang-WASM producer integration (paused)
+- **Current implementation slice:** Gate 3 pinned Clang-Wasm build, reproducibility, ABI review, and Worker-bundle integration
 
 **Runtime boundary:** the portable product runs the Clang/extractor as Wasm in
 a browser Worker, then executes verified semantics through CPU or WebGPU. It
@@ -40,7 +40,7 @@ test does not make a gate verified unless every exit criterion is covered.
 | Gate 0 — freeze and inventory | `verified` | Workspace direction and all six legacy adapters are machine-frozen. Stable diagnostic/capability/backend/requirement vocabularies are separated. Compiler pointer/scalar, runtime requirements, Grad behavior, and the exact JIT 36-constructor-call/39-operation matrix have pinned inventories and executable contracts. | None. Any baseline change requires the accepted-ADR exception path. | Architecture check; 945 compiler tests; 125 runtime tests; blocking Grad contract; 5-case JIT Gate 0 contract and full JIT integration. |
 | Gate 1 — value/layout core and wire foundation | `verified` | Semantic-core `0.1.0` implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None. The separate packed/release-tested `0.x` transition required by D-004 is also complete locally; registry publication remains a release operation, not a Gate 1 criterion. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check; packed-tarball gate. |
 | Gate 2 — multi-frontend, multi-backend view slice | `verified` | Semantic-core `0.2.0` owns verified view-copy meaning, shared specialization, and the sole canonical frontend construction sink. Kernels `0.2.0` passes the full nine-case CPU/actual-WebGPU bit-exact matrix. Compiler L1 preserves its six-case non-padded contract; sibling L2 binds the exact verified operation and proves rank-2/rank-3 guarded padding through CPU, structured IR, WGSL, and actual WebGPU. JIT `0.9.0` emits a closed typed permutation request and executes the same canonical operation through materializing/resident production routes without recovering semantic args from the frozen plan. All strict lanes passed from one clean detached worktree at exact source revision `aa605421410e9d4190d8939c24b1057731111231`. | None for the initial Gate 2 profile. Release CI must repeat the exact-source lanes before publication; registry publication is a separate release operation. | Exact clean-source Apple Metal 3 records: compiler L2 3 cases, compiler L1 6 cases, kernels 9 cases, and JIT 2 cases; compiler `verify:compiler` passed 35 files/1004 tests; release package gate passed 19 hostile-archive and 35 Node security tests plus packed/fresh consumers; combined publish guards accepted only exact L1/L2/JIT/kernels markers. |
-| Gate 3 — real C++/CuTe frontend slice | `in-progress` | Browser-local Clang-WASM remains the primary portable-product producer. The canonical runtime ABI, asset/build binding, bounded raw-Wasm inspector, LibTooling tracer source/build integration, offline header-pack assembly, Worker-owned VFS, canonical input frame, artifact/decode contract, source-level imported-VFS adapter, ABI 1.1 allocator producer, and closed Clang 22.1.8 semantic-policy authority exist as bounded components. The host now materializes one closed, resource-bounded transfer containing canonical invocation/profile/request/manifest regions plus exact asset and source buffers. The package Worker entry consumes that exact message shape once, reconstructs and adopts realm-local authority, and emits one typed success-or-failure terminal outcome. The C++ runtime owns a single bounded immutable result allocation and remains fail-closed. Production remains capability-blocked before Worker creation because no independently reviewed self-contained Worker/factory bytes or real Clang-Wasm build exist. Native policy materialization, temporal-macro callbacks, and pass-scoped VFS observation are source-closed but not wired into the review-only Clang action. The producer remains a placeholder until strict compile-session decode, sealed device-first/host-second invocation, diagnostic normalization, and the artifact-v3 writer exist. Header licensing, build execution, output identity, ABI conformance, reproducibility, provenance, browser-local C++ execution, and release authority remain false. Docker/native stays outside the portable runtime graph. | Execute the pinned build and prove final allocator call graph/ABI behavior; implement strict compile-session decode, sealed device-first/host-second tracing, and artifact-v3 output; acquire/review exact headers and notices; bundle and internally pin the generated Emscripten factory plus self-contained Worker bytes; produce and inspect two builds; then prove one unmodified browser-local source through shared semantics and real WebGPU. | Full compiler: 68 files/1,426 tests; build-plan/native: 10 files/73 passed/6 platform skips; real Chromium module Worker: 1 file/1 test. Zero pinned Clang-Wasm builds, valid Worker compile launches, reviewed distributed header packs, or browser-local C++ executions. |
+| Gate 3 — real C++/CuTe frontend slice | `in-progress` | Browser-local Clang-Wasm remains the primary portable-product producer. The strict native compile session, closed policy materialization, pass-scoped VFS observation, sealed CUDA device-first/host-second actions, diagnostic normalization, and canonical production Artifact V3 writer now execute as one native producer. The pinned build boundary executes exactly four no-shell steps in a networkless, read-only, capability-free container and records bounded immutable logs, generated bytes, source/tool identities, and isolation observations. Separate authorities now compare two distinct clean builds and emit a raw-Wasm ABI projection without granting release or Worker authority. Production remains capability-blocked before Worker creation because no completed build output has been reviewed or bundled. Header licensing, completed build execution, ABI conformance, full-output reproducibility, provenance, browser-local C++ execution, and release authority remain false. Docker stays outside the portable runtime graph. | Complete and inspect the first build; run the two-clean-build lane; review and repin the exact Wasm projection; bundle the generated factory into package-owned Worker bytes; acquire and license exact header packs; then prove one unmodified browser-local source through shared semantics and real WebGPU. | Commits `bf353f5f` through `1eac0a1c`; CI green through `1eac0a1c`; focused build boundary has 19 test files and 126 enumerated cases. Workflow `29650211276` reached real isolated build execution and remains in progress. Zero completed pinned Clang-Wasm builds, valid Worker compile launches, reviewed distributed header packs, or browser-local C++ executions. |
 | Gate 4 — tiled GEMM and schedule separation | `not-started` | No implementation in this workstream. | All Gate 4 exit criteria. | None. |
 | Gate 5 — tiled attention flagship | `not-started` | No implementation in this workstream. | All Gate 5 exit criteria. | None. |
 | Gate 6 — framework convergence | `not-started` | No implementation in this workstream. | All Gate 6 exit criteria. | None. |
@@ -77,14 +77,14 @@ browser-local producer evidence or make Docker a product dependency.
 | Semantic-core package adoption gate | `verified` | `0.2.0` is public-package shaped, dependency-free, subpath-only, locally packed, and now consumed through kernels' packed exact dependency. A fresh temporary consumer installs both tarballs, resolves bare public subpaths, typechecks, and prepares matching CPU/WGSL specializations. It has not been published. |
 | Gate 2 view-family selection | `verified` | Selected typed JIT `PERMUTE` plus compiler L1 read binding and sibling L2 guarded materializing view copy. The full required matrix and strict exact-source WebGPU proof now pass; broader view families must add typed operation variants rather than reinterpret frozen plans. |
 | Gate 3 legacy CuTe motif freeze | `verified` | Existing transpose, GEMV, GEMM, affine-tile, flash-attention, and WGMMA/TMA source-spelling normalizers are explicitly frozen compatibility debt. Exact exception-file membership and source hashes are architecture-guarded; new motifs, replacement bodies, files, or call sites require an accepted architecture decision. | Delete these adapters after pinned resolved frontend artifacts cover their retained fixtures through shared semantics. | Architecture guard and two mutation tests. |
-| Gate 3 browser-local Clang-WASM producer | `partial` | Closed browser-local profile 2.5, producer-neutral request, artifact v3, request binding, compilation contract 1.1, explicit CUDA-pass authorities, exact ABI/semantic-adapter asset binding, raw-Wasm inspection, Worker frame/VFS contracts, canonical transfer, one-shot entry, and typed controller terminal protocol now share one closed contract. The profile binds exact Clang 22.1.8, a reject-only temporal-macro policy, and a closed namespaced warning registry. The runtime adopts one reconstructed realm input with exact frame/Wasm/mount/import continuity and deterministic cleanup; start remains capability-blocked. It intentionally has no loader, caller factory, or network seam. The controller's test shell posts the canonical message; production still fails closed before caller input or browser effects. | Add the self-contained internally pinned Worker/generated-factory bundle and captured production platform adapter; wire the sealed native invocation and pass callbacks; build/review the first real Wasm module and licensed packs; then execute one unmodified browser-local fixture. | Full compiler 68 files/1,426 tests; build-plan/native 10 files/73 passed/6 platform skips; real Chromium entry 1/1; zero valid Worker compile launches or browser-local C++ executions. |
-| Gate 3 Clang-WASM build and distribution | `partial` | The lock pins the exact BrowserGrad-owned LibTooling tracer and deterministic Emscripten plan. Its source closure now contains 21 exact files, including generated-from-manifest native warning policy, typed macro/warning option materialization, reject-only temporal-macro callbacks, and pass-scoped successful-read/include-edge observation. The Node executor verifies and stages the exact closure and can atomically install generated Wasm bytes. The checked-in C++ extractor still separates runtime/lifecycle, imported VFS, allocator metrics, Clang action, and fail-closed artifact ownership; the top-level file owns the exact nine ABI 1.1 exports. These new policy primitives are build inputs, not production wiring: `ClangAction` still accepts review-only caller argv, uses the observer-free VFS overload, installs no policy callbacks, and the extractor still returns the artifact-v3 placeholder. No pinned LLVM/Emscripten compile or final Wasm call-graph inspection has occurred. | Implement one sealed full invocation builder; wire fresh observer/preprocessor/diagnostic state into each device-first/host-second pass; add strict frame-region/session decode and artifact-v3 output; then execute and inspect two pinned builds before licensing/provenance/release work. | Commit `9b9fd341`; build-plan/native 10 files/73 passed/6 platform skips; full compiler 68 files/1,426 tests; typecheck/lint green. No complete LLVM/Emscripten build, Clang pass, output authority, licensed distribution, reproducibility proof, or release authority exists. |
+| Gate 3 browser-local Clang-WASM producer | `partial` | Closed browser-local profile 2.5, producer-neutral request, Artifact V3, request binding, compilation contract 1.1, explicit CUDA-pass authorities, exact ABI/semantic-adapter asset binding, raw-Wasm inspection, Worker frame/VFS contracts, canonical transfer, one-shot entry, and typed controller terminal protocol share one closed contract. The native producer now strictly decodes the complete session, owns the sealed dual-pass invocation, installs policy/VFS/diagnostic observers, and writes accepted or rejected Artifact V3 bytes. The runtime adopts one reconstructed realm input with exact frame/Wasm/mount/import continuity and deterministic cleanup; start remains capability-blocked. | Add the self-contained internally pinned Worker/generated-factory bundle and captured production platform adapter; inspect the real Wasm module and licensed packs; then execute one unmodified browser-local fixture. | Commit `bf353f5f`; focused native and TypeScript producer gates green; real Chromium blocked-entry path 1/1. Zero valid Worker compile launches or browser-local C++ executions. |
+| Gate 3 Clang-WASM build and distribution | `partial` | The lock pins the exact 36-file BrowserGrad LibTooling extractor closure, LLVM 22.1.8 archive, Emscripten image manifest/config, four-step recipe, ABI, and distribution plan. The executor stages only locked snapshots, executes exact argv/cwd/environment without a shell, enforces per-step time/output/cancellation limits, binds inputs against inode-version drift, hashes native TableGen tools, seals the factory/Wasm/link map and logs, validates UTF-8/WebAssembly, and atomically materializes only the Wasm sidecar. The manual workflow verifies acquisition and image identities, then runs with no network, read-only root/input mounts, zero capabilities, no-new-privileges, and a private writable work mount. A separate strict comparator validates two distinct clean records and actual artifact bytes; the raw-Wasm reviewer emits discovery without self-authorizing an ABI. | Finish the first real build, review its logs/factory/Wasm/link closure, then run the two-job clean-build lane. Repin the independently reviewed ABI projection before any Worker or distribution authority. | Commits `caae5c65`, `3343226a`, `467d2141`, `05679a77`, `2b5604a3`, `b421f327`, `13d2fb54`, `a615a850`, `77f41e94`, and `1eac0a1c`; CI green through `1eac0a1c`; workflow `29650211276` is executing. No completed build, ABI conformance, licensed distribution, authenticated provenance, or release authority yet. |
 | Gate 3 Worker-owned VFS session | `partial` | One exact unshared Wasm memory serves canonical source snapshots and verified pack ranges through the six runtime-ABI imports. VFS preparation is split into a memory-independent mount and one-time bind. Canonical transfer reconstructs exact manifest/assets/request/runtime-ABI/Wasm/invocation/frame authorities in the receiving realm, creates the mount there, and hands stable pre-bind imports to one runtime adoption. Buffers are uniquely owned, destructively transferred, capped before consumption, and cleared after downstream snapshots. The entry-to-runtime seam consumes this contract in integration tests; the real Chromium module-Worker test deliberately stops at invalid pre-identity input because no reviewed build/factory exists. | Instantiate the reviewed factory, bind only `instance.exports.memory`, and compare artifact `openedFileIds` with terminal VFS observations in a valid real-Worker compile. | Focused entry/transfer/runtime coverage is green; full compiler 65 files/1,398 tests. No valid Worker compile, C++ execution, or semantic-contribution evidence. |
 | Gate 3 Wasm runtime metrics | `partial` | Runtime ABI 1.1 owns the exact ninth pointer export, nonzero/stable/read-only pointer contract, 72-byte little-endian record, synchronous snapshot rules, requested-byte equations, exclusions, overflow behavior, and exact malloc/free/realloc/zero-byte event semantics. The C++ metrics unit now implements the module-global record, sticky poison, raw builtin bypass, exact supported allocator entrypoints, requested-size side table, and runtime fail-closed integration. Native behavioral cases cover creation/free, every realloc branch, zero-size behavior, alignment, growth/backshift deletion, allocator/metadata failure, overflow, and corruption. The local observer still claims neither Worker evidence nor JS heap/resident/CPU/process metrics. | Compile with the exact pinned Emscripten toolchain; inspect the object/final-Wasm call graph; execute the record between synchronous ABI calls in a Worker; preserve the blocker until all three proofs exist. | ABI/build-lock focused 3 files/76 tests; build-plan/source/native model 4 files/54 passed plus one Darwin ASan skip; strict native/fake-Emscripten syntax; independent review found no P0/P1. No executed-Wasm or Worker producer evidence. |
 | Gate 3 Worker invocation/result protocol | `partial` | Exact profile/asset/VFS/request/ABI/raw-Wasm identities bind one invocation. Host transfer preparation is single-reservation/single-materialization; its closed message carries no Worker module or network authority. The entry installs one listener, removes it before asynchronous work, reconstructs local authority, settles pre-adoption ownership exactly once, and emits one discriminated terminal success or bounded typed failure. Success bytes are copied into standalone transferable buffers. The controller test shell posts the exact transfer, owns nonce/event-source/replay cleanup, and exposes authenticated failure phase/code/path through a dedicated typed error. Pure result validation remains `caller-frame-consistency-only`; production execution and lowering authority remain false. | Bundle the reviewed generated factory and Worker bytes, then deliberately enable the captured production platform adapter only after the real asset/build review. | Focused 4 files/62 tests; real Chromium one-shot/error path 1/1; independent final review found no P0/P1; no production issuer, valid Worker compile, C++ ABI execution, or lowering authority exists. |
 | Gate 3 deterministic header-pack selection and assembly | `partial` | One opaque selection binds the exact prepared build lock and frontend profile to complete compiler-resource, libc++, CUDA, CuTe/CUTLASS, and Linux-sysroot inventories. Selection and content-set hashes use explicit closed canonical limits. Offline assembly rechecks exact unshared bytes immediately before hashing, writes and re-inspects the canonical VFS pack, and enforces aggregate asset ceilings plus a conservative byte-copy projection that includes retained outputs, source/index/canonical buffers, and the inspector's three full-pack copies. Policy is intentionally non-authoritative: exact notice bytes and externally reviewed per-file license mappings remain blockers; output, build, reproducibility, and release facts are false. | Acquire the pinned upstream inputs; verify exact notice bytes and an external file-license map; materialize and independently inspect all real packs; bind their observed output identities into the asset/build-provenance chain; then mount them only inside the package Worker. | Focused header/VFS 2 files/19 tests; strict typecheck/lint/architecture; independent final P0/P1 review; full compiler 59 files/1,316 tests; release package gate 19 Python and 35 Node security tests. No network, build, real pack, Worker, Docker, or browser execution occurred. |
 
-| Gate 3 native compile-session foundation | `partial` | Runtime ABI 1.1 pins canonical-region decoder ceilings and accounting. Extractor source closure contains allocation-free canonical JSON validation, incremental SHA-256, typed policy-to-argv materialization, reject-only temporal-macro callbacks, and pass-scoped VFS observations. Profile 2.5/contract 1.1 bind exact Clang 22.1.8 and the canonical semantic-adapter manifest; a generated native include prevents warning-policy drift. Virtual-path parity and exact source-closure subset binding landed in prior commits. | Implement one closed noncopyable typed compile session; decode complete profile/request schemas; recompute profile/contract/request/file/entry identities; verify exact VFS bytes only after canonical/identity checks; privately bind effective output ceiling. Then close the remaining full-argv, Clang lifecycle wiring, include-edge callback, diagnostic normalization, dual-pass, and artifact-writer gaps. | Commits `719cca9b`, `34f4e5a9`, `a7e811ec`, `83aee3a9`, and `9b9fd341`; full compiler 68 files/1,426 tests; build-plan/native 10 files/73 passed/6 platform skips; typecheck/lint green. No pinned Emscripten compile, executed Wasm, VFS read by Clang, production Clang action, or artifact output. |
+| Gate 3 native compile-session foundation | `verified` | One closed noncopyable session validates canonical profile/request regions, recomputes every bound identity, verifies exact VFS source bytes after identity admission, privately binds output ceilings, materializes closed argv, and runs fresh device-first/host-second policy/VFS/diagnostic state before canonical Artifact V3 production. Accepted and rejected outcomes remain explicit and bounded. This status applies only to the native producer slice, not Gate 3 or browser execution. | None for the native producer slice. The exact code must still compile to Wasm and execute in the Worker before it contributes browser-local evidence. | Commit `bf353f5f`; focused native strict/UBSan and TypeScript artifact tests green; no Emscripten/Worker execution evidence. |
 
 ### Optional native/AOT parity ledger
 
@@ -3047,6 +3047,46 @@ whether any files may be left partially changed.
   [`package-requirements-handover-2026-07-17.md`](./package-requirements-handover-2026-07-17.md),
   which records exact file ownership, failures, decisions, and recovery order.
 
+### 2026-07-18 — Gate 3 resumed through production native Artifact V3
+
+- Commit `bf353f5f` recovers the red handover and closes the native producer:
+  strict canonical session decode, every bound identity, exact VFS source-byte
+  admission, sealed CUDA device-first/host-second actions, pass-scoped policy
+  and observations, stable diagnostic normalization, and accepted/rejected
+  canonical Artifact V3 output.
+- Commit `467d2141` hardens file bindings against Linux/Node inode-number reuse
+  by including version identity. CI run `29648699782` passed every job.
+- This verifies the native producer slice only. It does not prove Emscripten
+  compilation, Wasm ABI conformance, Worker execution, browser-local source
+  compatibility, or WebGPU convergence.
+
+### 2026-07-18 — Locked isolated Clang-Wasm build and evidence authorities
+
+- Commit `caae5c65` adds the exact no-shell four-step build executor with clean
+  argv/cwd/environment, process-group cancellation, four-hour and 16-MiB
+  per-stream bounds, immutable logs, input/source rebinding, generated factory
+  validation, raw WebAssembly validation, and atomic sidecar materialization.
+- Commit `3343226a` adds the manual pinned workflow and runner. The workflow
+  verifies the LLVM archive and Emscripten platform/config digests, then uses a
+  networkless, read-only, capability-free, no-new-privileges container with
+  read-only inputs and one private writable work mount.
+- Commits `05679a77`, `2b5604a3`, and `b421f327` resolve three fail-closed image
+  admission mismatches without weakening writable-input rejection: immutable
+  foreign ownership, immutable ancestry, and image-layer mode bits are accepted
+  only when the effective kernel mount is read-only.
+- Commit `13d2fb54` records bounded streaming SHA-256 identities for native
+  `clang-tblgen` and `llvm-tblgen`. Commit `a615a850` adds a strict two-record
+  comparator for actual files, paths, commands/environments, tools, factory,
+  Wasm, link map, and logs. Commit `77f41e94` runs the clean builds on separate
+  runners and compares their bounded downloaded closures. Commit `1eac0a1c`
+  adds a raw-Wasm projection producer against the independent runtime ABI;
+  mismatches remain review observations and cannot become conformance.
+- CI is green through `1eac0a1c`; the focused boundary contains 19 files and
+  126 enumerated cases. The first admitted real build, workflow `29650211276`
+  at `b421f327`, has verified acquisition, image identity, and isolation and is
+  executing the exact build. It is not capability evidence until it terminates
+  and its uploaded outputs are reviewed.
+
 ## Quick Resume Checklist
 
 1. Read this ledger, then the relevant gate and exit criteria in the normative
@@ -3060,78 +3100,33 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Build one noncopyable `DecodedCompileSession` that validates both canonical
-regions, recomputes every profile/contract/request/file/entry identity, admits
-all five ordered compiler-option variants, performs zero VFS access during
-decode, and privately binds `maxOutputBytes`. Raw frame bytes must never reach
-the Clang callback. Then close the remaining versioned diagnostic-normalization
-contract and implement one sealed full invocation builder. Wire fresh
-preprocessor-policy, VFS observer, include-edge, diagnostic, and semantic state
-into each device-first/host-second Clang pass. Replace the artifact-v3
-placeholder only after both passes and the canonical writer pass pinned native
-and browser-Wasm tests.
+Let workflow `29650211276` finish. On failure, use only its bounded immutable
+step logs to repair the exact CMake, source, or link mismatch. On success,
+download and independently inspect the factory, Wasm, link map, allocator call
+closure, and raw ABI projection before changing the runtime manifest or Worker.
+Do not authorize output identity from the builder's self-description.
 
-Build-input selection, deterministic command materialization, canonical ABI,
-profile binding, exact ABI asset/build closure, bounded raw-WASM inspection,
-executor-enforced source snapshots, and atomic sidecar byte installation are
-closed boundaries. They are not real build, execution, or release evidence.
-Keep optional AOT frozen and keep the build lock release-blocked until
-redistribution/license closure, complete independently reviewed first-build
-interface allowlists, and two distinct clean builds produce authenticated
-evidence.
+After one reviewed build succeeds, dispatch the two-clean-build workflow at the
+current `main`. Reproducibility applies only to the extractor outputs until the
+complete deterministic distribution closure is assembled. External signed
+provenance, exact notice/license review, and runtime ABI conformance remain
+separate authorities.
 
-The pure Worker protocol, memoized input frame, complete artifact-verification
-contract, canonical destructive transfer, receiving-realm authority
-reconstruction, package entry, typed terminal protocol, package runtime
-adoption, and local Wasm metrics observer are closed bounded components. The
-source-level C++ VFS bridge implements the exact imports, but it has not compiled
-or executed. A real Chromium Worker has loaded the entry and rejected untrusted
-pre-identity input; no valid canonical compile has run in that Worker. The
-production controller and runtime start remain deliberately capability-blocked
-and therefore observe no execution.
+Bundle the reviewed generated Emscripten factory into one self-contained,
+package-owned Worker module. The Worker must instantiate only host-verified
+Wasm bytes, preserve the stable pre-bind VFS imports, bind exactly the exported
+unshared memory, exercise the allocator/result metrics synchronously, and keep
+all current construction blockers until real module observations satisfy the
+independent manifest.
 
-Runtime ABI 1.1 and every dependent profile/asset/build identity now pin the
-exact metrics record, and the C++ source/native behavioral producer exists.
-The extractor is split into runtime/lifecycle, imported-VFS, allocator-metrics,
-Clang-action, and wired fail-closed artifact units. Runtime result ownership is
-closed through a strict native model, including invocation-ceiling binding,
-blocker-gated success, immutable free-after-success results, and reset/module
-disposal. It is not executed-Wasm evidence. Do not clear the metrics or result
-build blockers from source/native tests: execute the exact pinned Emscripten
-build, inspect object and final-Wasm allocator call closure, then exercise the
-record and result lifetime between synchronous ABI calls in the real Worker.
+In parallel with bundle review, acquire the pinned compiler/libc++/CUDA/CuTe and
+Linux-sysroot header inputs, verify exact notice bytes and an externally
+reviewed per-file license map, materialize every closed VFS pack, and bind their
+observed identities into the asset/provenance chain. No ambient builder header
+may enter the parsed-program sysroot.
 
-The entry/controller protocol work is complete for the blocked phase: exact
-`postMessage`, nonce/event source, terminal replay protection, cleanup, and
-typed success/failure shapes are defined. Keep production start blocked until
-the generated Emscripten factory and self-contained Worker bytes are internally
-pinned from an independently inspected build. The Worker must instantiate only
-host-verified Clang-Wasm bytes through that factory, preserve the stable pre-bind
-imports, and bind exactly `instance.exports.memory`. In parallel, add
-strict canonical profile/request compile-session decode, bind its effective
-`maxOutputBytes`, then add device-first/host-second CUDA actions and the
-canonical artifact-v3 writer. Wasm page/allocator observations remain separate
-from logical VFS reservations and browser-process memory.
-
-Run the lock-derived executor for the first real extractor build from pinned
-inputs after compile-session decode, the metrics/result ABI, CUDA passes, and
-artifact writer close. The offline header-pack selector/writer is now closed,
-but it is not acquisition or release
-evidence: acquire the exact compiler/libc++/CUDA/CuTe/sysroot bytes, verify exact
-notice bytes and an externally reviewed per-file license map, materialize every
-pack, independently inspect the observed output identities, and bind them into
-the asset/build-provenance chain. Bundle the exact generated Emscripten factory
-into the package Worker and independently repin observed Wasm projections.
-Correct artifact-v3 root ownership for real unannotated CuTe layout
-declarations: device-pass selection evidence owns root membership while CUDA
-attributes remain source facts. Enforce declared Clang work ceilings with real
-hooks or narrow the profile claims.
-
-The first executable checkpoint is one unmodified pinned layout-only source
-compiled in a supported browser with network and Docker absent. Its canonical
-frontend artifact must pass the existing strict verifier, preserve exact
-diagnostics/source spans/selected-entry identity, lower through the authorized
-layout seam, and match an independently derived expected semantic result. A
-retained native producer may later run the same fixture as an optional parity
-oracle, but it cannot block or stand in for this browser-local proof. Dynamic
-tensor copy and required real-WebGPU convergence follow that checkpoint.
+The next executable product checkpoint remains one unmodified pinned
+layout-only source compiled in a supported browser with Docker, native tools,
+and network absent. Its canonical Artifact V3 must pass the producer-neutral
+verifier, preserve exact source spans/diagnostics/selected-entry identity,
+lower through the Gate 2 layout seam, and match CPU plus required real WebGPU.

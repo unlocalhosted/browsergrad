@@ -1,7 +1,7 @@
 # BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
 - **Status:** normative platform architecture; implementation status is not implied
-- **Last reviewed:** 2026-07-17
+- **Last reviewed:** 2026-07-18
 - **Implementation ledger:**
   [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
 - **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
@@ -13,20 +13,24 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
 describe requirement strength. They are used deliberately rather than as
 general emphasis.
 
-## Implementation Checkpoint — Paused 2026-07-17
+## Implementation Checkpoint — Active 2026-07-18
 
-Implementation is paused during Gate 3. The last verified green baseline is
-`cf94cc97`; the resumable code checkpoint through `7b7757fa` is intentionally
-incomplete and red. Gates 0 through 2 are verified; Gate 3 remains in progress;
-Gates 4 through 7 have not started. A committed checkpoint MUST NOT be treated
-as capability or release evidence without the gate's required proofs.
+Implementation resumed from the intentionally red `7b7757fa` Gate 3 handover.
+Gates 0 through 2 remain verified; Gate 3 is active; Gates 4 through 7 have not
+started. The strict native compile session, sealed CUDA device-first/host-second
+passes, diagnostic normalization, and production Artifact V3 writer are now
+implemented. A pinned no-shell Clang-Wasm executor, isolated manual build lane,
+two-clean-build comparator, native TableGen identity observation, and raw-Wasm
+ABI review producer are on `main` through `1eac0a1c`.
 
-Resume from the authoritative
-[`2026-07-17 handover`](../internal/package-requirements-handover-2026-07-17.md),
-then use the linked implementation ledger for chronological decisions and
-evidence. This checkpoint is informational: the remainder of this document
-continues to define the normative target and does not become a mutable status
-dashboard.
+The first admitted LLVM 22.1.8/Emscripten build is executing in workflow run
+`29650211276`. An active run is not build, ABI, reproducibility, Worker, browser,
+or release evidence. The package Worker remains capability-blocked until real
+outputs are independently reviewed and the generated factory is bundled into
+package-owned Worker bytes. Use the linked implementation ledger for exact
+chronology, failures, and evidence. This checkpoint is informational: the
+remainder of this document continues to define the normative target and does
+not become a mutable status dashboard.
 
 ## Purpose
 
