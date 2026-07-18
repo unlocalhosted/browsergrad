@@ -31,6 +31,7 @@ add_llvm_executable(browsergrad-cpp-cute-extractor
   BrowserGradCppCuteArtifactV3.h
   BrowserGradCppCuteArtifactWriter.cpp
   BrowserGradCppCuteArtifactWriter.h
+  BrowserGradCppCuteBrowserHost.cpp
   BrowserGradCppCuteCanonicalJson.cpp
   BrowserGradCppCuteCanonicalJson.h
   BrowserGradCppCuteClangAction.cpp

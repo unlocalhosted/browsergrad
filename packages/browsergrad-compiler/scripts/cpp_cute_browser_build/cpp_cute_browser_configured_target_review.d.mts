@@ -2,7 +2,11 @@ export interface CppCuteBrowserConfiguredTargetReview {
   readonly authority: "configured-target-flags-review-only";
   readonly exceptionMode: "emscripten-javascript";
   readonly rttiRequired: true;
+  readonly llvmLibrariesRttiEnabled: true;
   readonly clangIncludeDirectoriesVerified: true;
+  readonly cmakeCachePath: string;
+  readonly cmakeCacheSha256: string;
+  readonly cmakeCacheByteLength: number;
   readonly compileFlagsPath: string;
   readonly compileFlagsSha256: string;
   readonly compileFlagsByteLength: number;

@@ -23,6 +23,7 @@ const expectedSourcePaths = [
   "BrowserGradCppCuteArtifactV3.h",
   "BrowserGradCppCuteArtifactWriter.cpp",
   "BrowserGradCppCuteArtifactWriter.h",
+  "BrowserGradCppCuteBrowserHost.cpp",
   "BrowserGradCppCuteCanonicalJson.cpp",
   "BrowserGradCppCuteCanonicalJson.h",
   "BrowserGradCppCuteClangAction.cpp",
@@ -87,6 +88,7 @@ let wasmCompilerFlags: readonly string[];
 let wasmLinkerFlags: readonly string[];
 let forbiddenWasmFeatures: readonly string[];
 let wasmExceptionTagCount: number;
+let wasmLibrariesRttiEnabled: boolean;
 
 beforeAll(async () => {
   const prepared = await decodeCppCuteBrowserBuildInputLock(
@@ -103,6 +105,9 @@ beforeAll(async () => {
   if (wasmStage === undefined) throw new Error("missing locked Clang-Wasm stage");
   wasmCompilerFlags = wasmStage.compilerFlags;
   wasmLinkerFlags = wasmStage.linkerFlags ?? [];
+  wasmLibrariesRttiEnabled = wasmStage.definitions.some((entry) =>
+    entry.name === "LLVM_ENABLE_RTTI" && entry.value === "ON"
+  );
   const runtimeAbi = await decodeCppCuteBrowserRuntimeAbiManifest(
     cppCuteBrowserRuntimeAbiManifestResourceBytes(),
   );
@@ -176,11 +181,27 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect(cmake.indexOf("set(LLVM_REQUIRES_EH ON)")).toBeGreaterThanOrEqual(0);
     expect(cmake.indexOf("set(LLVM_REQUIRES_EH ON)")).toBeLessThan(targetOffset);
     expect(cmake.indexOf("set(LLVM_REQUIRES_RTTI ON)")).toBeLessThan(targetOffset);
+    expect(wasmLibrariesRttiEnabled).toBe(true);
     expect(wasmCompilerFlags).toContain("-fexceptions");
     expect(wasmLinkerFlags).toContain("-fexceptions");
     expect([...wasmCompilerFlags, ...wasmLinkerFlags]).not.toContain("-fwasm-exceptions");
     expect(forbiddenWasmFeatures).toContain("exception-handling");
     expect(wasmExceptionTagCount).toBe(0);
+  });
+
+  it("closes unsupported browser host services inside the Wasm module", async () => {
+    const source = await extractorSource("BrowserGradCppCuteBrowserHost.cpp");
+    for (const symbol of [
+      "getpwnam_r", "getpwuid_r", "getuid", "getrlimit", "setrlimit",
+      "getrusage", "getsid", "fork", "execve", "posix_spawn", "sigaltstack",
+    ]) {
+      expect(source).toMatch(new RegExp(`\\b${symbol}\\(`, "u"));
+    }
+    expect(source).toContain("return ENOSYS;");
+    expect(source).toContain("errno = ENOSYS;");
+    expect(source).toContain("RLIM_INFINITY");
+    expect(source).not.toMatch(/fetch|socket|filesystem|system\(|popen\(/u);
+    expect(wasmLinkerFlags).toContain("-Wl,--error-limit=0");
   });
 
   it("keeps the top-level translation unit as exact ABI-1.1 composition only", async () => {

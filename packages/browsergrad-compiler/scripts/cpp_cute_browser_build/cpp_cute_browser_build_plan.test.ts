@@ -161,6 +161,7 @@ describe("C++/CuTe opaque Clang-WASM build plan", () => {
       "BrowserGradCppCuteArtifactV3.h",
       "BrowserGradCppCuteArtifactWriter.cpp",
       "BrowserGradCppCuteArtifactWriter.h",
+      "BrowserGradCppCuteBrowserHost.cpp",
       "BrowserGradCppCuteCanonicalJson.cpp",
       "BrowserGradCppCuteCanonicalJson.h",
       "BrowserGradCppCuteClangAction.cpp",

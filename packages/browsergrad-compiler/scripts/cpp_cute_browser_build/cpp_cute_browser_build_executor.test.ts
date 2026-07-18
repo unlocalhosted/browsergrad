@@ -168,6 +168,10 @@ vi.mock("./cpp_cute_browser_build_executor_process.mjs", async (importOriginal) 
           await mkdir(targetDirectory, { recursive: true });
           await Promise.all([
             writeFile(
+              join(buildRoot, "CMakeCache.txt"),
+              "LLVM_ENABLE_RTTI:BOOL=ON\n",
+            ),
+            writeFile(
               join(targetDirectory, "flags.make"),
               [
                 executorProcessState.missingClangInclude
@@ -403,7 +407,7 @@ describe("bounded Clang-WASM build source executor", () => {
       authority: "build-source-snapshot-only",
       lockId: lock.lockId,
       sourceSetSha256: lock.extractorSourceSetSha256,
-      fileCount: 36,
+      fileCount: 37,
       sourceVerified: true,
       buildExecuted: false,
       outputIdentityAuthorized: false,
@@ -415,6 +419,7 @@ describe("bounded Clang-WASM build source executor", () => {
       "BrowserGradCppCuteArtifactV3.h",
       "BrowserGradCppCuteArtifactWriter.cpp",
       "BrowserGradCppCuteArtifactWriter.h",
+      "BrowserGradCppCuteBrowserHost.cpp",
       "BrowserGradCppCuteCanonicalJson.cpp",
       "BrowserGradCppCuteCanonicalJson.h",
       "BrowserGradCppCuteClangAction.cpp",

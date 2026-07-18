@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.7bae41fb6bc0d84be84035e89714fc2cd65959532854dbcffffee694721a959f",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.3c754ac9eb2024948d1c386ed95bac22619c20924787bde163cb0095dcdc83d8",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -188,7 +188,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
             { name: "LLVM_ENABLE_PIC", value: "OFF" },
             { name: "LLVM_ENABLE_PLUGINS", value: "OFF" },
             { name: "LLVM_ENABLE_PROJECTS", value: "clang" },
-            { name: "LLVM_ENABLE_RTTI", value: "OFF" },
+            { name: "LLVM_ENABLE_RTTI", value: "ON" },
             { name: "LLVM_ENABLE_THREADS", value: "OFF" },
             { name: "LLVM_ENABLE_UNWIND_TABLES", value: "OFF" },
             { name: "LLVM_ENABLE_Z3_SOLVER", value: "OFF" },
@@ -240,6 +240,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
             "-sABORTING_MALLOC=0",
             "-sMALLOC=dlmalloc",
             "-sERROR_ON_UNDEFINED_SYMBOLS=1",
+            "-Wl,--error-limit=0",
             "-sWASM_ASYNC_COMPILATION=1",
             "-sRETAIN_COMPILER_SETTINGS=0",
             "-sEMIT_PRODUCERS_SECTION=0",
@@ -252,7 +253,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
         },
       ],
       extractorSource: {
-        sourceSetSha256: "184a2217b43297a64f0ac53a39f9cf161d3600c017688fc773f79f46744c532e",
+        sourceSetSha256: "5406c711253de704c3bca80e7f67157ca0e1503498249be6d76a1ddee3eae324",
         hashDomain: "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1",
         files: [
           {
@@ -274,6 +275,11 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
             path: "BrowserGradCppCuteArtifactWriter.h",
             sha256: "e627b9c21683918699a073b20100d126a244971331bd7e85693ad45d1712543e",
             byteLength: "918",
+          },
+          {
+            path: "BrowserGradCppCuteBrowserHost.cpp",
+            sha256: "3ec6e58897b9761ff0df58a944ba920c0c7250ac10d1faaa30157b6acc8b087c",
+            byteLength: "2480",
           },
           {
             path: "BrowserGradCppCuteCanonicalJson.cpp",
@@ -432,8 +438,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "CMakeLists.txt",
-            sha256: "45270d3bb94fc8590bd0f555dfe15361ed2ffd9790c81220b2664e9641a59723",
-            byteLength: "4609",
+            sha256: "8e68e5347dac776bb4a83aec73adc4d5c5dd83d7bc69faf88e12085aa41f8ecc",
+            byteLength: "4645",
           },
         ],
       },

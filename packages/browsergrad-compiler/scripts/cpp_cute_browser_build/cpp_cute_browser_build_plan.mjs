@@ -109,6 +109,7 @@ const EXTRACTOR_SOURCE_PATHS = Object.freeze([
   "BrowserGradCppCuteArtifactV3.h",
   "BrowserGradCppCuteArtifactWriter.cpp",
   "BrowserGradCppCuteArtifactWriter.h",
+  "BrowserGradCppCuteBrowserHost.cpp",
   "BrowserGradCppCuteCanonicalJson.cpp",
   "BrowserGradCppCuteCanonicalJson.h",
   "BrowserGradCppCuteClangAction.cpp",

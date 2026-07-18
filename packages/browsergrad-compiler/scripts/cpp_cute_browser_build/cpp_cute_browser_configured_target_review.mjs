@@ -69,6 +69,17 @@ export async function reviewCppCuteBrowserConfiguredTarget(input) {
     join(targetDirectory, "link.txt"),
     "$.linkCommand",
   );
+  const cmakeCache = await readObservedUtf8File(
+    join(wasmBuildRoot, "CMakeCache.txt"),
+    "$.cmakeCache",
+  );
+
+  requireCacheBoolean(
+    cmakeCache.text,
+    "LLVM_ENABLE_RTTI",
+    true,
+    "$.cmakeCache.LLVM_ENABLE_RTTI",
+  );
 
   const cxxFlags = exactMakeVariable(
     compileFlags.text,
@@ -105,6 +116,10 @@ export async function reviewCppCuteBrowserConfiguredTarget(input) {
     exceptionMode: "emscripten-javascript",
     rttiRequired: true,
     clangIncludeDirectoriesVerified: true,
+    llvmLibrariesRttiEnabled: true,
+    cmakeCachePath: cmakeCache.path,
+    cmakeCacheSha256: cmakeCache.sha256,
+    cmakeCacheByteLength: cmakeCache.byteLength,
     compileFlagsPath: compileFlags.path,
     compileFlagsSha256: compileFlags.sha256,
     compileFlagsByteLength: compileFlags.byteLength,
@@ -189,6 +204,16 @@ function exactNonemptyLine(text, path) {
   const lines = text.split("\n").filter((line) => line.length > 0);
   if (lines.length !== 1) invalid(path, "expected exactly one nonempty link command line");
   return lines[0];
+}
+
+/** @param {string} text @param {string} name @param {boolean} expected @param {string} path */
+function requireCacheBoolean(text, name, expected, path) {
+  const prefix = `${name}:BOOL=`;
+  const matches = text.split("\n").filter((line) => line.startsWith(prefix));
+  const expectedValue = expected ? "ON" : "OFF";
+  if (matches.length !== 1 || matches[0] !== `${prefix}${expectedValue}`) {
+    invalid(path, `expected exactly ${name}:BOOL=${expectedValue}`);
+  }
 }
 
 /** @param {string} value @param {RegExp} pattern @param {string} path @param {string} flag */

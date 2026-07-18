@@ -36,6 +36,7 @@ export interface CppCuteClangWasmExtractorSourceFile {
     | "BrowserGradCppCuteArtifactV3.h"
     | "BrowserGradCppCuteArtifactWriter.cpp"
     | "BrowserGradCppCuteArtifactWriter.h"
+    | "BrowserGradCppCuteBrowserHost.cpp"
     | "BrowserGradCppCuteCanonicalJson.cpp"
     | "BrowserGradCppCuteCanonicalJson.h"
     | "BrowserGradCppCuteClangAction.cpp"
