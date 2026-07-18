@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -9,6 +9,11 @@ import { describe, expect, it } from "vitest";
 import {
   CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE,
 } from "../../src/resources/cpp_cute_semantic_adapter_manifest_v1.js";
+import {
+  nativeCompiler as compiler,
+  nativeCompilerIsClang,
+  nativeCompilerUnavailableUnlessOptional,
+} from "./cpp_cute_browser_native_test_harness.js";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const nativeSource = join(
@@ -25,12 +30,6 @@ const policyImplementation = join(
   "extractor",
   "BrowserGradCppCutePreprocessorPolicy.cpp",
 );
-const compiler = [
-  "/usr/bin/clang++",
-  "/usr/bin/c++",
-  "/usr/bin/g++",
-].find((candidate) => existsSync(candidate));
-
 function compileAndRun(extraFlags: readonly string[]): void {
   if (compiler === undefined) throw new Error("native C++ compiler unavailable");
   const workingDirectory = mkdtempSync(join(tmpdir(), "browsergrad-pp-policy-"));
@@ -155,13 +154,13 @@ describe("Clang 22.1.8 temporal macro preprocessor policy", () => {
     );
   });
 
-  it.skipIf(compiler === undefined)(
+  it.skipIf(nativeCompilerUnavailableUnlessOptional)(
     "classifies only exact macro identifiers and fixed diagnostic families",
     () => compileAndRun([]),
     90_000,
   );
 
-  it.skipIf(compiler !== "/usr/bin/clang++")(
+  it.skipIf(!nativeCompilerIsClang)(
     "stays clean under the undefined-behavior sanitizer",
     () => compileAndRun(["-fsanitize=undefined"]),
     90_000,
@@ -169,7 +168,7 @@ describe("Clang 22.1.8 temporal macro preprocessor policy", () => {
 
   // Apple clang's ASan runtime deadlocks inside dyld initialization on this
   // Darwin runner. ASan remains enabled on non-Darwin clang runners.
-  it.skipIf(compiler !== "/usr/bin/clang++" || process.platform === "darwin")(
+  it.skipIf(!nativeCompilerIsClang || process.platform === "darwin")(
     "stays clean under the address sanitizer",
     () => compileAndRun(["-fsanitize=address"]),
     90_000,

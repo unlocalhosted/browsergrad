@@ -57,6 +57,7 @@ jobs:
           bg_llvm_config="/usr/lib/llvm-18/bin/llvm-config"
           test -x "${bg_llvm_config}"
           echo "BROWSERGRAD_LLVM_CONFIG=${bg_llvm_config}" >> "${GITHUB_ENV}"
+          echo "BROWSERGRAD_NATIVE_CXX=/usr/lib/llvm-18/bin/clang++" >> "${GITHUB_ENV}"
 
       - name: Verify compiler Node-only Docker shell
         run: pnpm --filter @unlocalhosted/browsergrad-compiler test:aot-docker-shell:run

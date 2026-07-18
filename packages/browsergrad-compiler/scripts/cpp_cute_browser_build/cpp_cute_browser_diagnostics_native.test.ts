@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -20,12 +20,15 @@ import {
   cppCuteDiagnosticsPolicyIncludeMatches,
   renderCppCuteDiagnosticsPolicyInclude,
 } from "./cpp_cute_browser_diagnostics_policy_codegen.mjs";
+import {
+  nativeCompiler as compiler,
+  nativeCompilerIsClang,
+  nativeCompilerUnavailableUnlessOptional,
+} from "./cpp_cute_browser_native_test_harness.js";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const extractorRoot = join(scriptRoot, "extractor");
 const nativeSource = join(scriptRoot, "cpp_cute_browser_diagnostics_native_test.cpp");
-const compiler = ["/usr/bin/clang++", "/usr/bin/c++", "/usr/bin/g++"]
-  .find((candidate) => existsSync(candidate));
 const contractHash = "2".repeat(64);
 const spanOne = `bg.cpp.span.sha256.${"1".repeat(64)}`;
 const spanTwo = `bg.cpp.span.sha256.${"3".repeat(64)}`;
@@ -135,19 +138,19 @@ describe("native C++/CuTe diagnostic normalization", () => {
     );
   });
 
-  it.skipIf(compiler === undefined)(
+  it.skipIf(nativeCompilerUnavailableUnlessOptional)(
     "matches TypeScript stable IDs and fails closed for hostile states",
     () => compileAndRun([]),
     90_000,
   );
 
-  it.skipIf(compiler !== "/usr/bin/clang++")(
+  it.skipIf(!nativeCompilerIsClang)(
     "stays clean under undefined-behavior sanitizer coverage",
     () => compileAndRun(["-fsanitize=undefined"]),
     90_000,
   );
 
-  it.skipIf(compiler !== "/usr/bin/clang++" || process.platform === "darwin")(
+  it.skipIf(!nativeCompilerIsClang || process.platform === "darwin")(
     "stays clean under address and leak sanitizer coverage",
     () => compileAndRun(["-fsanitize=address"]),
     90_000,

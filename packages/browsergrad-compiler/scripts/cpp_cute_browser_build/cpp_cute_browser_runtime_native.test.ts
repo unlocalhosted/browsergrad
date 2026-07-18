@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -12,15 +12,14 @@ import {
   verifyCppCuteFrontendArtifact,
 } from "../../src/cpp_cute_frontend_artifact.js";
 import { createCppCuteArtifactInput } from "../../tests/compiler/support/cpp_cute_frontend_fixtures.js";
+import {
+  nativeCompiler as compiler,
+  nativeCompilerIsClang,
+  nativeCompilerUnavailableUnlessOptional,
+} from "./cpp_cute_browser_native_test_harness.js";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const nativeSource = join(scriptRoot, "cpp_cute_browser_runtime_native_test.cpp");
-const compiler = [
-  "/usr/bin/clang++",
-  "/usr/bin/c++",
-  "/usr/bin/g++",
-].find((candidate) => existsSync(candidate));
-
 async function canonicalArtifactFixtureBytes(): Promise<Uint8Array> {
   const verified = await verifyCppCuteFrontendArtifact(
     await createCppCuteArtifactInput(),
@@ -81,13 +80,13 @@ function compileAndRun(
 }
 
 describe("Clang-Wasm ABI-1.1 result lifecycle native behavioral model", () => {
-  it.skipIf(compiler === undefined)(
+  it.skipIf(nativeCompilerUnavailableUnlessOptional)(
     "owns one immutable bounded result across compile, free, failure, and reset",
     async () => compileAndRun([], await canonicalArtifactFixtureBytes()),
     90_000,
   );
 
-  it.skipIf(compiler !== "/usr/bin/clang++")(
+  it.skipIf(!nativeCompilerIsClang)(
     "stays clean under the undefined-behavior sanitizer",
     async () => compileAndRun(
       ["-fsanitize=undefined"],
@@ -98,7 +97,7 @@ describe("Clang-Wasm ABI-1.1 result lifecycle native behavioral model", () => {
 
   // Apple clang's ASan runtime deadlocks inside dyld initialization on this
   // Darwin runner; Linux CI owns address-sanitizer coverage for this model.
-  it.skipIf(compiler !== "/usr/bin/clang++" || process.platform === "darwin")(
+  it.skipIf(!nativeCompilerIsClang || process.platform === "darwin")(
     "stays clean under the address sanitizer",
     async () => compileAndRun(
       ["-fsanitize=address"],

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -7,6 +7,12 @@ import { fileURLToPath } from "node:url";
 import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import { describe, expect, it } from "vitest";
 
+import {
+  nativeCompiler as compiler,
+  nativeCompilerIsClang,
+  nativeCompilerUnavailableUnlessOptional,
+} from "./cpp_cute_browser_native_test_harness.js";
+
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const nativeSource = join(scriptRoot, "cpp_cute_browser_canonical_json_native_test.cpp");
 const implementationSource = join(
@@ -14,12 +20,6 @@ const implementationSource = join(
   "extractor",
   "BrowserGradCppCuteCanonicalJson.cpp",
 );
-const compiler = [
-  "/usr/bin/clang++",
-  "/usr/bin/c++",
-  "/usr/bin/g++",
-].find((candidate) => existsSync(candidate));
-
 function compileAndRun(extraFlags: readonly string[]): void {
   if (compiler === undefined) throw new Error("native C++ compiler unavailable");
   const workingDirectory = mkdtempSync(join(tmpdir(), "browsergrad-canonical-json-"));
@@ -71,13 +71,13 @@ function compileAndRun(extraFlags: readonly string[]): void {
 }
 
 describe("Clang-Wasm allocation-free canonical JSON validator", () => {
-  it.skipIf(compiler === undefined)(
+  it.skipIf(nativeCompilerUnavailableUnlessOptional)(
     "matches TypeScript canonical bytes and rejects hostile wire forms",
     () => compileAndRun([]),
     90_000,
   );
 
-  it.skipIf(compiler !== "/usr/bin/clang++")(
+  it.skipIf(!nativeCompilerIsClang)(
     "stays clean under the undefined-behavior sanitizer",
     () => compileAndRun(["-fsanitize=undefined"]),
     90_000,

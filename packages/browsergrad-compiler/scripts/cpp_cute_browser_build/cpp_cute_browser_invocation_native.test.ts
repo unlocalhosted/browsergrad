@@ -1,10 +1,16 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
+
+import {
+  nativeCompiler as compiler,
+  nativeCompilerIsClang,
+  nativeCompilerUnavailableUnlessOptional,
+} from "./cpp_cute_browser_native_test_harness.js";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const nativeSource = join(
@@ -26,12 +32,6 @@ const virtualPathSource = join(
   "extractor",
   "BrowserGradCppCuteVirtualPath.cpp",
 );
-const compiler = [
-  "/usr/bin/clang++",
-  "/usr/bin/c++",
-  "/usr/bin/g++",
-].find((candidate) => existsSync(candidate));
-
 function compileAndRun(extraFlags: readonly string[]): void {
   if (compiler === undefined) throw new Error("native C++ compiler unavailable");
   const workingDirectory = mkdtempSync(join(tmpdir(), "browsergrad-invocation-"));
@@ -81,13 +81,13 @@ function compileAndRun(extraFlags: readonly string[]): void {
 }
 
 describe("sealed Clang 22.1.8 CUDA invocation materializer", () => {
-  it.skipIf(compiler === undefined)(
+  it.skipIf(nativeCompilerUnavailableUnlessOptional)(
     "owns exact device/host argv and rejects unsafe or conflicting typed input",
     () => compileAndRun([]),
     90_000,
   );
 
-  it.skipIf(compiler !== "/usr/bin/clang++")(
+  it.skipIf(!nativeCompilerIsClang)(
     "stays clean under the undefined-behavior sanitizer",
     () => compileAndRun(["-fsanitize=undefined"]),
     90_000,
@@ -95,7 +95,7 @@ describe("sealed Clang 22.1.8 CUDA invocation materializer", () => {
 
   // Apple clang's ASan runtime deadlocks inside dyld initialization on this
   // Darwin runner. ASan remains enabled on non-Darwin clang runners.
-  it.skipIf(compiler !== "/usr/bin/clang++" || process.platform === "darwin")(
+  it.skipIf(!nativeCompilerIsClang || process.platform === "darwin")(
     "stays clean under the address sanitizer",
     () => compileAndRun(["-fsanitize=address"]),
     90_000,

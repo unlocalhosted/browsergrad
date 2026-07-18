@@ -1,10 +1,16 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
+
+import {
+  nativeCompiler as compiler,
+  nativeCompilerIsClang,
+  nativeCompilerUnavailableUnlessOptional,
+} from "./cpp_cute_browser_native_test_harness.js";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const nativeSource = join(scriptRoot, "cpp_cute_browser_sha256_native_test.cpp");
@@ -13,12 +19,6 @@ const implementationSource = join(
   "extractor",
   "BrowserGradCppCuteSha256.cpp",
 );
-const compiler = [
-  "/usr/bin/clang++",
-  "/usr/bin/c++",
-  "/usr/bin/g++",
-].find((candidate) => existsSync(candidate));
-
 function compileAndRun(extraFlags: readonly string[]): void {
   if (compiler === undefined) throw new Error("native C++ compiler unavailable");
   const workingDirectory = mkdtempSync(join(tmpdir(), "browsergrad-sha256-"));
@@ -66,13 +66,13 @@ function compileAndRun(extraFlags: readonly string[]): void {
 }
 
 describe("Clang-Wasm portable SHA-256 native primitive", () => {
-  it.skipIf(compiler === undefined)(
+  it.skipIf(nativeCompilerUnavailableUnlessOptional)(
     "matches standard vectors, chunk boundaries, and fail-closed lifecycle rules",
     () => compileAndRun([]),
     90_000,
   );
 
-  it.skipIf(compiler !== "/usr/bin/clang++")(
+  it.skipIf(!nativeCompilerIsClang)(
     "stays clean under the undefined-behavior sanitizer",
     () => compileAndRun(["-fsanitize=undefined"]),
     90_000,
@@ -80,7 +80,7 @@ describe("Clang-Wasm portable SHA-256 native primitive", () => {
 
   // Apple clang's ASan runtime deadlocks inside dyld initialization on this
   // Darwin runner; Linux CI owns address-sanitizer coverage for this primitive.
-  it.skipIf(compiler !== "/usr/bin/clang++" || process.platform === "darwin")(
+  it.skipIf(!nativeCompilerIsClang || process.platform === "darwin")(
     "stays clean under the address sanitizer",
     () => compileAndRun(["-fsanitize=address"]),
     90_000,

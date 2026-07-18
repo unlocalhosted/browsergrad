@@ -47,12 +47,15 @@ import {
   createCppCuteBrowserProfileInput,
   createCppCuteProfileInput,
 } from "../../tests/compiler/support/cpp_cute_frontend_fixtures.js";
+import {
+  nativeCompiler as compiler,
+  nativeCompilerIsClang,
+  nativeCompilerUnavailableUnlessOptional,
+} from "./cpp_cute_browser_native_test_harness.js";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const extractorRoot = join(scriptRoot, "extractor");
 const nativeSource = join(scriptRoot, "cpp_cute_browser_compile_session_native_test.cpp");
-const compiler = ["/usr/bin/clang++", "/usr/bin/c++", "/usr/bin/g++"]
-  .find((candidate) => existsSync(candidate));
 const encoder = new TextEncoder();
 const mainPath = "/workspace/src/main.cu";
 const headerPath = "/workspace/src/project.hpp";
@@ -395,13 +398,13 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
 }
 
 describe("bounded native C++/CuTe compile-session admission", () => {
-  it.skipIf(compiler === undefined)(
+  it.skipIf(nativeCompilerUnavailableUnlessOptional)(
     "admits exact TS identities and rejects hostile, drifted, and over-budget frames",
     () => compileAndRun([]),
     90_000,
   );
 
-  it.skipIf(compiler !== "/usr/bin/clang++")(
+  it.skipIf(!nativeCompilerIsClang)(
     "stays clean under undefined-behavior sanitizer coverage",
     () => compileAndRun(["-fsanitize=undefined"]),
     90_000,
@@ -409,7 +412,7 @@ describe("bounded native C++/CuTe compile-session admission", () => {
 
   // Apple clang's ASan runtime deadlocks during dyld initialization on the
   // Darwin runner; Linux CI owns address/leak sanitizer coverage.
-  it.skipIf(compiler !== "/usr/bin/clang++" || process.platform === "darwin")(
+  it.skipIf(!nativeCompilerIsClang || process.platform === "darwin")(
     "stays clean under address and leak sanitizer coverage",
     () => compileAndRun(["-fsanitize=address"]),
     90_000,
