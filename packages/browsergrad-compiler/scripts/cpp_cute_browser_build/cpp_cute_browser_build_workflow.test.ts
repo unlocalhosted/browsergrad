@@ -52,13 +52,17 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("--security-opt no-new-privileges:true");
     expect(workflow).toContain("--user \"$(id -u):$(id -g)\"");
     expect(workflow).not.toContain("src=${GITHUB_WORKSPACE},dst=/workspace,readonly");
+    expect(workflow).not.toContain("src=${GITHUB_WORKSPACE}/packages/");
+    expect(workflow).toContain("cpp_cute_browser_build_runtime_closure.mjs");
     expect(workflow).toContain(
-      "src=${GITHUB_WORKSPACE}/packages/browsergrad-compiler,dst=/workspace/packages/browsergrad-compiler,readonly",
+      "--output-root=\"${BG_CLANG_BUILD_ROOT}/inputs/runtime-workspace\"",
     );
     expect(workflow).toContain(
-      "src=${GITHUB_WORKSPACE}/packages/browsergrad-semantic-core,dst=/workspace/packages/browsergrad-semantic-core,readonly",
+      "src=${BG_CLANG_BUILD_ROOT}/inputs/runtime-workspace,dst=/workspace,readonly",
     );
     expect(workflow).toContain("dst=/browsergrad/inputs/build-${BG_CLANG_BUILD_ORDINAL},readonly");
+    expect(workflow).toContain("build-execution-observation.v2.json");
+    expect(workflow).not.toContain("build-execution-observation.v1.json");
   });
 
   it("separates one-build validation from two-build reproducibility", () => {
@@ -73,6 +77,8 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("needs: build");
     expect(workflow).toContain("if: ${{ inputs.mode == 'reproducibility' }}");
     expect(workflow).toContain("cpp_cute_browser_build_reproducibility.mjs");
+    expect(workflow).toContain("clang-wasm-reproducibility.v2.json");
+    expect(workflow).not.toContain("clang-wasm-reproducibility.v1.json");
     expect(workflow).toContain("cpp_cute_browser_wasm_review.mjs");
     expect(workflow).toContain("--first-root=\"${BG_CLANG_REPRO_ROOT}/first\"");
     expect(workflow).toContain("--second-root=\"${BG_CLANG_REPRO_ROOT}/second\"");

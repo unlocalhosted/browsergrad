@@ -23,11 +23,15 @@ const CONFLICT = "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-CONFLICT";
 const IO = "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-IO";
 const BUILD_EXECUTION_SCHEMA =
   "browsergrad.compiler.cpp-cute.clang-wasm-build-execution-observation";
+const RUNTIME_CLOSURE_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.build-runtime-closure.v1";
 const REPRODUCIBILITY_SCHEMA =
   "browsergrad.compiler.cpp-cute.clang-wasm-reproducibility";
 const PORTABLE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._+/-]+$/u;
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const MAX_EVIDENCE_BYTE_LENGTH = 1024 * 1024;
+const MAX_RUNTIME_CLOSURE_OBSERVATION_BYTE_LENGTH = 256 * 1024;
+const MAX_RUNTIME_CLOSURE_FILE_COUNT = 256;
+const MAX_RUNTIME_CLOSURE_FILE_BYTE_LENGTH = 16 * 1024 * 1024;
 const MAX_FACTORY_MODULE_BYTE_LENGTH = 32 * 1024 * 1024;
 const MAX_WASM_BYTE_LENGTH = 256 * 1024 * 1024;
 const MAX_LINK_MAP_BYTE_LENGTH = 128 * 1024 * 1024;
@@ -104,7 +108,7 @@ export async function verifyCppCuteClangWasmReproducibility(input) {
 
   const evidence = Object.freeze({
     schema: REPRODUCIBILITY_SCHEMA,
-    version: 1,
+    version: 2,
     authority: "clang-wasm-extractor-reproducibility-observation-only",
     lockId: lock.lockId,
     sourceSetSha256: lock.extractorSourceSetSha256,
@@ -115,6 +119,7 @@ export async function verifyCppCuteClangWasmReproducibility(input) {
     ]),
     comparison: Object.freeze({
       sourceAndBuildPathsDistinct: true,
+      runtimeClosureMatched: true,
       canonicalCommandsAndEnvironmentMatched: true,
       nativeTablegenIdentitiesMatched: true,
       factoryModuleBytesMatched: true,
@@ -179,7 +184,7 @@ export async function writeCppCuteClangWasmReproducibilityEvidence(outputPath, e
 async function admitBuild(root, diagnosticPath, lockId, sourceSetSha256, body, llvm) {
   const expectedOutputFiles = [
     "browsergrad-cpp-cute/clang-extractor.wasm",
-    "build-execution-observation.v1.json",
+    "build-execution-observation.v2.json",
   ];
   const expectedEvidenceFiles = [
     "build-logs/clang-extractor-wasm-build.stderr.log",
@@ -198,7 +203,7 @@ async function admitBuild(root, diagnosticPath, lockId, sourceSetSha256, body, l
     assertExactTree(join(root, "output"), expectedOutputFiles, `${diagnosticPath}.output`),
     assertExactTree(join(root, "state", "evidence"), expectedEvidenceFiles, `${diagnosticPath}.evidence`),
   ]);
-  const evidencePath = join(root, "output", "build-execution-observation.v1.json");
+  const evidencePath = join(root, "output", "build-execution-observation.v2.json");
   const evidenceSnapshot = await readSmallFile(
     evidencePath,
     MAX_EVIDENCE_BYTE_LENGTH,
@@ -237,14 +242,20 @@ function decodeBuildExecutionEvidence(bytes, diagnosticPath, lockId, sourceSetSh
     invalid(`${diagnosticPath}.buildExecutionEvidence`, "evidence must use canonical JSON bytes");
   }
   const top = exactObject(value, [
-    "schema", "version", "authority", "lockId", "builder", "isolation",
+    "schema", "version", "authority", "lockId", "builder", "runtimeClosure", "isolation",
     "llvmSourceArchive", "execution", "sidecarMaterialization", "claims",
   ], diagnosticPath);
   exactValue(top.schema, BUILD_EXECUTION_SCHEMA, `${diagnosticPath}.schema`);
-  exactValue(top.version, 1, `${diagnosticPath}.version`);
+  exactValue(top.version, 2, `${diagnosticPath}.version`);
   exactValue(top.authority, "build-execution-observation-only", `${diagnosticPath}.authority`);
   exactValue(top.lockId, lockId, `${diagnosticPath}.lockId`);
   const builder = validateBuilder(top.builder, `${diagnosticPath}.builder`, body.builder);
+  const runtimeClosure = validateRuntimeClosure(
+    top.runtimeClosure,
+    `${diagnosticPath}.runtimeClosure`,
+    lockId,
+    sourceSetSha256,
+  );
   const isolation = validateIsolation(top.isolation, `${diagnosticPath}.isolation`);
   const llvmSourceArchive = validateLlvm(top.llvmSourceArchive, `${diagnosticPath}.llvmSourceArchive`, llvm);
   const execution = validateExecution(top.execution, `${diagnosticPath}.execution`, lockId, sourceSetSha256);
@@ -254,7 +265,112 @@ function decodeBuildExecutionEvidence(bytes, diagnosticPath, lockId, sourceSetSh
     execution,
   );
   validateClaims(top.claims, `${diagnosticPath}.claims`);
-  return Object.freeze({ builder, isolation, llvmSourceArchive, execution, sidecarMaterialization });
+  return Object.freeze({
+    builder,
+    runtimeClosure,
+    isolation,
+    llvmSourceArchive,
+    execution,
+    sidecarMaterialization,
+  });
+}
+
+function validateRuntimeClosure(value, path, lockId, sourceSetSha256) {
+  const object = exactObject(value, [
+    "observationSha256", "observationByteLength", "observation",
+  ], path);
+  const observation = exactObject(object.observation, [
+    "schema", "version", "authority", "lockId", "extractorSourceSetSha256",
+    "closureSha256", "fileCount", "files", "claims",
+  ], `${path}.observation`);
+  exactValue(
+    observation.schema,
+    "browsergrad.compiler.cpp-cute.build-runtime-closure",
+    `${path}.observation.schema`,
+  );
+  exactValue(observation.version, 1, `${path}.observation.version`);
+  exactValue(
+    observation.authority,
+    "staged-build-runtime-closure-observation-only",
+    `${path}.observation.authority`,
+  );
+  exactValue(observation.lockId, lockId, `${path}.observation.lockId`);
+  exactValue(
+    observation.extractorSourceSetSha256,
+    sourceSetSha256,
+    `${path}.observation.extractorSourceSetSha256`,
+  );
+  exactSha(observation.closureSha256, `${path}.observation.closureSha256`);
+  const fileCount = boundedInteger(
+    observation.fileCount,
+    1,
+    MAX_RUNTIME_CLOSURE_FILE_COUNT,
+    `${path}.observation.fileCount`,
+  );
+  const files = exactArray(observation.files, `${path}.observation.files`);
+  if (files.length !== fileCount) invalid(`${path}.observation.files`, "files must match fileCount");
+  let previousPath;
+  for (const [index, value_] of files.entries()) {
+    const filePath = `${path}.observation.files[${index}]`;
+    const file = exactObject(value_, ["kind", "path", "sha256", "byteLength"], filePath);
+    if (file.kind !== "runtime" && file.kind !== "extractor") {
+      invalid(`${filePath}.kind`, "kind must be runtime or extractor");
+    }
+    const relativePath = exactString(file.path, `${filePath}.path`);
+    if (relativePath.length > 4_096 || normalize(relativePath) !== relativePath ||
+        !/^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._@/-]+$/u.test(relativePath)) {
+      invalid(`${filePath}.path`, "expected a safe relative path");
+    }
+    if (previousPath !== undefined && previousPath >= relativePath) {
+      invalid(`${path}.observation.files`, "files must be strictly sorted and unique");
+    }
+    previousPath = relativePath;
+    exactSha(file.sha256, `${filePath}.sha256`);
+    boundedInteger(
+      file.byteLength,
+      0,
+      MAX_RUNTIME_CLOSURE_FILE_BYTE_LENGTH,
+      `${filePath}.byteLength`,
+    );
+  }
+  exactValue(
+    sha256(canonicalJsonBytes({ domain: RUNTIME_CLOSURE_HASH_DOMAIN, files })),
+    observation.closureSha256,
+    `${path}.observation.closureSha256`,
+  );
+  const claims = exactObject(observation.claims, [
+    "exactReadableWorkspaceClosureVerified", "buildExecuted", "outputIdentityAuthorized",
+    "reproducibilityVerified", "releaseReady",
+  ], `${path}.observation.claims`);
+  exactValue(
+    claims.exactReadableWorkspaceClosureVerified,
+    true,
+    `${path}.observation.claims.exactReadableWorkspaceClosureVerified`,
+  );
+  for (const name of ["buildExecuted", "outputIdentityAuthorized", "reproducibilityVerified", "releaseReady"]) {
+    exactValue(claims[name], false, `${path}.observation.claims.${name}`);
+  }
+  const observationBytes = canonicalJsonBytes(observation);
+  exactValue(
+    observationBytes.byteLength,
+    boundedInteger(
+      object.observationByteLength,
+      1,
+      MAX_RUNTIME_CLOSURE_OBSERVATION_BYTE_LENGTH,
+      `${path}.observationByteLength`,
+    ),
+    `${path}.observationByteLength`,
+  );
+  exactValue(
+    sha256(observationBytes),
+    exactSha(object.observationSha256, `${path}.observationSha256`),
+    `${path}.observationSha256`,
+  );
+  return Object.freeze({
+    observationSha256: object.observationSha256,
+    observationByteLength: object.observationByteLength,
+    observation: Object.freeze({ ...observation, files: Object.freeze([...files]) }),
+  });
 }
 
 function validateBuilder(value, path, expected) {
@@ -490,9 +606,13 @@ function validateSidecar(value, path, execution) {
 function validateClaims(value, path) {
   const object = exactObject(value, [
     "sourceArchiveVerified", "buildExecuted", "networkDuringBuildObservedDisabled",
+    "exactReadableWorkspaceClosureVerified",
     "outputIdentityAuthorized", "reproducibilityVerified", "producerAttested", "releaseReady",
   ], path);
-  for (const name of ["sourceArchiveVerified", "buildExecuted", "networkDuringBuildObservedDisabled"]) {
+  for (const name of [
+    "sourceArchiveVerified", "buildExecuted", "networkDuringBuildObservedDisabled",
+    "exactReadableWorkspaceClosureVerified",
+  ]) {
     exactValue(object[name], true, `${path}.${name}`);
   }
   for (const name of ["outputIdentityAuthorized", "reproducibilityVerified", "producerAttested", "releaseReady"]) {
@@ -567,6 +687,17 @@ function normalizedCommandRecords(build) {
 
 function assertIdentityParity(first, second) {
   const pairs = [
+    [
+      {
+        sha256: first.runtimeClosure.observationSha256,
+        byteLength: first.runtimeClosure.observationByteLength,
+      },
+      {
+        sha256: second.runtimeClosure.observationSha256,
+        byteLength: second.runtimeClosure.observationByteLength,
+      },
+      "$comparison.runtimeClosure",
+    ],
     [first.execution.nativeTools.clangTablegen, second.execution.nativeTools.clangTablegen, "$comparison.nativeTools.clangTablegen"],
     [first.execution.nativeTools.llvmTablegen, second.execution.nativeTools.llvmTablegen, "$comparison.nativeTools.llvmTablegen"],
     [identity(first.execution, "factoryModule"), identity(second.execution, "factoryModule"), "$comparison.factoryModule"],
@@ -592,6 +723,9 @@ function buildIdentity(ordinal, build) {
     ordinal,
     buildExecutionEvidenceSha256: build.evidenceSha256,
     buildExecutionEvidenceByteLength: build.evidenceByteLength,
+    runtimeClosureSha256: build.runtimeClosure.observation.closureSha256,
+    runtimeClosureObservationSha256: build.runtimeClosure.observationSha256,
+    runtimeClosureObservationByteLength: build.runtimeClosure.observationByteLength,
     nativeTools: Object.freeze({
       clangTablegenSha256: build.execution.nativeTools.clangTablegen.sha256,
       clangTablegenByteLength: build.execution.nativeTools.clangTablegen.byteLength,

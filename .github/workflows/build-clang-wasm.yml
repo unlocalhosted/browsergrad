@@ -61,6 +61,14 @@ jobs:
             "${bg_clang_build_root}/work/build-${BG_CLANG_BUILD_ORDINAL}"
           echo "BG_CLANG_BUILD_ROOT=${bg_clang_build_root}" >> "${GITHUB_ENV}"
 
+      - name: Stage the exact build runtime closure
+        run: |
+          set -euo pipefail
+          node \
+            packages/browsergrad-compiler/scripts/cpp_cute_browser_build/cpp_cute_browser_build_runtime_closure.mjs \
+            --source-root="${GITHUB_WORKSPACE}" \
+            --output-root="${BG_CLANG_BUILD_ROOT}/inputs/runtime-workspace"
+
       - name: Acquire and verify the locked LLVM source archive
         run: |
           set -euo pipefail
@@ -125,8 +133,7 @@ jobs:
             --ulimit nofile=65536:65536 \
             --user "$(id -u):$(id -g)" \
             --tmpfs /tmp:rw,nosuid,nodev,noexec,size=67108864 \
-            --mount "type=bind,src=${GITHUB_WORKSPACE}/packages/browsergrad-compiler,dst=/workspace/packages/browsergrad-compiler,readonly" \
-            --mount "type=bind,src=${GITHUB_WORKSPACE}/packages/browsergrad-semantic-core,dst=/workspace/packages/browsergrad-semantic-core,readonly" \
+            --mount "type=bind,src=${BG_CLANG_BUILD_ROOT}/inputs/runtime-workspace,dst=/workspace,readonly" \
             --mount "type=bind,src=${BG_CLANG_BUILD_ROOT}/inputs,dst=/browsergrad/inputs/build-${BG_CLANG_BUILD_ORDINAL},readonly" \
             --mount "type=bind,src=${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL},dst=/browsergrad/work/build-${BG_CLANG_BUILD_ORDINAL}" \
             --workdir /workspace/packages/browsergrad-compiler \
@@ -144,7 +151,7 @@ jobs:
         run: |
           set -euo pipefail
           sha256sum \
-            "${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/output/build-execution-observation.v1.json" \
+            "${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/output/build-execution-observation.v2.json" \
             "${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/output/browsergrad-cpp-cute/clang-extractor.wasm"
           du --human-readable --summarize \
             "${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/output" \
@@ -214,8 +221,8 @@ jobs:
             packages/browsergrad-compiler/scripts/cpp_cute_browser_build/cpp_cute_browser_build_reproducibility.mjs \
             --first-root="${BG_CLANG_REPRO_ROOT}/first" \
             --second-root="${BG_CLANG_REPRO_ROOT}/second" \
-            --output="${BG_CLANG_REPRO_ROOT}/clang-wasm-reproducibility.v1.json"
-          sha256sum "${BG_CLANG_REPRO_ROOT}/clang-wasm-reproducibility.v1.json"
+            --output="${BG_CLANG_REPRO_ROOT}/clang-wasm-reproducibility.v2.json"
+          sha256sum "${BG_CLANG_REPRO_ROOT}/clang-wasm-reproducibility.v2.json"
 
       - name: Inspect reproducible Wasm against the pinned runtime ABI
         run: |
@@ -232,7 +239,7 @@ jobs:
         with:
           name: clang-wasm-reproducibility-${{ github.run_id }}
           path: |
-            ${{ env.BG_CLANG_REPRO_ROOT }}/clang-wasm-reproducibility.v1.json
+            ${{ env.BG_CLANG_REPRO_ROOT }}/clang-wasm-reproducibility.v2.json
             ${{ env.BG_CLANG_REPRO_ROOT }}/clang-wasm-runtime-abi-review.v1.json
           if-no-files-found: warn
           retention-days: 7

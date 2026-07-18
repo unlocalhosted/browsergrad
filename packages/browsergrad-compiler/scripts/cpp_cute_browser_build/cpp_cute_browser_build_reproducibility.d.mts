@@ -7,6 +7,9 @@ export interface CppCuteClangWasmReproducibilityBuildIdentity {
   readonly ordinal: 1 | 2;
   readonly buildExecutionEvidenceSha256: string;
   readonly buildExecutionEvidenceByteLength: number;
+  readonly runtimeClosureSha256: string;
+  readonly runtimeClosureObservationSha256: string;
+  readonly runtimeClosureObservationByteLength: number;
   readonly nativeTools: Readonly<{
     readonly clangTablegenSha256: string;
     readonly clangTablegenByteLength: number;
@@ -31,7 +34,7 @@ declare const cppCuteClangWasmReproducibilityBrand: unique symbol;
 export interface VerifiedCppCuteClangWasmReproducibility {
   readonly [cppCuteClangWasmReproducibilityBrand]: true;
   readonly schema: "browsergrad.compiler.cpp-cute.clang-wasm-reproducibility";
-  readonly version: 1;
+  readonly version: 2;
   readonly authority: "clang-wasm-extractor-reproducibility-observation-only";
   readonly lockId: string;
   readonly sourceSetSha256: string;
@@ -42,6 +45,7 @@ export interface VerifiedCppCuteClangWasmReproducibility {
   ];
   readonly comparison: Readonly<{
     readonly sourceAndBuildPathsDistinct: true;
+    readonly runtimeClosureMatched: true;
     readonly canonicalCommandsAndEnvironmentMatched: true;
     readonly nativeTablegenIdentitiesMatched: true;
     readonly factoryModuleBytesMatched: true;

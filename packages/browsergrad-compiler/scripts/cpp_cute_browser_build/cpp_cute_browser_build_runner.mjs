@@ -27,6 +27,9 @@ import {
   persistCppCuteBrowserBuildFailureObservation,
   projectCppCuteBrowserBuildFailure,
 } from "./cpp_cute_browser_build_failure_observation.mjs";
+import {
+  verifyCppCuteBrowserBuildRuntimeClosure,
+} from "./cpp_cute_browser_build_runtime_closure.mjs";
 
 const ARGUMENT_NAMES = Object.freeze([
   "builder-observation",
@@ -129,11 +132,6 @@ export async function runCppCuteBrowserBuild(argv) {
     "packages",
     "browsergrad-compiler",
   );
-  const semanticCorePackageRoot = join(
-    arguments_["workspace-root"],
-    "packages",
-    "browsergrad-semantic-core",
-  );
 
   const builderBytes = await readBoundedRegularFile(
     arguments_["builder-observation"],
@@ -142,8 +140,7 @@ export async function runCppCuteBrowserBuild(argv) {
   );
   const builder = decodeCppCuteBuilderContainerObservation(builderBytes, body.builder);
   const isolation = await observeContainerIsolation([
-    compilerPackageRoot,
-    semanticCorePackageRoot,
+    arguments_["workspace-root"],
     arguments_["llvm-archive"],
     arguments_["llvm-source-root"],
   ], arguments_["work-root"]);
@@ -172,6 +169,9 @@ export async function runCppCuteBrowserBuild(argv) {
   );
   try {
     const tools = await discoverPinnedBuilderTools();
+    const runtimeClosure = await verifyCppCuteBrowserBuildRuntimeClosure({
+      workspaceRoot: arguments_["workspace-root"],
+    });
     const prepared = await prepareCppCuteClangWasmBuildSource({
       lock,
       tools,
@@ -182,10 +182,15 @@ export async function runCppCuteBrowserBuild(argv) {
     const materialized = await materializeCppCuteClangWasmSidecar(prepared);
     const evidence = Object.freeze({
       schema: BUILD_EXECUTION_SCHEMA,
-      version: 1,
+      version: 2,
       authority: "build-execution-observation-only",
       lockId: lock.lockId,
       builder,
+      runtimeClosure: Object.freeze({
+        observationSha256: runtimeClosure.observationSha256,
+        observationByteLength: runtimeClosure.observationByteLength,
+        observation: runtimeClosure.observation,
+      }),
       isolation,
       llvmSourceArchive: archive,
       execution: executed,
@@ -194,6 +199,7 @@ export async function runCppCuteBrowserBuild(argv) {
         sourceArchiveVerified: true,
         buildExecuted: true,
         networkDuringBuildObservedDisabled: true,
+        exactReadableWorkspaceClosureVerified: true,
         outputIdentityAuthorized: false,
         reproducibilityVerified: false,
         producerAttested: false,
@@ -201,7 +207,7 @@ export async function runCppCuteBrowserBuild(argv) {
       }),
     });
     const evidenceBytes = canonicalJsonBytes(evidence);
-    const evidencePath = join(outputRoot, "build-execution-observation.v1.json");
+    const evidencePath = join(outputRoot, "build-execution-observation.v2.json");
     await writeExclusiveReadOnlyFile(evidencePath, evidenceBytes);
     return Object.freeze({
       evidencePath,

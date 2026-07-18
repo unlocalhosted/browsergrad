@@ -51,6 +51,7 @@ interface BuildFixtureOptions {
   readonly commandSuffix?: string;
   readonly evidenceWasmBytes?: Uint8Array;
   readonly observedWasmBytes?: Uint8Array;
+  readonly runtimeClosureContent?: string;
   readonly extraEvidenceField?: boolean;
   readonly nonCanonicalEvidence?: boolean;
 }
@@ -185,9 +186,39 @@ async function writeBuild(
     releaseReady: false,
     factoryModuleDistributed: false,
   };
+  const runtimeClosureBytes = new TextEncoder().encode(
+    options.runtimeClosureContent ?? "runtime closure fixture",
+  );
+  const runtimeClosureFiles = [{
+    kind: "runtime",
+    path: "packages/browsergrad-compiler/package.json",
+    sha256: sha256(runtimeClosureBytes),
+    byteLength: runtimeClosureBytes.byteLength,
+  }];
+  const runtimeClosureObservation = {
+    schema: "browsergrad.compiler.cpp-cute.build-runtime-closure",
+    version: 1,
+    authority: "staged-build-runtime-closure-observation-only",
+    lockId: lock.lockId,
+    extractorSourceSetSha256: lock.extractorSourceSetSha256,
+    closureSha256: sha256(canonicalJsonBytes({
+      domain: "browsergrad.compiler.cpp-cute.build-runtime-closure.v1",
+      files: runtimeClosureFiles,
+    })),
+    fileCount: runtimeClosureFiles.length,
+    files: runtimeClosureFiles,
+    claims: {
+      exactReadableWorkspaceClosureVerified: true,
+      buildExecuted: false,
+      outputIdentityAuthorized: false,
+      reproducibilityVerified: false,
+      releaseReady: false,
+    },
+  };
+  const runtimeClosureObservationBytes = canonicalJsonBytes(runtimeClosureObservation);
   const evidence = {
     schema: "browsergrad.compiler.cpp-cute.clang-wasm-build-execution-observation",
-    version: 1,
+    version: 2,
     authority: "build-execution-observation-only",
     lockId: lock.lockId,
     builder: {
@@ -196,6 +227,11 @@ async function writeBuild(
       platform: "linux/amd64",
       platformManifestDigest: body.builder.platformManifestDigest,
       imageConfigDigest: body.builder.imageConfigDigest,
+    },
+    runtimeClosure: {
+      observationSha256: sha256(runtimeClosureObservationBytes),
+      observationByteLength: runtimeClosureObservationBytes.byteLength,
+      observation: runtimeClosureObservation,
     },
     isolation: {
       networkInterfaces: ["lo"],
@@ -234,6 +270,7 @@ async function writeBuild(
       sourceArchiveVerified: true,
       buildExecuted: true,
       networkDuringBuildObservedDisabled: true,
+      exactReadableWorkspaceClosureVerified: true,
       outputIdentityAuthorized: false,
       reproducibilityVerified: false,
       producerAttested: false,
@@ -244,7 +281,7 @@ async function writeBuild(
   const evidenceBytes = options.nonCanonicalEvidence === true
     ? new TextEncoder().encode(JSON.stringify(evidence, null, 2))
     : canonicalJsonBytes(evidence);
-  await writeFile(join(outputRoot, "build-execution-observation.v1.json"), evidenceBytes);
+  await writeFile(join(outputRoot, "build-execution-observation.v2.json"), evidenceBytes);
   return { evidence, evidenceBytes };
 }
 
@@ -259,12 +296,13 @@ describe("Clang-Wasm clean-build reproducibility authority", () => {
 
     expect(evidence).toMatchObject({
       schema: "browsergrad.compiler.cpp-cute.clang-wasm-reproducibility",
-      version: 1,
+      version: 2,
       authority: "clang-wasm-extractor-reproducibility-observation-only",
       lockId: lock.lockId,
       cleanBuildCount: 2,
       comparison: {
         sourceAndBuildPathsDistinct: true,
+        runtimeClosureMatched: true,
         canonicalCommandsAndEnvironmentMatched: true,
         nativeTablegenIdentitiesMatched: true,
         factoryModuleBytesMatched: true,
@@ -316,6 +354,16 @@ describe("Clang-Wasm clean-build reproducibility authority", () => {
     });
   });
 
+  it("rejects different staged runtime closures across clean builds", async () => {
+    const { firstRoot, secondRoot } = await fixture({
+      second: { runtimeClosureContent: "different runtime closure" },
+    });
+    await expect(verifyCppCuteClangWasmReproducibility({ firstRoot, secondRoot })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-MISMATCH",
+      path: "$comparison.runtimeClosure",
+    });
+  });
+
   it("rejects command drift after canonical path substitution", async () => {
     const { firstRoot, secondRoot } = await fixture({ second: { commandSuffix: "--drift" } });
     await expect(verifyCppCuteClangWasmReproducibility({ firstRoot, secondRoot })).rejects.toMatchObject({
@@ -337,7 +385,7 @@ describe("Clang-Wasm clean-build reproducibility authority", () => {
   it("writes canonical no-clobber read-only evidence", async () => {
     const { root, firstRoot, secondRoot } = await fixture();
     const evidence = await verifyCppCuteClangWasmReproducibility({ firstRoot, secondRoot });
-    const outputPath = join(root, "reproducibility.v1.json");
+    const outputPath = join(root, "reproducibility.v2.json");
     const result = await writeCppCuteClangWasmReproducibilityEvidence(outputPath, evidence);
 
     const bytes = await readFile(outputPath);
