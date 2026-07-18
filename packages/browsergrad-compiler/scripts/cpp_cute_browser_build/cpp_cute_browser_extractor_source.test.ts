@@ -83,15 +83,26 @@ let allocatorInterception: {
   readonly forbiddenEntrypoints: readonly string[];
   readonly underlyingBypassEntrypoints: readonly string[];
 };
+let wasmCompilerFlags: readonly string[];
+let wasmLinkerFlags: readonly string[];
+let forbiddenWasmFeatures: readonly string[];
+let wasmExceptionTagCount: number;
 
 beforeAll(async () => {
   const prepared = await decodeCppCuteBrowserBuildInputLock(
     cppCuteBrowserBuildInputLockResourceBytes(),
   );
-  const source = unwrapPreparedCppCuteBrowserBuildInputLock(prepared)
-    .lock.body.recipe.extractorSource;
+  const recipe = unwrapPreparedCppCuteBrowserBuildInputLock(prepared)
+    .lock.body.recipe;
+  const source = recipe.extractorSource;
   sourceFiles = source.files;
   sourceSetSha256 = source.sourceSetSha256;
+  const wasmStage = recipe.stages.find((stage) =>
+    stage.stageId === "clang-extractor-wasm"
+  );
+  if (wasmStage === undefined) throw new Error("missing locked Clang-Wasm stage");
+  wasmCompilerFlags = wasmStage.compilerFlags;
+  wasmLinkerFlags = wasmStage.linkerFlags ?? [];
   const runtimeAbi = await decodeCppCuteBrowserRuntimeAbiManifest(
     cppCuteBrowserRuntimeAbiManifestResourceBytes(),
   );
@@ -101,6 +112,8 @@ beforeAll(async () => {
   runtimeVfsLimits = body.vfs;
   runtimeJsonLimits = body.inputFrame.decodeLimits;
   allocatorInterception = body.allocatorMetricsRecord.accounting.interception;
+  forbiddenWasmFeatures = body.wasm.forbiddenFeatures;
+  wasmExceptionTagCount = body.wasm.structuralPolicy.tags.exactCount;
 });
 
 async function extractorSource(path: typeof expectedSourcePaths[number]): Promise<string> {
@@ -136,6 +149,24 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     ]) {
       expect(cmake).toContain(`  ${library}\n`);
     }
+  });
+
+  it("keeps the extractor exception model consistent with the locked Wasm ABI", async () => {
+    const cmake = await extractorSource("CMakeLists.txt");
+    const exceptionSources = (await Promise.all(expectedSourcePaths
+      .filter((path) => path.endsWith(".cpp"))
+      .map(extractorSource))).join("\n");
+    const targetOffset = cmake.indexOf("add_llvm_executable(browsergrad-cpp-cute-extractor");
+
+    expect(exceptionSources).toMatch(/\b(?:throw|try|catch)\b/u);
+    expect(cmake.indexOf("set(LLVM_REQUIRES_EH ON)")).toBeGreaterThanOrEqual(0);
+    expect(cmake.indexOf("set(LLVM_REQUIRES_EH ON)")).toBeLessThan(targetOffset);
+    expect(cmake.indexOf("set(LLVM_REQUIRES_RTTI ON)")).toBeLessThan(targetOffset);
+    expect(wasmCompilerFlags).toContain("-fexceptions");
+    expect(wasmLinkerFlags).toContain("-fexceptions");
+    expect([...wasmCompilerFlags, ...wasmLinkerFlags]).not.toContain("-fwasm-exceptions");
+    expect(forbiddenWasmFeatures).toContain("exception-handling");
+    expect(wasmExceptionTagCount).toBe(0);
   });
 
   it("keeps the top-level translation unit as exact ABI-1.1 composition only", async () => {

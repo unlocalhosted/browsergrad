@@ -18,6 +18,14 @@ if(NOT BROWSERGRAD_EXTRACTOR_FACTORY_OUTPUT_FILENAME STREQUAL "clang-extractor.m
   message(FATAL_ERROR "the locked extractor factory filename must be clang-extractor.mjs")
 endif()
 
+# LLVM and Clang remain exception-free. BrowserGrad's boundary converts its own
+# allocation and validation exceptions into the closed C ABI status model, so
+# this one target requires Emscripten's JavaScript exception implementation.
+# The locked compiler and linker flags select that implementation explicitly;
+# native Wasm exception tags remain forbidden by runtime ABI v1.
+set(LLVM_REQUIRES_EH ON)
+set(LLVM_REQUIRES_RTTI ON)
+
 add_llvm_executable(browsergrad-cpp-cute-extractor
   BrowserGradCppCuteArtifactV3.cpp
   BrowserGradCppCuteArtifactV3.h
