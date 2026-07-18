@@ -45,6 +45,9 @@ export interface ExecutedCppCuteClangWasmBuildStep {
   readonly stageId: "native-tablegen" | "clang-extractor-wasm";
   readonly kind: "configure" | "build";
   readonly executable: string;
+  readonly arguments: readonly string[];
+  readonly cwd: string;
+  readonly environment: Readonly<Record<string, string>>;
   readonly exitCode: number | null;
   readonly terminationSignal: NodeJS.Signals | null;
   readonly stdoutPath: string;
@@ -73,6 +76,14 @@ export interface ExecutedCppCuteClangWasmBuild {
   readonly authority: "clang-wasm-build-execution-observation-only";
   readonly lockId: string;
   readonly sourceSetSha256: string;
+  readonly paths: Readonly<{
+    readonly llvmProjectSourceRoot: string;
+    readonly extractorSourceRoot: string;
+    readonly nativeBuildRoot: string;
+    readonly wasmBuildRoot: string;
+    readonly outputRoot: string;
+    readonly stateRoot: string;
+  }>;
   readonly nativeTools: Readonly<{
     readonly clangTablegen: ExecutedCppCuteClangWasmNativeTool;
     readonly llvmTablegen: ExecutedCppCuteClangWasmNativeTool;

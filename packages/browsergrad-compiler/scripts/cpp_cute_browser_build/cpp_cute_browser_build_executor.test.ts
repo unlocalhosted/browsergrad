@@ -538,6 +538,18 @@ describe("exact Clang-Wasm build executor", () => {
       call.maximumDurationMs === 4 * 60 * 60 * 1_000
     ))).toBe(true);
     expect(executed.steps.map((step) => step.id)).toEqual(expectedPlan.steps.map((step) => step.id));
+    expect(executed.steps.map((step) => ({
+      executable: step.executable,
+      arguments: step.arguments,
+      cwd: step.cwd,
+      environment: step.environment,
+    }))).toEqual(expectedPlan.steps.map((step) => ({
+      executable: step.executable,
+      arguments: step.arguments,
+      cwd: step.cwd,
+      environment: step.environment,
+    })));
+    expect(executed.paths).toEqual(input.roots);
     for (const [index, step] of executed.steps.entries()) {
       expect(await readFile(step.stdoutPath, "utf8")).toBe(`stdout ${index}\n`);
       expect(await readFile(step.stderrPath, "utf8")).toBe(`stderr ${index}\n`);
