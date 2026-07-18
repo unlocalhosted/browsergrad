@@ -23,9 +23,16 @@ implemented. A pinned no-shell Clang-Wasm executor, isolated manual build lane,
 two-clean-build comparator, native TableGen identity observation, and raw-Wasm
 ABI review producer are on `main` through `1eac0a1c`.
 
-The first admitted LLVM 22.1.8/Emscripten build is executing in workflow run
-`29650211276`. An active run is not build, ABI, reproducibility, Worker, browser,
-or release evidence. The package Worker remains capability-blocked until real
+Harness hardening and build fixes are on `main` through `34ddd7ca`. Validation
+run `29650211276` exposed a target exception-mode mismatch after 86 minutes 45
+seconds; run `29653908647` cleared that failure and exposed missing Clang source
+and generated include roots after 94 minutes 45 seconds. Both failures occurred
+before any factory/Wasm output was admitted. The target now binds both include
+roots and the configured-target preflight requires them before the expensive
+Wasm compile. A new validation is running as `29657388282`.
+
+An active or failed run is not build, ABI, reproducibility, Worker, browser, or
+release evidence. The package Worker remains capability-blocked until real
 outputs are independently reviewed and the generated factory is bundled into
 package-owned Worker bytes. Use the linked implementation ledger for exact
 chronology, failures, and evidence. This checkpoint is informational: the
