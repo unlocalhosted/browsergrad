@@ -6,6 +6,7 @@ import {
   mkdir,
   open,
   opendir,
+  readFile,
   realpath,
   rm,
 } from "node:fs/promises";
@@ -515,7 +516,7 @@ async function verifyBuildInputBindings(bindings) {
         !sameFileVersionIdentity(fileVersionIdentity(stat), binding.identity)) {
       conflict(binding.diagnosticPath, "build-input directory identity changed during execution");
     }
-    assertTrustedOwnerAndMode(stat, binding.diagnosticPath);
+    await assertTrustedOwnerAndMode(stat, binding.path, binding.diagnosticPath);
   }
 }
 
@@ -530,7 +531,7 @@ async function snapshotRegularFileBindings(specs) {
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0n) {
       invalid(spec.diagnosticPath, "expected a nonempty non-symlink regular file");
     }
-    assertTrustedOwnerAndMode(stat, spec.diagnosticPath);
+    await assertTrustedOwnerAndMode(stat, spec.path, spec.diagnosticPath);
     if (spec.executable && (stat.mode & 0o111n) === 0n) {
       invalid(spec.diagnosticPath, "build tool must have an executable mode bit");
     }
@@ -554,7 +555,7 @@ async function verifyRegularFileBindings(bindings) {
         !sameFileVersionIdentity(fileVersionIdentity(stat), binding.identity)) {
       conflict(binding.diagnosticPath, "build-input file identity changed during execution");
     }
-    assertTrustedOwnerAndMode(stat, binding.diagnosticPath);
+    await assertTrustedOwnerAndMode(stat, binding.path, binding.diagnosticPath);
     if (binding.executable && (stat.mode & 0o111n) === 0n) {
       conflict(binding.diagnosticPath, "build tool lost its executable mode during execution");
     }
@@ -575,7 +576,7 @@ async function snapshotDirectoryBindings(specs) {
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
       invalid(spec.diagnosticPath, "expected a non-symlink directory");
     }
-    assertTrustedOwnerAndMode(stat, spec.diagnosticPath);
+    await assertTrustedOwnerAndMode(stat, spec.path, spec.diagnosticPath);
     await assertTrustedPosixAncestry(spec.path, spec.diagnosticPath);
     bindings.push(Object.freeze({
       ...spec,
@@ -585,18 +586,80 @@ async function snapshotDirectoryBindings(specs) {
   return Object.freeze(bindings);
 }
 
-/** @param {import("node:fs").BigIntStats} stat @param {string} diagnosticPath */
-function assertTrustedOwnerAndMode(stat, diagnosticPath) {
+/** @param {import("node:fs").BigIntStats} stat @param {string} path @param {string} diagnosticPath */
+async function assertTrustedOwnerAndMode(stat, path, diagnosticPath) {
   if (typeof process.getuid !== "function") {
     invalid(diagnosticPath, "build-input ownership requires POSIX uid support");
   }
   const currentUid = BigInt(process.getuid());
   if (stat.uid !== 0n && stat.uid !== currentUid) {
-    invalid(diagnosticPath, "build input must be owned by root or the current build user");
+    await assertPathOnReadOnlyLinuxMount(path, diagnosticPath);
   }
   if ((stat.mode & 0o022n) !== 0n) {
     invalid(diagnosticPath, "build input must not be writable by group or other users");
   }
+}
+
+/**
+ * Pinned OCI toolchains commonly retain their image-build uid. Such inputs are
+ * admitted only when the kernel reports their effective mount read-only; a
+ * mode-bit-only or caller-declared immutability claim is insufficient.
+ *
+ * @param {string} path
+ * @param {string} diagnosticPath
+ */
+async function assertPathOnReadOnlyLinuxMount(path, diagnosticPath) {
+  let mountInfo;
+  try {
+    mountInfo = await readFile("/proc/self/mountinfo");
+  } catch (cause) {
+    invalid(
+      diagnosticPath,
+      "foreign-owned build input requires a kernel-observed read-only Linux mount",
+      { cause },
+    );
+  }
+  if (mountInfo.byteLength === 0 || mountInfo.byteLength > 4 * 1024 * 1024) {
+    resource(`${diagnosticPath}.mountInfo`, "Linux mountinfo length is outside the admitted range");
+  }
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(mountInfo);
+  } catch (cause) {
+    invalid(`${diagnosticPath}.mountInfo`, "Linux mountinfo is not valid UTF-8", { cause });
+  }
+  let selectedMountPoint;
+  let selectedOptions;
+  for (const [index, line] of text.trim().split("\n").entries()) {
+    const fields = line.split(" ");
+    const separator = fields.indexOf("-");
+    if (separator < 6 || fields[4] === undefined || fields[5] === undefined) {
+      invalid(`${diagnosticPath}.mountInfo[${index}]`, "malformed Linux mountinfo record");
+    }
+    const mountPoint = decodeMountInfoPath(fields[4]);
+    if ((path === mountPoint ||
+         path.startsWith(`${mountPoint === "/" ? "" : mountPoint}/`)) &&
+        (selectedMountPoint === undefined || mountPoint.length > selectedMountPoint.length)) {
+      selectedMountPoint = mountPoint;
+      selectedOptions = fields[5].split(",");
+    }
+  }
+  if (selectedMountPoint === undefined || selectedOptions === undefined ||
+      !selectedOptions.includes("ro")) {
+    invalid(
+      diagnosticPath,
+      "foreign-owned build input is not protected by a kernel-observed read-only mount",
+    );
+  }
+}
+
+/** @param {string} value */
+function decodeMountInfoPath(value) {
+  return value
+    .replaceAll("\\040", " ")
+    .replaceAll("\\011", "\t")
+    .replaceAll("\\012", "\n")
+    .replaceAll("\\134", "\\");
 }
 
 /**

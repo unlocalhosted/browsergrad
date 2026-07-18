@@ -474,11 +474,23 @@ if (mainUrl === import.meta.url) {
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (cause) {
     const error = cause instanceof Error ? cause : new Error("unknown build-runner failure");
+    const code = ownStringDataProperty(error, "code");
+    const path = ownStringDataProperty(error, "path");
     process.stderr.write(`${JSON.stringify({
       name: error.name,
       message: error.message,
-      ...(error instanceof CppCuteBrowserBuildRunnerError ? { path: error.path } : {}),
+      ...(code === undefined ? {} : { code }),
+      ...(path === undefined ? {} : { path }),
     })}\n`);
     process.exitCode = 1;
   }
+}
+
+/** @param {Error} error @param {string} name */
+function ownStringDataProperty(error, name) {
+  const descriptor = Object.getOwnPropertyDescriptor(error, name);
+  return descriptor !== undefined && "value" in descriptor &&
+    typeof descriptor.value === "string"
+    ? descriptor.value
+    : undefined;
 }
