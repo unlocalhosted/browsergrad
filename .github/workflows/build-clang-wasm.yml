@@ -64,12 +64,16 @@ jobs:
         run: |
           set -euo pipefail
           bg_clang_build_root="$(mktemp -d "${RUNNER_TEMP}/browsergrad-clang-wasm.XXXXXX")"
+          bg_clang_cache_root="${RUNNER_TEMP}/browsergrad-clang-wasm-cache-v1/build-${BG_CLANG_BUILD_ORDINAL}"
           chmod 0700 "${bg_clang_build_root}"
           mkdir -m 0700 \
             "${bg_clang_build_root}/inputs" \
             "${bg_clang_build_root}/work" \
-            "${bg_clang_build_root}/work/build-${BG_CLANG_BUILD_ORDINAL}"
+            "${bg_clang_build_root}/work/build-${BG_CLANG_BUILD_ORDINAL}" \
+            "${RUNNER_TEMP}/browsergrad-clang-wasm-cache-v1" \
+            "${bg_clang_cache_root}"
           echo "BG_CLANG_BUILD_ROOT=${bg_clang_build_root}" >> "${GITHUB_ENV}"
+          echo "BG_CLANG_CACHE_ROOT=${bg_clang_cache_root}" >> "${GITHUB_ENV}"
 
       - name: Restore the untrusted diagnostic toolchain cache
         id: toolchain-cache
@@ -77,9 +81,41 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            ${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/native-tablegen
-            ${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
+            ${{ runner.temp }}/browsergrad-clang-wasm-cache-v1/build-${{ matrix.buildOrdinal }}/native-tablegen
+            ${{ runner.temp }}/browsergrad-clang-wasm-cache-v1/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
           key: linux-amd64-${{ steps.toolchain-cache-key.outputs.cache-key }}
+
+      # One-time migration for the cache seeded by run 29663494490 before the
+      # cache path was made stable. Remove after the stable namespace is proven.
+      - name: Restore the legacy diagnostic toolchain cache for migration
+        id: legacy-toolchain-cache
+        if: ${{ inputs.mode == 'fast-validation' && steps.toolchain-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/browsergrad-clang-wasm.d2uQIm/work/build-${{ matrix.buildOrdinal }}/native-tablegen
+            ${{ runner.temp }}/browsergrad-clang-wasm.d2uQIm/work/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
+          key: linux-amd64-${{ steps.toolchain-cache-key.outputs.cache-key }}
+
+      - name: Admit the restored diagnostic cache into the private build root
+        if: ${{ inputs.mode == 'fast-validation' }}
+        run: |
+          set -euo pipefail
+          bg_cache_source=''
+          if [[ "${{ steps.toolchain-cache.outputs.cache-hit }}" == 'true' ]]; then
+            bg_cache_source="${BG_CLANG_CACHE_ROOT}"
+          elif [[ "${{ steps.legacy-toolchain-cache.outputs.cache-hit }}" == 'true' ]]; then
+            bg_cache_source="${RUNNER_TEMP}/browsergrad-clang-wasm.d2uQIm/work/build-${BG_CLANG_BUILD_ORDINAL}"
+          fi
+          if [[ -n "${bg_cache_source}" ]]; then
+            for bg_cache_entry in native-tablegen clang-extractor-wasm; do
+              test -d "${bg_cache_source}/${bg_cache_entry}"
+              test ! -L "${bg_cache_source}/${bg_cache_entry}"
+              mv \
+                "${bg_cache_source}/${bg_cache_entry}" \
+                "${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/${bg_cache_entry}"
+            done
+          fi
 
       - name: Stage the exact build runtime closure
         run: |
@@ -167,13 +203,44 @@ jobs:
             --work-root=/browsergrad/work/build-${BG_CLANG_BUILD_ORDINAL} \
             --builder-observation=/browsergrad/inputs/build-${BG_CLANG_BUILD_ORDINAL}/builder-observation.json
 
-      - name: Save the untrusted diagnostic toolchain cache
+      - name: Stage a complete reusable diagnostic toolchain cache
+        id: stage-toolchain-cache
         if: ${{ always() && inputs.mode == 'fast-validation' && steps.toolchain-cache.outputs.cache-hit != 'true' }}
+        run: |
+          set -euo pipefail
+          bg_build_root="${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}"
+          for bg_required_path in \
+            native-tablegen/bin/clang-tblgen \
+            native-tablegen/bin/llvm-tblgen \
+            clang-extractor-wasm/lib/libclangAST.a \
+            clang-extractor-wasm/lib/libclangBasic.a \
+            clang-extractor-wasm/lib/libclangDriver.a \
+            clang-extractor-wasm/lib/libclangFrontend.a \
+            clang-extractor-wasm/lib/libclangIndex.a \
+            clang-extractor-wasm/lib/libclangLex.a \
+            clang-extractor-wasm/lib/libclangParse.a \
+            clang-extractor-wasm/lib/libclangSema.a \
+            clang-extractor-wasm/lib/libclangSerialization.a \
+            clang-extractor-wasm/lib/libclangTooling.a; do
+            if [[ ! -f "${bg_build_root}/${bg_required_path}" || -L "${bg_build_root}/${bg_required_path}" ]]; then
+              echo 'cache-ready=false' >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+          done
+          for bg_cache_entry in native-tablegen clang-extractor-wasm; do
+            mv \
+              "${bg_build_root}/${bg_cache_entry}" \
+              "${BG_CLANG_CACHE_ROOT}/${bg_cache_entry}"
+          done
+          echo 'cache-ready=true' >> "${GITHUB_OUTPUT}"
+
+      - name: Save the untrusted diagnostic toolchain cache
+        if: ${{ always() && steps.stage-toolchain-cache.outputs.cache-ready == 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            ${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/native-tablegen
-            ${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
+            ${{ runner.temp }}/browsergrad-clang-wasm-cache-v1/build-${{ matrix.buildOrdinal }}/native-tablegen
+            ${{ runner.temp }}/browsergrad-clang-wasm-cache-v1/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
           key: linux-amd64-${{ steps.toolchain-cache-key.outputs.cache-key }}
 
       - name: Summarize exact build outputs

@@ -94,6 +94,13 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain(
       "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
     );
+    expect(workflow).toContain(
+      "${{ runner.temp }}/browsergrad-clang-wasm-cache-v1/build-${{ matrix.buildOrdinal }}/native-tablegen",
+    );
+    expect(workflow).toContain("Admit the restored diagnostic cache into the private build root");
+    expect(workflow).toContain("Stage a complete reusable diagnostic toolchain cache");
+    expect(workflow).toContain("native-tablegen/bin/clang-tblgen");
+    expect(workflow).toContain("clang-extractor-wasm/lib/libclangTooling.a");
     expect(workflow).toContain("--execution-mode=\"${{ inputs.mode == 'fast-validation' && 'cached-diagnostic' || 'clean' }}\"");
     expect(workflow).toContain("fast-validation-observation.v1.json");
     expect(workflow).not.toContain("restore-keys:");
