@@ -95,7 +95,7 @@ describe("Clang-Wasm evidence workflow", () => {
       "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
     );
     expect(workflow).toContain(
-      "${{ runner.temp }}/browsergrad-clang-wasm-cache-v1/build-${{ matrix.buildOrdinal }}/native-tablegen",
+      "${{ runner.temp }}/browsergrad-clang-wasm-cache-v2/build-${{ matrix.buildOrdinal }}/native-tablegen",
     );
     expect(workflow).toContain("Admit the restored diagnostic cache into the private build root");
     expect(workflow).toContain("Stage a complete reusable diagnostic toolchain cache");

@@ -64,13 +64,13 @@ jobs:
         run: |
           set -euo pipefail
           bg_clang_build_root="$(mktemp -d "${RUNNER_TEMP}/browsergrad-clang-wasm.XXXXXX")"
-          bg_clang_cache_root="${RUNNER_TEMP}/browsergrad-clang-wasm-cache-v1/build-${BG_CLANG_BUILD_ORDINAL}"
+          bg_clang_cache_root="${RUNNER_TEMP}/browsergrad-clang-wasm-cache-v2/build-${BG_CLANG_BUILD_ORDINAL}"
           chmod 0700 "${bg_clang_build_root}"
           mkdir -m 0700 \
             "${bg_clang_build_root}/inputs" \
             "${bg_clang_build_root}/work" \
             "${bg_clang_build_root}/work/build-${BG_CLANG_BUILD_ORDINAL}" \
-            "${RUNNER_TEMP}/browsergrad-clang-wasm-cache-v1" \
+            "${RUNNER_TEMP}/browsergrad-clang-wasm-cache-v2" \
             "${bg_clang_cache_root}"
           echo "BG_CLANG_BUILD_ROOT=${bg_clang_build_root}" >> "${GITHUB_ENV}"
           echo "BG_CLANG_CACHE_ROOT=${bg_clang_cache_root}" >> "${GITHUB_ENV}"
@@ -81,8 +81,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            ${{ runner.temp }}/browsergrad-clang-wasm-cache-v1/build-${{ matrix.buildOrdinal }}/native-tablegen
-            ${{ runner.temp }}/browsergrad-clang-wasm-cache-v1/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
+            ${{ runner.temp }}/browsergrad-clang-wasm-cache-v2/build-${{ matrix.buildOrdinal }}/native-tablegen
+            ${{ runner.temp }}/browsergrad-clang-wasm-cache-v2/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
           key: linux-amd64-${{ steps.toolchain-cache-key.outputs.cache-key }}
 
       # One-time migration for the cache seeded by run 29663494490 before the
@@ -239,8 +239,8 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            ${{ runner.temp }}/browsergrad-clang-wasm-cache-v1/build-${{ matrix.buildOrdinal }}/native-tablegen
-            ${{ runner.temp }}/browsergrad-clang-wasm-cache-v1/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
+            ${{ runner.temp }}/browsergrad-clang-wasm-cache-v2/build-${{ matrix.buildOrdinal }}/native-tablegen
+            ${{ runner.temp }}/browsergrad-clang-wasm-cache-v2/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
           key: linux-amd64-${{ steps.toolchain-cache-key.outputs.cache-key }}
 
       - name: Summarize exact build outputs
