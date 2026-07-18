@@ -105,4 +105,9 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(ciWorkflow).toContain("Run kernels browser suite");
     expect(ciWorkflow).not.toContain("continue-on-error");
   });
+
+  it("keeps oldest, LTS native-harness, and Node 25 default compatibility lanes", () => {
+    expect(ciWorkflow).toContain("node: [20, 24, 25]");
+    expect(ciWorkflow).toContain("if: matrix.node == 24");
+  });
 });

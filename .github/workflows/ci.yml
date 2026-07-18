@@ -9,7 +9,8 @@
 #
 # Build matrix:
 #   - Node 20 (oldest supported via engines.node ≥20)
-#   - Node 24 (current)
+#   - Node 24 (LTS and exact native compiler-harness lane)
+#   - Node 25 (current developer default compatibility)
 #
 # Fail-fast disabled so we always see the full matrix when one job breaks.
 
@@ -34,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 24]
+        node: [20, 24, 25]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
