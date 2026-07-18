@@ -16,6 +16,7 @@ const llvmConfigCandidates = [
   "/usr/bin/llvm-config",
 ].filter((candidate): candidate is string => candidate !== undefined);
 const llvmConfig = llvmConfigCandidates.find((candidate) => existsSync(candidate));
+const requireNativeClangPass = process.env["BROWSERGRAD_REQUIRE_NATIVE_CLANG_PASS"] === "1";
 
 interface NativeClangToolchain {
   readonly compiler: string;
@@ -101,7 +102,7 @@ function compileAndRun(): void {
 }
 
 describe("native Clang C++/CuTe semantic passes", () => {
-  it.skipIf(toolchain === undefined)(
+  it.skipIf(toolchain === undefined && !requireNativeClangPass)(
     "runs isolated CUDA device and host actions and resets temporal policy",
     compileAndRun,
     180_000,
