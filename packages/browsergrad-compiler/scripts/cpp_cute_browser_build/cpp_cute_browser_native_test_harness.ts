@@ -4,7 +4,7 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { isAbsolute } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const configuredCompiler = process.env["BROWSERGRAD_NATIVE_CXX"];
@@ -12,26 +12,36 @@ const compilerCandidates = configuredCompiler === undefined
   ? ["/usr/bin/clang++", "/usr/bin/c++", "/usr/bin/g++"]
   : [configuredCompiler];
 
-interface NativeCompilerDiscovery {
+export interface NativeCompilerDiscovery {
+  /**
+   * The validated absolute invocation path. Keep its basename intact because
+   * compiler drivers such as Clang select C++ link behavior from argv[0].
+   */
   readonly path: string;
+  /** The canonical executable identity behind the invocation path. */
+  readonly canonicalPath: string;
   readonly isClang: boolean;
 }
 
-function resolveNativeCompiler(): NativeCompilerDiscovery | undefined {
-  for (const candidate of compilerCandidates) {
+export function resolveNativeCompiler(
+  candidates: readonly string[] = compilerCandidates,
+): NativeCompilerDiscovery | undefined {
+  for (const candidate of candidates) {
     if (!isAbsolute(candidate)) continue;
     try {
-      const resolved = realpathSync(candidate);
-      const stat = statSync(resolved);
-      accessSync(resolved, constants.X_OK);
+      const invocationPath = resolve(candidate);
+      const canonicalPath = realpathSync(invocationPath);
+      const stat = statSync(canonicalPath);
+      accessSync(canonicalPath, constants.X_OK);
       if (!stat.isFile()) continue;
-      const version = spawnSync(resolved, ["--version"], {
+      const version = spawnSync(invocationPath, ["--version"], {
         encoding: "utf8",
         timeout: 5_000,
       });
       if (version.status !== 0 || version.error !== undefined) continue;
       return {
-        path: resolved,
+        path: invocationPath,
+        canonicalPath,
         isClang: /(?:^|\n)(?:Apple )?clang version /u.test(version.stdout),
       };
     } catch {
@@ -45,6 +55,7 @@ function resolveNativeCompiler(): NativeCompilerDiscovery | undefined {
 const discovery = resolveNativeCompiler();
 
 export const nativeCompiler = discovery?.path;
+export const nativeCompilerCanonicalPath = discovery?.canonicalPath;
 export const nativeCompilerRequired =
   process.env["BROWSERGRAD_REQUIRE_NATIVE_CPP_TESTS"] === "1";
 export const nativeCompilerUnavailableUnlessOptional =
