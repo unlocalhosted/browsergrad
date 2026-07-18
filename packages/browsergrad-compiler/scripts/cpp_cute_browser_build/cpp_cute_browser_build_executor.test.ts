@@ -27,6 +27,30 @@ const executorFsFaults = vi.hoisted(() => ({
   closeTemporaryFailure: undefined as Error | undefined,
 }));
 
+const executorProcessState = vi.hoisted(() => ({
+  calls: [] as Array<Readonly<{
+    executable: string;
+    arguments: readonly string[];
+    cwd: string;
+    environment: Readonly<Record<string, string>>;
+    maximumOutputByteLength: number;
+    maximumDurationMs: number;
+    signal?: AbortSignal;
+  }>>,
+  failureIndex: undefined as number | undefined,
+  thrownReason: undefined as
+    | "cancelled"
+    | "output-limit"
+    | "spawn"
+    | "timeout"
+    | undefined,
+  afterRun: undefined as ((index: number) => Promise<void>) | undefined,
+  factoryPath: undefined as string | undefined,
+  linkMapPath: undefined as string | undefined,
+  malformedFactory: false,
+  malformedWasm: false,
+}));
+
 vi.mock("./cpp_cute_browser_build_executor_fs.mjs", async (importOriginal) => {
   const actual = await importOriginal<
     typeof import("./cpp_cute_browser_build_executor_fs.mjs")
@@ -65,6 +89,95 @@ vi.mock("./cpp_cute_browser_build_executor_fs.mjs", async (importOriginal) => {
   };
 });
 
+vi.mock("./cpp_cute_browser_build_executor_process.mjs", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("./cpp_cute_browser_build_executor_process.mjs")
+  >();
+  return {
+    ...actual,
+    CPP_CUTE_BROWSER_BUILD_EXECUTOR_PROCESS: Object.freeze({
+      run: async (input: {
+        executable: string;
+        arguments: readonly string[];
+        cwd: string;
+        environment: Readonly<Record<string, string>>;
+        maximumOutputByteLength: number;
+        maximumDurationMs: number;
+        signal?: AbortSignal;
+      }) => {
+        const callIndex = executorProcessState.calls.length;
+        executorProcessState.calls.push(Object.freeze({
+          ...input,
+          arguments: Object.freeze([...input.arguments]),
+          environment: Object.freeze({ ...input.environment }),
+        }));
+        if (executorProcessState.thrownReason !== undefined) {
+          throw new actual.CppCuteBrowserBuildProcessError(
+            executorProcessState.thrownReason,
+            "injected process-boundary failure",
+          );
+        }
+
+        const { chmod, mkdir, writeFile } = await import("node:fs/promises");
+        const { join } = await import("node:path");
+        if (input.arguments[0] === "--build" &&
+            input.arguments.includes("clang-tblgen")) {
+          const bin = join(input.cwd, "bin");
+          await mkdir(bin, { recursive: true });
+          await Promise.all([
+            writeFile(join(bin, "clang-tblgen"), "native clang tablegen\n"),
+            writeFile(join(bin, "llvm-tblgen"), "native llvm tablegen\n"),
+          ]);
+          await Promise.all([
+            chmod(join(bin, "clang-tblgen"), 0o555),
+            chmod(join(bin, "llvm-tblgen"), 0o555),
+          ]);
+        }
+        if (input.arguments[0] === "-S" &&
+            input.arguments.some((argument) => argument.includes("BROWSERGRAD_EXTRACTOR_FACTORY_OUTPUT_PATH"))) {
+          executorProcessState.factoryPath = input.arguments
+            .find((argument) => argument.startsWith("-DBROWSERGRAD_EXTRACTOR_FACTORY_OUTPUT_PATH="))
+            ?.split("=").slice(1).join("=");
+          const linkerFlags = input.arguments
+            .find((argument) => argument.startsWith("-DCMAKE_EXE_LINKER_FLAGS="));
+          executorProcessState.linkMapPath = linkerFlags
+            ?.match(/--Map=([^ ]+)/u)?.[1];
+        }
+        if (input.arguments[0] === "--build" &&
+            input.arguments.includes("browsergrad-cpp-cute-extractor")) {
+          const factoryPath = executorProcessState.factoryPath;
+          const linkMapPath = executorProcessState.linkMapPath;
+          if (factoryPath === undefined || linkMapPath === undefined) {
+            throw new Error("mock did not observe the Wasm configure outputs");
+          }
+          await Promise.all([
+            writeFile(
+              factoryPath,
+              executorProcessState.malformedFactory
+                ? Uint8Array.of(0xff)
+                : "const createBrowserGradCppCuteExtractor = () => {}; export default createBrowserGradCppCuteExtractor;\n",
+            ),
+            writeFile(
+              factoryPath.replace(/\.mjs$/u, ".wasm"),
+              executorProcessState.malformedWasm
+                ? Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8)
+                : Uint8Array.of(0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00),
+            ),
+            writeFile(linkMapPath, "browsergrad link map\n"),
+          ]);
+        }
+        await executorProcessState.afterRun?.(callIndex);
+        return Object.freeze({
+          exitCode: executorProcessState.failureIndex === callIndex ? 7 : 0,
+          terminationSignal: null,
+          stdout: new TextEncoder().encode(`stdout ${callIndex}\n`),
+          stderr: new TextEncoder().encode(`stderr ${callIndex}\n`),
+        });
+      },
+    }),
+  };
+});
+
 import {
   cppCuteBrowserBuildInputLockResourceBytes,
   decodeCppCuteBrowserBuildInputLock,
@@ -73,10 +186,12 @@ import {
 } from "../../dist/cpp_cute_browser_build_lock.js";
 import {
   CppCuteBrowserBuildExecutorError,
+  executeCppCuteClangWasmBuild,
   materializeCppCuteClangWasmSidecar,
   prepareCppCuteClangWasmBuildSource,
   type PrepareCppCuteClangWasmBuildSourceInput,
 } from "./cpp_cute_browser_build_executor.mjs";
+import { planCppCuteClangWasmBuild } from "./cpp_cute_browser_build_plan.mjs";
 
 const checkedInExtractorRoot = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -97,13 +212,21 @@ afterEach(async () => {
   executorFsFaults.afterLink = undefined;
   executorFsFaults.syncDirectoryFailure = undefined;
   executorFsFaults.closeTemporaryFailure = undefined;
+  executorProcessState.calls.splice(0);
+  executorProcessState.failureIndex = undefined;
+  executorProcessState.thrownReason = undefined;
+  executorProcessState.afterRun = undefined;
+  executorProcessState.factoryPath = undefined;
+  executorProcessState.linkMapPath = undefined;
+  executorProcessState.malformedFactory = false;
+  executorProcessState.malformedWasm = false;
   await Promise.all(temporaryRoots.splice(0).map(async (root) => {
     await chmod(join(root, "staged-extractor-source"), 0o700).catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }));
 });
 
-async function fixture(): Promise<{
+async function fixture(materializeBuildInputs = false): Promise<{
   readonly root: string;
   readonly input: PrepareCppCuteClangWasmBuildSourceInput;
 }> {
@@ -118,11 +241,9 @@ async function fixture(): Promise<{
     join(checkedInExtractorRoot, path),
     join(sourceRoot, path),
   )));
-  return {
-    root,
-    input: {
-      lock,
-      tools: {
+  const tools = materializeBuildInputs
+    ? await materializedTools(root)
+    : {
         cmakeExecutable: "/tools/cmake/bin/cmake",
         buildToolExecutable: "/usr/bin/make",
         emsdkRoot: "/tools/emsdk",
@@ -136,9 +257,18 @@ async function fixture(): Promise<{
           "/tools/python/bin",
           "/tools/node/bin",
         ],
-      },
+      };
+  const llvmProjectSourceRoot = join(root, "llvm-source");
+  if (materializeBuildInputs) {
+    await mkdir(join(llvmProjectSourceRoot, "llvm"), { recursive: true });
+  }
+  return {
+    root,
+    input: {
+      lock,
+      tools,
       roots: {
-        llvmProjectSourceRoot: join(root, "llvm-source"),
+        llvmProjectSourceRoot,
         extractorSourceRoot: join(root, "staged-extractor-source"),
         nativeBuildRoot: join(root, "native-build"),
         wasmBuildRoot: join(root, "wasm-build"),
@@ -147,6 +277,57 @@ async function fixture(): Promise<{
       },
       extractorSourceInputRoot: sourceRoot,
     },
+  };
+}
+
+async function materializedTools(root: string) {
+  const toolsRoot = join(root, "tools");
+  const cmakeDirectory = join(toolsRoot, "cmake", "bin");
+  const emsdkRoot = join(toolsRoot, "emsdk");
+  const emscriptenDirectory = join(emsdkRoot, "upstream", "emscripten");
+  const upstreamBin = join(emsdkRoot, "upstream", "bin");
+  const pythonBin = join(toolsRoot, "python", "bin");
+  const nodeBin = join(toolsRoot, "node", "bin");
+  const emscriptenToolchainFile = join(
+    emscriptenDirectory,
+    "cmake",
+    "Modules",
+    "Platform",
+    "Emscripten.cmake",
+  );
+  await Promise.all([
+    mkdir(cmakeDirectory, { recursive: true }),
+    mkdir(dirname(emscriptenToolchainFile), { recursive: true }),
+    mkdir(upstreamBin, { recursive: true }),
+    mkdir(pythonBin, { recursive: true }),
+    mkdir(nodeBin, { recursive: true }),
+  ]);
+  const cmakeExecutable = join(cmakeDirectory, "cmake");
+  const buildToolExecutable = "/usr/bin/make";
+  const emscriptenConfigFile = join(emsdkRoot, ".emscripten");
+  await Promise.all([
+    writeFile(cmakeExecutable, "mock cmake\n"),
+    writeFile(emscriptenToolchainFile, "mock emscripten toolchain\n"),
+    writeFile(emscriptenConfigFile, "mock emscripten config\n"),
+  ]);
+  await Promise.all([
+    chmod(cmakeExecutable, 0o555),
+    chmod(emscriptenToolchainFile, 0o444),
+    chmod(emscriptenConfigFile, 0o444),
+  ]);
+  return {
+    cmakeExecutable,
+    buildToolExecutable,
+    emsdkRoot,
+    emscriptenToolchainFile,
+    emscriptenConfigFile,
+    searchPath: [
+      cmakeDirectory,
+      upstreamBin,
+      emscriptenDirectory,
+      pythonBin,
+      nodeBin,
+    ],
   };
 }
 
@@ -310,6 +491,162 @@ describe("bounded Clang-WASM build source executor", () => {
       path: "$.stagedSourceRoot",
     });
     expect(await readFile(sentinel, "utf8")).toBe("replacement must survive");
+  });
+});
+
+describe("exact Clang-Wasm build executor", () => {
+  it("runs the four lock-derived steps and seals bounded build evidence", async () => {
+    const { input } = await fixture(true);
+    const prepared = await prepareCppCuteClangWasmBuildSource(input);
+    const expectedPlan = planCppCuteClangWasmBuild({
+      lock: input.lock,
+      tools: input.tools,
+      roots: input.roots,
+    });
+
+    const executed = await executeCppCuteClangWasmBuild(prepared);
+
+    expect(executed).toMatchObject({
+      authority: "clang-wasm-build-execution-observation-only",
+      lockId: lock.lockId,
+      sourceSetSha256: lock.extractorSourceSetSha256,
+      stepCount: 4,
+      sourceVerified: true,
+      buildExecuted: true,
+      factoryModuleUtf8Validated: true,
+      webAssemblyValidated: true,
+      abiConformanceVerified: false,
+      outputIdentityAuthorized: false,
+      reproducibilityVerified: false,
+      releaseReady: false,
+      factoryModuleDistributed: false,
+    });
+    expect(executorProcessState.calls).toHaveLength(4);
+    expect(executorProcessState.calls.map((call) => ({
+      executable: call.executable,
+      arguments: call.arguments,
+      cwd: call.cwd,
+      environment: call.environment,
+    }))).toEqual(expectedPlan.steps.map((step) => ({
+      executable: step.executable,
+      arguments: step.arguments,
+      cwd: step.cwd,
+      environment: step.environment,
+    })));
+    expect(executorProcessState.calls.every((call) => (
+      call.maximumOutputByteLength === 16 * 1024 * 1024 &&
+      call.maximumDurationMs === 4 * 60 * 60 * 1_000
+    ))).toBe(true);
+    expect(executed.steps.map((step) => step.id)).toEqual(expectedPlan.steps.map((step) => step.id));
+    for (const [index, step] of executed.steps.entries()) {
+      expect(await readFile(step.stdoutPath, "utf8")).toBe(`stdout ${index}\n`);
+      expect(await readFile(step.stderrPath, "utf8")).toBe(`stderr ${index}\n`);
+      expect((await lstat(step.stdoutPath)).mode & 0o222).toBe(0);
+      expect((await lstat(step.stderrPath)).mode & 0o222).toBe(0);
+    }
+    expect((await lstat(executed.factoryModulePath)).mode & 0o222).toBe(0);
+    expect((await lstat(executed.wasmSidecarPath)).mode & 0o222).toBe(0);
+    expect((await lstat(executed.linkMapPath)).mode & 0o222).toBe(0);
+    expect(executed.factoryModuleSha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(executed.wasmSha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(executed.linkMapSha256).toMatch(/^[0-9a-f]{64}$/u);
+    await expect(lstat(destination(input))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("persists failed-step logs and halts before later build steps", async () => {
+    const { input } = await fixture(true);
+    const prepared = await prepareCppCuteClangWasmBuildSource(input);
+    executorProcessState.failureIndex = 1;
+
+    await expect(executeCppCuteClangWasmBuild(prepared)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-BUILD-FAILED",
+      path: "$.steps[1]",
+    });
+    expect(executorProcessState.calls).toHaveLength(2);
+    const logRoot = join(input.roots.stateRoot, "evidence", "build-logs");
+    expect((await readdir(logRoot)).sort()).toEqual([
+      "native-tablegen-build.stderr.log",
+      "native-tablegen-build.stdout.log",
+      "native-tablegen-configure.stderr.log",
+      "native-tablegen-configure.stdout.log",
+    ]);
+  });
+
+  it.each([
+    ["output-limit", "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-RESOURCE-LIMIT", "output"],
+    ["timeout", "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-RESOURCE-LIMIT", "duration"],
+    ["spawn", "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-IO", "steps[0]"],
+    ["cancelled", "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-CANCELLED", "signal"],
+  ] as const)("maps %s process-boundary failures into typed executor failures", async (
+    reason,
+    code,
+    expectedPath,
+  ) => {
+    const { input } = await fixture(true);
+    const prepared = await prepareCppCuteClangWasmBuildSource(input);
+    executorProcessState.thrownReason = reason;
+
+    await expect(executeCppCuteClangWasmBuild(prepared)).rejects.toMatchObject({
+      code,
+      path: expect.stringContaining(expectedPath),
+    });
+    expect(executorProcessState.calls).toHaveLength(1);
+  });
+
+  it("detects admitted build-tool mutation between exact steps", async () => {
+    const { input } = await fixture(true);
+    const prepared = await prepareCppCuteClangWasmBuildSource(input);
+    executorProcessState.afterRun = async (index) => {
+      if (index !== 0) return;
+      await chmod(input.tools.cmakeExecutable, 0o755);
+      await writeFile(input.tools.cmakeExecutable, "mutated cmake\n");
+      await chmod(input.tools.cmakeExecutable, 0o555);
+    };
+
+    await expect(executeCppCuteClangWasmBuild(prepared)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-CONFLICT",
+      path: "$.tools.cmakeExecutable",
+    });
+    expect(executorProcessState.calls).toHaveLength(1);
+  });
+
+  it("rejects malformed factory and Wasm outputs after all exact steps", async () => {
+    const malformedFactory = await fixture(true);
+    const preparedFactory = await prepareCppCuteClangWasmBuildSource(malformedFactory.input);
+    executorProcessState.malformedFactory = true;
+    await expect(executeCppCuteClangWasmBuild(preparedFactory)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-INVALID",
+      path: "$.generatedExtractor.factoryModulePath",
+    });
+
+    executorProcessState.calls.splice(0);
+    executorProcessState.factoryPath = undefined;
+    executorProcessState.linkMapPath = undefined;
+    executorProcessState.malformedFactory = false;
+    executorProcessState.malformedWasm = true;
+    const malformedWasm = await fixture(true);
+    const preparedWasm = await prepareCppCuteClangWasmBuildSource(malformedWasm.input);
+    await expect(executeCppCuteClangWasmBuild(preparedWasm)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-INVALID",
+      path: "$.generatedExtractor.wasmSidecarPath",
+    });
+  });
+
+  it("requires opaque prepared authority and honors pre-spawn cancellation", async () => {
+    const { input } = await fixture(true);
+    const prepared = await prepareCppCuteClangWasmBuildSource(input);
+    await expect(executeCppCuteClangWasmBuild({ ...prepared })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-UNVERIFIED",
+    });
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(executeCppCuteClangWasmBuild(prepared, {
+      signal: controller.signal,
+    })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-CANCELLED",
+    });
+    expect(executorProcessState.calls).toHaveLength(0);
   });
 });
 

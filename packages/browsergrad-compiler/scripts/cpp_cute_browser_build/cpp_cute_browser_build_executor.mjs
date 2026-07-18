@@ -10,11 +10,16 @@ import {
   rm,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize } from "node:path/posix";
+import { TextDecoder } from "node:util";
 
 import { hashCanonicalJson } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
 import { planCppCuteClangWasmBuild } from "./cpp_cute_browser_build_plan.mjs";
 import { CPP_CUTE_BROWSER_BUILD_EXECUTOR_FS } from "./cpp_cute_browser_build_executor_fs.mjs";
+import {
+  CPP_CUTE_BROWSER_BUILD_EXECUTOR_PROCESS,
+  CppCuteBrowserBuildProcessError,
+} from "./cpp_cute_browser_build_executor_process.mjs";
 
 const CANCELLED = "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-CANCELLED";
 const INVALID = "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-INVALID";
@@ -24,17 +29,23 @@ const CONFLICT = "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-CONFLICT";
 const IO = "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-IO";
 const CLEANUP = "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-CLEANUP";
 const UNVERIFIED = "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-UNVERIFIED";
+const BUILD_FAILED = "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-BUILD-FAILED";
 const SOURCE_SET_HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1";
 const MAX_SOURCE_FILE_COUNT = 64;
 const MAX_SOURCE_TOTAL_BYTE_LENGTH = 1024 * 1024;
 const MAX_WASM_SIDECAR_BYTE_LENGTH = 256 * 1024 * 1024;
+const MAX_FACTORY_MODULE_BYTE_LENGTH = 32 * 1024 * 1024;
+const MAX_LINK_MAP_BYTE_LENGTH = 128 * 1024 * 1024;
+const MAX_STEP_OUTPUT_BYTE_LENGTH = 16 * 1024 * 1024;
+const MAX_STEP_DURATION_MS = 4 * 60 * 60 * 1_000;
 const PORTABLE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._+/-]+$/u;
 const WASM_HEADER = Uint8Array.of(
   0x00, 0x61, 0x73, 0x6d,
   0x01, 0x00, 0x00, 0x00,
 );
 const PREPARED_SOURCES = new WeakMap();
+const EXECUTED_BUILDS = new WeakMap();
 const MATERIALIZED_SIDECARS = new WeakMap();
 const ABORTED_GETTER = typeof AbortSignal === "undefined"
   ? undefined
@@ -44,6 +55,8 @@ const ABORTED_GETTER = typeof AbortSignal === "undefined"
 /** @typedef {Readonly<{ dev: bigint; ino: bigint; ctimeNs: bigint; birthtimeNs: bigint }>} FileVersionIdentity */
 /** @typedef {Readonly<{ path: string; identity: FileVersionIdentity }>} StagedFileIdentity */
 /** @typedef {Readonly<{ root: FileIdentity; files: readonly StagedFileIdentity[] }>} StagedSourceIdentity */
+/** @typedef {Readonly<{ path: string; identity: FileVersionIdentity; executable: boolean; diagnosticPath: string }>} RegularFileBinding */
+/** @typedef {Readonly<{ path: string; identity: FileVersionIdentity; diagnosticPath: string }>} DirectoryBinding */
 
 export class CppCuteBrowserBuildExecutorError extends Error {
   /**
@@ -161,6 +174,11 @@ export async function prepareCppCuteClangWasmBuildSource(input, options = {}) {
   });
   PREPARED_SOURCES.set(prepared, Object.freeze({
     plan,
+    roots: Object.freeze({ ...selected.roots }),
+    tools: Object.freeze({
+      ...selected.tools,
+      searchPath: Object.freeze([...selected.tools.searchPath]),
+    }),
     stagedSourceIdentity,
     snapshots: Object.freeze(snapshots.map((snapshot) => Object.freeze({
       path: snapshot.path,
@@ -170,6 +188,202 @@ export async function prepareCppCuteClangWasmBuildSource(input, options = {}) {
     }))),
   }));
   return /** @type {import("./cpp_cute_browser_build_executor.mjs").PreparedCppCuteClangWasmBuildSource} */ (prepared);
+}
+
+/**
+ * Executes the four exact lock-derived CMake steps without a shell, persists
+ * bounded immutable stdout/stderr evidence, and validates the generated
+ * factory, link map, and WebAssembly binary. This proves one build execution;
+ * it does not prove reproducibility, ABI conformance, provenance, or release
+ * readiness.
+ *
+ * @param {import("./cpp_cute_browser_build_executor.mjs").PreparedCppCuteClangWasmBuildSource} prepared
+ * @param {import("./cpp_cute_browser_build_executor.mjs").CppCuteBrowserBuildExecutorOptions} [options]
+ * @returns {Promise<import("./cpp_cute_browser_build_executor.mjs").ExecutedCppCuteClangWasmBuild>}
+ */
+export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
+  const signal = normalizeOptions(options);
+  throwIfAborted(signal);
+  const stored = storedPreparedSource(prepared);
+  const { plan, roots, tools } = stored;
+
+  try {
+    await verifyStagedSourceClosure(
+      prepared.stagedSourceRoot,
+      stored.snapshots,
+      signal,
+      stored.stagedSourceIdentity.root,
+      stored.stagedSourceIdentity.files,
+    );
+  } catch (cause) {
+    rethrowExecutorOrIo(cause, "$.stagedSourceRoot", "staged extractor source no longer matches its authority");
+  }
+  throwIfAborted(signal);
+
+  let inputBindings;
+  try {
+    inputBindings = await snapshotBuildInputBindings(roots, tools);
+    await prepareBuildExecutionDirectories(roots, plan);
+  } catch (cause) {
+    rethrowExecutorOrIo(cause, "$.buildInputs", "failed to admit the materialized build inputs");
+  }
+
+  const evidenceRoot = join(roots.stateRoot, "evidence");
+  const logRoot = join(evidenceRoot, "build-logs");
+  const receipts = [];
+  let nativeToolBindings;
+  for (const [index, step] of plan.steps.entries()) {
+    throwIfAborted(signal);
+    await verifyBuildInputBindings(inputBindings);
+    await verifyStagedSourceClosure(
+      prepared.stagedSourceRoot,
+      stored.snapshots,
+      signal,
+      stored.stagedSourceIdentity.root,
+      stored.stagedSourceIdentity.files,
+    );
+    if (step.stageId === "clang-extractor-wasm") {
+      if (nativeToolBindings === undefined) {
+        unverified(`$.steps[${index}]`, "native TableGen tools were not admitted before the Wasm stage");
+      }
+      await verifyRegularFileBindings(nativeToolBindings);
+    }
+
+    let processResult;
+    try {
+      processResult = await CPP_CUTE_BROWSER_BUILD_EXECUTOR_PROCESS.run({
+        executable: step.executable,
+        arguments: step.arguments,
+        cwd: step.cwd,
+        environment: step.environment,
+        maximumOutputByteLength: MAX_STEP_OUTPUT_BYTE_LENGTH,
+        maximumDurationMs: MAX_STEP_DURATION_MS,
+        ...(signal === undefined ? {} : { signal }),
+      });
+    } catch (cause) {
+      rethrowBuildProcessFailure(cause, `$.steps[${index}]`);
+    }
+    const stdout = new Uint8Array(processResult.stdout);
+    const stderr = new Uint8Array(processResult.stderr);
+    if (stdout.byteLength > MAX_STEP_OUTPUT_BYTE_LENGTH ||
+        stderr.byteLength > MAX_STEP_OUTPUT_BYTE_LENGTH) {
+      resource(`$.steps[${index}].output`, "process boundary returned over-budget output");
+    }
+    const stdoutEvidence = await writeImmutableEvidenceFile(
+      join(logRoot, `${step.id}.stdout.log`),
+      stdout,
+      `$.steps[${index}].stdout`,
+    );
+    const stderrEvidence = await writeImmutableEvidenceFile(
+      join(logRoot, `${step.id}.stderr.log`),
+      stderr,
+      `$.steps[${index}].stderr`,
+    );
+    const receipt = Object.freeze({
+      id: step.id,
+      stageId: step.stageId,
+      kind: step.kind,
+      executable: step.executable,
+      exitCode: processResult.exitCode,
+      terminationSignal: processResult.terminationSignal,
+      stdoutPath: stdoutEvidence.path,
+      stdoutSha256: stdoutEvidence.sha256,
+      stdoutByteLength: stdoutEvidence.byteLength,
+      stderrPath: stderrEvidence.path,
+      stderrSha256: stderrEvidence.sha256,
+      stderrByteLength: stderrEvidence.byteLength,
+    });
+    receipts.push(receipt);
+    if (processResult.exitCode !== 0 || processResult.terminationSignal !== null) {
+      buildFailed(
+        `$.steps[${index}]`,
+        `exact build step ${step.id} failed with exit ${String(processResult.exitCode)} and signal ${String(processResult.terminationSignal)}`,
+      );
+    }
+    if (step.id === "native-tablegen-build") {
+      nativeToolBindings = await snapshotRegularFileBindings([
+        { path: plan.nativeTools.clangTablegen, executable: true, diagnosticPath: "$.nativeTools.clangTablegen" },
+        { path: plan.nativeTools.llvmTablegen, executable: true, diagnosticPath: "$.nativeTools.llvmTablegen" },
+      ]);
+    }
+  }
+  if (receipts.length !== 4 || nativeToolBindings === undefined) {
+    unverified("$.steps", "exact four-step build did not complete");
+  }
+
+  await verifyBuildInputBindings(inputBindings);
+  await verifyRegularFileBindings(nativeToolBindings);
+  await verifyStagedSourceClosure(
+    prepared.stagedSourceRoot,
+    stored.snapshots,
+    signal,
+    stored.stagedSourceIdentity.root,
+    stored.stagedSourceIdentity.files,
+  );
+  throwIfAborted(signal);
+
+  const generatedRoot = join(evidenceRoot, "generated");
+  await assertExactSourceTree(
+    generatedRoot,
+    ["clang-extractor.mjs", "clang-extractor.wasm"],
+    "$.generatedExtractor",
+  );
+  const factory = await sealGeneratedFile(
+    plan.generatedExtractor.factoryModulePath,
+    MAX_FACTORY_MODULE_BYTE_LENGTH,
+    "$.generatedExtractor.factoryModulePath",
+    signal,
+  );
+  validateFactoryModule(factory.bytes);
+  const wasm = await sealGeneratedFile(
+    plan.generatedExtractor.wasmSidecarPath,
+    MAX_WASM_SIDECAR_BYTE_LENGTH,
+    "$.generatedExtractor.wasmSidecarPath",
+    signal,
+  );
+  if (!startsWithBytes(wasm.bytes, WASM_HEADER) || !WebAssembly.validate(wasm.bytes)) {
+    invalid("$.generatedExtractor.wasmSidecarPath", "generated sidecar is not valid WebAssembly v1");
+  }
+  const linkMap = await sealGeneratedFile(
+    join(evidenceRoot, "clang-extractor.link.map"),
+    MAX_LINK_MAP_BYTE_LENGTH,
+    "$.buildEvidence.linkMap",
+    signal,
+  );
+  throwIfAborted(signal);
+
+  const executed = Object.freeze({
+    authority: "clang-wasm-build-execution-observation-only",
+    lockId: plan.lockId,
+    sourceSetSha256: prepared.sourceSetSha256,
+    stepCount: receipts.length,
+    steps: Object.freeze(receipts),
+    factoryModulePath: plan.generatedExtractor.factoryModulePath,
+    factoryModuleSha256: factory.sha256,
+    factoryModuleByteLength: factory.byteLength,
+    wasmSidecarPath: plan.generatedExtractor.wasmSidecarPath,
+    wasmSha256: wasm.sha256,
+    wasmByteLength: wasm.byteLength,
+    linkMapPath: linkMap.path,
+    linkMapSha256: linkMap.sha256,
+    linkMapByteLength: linkMap.byteLength,
+    sourceVerified: true,
+    buildExecuted: true,
+    factoryModuleUtf8Validated: true,
+    webAssemblyValidated: true,
+    abiConformanceVerified: false,
+    outputIdentityAuthorized: false,
+    reproducibilityVerified: false,
+    releaseReady: false,
+    factoryModuleDistributed: false,
+  });
+  EXECUTED_BUILDS.set(executed, Object.freeze({
+    prepared,
+    factoryIdentity: factory.identity,
+    wasmIdentity: wasm.identity,
+    linkMapIdentity: linkMap.identity,
+  }));
+  return /** @type {import("./cpp_cute_browser_build_executor.mjs").ExecutedCppCuteClangWasmBuild} */ (executed);
 }
 
 /**
@@ -263,6 +477,298 @@ export async function materializeCppCuteClangWasmSidecar(prepared, options = {})
   });
   MATERIALIZED_SIDECARS.set(materialized, Object.freeze({ prepared }));
   return /** @type {import("./cpp_cute_browser_build_executor.mjs").MaterializedCppCuteClangWasmSidecar} */ (materialized);
+}
+
+/**
+ * @param {import("./cpp_cute_browser_build_plan.mjs").CppCuteClangWasmBuildRoots} roots
+ * @param {import("./cpp_cute_browser_build_plan.mjs").CppCuteClangWasmMaterializedTools} tools
+ */
+async function snapshotBuildInputBindings(roots, tools) {
+  const files = await snapshotRegularFileBindings([
+    { path: tools.cmakeExecutable, executable: true, diagnosticPath: "$.tools.cmakeExecutable" },
+    { path: tools.buildToolExecutable, executable: true, diagnosticPath: "$.tools.buildToolExecutable" },
+    { path: tools.emscriptenToolchainFile, executable: false, diagnosticPath: "$.tools.emscriptenToolchainFile" },
+    { path: tools.emscriptenConfigFile, executable: false, diagnosticPath: "$.tools.emscriptenConfigFile" },
+  ]);
+  const directorySpecs = [
+    { path: roots.llvmProjectSourceRoot, diagnosticPath: "$.roots.llvmProjectSourceRoot" },
+    { path: join(roots.llvmProjectSourceRoot, "llvm"), diagnosticPath: "$.roots.llvmProjectSourceRoot/llvm" },
+    { path: tools.emsdkRoot, diagnosticPath: "$.tools.emsdkRoot" },
+    ...tools.searchPath.map((path, index) => ({
+      path,
+      diagnosticPath: `$.tools.searchPath[${index}]`,
+    })),
+  ];
+  /** @type {Map<string, { path: string; diagnosticPath: string }>} */
+  const uniqueDirectorySpecs = new Map();
+  for (const spec of directorySpecs) uniqueDirectorySpecs.set(spec.path, spec);
+  const directories = await snapshotDirectoryBindings([...uniqueDirectorySpecs.values()]);
+  return Object.freeze({ files, directories });
+}
+
+/** @param {Readonly<{ files: readonly RegularFileBinding[]; directories: readonly DirectoryBinding[] }>} bindings */
+async function verifyBuildInputBindings(bindings) {
+  await verifyRegularFileBindings(bindings.files);
+  for (const binding of bindings.directories) {
+    const stat = await lstat(binding.path, { bigint: true });
+    if (!stat.isDirectory() || stat.isSymbolicLink() ||
+        !sameFileVersionIdentity(fileVersionIdentity(stat), binding.identity)) {
+      conflict(binding.diagnosticPath, "build-input directory identity changed during execution");
+    }
+    assertTrustedOwnerAndMode(stat, binding.diagnosticPath);
+  }
+}
+
+/**
+ * @param {readonly { readonly path: string; readonly executable: boolean; readonly diagnosticPath: string }[]} specs
+ * @returns {Promise<readonly RegularFileBinding[]>}
+ */
+async function snapshotRegularFileBindings(specs) {
+  const bindings = [];
+  for (const spec of specs) {
+    const stat = await lstat(spec.path, { bigint: true });
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0n) {
+      invalid(spec.diagnosticPath, "expected a nonempty non-symlink regular file");
+    }
+    assertTrustedOwnerAndMode(stat, spec.diagnosticPath);
+    if (spec.executable && (stat.mode & 0o111n) === 0n) {
+      invalid(spec.diagnosticPath, "build tool must have an executable mode bit");
+    }
+    if ((stat.mode & 0o6000n) !== 0n) {
+      invalid(spec.diagnosticPath, "build input must not carry setuid or setgid mode bits");
+    }
+    await assertTrustedPosixAncestry(dirname(spec.path), spec.diagnosticPath);
+    bindings.push(Object.freeze({
+      ...spec,
+      identity: fileVersionIdentity(stat),
+    }));
+  }
+  return Object.freeze(bindings);
+}
+
+/** @param {readonly RegularFileBinding[]} bindings */
+async function verifyRegularFileBindings(bindings) {
+  for (const binding of bindings) {
+    const stat = await lstat(binding.path, { bigint: true });
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0n ||
+        !sameFileVersionIdentity(fileVersionIdentity(stat), binding.identity)) {
+      conflict(binding.diagnosticPath, "build-input file identity changed during execution");
+    }
+    assertTrustedOwnerAndMode(stat, binding.diagnosticPath);
+    if (binding.executable && (stat.mode & 0o111n) === 0n) {
+      conflict(binding.diagnosticPath, "build tool lost its executable mode during execution");
+    }
+    if ((stat.mode & 0o6000n) !== 0n) {
+      conflict(binding.diagnosticPath, "build input acquired setuid or setgid mode bits");
+    }
+  }
+}
+
+/**
+ * @param {readonly { readonly path: string; readonly diagnosticPath: string }[]} specs
+ * @returns {Promise<readonly DirectoryBinding[]>}
+ */
+async function snapshotDirectoryBindings(specs) {
+  const bindings = [];
+  for (const spec of specs) {
+    const stat = await lstat(spec.path, { bigint: true });
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      invalid(spec.diagnosticPath, "expected a non-symlink directory");
+    }
+    assertTrustedOwnerAndMode(stat, spec.diagnosticPath);
+    await assertTrustedPosixAncestry(spec.path, spec.diagnosticPath);
+    bindings.push(Object.freeze({
+      ...spec,
+      identity: fileVersionIdentity(stat),
+    }));
+  }
+  return Object.freeze(bindings);
+}
+
+/** @param {import("node:fs").BigIntStats} stat @param {string} diagnosticPath */
+function assertTrustedOwnerAndMode(stat, diagnosticPath) {
+  if (typeof process.getuid !== "function") {
+    invalid(diagnosticPath, "build-input ownership requires POSIX uid support");
+  }
+  const currentUid = BigInt(process.getuid());
+  if (stat.uid !== 0n && stat.uid !== currentUid) {
+    invalid(diagnosticPath, "build input must be owned by root or the current build user");
+  }
+  if ((stat.mode & 0o022n) !== 0n) {
+    invalid(diagnosticPath, "build input must not be writable by group or other users");
+  }
+}
+
+/**
+ * @param {import("./cpp_cute_browser_build_plan.mjs").CppCuteClangWasmBuildRoots} roots
+ * @param {import("./cpp_cute_browser_build_plan.mjs").CppCuteClangWasmBuildPlan} plan
+ */
+async function prepareBuildExecutionDirectories(roots, plan) {
+  const evidenceRoot = join(roots.stateRoot, "evidence");
+  const generatedRoot = join(evidenceRoot, "generated");
+  const logRoot = join(evidenceRoot, "build-logs");
+  if (plan.generatedExtractor.factoryModulePath !== join(generatedRoot, "clang-extractor.mjs") ||
+      plan.generatedExtractor.wasmSidecarPath !== join(generatedRoot, "clang-extractor.wasm")) {
+    invalid("$.generatedExtractor", "generated output paths escaped the exact evidence root");
+  }
+  await assertPrivateOwnedDirectory(roots.outputRoot, "$.roots.outputRoot");
+  for (const [path, diagnosticPath] of [
+    [roots.nativeBuildRoot, "$.roots.nativeBuildRoot"],
+    [roots.wasmBuildRoot, "$.roots.wasmBuildRoot"],
+    [roots.stateRoot, "$.roots.stateRoot"],
+  ]) {
+    await createPrivateEmptyDirectory(path, diagnosticPath);
+  }
+  await createPrivateEmptyDirectory(evidenceRoot, "$.buildEvidence");
+  await createPrivateEmptyDirectory(generatedRoot, "$.generatedExtractor");
+  await createPrivateEmptyDirectory(logRoot, "$.buildEvidence.logs");
+}
+
+/** @param {string} path @param {string} diagnosticPath */
+async function createPrivateEmptyDirectory(path, diagnosticPath) {
+  await assertPrivateOwnedDirectory(dirname(path), `${diagnosticPath}.parent`);
+  if (await lstatIfExists(path, diagnosticPath) !== undefined) {
+    conflict(diagnosticPath, "clean build directory must not already exist");
+  }
+  try {
+    await mkdir(path, { mode: 0o700 });
+  } catch (cause) {
+    if (isNodeError(cause, "EEXIST")) {
+      conflict(diagnosticPath, "build directory was concurrently created");
+    }
+    throw cause;
+  }
+  await assertPrivateOwnedDirectory(path, diagnosticPath);
+  await syncDirectory(dirname(path));
+}
+
+/**
+ * @param {string} path
+ * @param {Uint8Array} bytes
+ * @param {string} diagnosticPath
+ */
+async function writeImmutableEvidenceFile(path, bytes, diagnosticPath) {
+  let handle;
+  try {
+    handle = await open(
+      path,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o400,
+    );
+  } catch (cause) {
+    if (isNodeError(cause, "EEXIST") || isNodeError(cause, "ELOOP")) {
+      conflict(diagnosticPath, "build evidence path must not already exist");
+    }
+    throw cause;
+  }
+  let identity;
+  try {
+    await handle.writeFile(bytes);
+    await handle.sync();
+    await handle.chmod(0o444);
+    const stat = await handle.stat({ bigint: true });
+    if (stat.nlink !== 1n) {
+      conflict(diagnosticPath, "build evidence must have exactly one hard link");
+    }
+    identity = fileVersionIdentity(stat);
+  } finally {
+    await handle.close();
+  }
+  await assertReadOnlyRegularPathIdentity(path, identity, bytes.byteLength, diagnosticPath);
+  await syncDirectory(dirname(path));
+  return Object.freeze({
+    path,
+    sha256: sha256(bytes),
+    byteLength: bytes.byteLength,
+    identity,
+  });
+}
+
+/**
+ * @param {string} path
+ * @param {number} maximumByteLength
+ * @param {string} diagnosticPath
+ * @param {AbortSignal | undefined} signal
+ */
+async function sealGeneratedFile(path, maximumByteLength, diagnosticPath, signal) {
+  const before = await readBoundedRegularFileSnapshot(
+    path,
+    maximumByteLength,
+    diagnosticPath,
+    signal,
+  );
+  const beforeIdentity = fileIdentity(before.stat);
+  if (before.stat.nlink !== 1n) {
+    conflict(diagnosticPath, "generated output must have exactly one hard link");
+  }
+  await chmod(path, 0o444);
+  const after = await readBoundedRegularFileSnapshot(
+    path,
+    maximumByteLength,
+    diagnosticPath,
+    signal,
+  );
+  if (!sameFileIdentity(fileIdentity(after.stat), beforeIdentity) ||
+      after.stat.nlink !== 1n || !equalBytes(before.bytes, after.bytes)) {
+    conflict(diagnosticPath, "generated output identity changed while it was being sealed");
+  }
+  const identity = fileVersionIdentity(after.stat);
+  await assertReadOnlyRegularPathIdentity(
+    path,
+    identity,
+    after.bytes.byteLength,
+    diagnosticPath,
+  );
+  await syncDirectory(dirname(path));
+  return Object.freeze({
+    path,
+    bytes: after.bytes,
+    sha256: sha256(after.bytes),
+    byteLength: after.bytes.byteLength,
+    identity,
+  });
+}
+
+/** @param {Uint8Array} bytes */
+function validateFactoryModule(bytes) {
+  let source;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (cause) {
+    invalid("$.generatedExtractor.factoryModulePath", "factory module is not valid UTF-8", { cause });
+  }
+  if (containsForbiddenTextControl(source) ||
+      !source.includes("createBrowserGradCppCuteExtractor")) {
+    invalid(
+      "$.generatedExtractor.factoryModulePath",
+      "factory module lacks the exact Emscripten export or contains forbidden control bytes",
+    );
+  }
+}
+
+/** @param {string} value */
+function containsForbiddenTextControl(value) {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if ((code >= 0 && code <= 8) || code === 11 || code === 12 ||
+        (code >= 14 && code <= 31) || code === 127) return true;
+  }
+  return false;
+}
+
+/** @param {unknown} cause @param {string} path */
+function rethrowBuildProcessFailure(cause, path) {
+  if (cause instanceof CppCuteBrowserBuildProcessError) {
+    if (cause.reason === "cancelled") cancelled();
+    if (cause.reason === "output-limit") {
+      resource(`${path}.output`, "build step exceeded its bounded output budget");
+    }
+    if (cause.reason === "timeout") {
+      resource(`${path}.duration`, "build step exceeded its bounded execution duration");
+    }
+    io(path, "failed to spawn the exact build step", { cause });
+  }
+  rethrowExecutorOrIo(cause, path, "build process boundary failed");
 }
 
 /**
@@ -1439,6 +1945,11 @@ function conflict(path, message) {
 /** @param {string} path @param {string} message @param {ErrorOptions} [options] */
 function io(path, message, options) {
   fail(IO, path, message, options);
+}
+
+/** @param {string} path @param {string} message */
+function buildFailed(path, message) {
+  fail(BUILD_FAILED, path, message);
 }
 
 /** @param {string} path @param {string} message @param {unknown} primary @param {unknown} cause */
