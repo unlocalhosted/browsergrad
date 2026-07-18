@@ -5,7 +5,7 @@ const PROCESS_ERROR = "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-PROCESS";
 
 export class CppCuteBrowserBuildProcessError extends Error {
   /**
-   * @param {"cancelled" | "output-limit" | "spawn" | "timeout"} reason
+   * @param {"cancelled" | "output-limit" | "output-sink" | "spawn" | "timeout"} reason
    * @param {string} message
    * @param {ErrorOptions} [options]
    */
@@ -34,12 +34,15 @@ export const CPP_CUTE_BROWSER_BUILD_EXECUTOR_PROCESS = Object.freeze({
  *   maximumOutputByteLength: number;
  *   maximumDurationMs: number;
  *   signal?: AbortSignal;
+ *   onOutputChunk?: (stream: "stdout" | "stderr", chunk: Uint8Array) => Promise<void>;
  * }>} input
  * @returns {Promise<Readonly<{
  *   exitCode: number | null;
  *   terminationSignal: NodeJS.Signals | null;
  *   stdout: Uint8Array;
  *   stderr: Uint8Array;
+ *   stdoutByteLength: number;
+ *   stderrByteLength: number;
  * }>>}
  */
 async function runProcessStep(input) {
@@ -53,6 +56,9 @@ async function runProcessStep(input) {
   if (!Number.isSafeInteger(input.maximumDurationMs) || input.maximumDurationMs <= 0) {
     throw new TypeError("maximumDurationMs must be a positive safe integer");
   }
+  if (input.onOutputChunk !== undefined && typeof input.onOutputChunk !== "function") {
+    throw new TypeError("onOutputChunk must be an async output handler");
+  }
 
   return await new Promise((resolve, reject) => {
     /** @type {Buffer[]} */
@@ -61,8 +67,10 @@ async function runProcessStep(input) {
     const stderrChunks = [];
     let stdoutByteLength = 0;
     let stderrByteLength = 0;
-    /** @type {"cancelled" | "output-limit" | "timeout" | undefined} */
+    /** @type {"cancelled" | "output-limit" | "output-sink" | "timeout" | undefined} */
     let terminationReason;
+    /** @type {unknown} */
+    let outputSinkFailure;
     /** @type {Error | undefined} */
     let spawnFailure;
     /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -93,7 +101,7 @@ async function runProcessStep(input) {
       }
     };
 
-    /** @param {"cancelled" | "output-limit" | "timeout"} reason */
+    /** @param {"cancelled" | "output-limit" | "output-sink" | "timeout"} reason */
     const terminate = (reason) => {
       if (terminationReason !== undefined) return;
       terminationReason = reason;
@@ -111,32 +119,58 @@ async function runProcessStep(input) {
     );
     timeout.unref();
 
-    /** @param {Buffer[]} chunks @param {number} currentByteLength @param {Uint8Array} chunk */
-    const capture = (chunks, currentByteLength, chunk) => {
+    let stdoutDelivery = Promise.resolve();
+    let stderrDelivery = Promise.resolve();
+
+    /**
+     * @param {"stdout" | "stderr"} stream
+     * @param {Buffer[]} chunks
+     * @param {number} currentByteLength
+     * @param {Uint8Array} chunk
+     */
+    const capture = (stream, chunks, currentByteLength, chunk) => {
       if (terminationReason !== undefined) return currentByteLength;
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      const nextByteLength = currentByteLength + bytes.byteLength;
-      if (nextByteLength > input.maximumOutputByteLength) {
-        terminate("output-limit");
-        return nextByteLength;
+      const remaining = input.maximumOutputByteLength - currentByteLength;
+      const accepted = bytes.subarray(0, Math.max(0, remaining));
+      const nextByteLength = currentByteLength + accepted.byteLength;
+      if (input.onOutputChunk === undefined) {
+        if (accepted.byteLength > 0) chunks.push(Buffer.from(accepted));
+      } else if (accepted.byteLength > 0) {
+        const readable = stream === "stdout" ? child.stdout : child.stderr;
+        readable.pause();
+        const previous = stream === "stdout" ? stdoutDelivery : stderrDelivery;
+        const delivery = previous.then(async () => {
+          await input.onOutputChunk?.(stream, new Uint8Array(accepted));
+          readable.resume();
+        }).catch((cause) => {
+          outputSinkFailure = cause;
+          terminate("output-sink");
+          readable.resume();
+        });
+        if (stream === "stdout") stdoutDelivery = delivery;
+        else stderrDelivery = delivery;
       }
-      chunks.push(bytes);
+      if (bytes.byteLength > remaining) {
+        terminate("output-limit");
+      }
       return nextByteLength;
     };
 
     child.stdout.on("data", (chunk) => {
-      stdoutByteLength = capture(stdoutChunks, stdoutByteLength, chunk);
+      stdoutByteLength = capture("stdout", stdoutChunks, stdoutByteLength, chunk);
     });
     child.stderr.on("data", (chunk) => {
-      stderrByteLength = capture(stderrChunks, stderrByteLength, chunk);
+      stderrByteLength = capture("stderr", stderrChunks, stderrByteLength, chunk);
     });
     child.once("error", (cause) => {
       spawnFailure = cause;
     });
-    child.once("close", (exitCode, terminationSignal) => {
+    child.once("close", async (exitCode, terminationSignal) => {
       clearTimeout(timeout);
       if (killTimer !== undefined) clearTimeout(killTimer);
       input.signal?.removeEventListener("abort", onAbort);
+      await Promise.all([stdoutDelivery, stderrDelivery]);
 
       if (spawnFailure !== undefined) {
         reject(new CppCuteBrowserBuildProcessError(
@@ -150,19 +184,27 @@ async function runProcessStep(input) {
         const messages = {
           cancelled: "build step was cancelled",
           "output-limit": `build step output exceeded ${input.maximumOutputByteLength} bytes per stream`,
+          "output-sink": "build step output could not be persisted",
           timeout: `build step exceeded ${input.maximumDurationMs} milliseconds`,
         };
         reject(new CppCuteBrowserBuildProcessError(
           terminationReason,
           messages[terminationReason],
+          outputSinkFailure === undefined ? undefined : { cause: outputSinkFailure },
         ));
         return;
       }
       resolve(Object.freeze({
         exitCode,
         terminationSignal,
-        stdout: new Uint8Array(Buffer.concat(stdoutChunks, stdoutByteLength)),
-        stderr: new Uint8Array(Buffer.concat(stderrChunks, stderrByteLength)),
+        stdout: input.onOutputChunk === undefined
+          ? new Uint8Array(Buffer.concat(stdoutChunks, stdoutByteLength))
+          : new Uint8Array(),
+        stderr: input.onOutputChunk === undefined
+          ? new Uint8Array(Buffer.concat(stderrChunks, stderrByteLength))
+          : new Uint8Array(),
+        stdoutByteLength,
+        stderrByteLength,
       }));
     });
   });

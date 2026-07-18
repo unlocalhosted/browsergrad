@@ -164,7 +164,7 @@ export async function runCppCuteBrowserBuild(argv) {
     roots,
     extractorSourceInputRoot,
   });
-  const executed = await executeCppCuteClangWasmBuild(prepared);
+  const executed = await executeCppCuteClangWasmBuild(prepared, { mirrorOutput: true });
   const materialized = await materializeCppCuteClangWasmSidecar(prepared);
   const evidence = Object.freeze({
     schema: BUILD_EXECUTION_SCHEMA,

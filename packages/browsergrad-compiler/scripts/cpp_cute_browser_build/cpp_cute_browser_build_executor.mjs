@@ -17,6 +17,7 @@ import { hashCanonicalJson } from "@unlocalhosted/browsergrad-semantic-core/sche
 
 import { planCppCuteClangWasmBuild } from "./cpp_cute_browser_build_plan.mjs";
 import { CPP_CUTE_BROWSER_BUILD_EXECUTOR_FS } from "./cpp_cute_browser_build_executor_fs.mjs";
+import { createCppCuteBrowserBuildLogSink } from "./cpp_cute_browser_build_log_sink.mjs";
 import {
   CPP_CUTE_BROWSER_BUILD_EXECUTOR_PROCESS,
   CppCuteBrowserBuildProcessError,
@@ -88,7 +89,7 @@ export class CppCuteBrowserBuildExecutorError extends Error {
  * @returns {Promise<import("./cpp_cute_browser_build_executor.mjs").PreparedCppCuteClangWasmBuildSource>}
  */
 export async function prepareCppCuteClangWasmBuildSource(input, options = {}) {
-  const signal = normalizeOptions(options);
+  const { signal } = normalizeOptions(options, false);
   throwIfAborted(signal);
   const selected = snapshotInput(input);
   let plan;
@@ -201,11 +202,11 @@ export async function prepareCppCuteClangWasmBuildSource(input, options = {}) {
  * readiness.
  *
  * @param {import("./cpp_cute_browser_build_executor.mjs").PreparedCppCuteClangWasmBuildSource} prepared
- * @param {import("./cpp_cute_browser_build_executor.mjs").CppCuteBrowserBuildExecutorOptions} [options]
+ * @param {import("./cpp_cute_browser_build_executor.mjs").CppCuteBrowserBuildExecutionOptions} [options]
  * @returns {Promise<import("./cpp_cute_browser_build_executor.mjs").ExecutedCppCuteClangWasmBuild>}
  */
 export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
-  const signal = normalizeOptions(options);
+  const { signal, mirrorOutput } = normalizeOptions(options, true);
   throwIfAborted(signal);
   const stored = storedPreparedSource(prepared);
   const { plan, roots, tools } = stored;
@@ -252,7 +253,14 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
       await verifyRegularFileBindings(nativeToolBindings);
     }
 
+    const outputSinks = await openBuildLogSinks(
+      logRoot,
+      step.id,
+      mirrorOutput,
+      `$.steps[${index}]`,
+    );
     let processResult;
+    let processFailure;
     try {
       processResult = await CPP_CUTE_BROWSER_BUILD_EXECUTOR_PROCESS.run({
         executable: step.executable,
@@ -261,27 +269,25 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
         environment: step.environment,
         maximumOutputByteLength: MAX_STEP_OUTPUT_BYTE_LENGTH,
         maximumDurationMs: MAX_STEP_DURATION_MS,
+        onOutputChunk: async (stream, chunk) => {
+          await outputSinks[stream].write(chunk);
+        },
         ...(signal === undefined ? {} : { signal }),
       });
     } catch (cause) {
-      rethrowBuildProcessFailure(cause, `$.steps[${index}]`);
+      processFailure = cause;
     }
-    const stdout = new Uint8Array(processResult.stdout);
-    const stderr = new Uint8Array(processResult.stderr);
-    if (stdout.byteLength > MAX_STEP_OUTPUT_BYTE_LENGTH ||
-        stderr.byteLength > MAX_STEP_OUTPUT_BYTE_LENGTH) {
-      resource(`$.steps[${index}].output`, "process boundary returned over-budget output");
+    const { stdout: stdoutEvidence, stderr: stderrEvidence } = await sealBuildLogSinks(
+      outputSinks,
+      `$.steps[${index}]`,
+    );
+    if (processFailure !== undefined) {
+      rethrowBuildProcessFailure(processFailure, `$.steps[${index}]`);
     }
-    const stdoutEvidence = await writeImmutableEvidenceFile(
-      join(logRoot, `${step.id}.stdout.log`),
-      stdout,
-      `$.steps[${index}].stdout`,
-    );
-    const stderrEvidence = await writeImmutableEvidenceFile(
-      join(logRoot, `${step.id}.stderr.log`),
-      stderr,
-      `$.steps[${index}].stderr`,
-    );
+    if (processResult.stdoutByteLength !== stdoutEvidence.byteLength ||
+        processResult.stderrByteLength !== stderrEvidence.byteLength) {
+      conflict(`$.steps[${index}].output`, "persisted build-log lengths differ from the process boundary");
+    }
     const receipt = Object.freeze({
       id: step.id,
       stageId: step.stageId,
@@ -481,7 +487,7 @@ async function observeBoundRegularFile(binding, maximumByteLength, signal) {
  * @returns {Promise<import("./cpp_cute_browser_build_executor.mjs").MaterializedCppCuteClangWasmSidecar>}
  */
 export async function materializeCppCuteClangWasmSidecar(prepared, options = {}) {
-  const signal = normalizeOptions(options);
+  const { signal } = normalizeOptions(options, false);
   throwIfAborted(signal);
   const stored = storedPreparedSource(prepared);
   const { plan } = stored;
@@ -802,46 +808,74 @@ async function createPrivateEmptyDirectory(path, diagnosticPath) {
   await syncDirectory(dirname(path));
 }
 
-/**
- * @param {string} path
- * @param {Uint8Array} bytes
- * @param {string} diagnosticPath
- */
-async function writeImmutableEvidenceFile(path, bytes, diagnosticPath) {
-  let handle;
+/** @param {string} logRoot @param {string} stepId @param {boolean} mirrorOutput @param {string} path */
+async function openBuildLogSinks(logRoot, stepId, mirrorOutput, path) {
+  let stdout;
+  let stderr;
   try {
-    handle = await open(
-      path,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-      0o400,
-    );
+    stdout = await createCppCuteBrowserBuildLogSink({
+      path: join(logRoot, `${stepId}.stdout.log`),
+      maximumByteLength: MAX_STEP_OUTPUT_BYTE_LENGTH,
+      mirror: mirrorOutput ? "stdout" : null,
+    });
+    stderr = await createCppCuteBrowserBuildLogSink({
+      path: join(logRoot, `${stepId}.stderr.log`),
+      maximumByteLength: MAX_STEP_OUTPUT_BYTE_LENGTH,
+      mirror: mirrorOutput ? "stderr" : null,
+    });
+    await syncDirectory(logRoot);
+    return Object.freeze({ stdout, stderr });
   } catch (cause) {
+    const cleanupResults = await Promise.allSettled([
+      ...(stdout === undefined ? [] : [stdout.seal()]),
+      ...(stderr === undefined ? [] : [stderr.seal()]),
+      ...((stdout === undefined && stderr === undefined) ? [] : [syncDirectory(logRoot)]),
+    ]);
+    const cleanupFailures = cleanupResults
+      .filter((result) => result.status === "rejected")
+      .map((result) => result.reason);
+    if (cleanupFailures.length > 0) {
+      compositeCleanup(
+        `${path}.output`,
+        "failed to settle partially opened build-log evidence",
+        cause,
+        cleanupFailures,
+      );
+    }
     if (isNodeError(cause, "EEXIST") || isNodeError(cause, "ELOOP")) {
-      conflict(diagnosticPath, "build evidence path must not already exist");
+      conflict(`${path}.output`, "build-log evidence path must not already exist");
     }
-    throw cause;
+    io(`${path}.output`, "failed to open exclusive build-log evidence", { cause });
   }
-  let identity;
-  try {
-    await handle.writeFile(bytes);
-    await handle.sync();
-    await handle.chmod(0o444);
-    const stat = await handle.stat({ bigint: true });
-    if (stat.nlink !== 1n) {
-      conflict(diagnosticPath, "build evidence must have exactly one hard link");
-    }
-    identity = fileVersionIdentity(stat);
-  } finally {
-    await handle.close();
+}
+
+/** @param {Awaited<ReturnType<typeof openBuildLogSinks>>} sinks @param {string} path */
+async function sealBuildLogSinks(sinks, path) {
+  const settled = await Promise.allSettled([sinks.stdout.seal(), sinks.stderr.seal()]);
+  const failures = settled
+    .filter((result) => result.status === "rejected")
+    .map((result) => result.reason);
+  if (failures.length > 0) {
+    io(`${path}.output`, "failed to seal streamed build-log evidence", {
+      cause: new AggregateError(failures, "build-log sealing failures"),
+    });
   }
-  await assertReadOnlyRegularPathIdentity(path, identity, bytes.byteLength, diagnosticPath);
-  await syncDirectory(dirname(path));
-  return Object.freeze({
-    path,
-    sha256: sha256(bytes),
-    byteLength: bytes.byteLength,
-    identity,
-  });
+  const stdout = settled[0].value;
+  const stderr = settled[1].value;
+  await assertReadOnlyRegularPathIdentity(
+    stdout.path,
+    stdout.identity,
+    stdout.byteLength,
+    `${path}.stdout`,
+  );
+  await assertReadOnlyRegularPathIdentity(
+    stderr.path,
+    stderr.identity,
+    stderr.byteLength,
+    `${path}.stderr`,
+  );
+  await syncDirectory(dirname(stdout.path));
+  return Object.freeze({ stdout, stderr });
 }
 
 /**
@@ -925,6 +959,9 @@ function rethrowBuildProcessFailure(cause, path) {
     }
     if (cause.reason === "timeout") {
       resource(`${path}.duration`, "build step exceeded its bounded execution duration");
+    }
+    if (cause.reason === "output-sink") {
+      io(`${path}.output`, "failed to persist streamed build-step output", { cause });
     }
     io(path, "failed to spawn the exact build step", { cause });
   }
@@ -1994,14 +2031,25 @@ function pathString(value, path) {
   return value;
 }
 
-/** @param {import("./cpp_cute_browser_build_executor.mjs").CppCuteBrowserBuildExecutorOptions} options */
-function normalizeOptions(options) {
-  const descriptors = exactDataObjectOptional(options, ["signal"], "$options");
+/**
+ * @param {import("./cpp_cute_browser_build_executor.mjs").CppCuteBrowserBuildExecutorOptions | import("./cpp_cute_browser_build_executor.mjs").CppCuteBrowserBuildExecutionOptions} options
+ * @param {boolean} execution
+ */
+function normalizeOptions(options, execution) {
+  const descriptors = exactDataObjectOptional(
+    options,
+    execution ? ["mirrorOutput", "signal"] : ["signal"],
+    "$options",
+  );
   const signal = descriptors.signal?.value;
   if (signal !== undefined && !isAbortSignal(signal)) {
     invalid("$options.signal", "signal must be an AbortSignal");
   }
-  return signal;
+  const mirrorOutput = descriptors.mirrorOutput?.value ?? false;
+  if (typeof mirrorOutput !== "boolean") {
+    invalid("$options.mirrorOutput", "mirrorOutput must be a boolean");
+  }
+  return Object.freeze({ signal, mirrorOutput });
 }
 
 /** @param {unknown} value @param {readonly string[]} allowedKeys @param {string} path */

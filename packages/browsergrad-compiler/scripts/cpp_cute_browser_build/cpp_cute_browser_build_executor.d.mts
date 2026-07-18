@@ -17,6 +17,11 @@ export interface CppCuteBrowserBuildExecutorOptions {
   readonly signal?: AbortSignal;
 }
 
+export interface CppCuteBrowserBuildExecutionOptions extends CppCuteBrowserBuildExecutorOptions {
+  /** Mirrors the already-bounded build logs while retaining immutable evidence. */
+  readonly mirrorOutput?: boolean;
+}
+
 declare const preparedCppCuteClangWasmBuildSourceBrand: unique symbol;
 
 /**
@@ -161,7 +166,7 @@ export function prepareCppCuteClangWasmBuildSource(
 
 export function executeCppCuteClangWasmBuild(
   prepared: PreparedCppCuteClangWasmBuildSource,
-  options?: CppCuteBrowserBuildExecutorOptions,
+  options?: CppCuteBrowserBuildExecutionOptions,
 ): Promise<ExecutedCppCuteClangWasmBuild>;
 
 export function materializeCppCuteClangWasmSidecar(

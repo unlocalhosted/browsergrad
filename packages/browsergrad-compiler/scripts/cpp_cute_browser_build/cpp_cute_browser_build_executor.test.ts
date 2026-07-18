@@ -36,11 +36,13 @@ const executorProcessState = vi.hoisted(() => ({
     maximumOutputByteLength: number;
     maximumDurationMs: number;
     signal?: AbortSignal;
+    onOutputChunk?: (stream: "stdout" | "stderr", chunk: Uint8Array) => Promise<void>;
   }>>,
   failureIndex: undefined as number | undefined,
   thrownReason: undefined as
     | "cancelled"
     | "output-limit"
+    | "output-sink"
     | "spawn"
     | "timeout"
     | undefined,
@@ -104,6 +106,7 @@ vi.mock("./cpp_cute_browser_build_executor_process.mjs", async (importOriginal) 
         maximumOutputByteLength: number;
         maximumDurationMs: number;
         signal?: AbortSignal;
+        onOutputChunk?: (stream: "stdout" | "stderr", chunk: Uint8Array) => Promise<void>;
       }) => {
         const callIndex = executorProcessState.calls.length;
         executorProcessState.calls.push(Object.freeze({
@@ -111,6 +114,10 @@ vi.mock("./cpp_cute_browser_build_executor_process.mjs", async (importOriginal) 
           arguments: Object.freeze([...input.arguments]),
           environment: Object.freeze({ ...input.environment }),
         }));
+        const stdout = new TextEncoder().encode(`stdout ${callIndex}\n`);
+        const stderr = new TextEncoder().encode(`stderr ${callIndex}\n`);
+        await input.onOutputChunk?.("stdout", stdout);
+        await input.onOutputChunk?.("stderr", stderr);
         if (executorProcessState.thrownReason !== undefined) {
           throw new actual.CppCuteBrowserBuildProcessError(
             executorProcessState.thrownReason,
@@ -170,8 +177,10 @@ vi.mock("./cpp_cute_browser_build_executor_process.mjs", async (importOriginal) 
         return Object.freeze({
           exitCode: executorProcessState.failureIndex === callIndex ? 7 : 0,
           terminationSignal: null,
-          stdout: new TextEncoder().encode(`stdout ${callIndex}\n`),
-          stderr: new TextEncoder().encode(`stderr ${callIndex}\n`),
+          stdout: input.onOutputChunk === undefined ? stdout : new Uint8Array(),
+          stderr: input.onOutputChunk === undefined ? stderr : new Uint8Array(),
+          stdoutByteLength: stdout.byteLength,
+          stderrByteLength: stderr.byteLength,
         });
       },
     }),
@@ -598,6 +607,7 @@ describe("exact Clang-Wasm build executor", () => {
 
   it.each([
     ["output-limit", "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-RESOURCE-LIMIT", "output"],
+    ["output-sink", "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-IO", "output"],
     ["timeout", "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-RESOURCE-LIMIT", "duration"],
     ["spawn", "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-IO", "steps[0]"],
     ["cancelled", "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-CANCELLED", "signal"],
@@ -615,6 +625,13 @@ describe("exact Clang-Wasm build executor", () => {
       path: expect.stringContaining(expectedPath),
     });
     expect(executorProcessState.calls).toHaveLength(1);
+    const logRoot = join(input.roots.stateRoot, "evidence", "build-logs");
+    expect(await readFile(join(logRoot, "native-tablegen-configure.stdout.log"), "utf8"))
+      .toBe("stdout 0\n");
+    expect(await readFile(join(logRoot, "native-tablegen-configure.stderr.log"), "utf8"))
+      .toBe("stderr 0\n");
+    expect((await lstat(join(logRoot, "native-tablegen-configure.stdout.log"))).mode & 0o222)
+      .toBe(0);
   });
 
   it("detects admitted build-tool mutation between exact steps", async () => {
