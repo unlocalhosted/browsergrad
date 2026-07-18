@@ -193,7 +193,8 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     const source = await extractorSource("BrowserGradCppCuteBrowserHost.cpp");
     for (const symbol of [
       "getpwnam_r", "getpwuid_r", "getuid", "getrlimit", "setrlimit",
-      "getrusage", "getsid", "fork", "execve", "posix_spawn", "sigaltstack",
+      "getrusage", "posix_madvise", "uname", "getsid", "setsid", "fork",
+      "execve", "posix_spawn", "wait4", "waitpid", "sigaltstack",
     ]) {
       expect(source).toMatch(new RegExp(`\\b${symbol}\\(`, "u"));
     }

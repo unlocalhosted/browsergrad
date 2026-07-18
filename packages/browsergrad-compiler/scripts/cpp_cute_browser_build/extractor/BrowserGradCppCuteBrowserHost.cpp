@@ -7,9 +7,12 @@
 #include <cstring>
 #include <limits>
 #include <pwd.h>
+#include <sys/mman.h>
 #include <spawn.h>
 #include <sys/resource.h>
 #include <sys/types.h>
+#include <sys/utsname.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace {
@@ -62,7 +65,25 @@ int getrusage(int, struct rusage* usage) {
   return 0;
 }
 
+int posix_madvise(void*, std::size_t, int) {
+  // POSIX memory advice cannot change program semantics. The browser runtime
+  // owns its linear-memory policy, so accepting the hint as a no-op is exact.
+  return 0;
+}
+
+int uname(struct utsname* identity) {
+  // Expose the compile target, never the runner or end-user host identity.
+  std::memset(identity, 0, sizeof(*identity));
+  std::memcpy(identity->sysname, "Emscripten", sizeof("Emscripten"));
+  std::memcpy(identity->machine, "wasm32", sizeof("wasm32"));
+  return 0;
+}
+
 pid_t getsid(pid_t) {
+  return static_cast<pid_t>(fail_with_enosys());
+}
+
+pid_t setsid() {
   return static_cast<pid_t>(fail_with_enosys());
 }
 
@@ -79,6 +100,14 @@ int posix_spawn(pid_t* process, const char*,
                 char* const[], char* const[]) {
   if (process != nullptr) *process = static_cast<pid_t>(-1);
   return ENOSYS;
+}
+
+pid_t wait4(pid_t, int*, int, struct rusage*) {
+  return static_cast<pid_t>(fail_with_enosys());
+}
+
+pid_t waitpid(pid_t, int*, int) {
+  return static_cast<pid_t>(fail_with_enosys());
 }
 
 int sigaltstack(const stack_t*, stack_t*) {

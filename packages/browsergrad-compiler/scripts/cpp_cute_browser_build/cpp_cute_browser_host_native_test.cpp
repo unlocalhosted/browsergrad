@@ -43,8 +43,23 @@ int run_browser_host_tests() {
     BG_CHECK(usage_bytes[index] == 0U);
   }
 
+  unsigned char advised_memory = 0;
+  BG_CHECK(posix_madvise(&advised_memory, sizeof(advised_memory),
+                         POSIX_MADV_NORMAL) == 0);
+  struct utsname identity;
+  std::memset(&identity, 0xff, sizeof(identity));
+  BG_CHECK(uname(&identity) == 0);
+  BG_CHECK(std::strcmp(identity.sysname, "Emscripten") == 0);
+  BG_CHECK(std::strcmp(identity.machine, "wasm32") == 0);
+  BG_CHECK(identity.nodename[0] == '\0');
+  BG_CHECK(identity.release[0] == '\0');
+  BG_CHECK(identity.version[0] == '\0');
+
   errno = 0;
   BG_CHECK(getsid(0) == static_cast<pid_t>(-1));
+  BG_CHECK(errno == ENOSYS);
+  errno = 0;
+  BG_CHECK(setsid() == static_cast<pid_t>(-1));
   BG_CHECK(errno == ENOSYS);
   errno = 0;
   BG_CHECK(fork() == static_cast<pid_t>(-1));
@@ -59,6 +74,15 @@ int run_browser_host_tests() {
   BG_CHECK(posix_spawn(&process, "/forbidden", nullptr, nullptr, arguments,
                        environment) == ENOSYS);
   BG_CHECK(process == static_cast<pid_t>(-1));
+  int process_status = 7;
+  errno = 0;
+  BG_CHECK(wait4(1, &process_status, 0, &usage) == static_cast<pid_t>(-1));
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(process_status == 7);
+  errno = 0;
+  BG_CHECK(waitpid(1, &process_status, 0) == static_cast<pid_t>(-1));
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(process_status == 7);
   errno = 0;
   BG_CHECK(sigaltstack(nullptr, nullptr) == -1);
   BG_CHECK(errno == ENOSYS);
