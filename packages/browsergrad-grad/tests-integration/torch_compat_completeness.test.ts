@@ -320,6 +320,7 @@ describe("end-to-end realistic PyTorch lab", () => {
     const result = await target.run<{ initial: number; final: number }>(`
 ${PRELUDE}
 torch.manual_seed(0)
+np.random.seed(0)
 
 # Data
 X_np = np.random.randn(128, 6).astype(np.float32)
