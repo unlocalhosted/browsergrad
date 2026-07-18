@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.74a783b4b283f533ca599b0bf3197346d20f9f2bf90ad612a1f557b5e1df662b",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.15a71eedf31da3ec752332f90ce74c3d2f7308bb81d3eeba698fc466b683fe14",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -96,7 +96,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
         { name: "TZ", value: "UTC" },
         { name: "ZERO_AR_DATE", value: "1" },
       ],
-      parallelJobs: 1,
+      parallelJobs: 4,
       prefixMapKinds: ["debug", "file", "macro"],
       stages: [
         {

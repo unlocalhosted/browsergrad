@@ -397,8 +397,8 @@ function validateBodyInvariants(value: JsonObject): void {
       assertWireU64(file.byteLength, `${path}.byteLength`);
       if (file.byteLength === "0") invalid(`${path}.byteLength`, "extractor source file must be nonempty");
     }
-    if (body.recipe.parallelJobs !== 1) {
-      invalid("$.body.recipe.parallelJobs", "deterministic build parallelism must equal one");
+    if (body.recipe.parallelJobs !== 4) {
+      invalid("$.body.recipe.parallelJobs", "reviewed build parallelism must equal four");
     }
     assertSortedUniqueStrings(body.recipe.environment.map((entry) => entry.name), "$.body.recipe.environment[*].name");
     assertSortedUniqueStrings(body.recipe.prefixMapKinds, "$.body.recipe.prefixMapKinds");

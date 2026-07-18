@@ -22,9 +22,9 @@ import {
 } from "../../src/cpp_cute_browser_runtime_abi.js";
 
 const LOCK_ID =
-  "bg.cpp.browser-build-input-lock.sha256.74a783b4b283f533ca599b0bf3197346d20f9f2bf90ad612a1f557b5e1df662b";
-const RESOURCE_SHA256 = "1fb10647c9522a2d03a1785024d7007d27b55be566aca3952826d90c75f96af6";
-const RECIPE_SHA256 = "e0572e33e03213a36aae874432b4dfcf29ea9fff9c02c8b44120fc6aff3eb896";
+  "bg.cpp.browser-build-input-lock.sha256.15a71eedf31da3ec752332f90ce74c3d2f7308bb81d3eeba698fc466b683fe14";
+const RESOURCE_SHA256 = "758a39252bac9c0ced63ee2dbdc0c945a1c005ae941bc03250271b43f34ba22d";
+const RECIPE_SHA256 = "1d0a5997432ad1179bdc5a965114590b3ca00288f79907888244b3d3725c027f";
 const EXTRACTOR_SOURCE_SHA256 = "bef1e0d01271b8b0bed1e0310f44bee7950cdac6c2dd768aa35efe77110eb191";
 const NOTICE_SHA256 = "ae94cc9272e8d3458778dda90db035388450075d5404f736f6daadc7192163d1";
 const BLOCKERS = [
@@ -151,7 +151,7 @@ describe("browser Clang-WASM build-input lock", () => {
     ]);
     expect(recipe.stages[0]?.targets).toEqual(["clang-tblgen", "llvm-tblgen"]);
     expect(recipe.stages[1]?.targets).toEqual(["browsergrad-cpp-cute-extractor"]);
-    expect(recipe.parallelJobs).toBe(1);
+    expect(recipe.parallelJobs).toBe(4);
     expect(recipe.stages[1]?.definitions).toContainEqual({
       name: "BROWSERGRAD_EXTRACTOR_FACTORY_OUTPUT_PATH",
       value: "@BUILD_EVIDENCE@/generated/clang-extractor.mjs",
