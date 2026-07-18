@@ -125,7 +125,8 @@ jobs:
             --ulimit nofile=65536:65536 \
             --user "$(id -u):$(id -g)" \
             --tmpfs /tmp:rw,nosuid,nodev,noexec,size=67108864 \
-            --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/workspace,readonly" \
+            --mount "type=bind,src=${GITHUB_WORKSPACE}/packages/browsergrad-compiler,dst=/workspace/packages/browsergrad-compiler,readonly" \
+            --mount "type=bind,src=${GITHUB_WORKSPACE}/packages/browsergrad-semantic-core,dst=/workspace/packages/browsergrad-semantic-core,readonly" \
             --mount "type=bind,src=${BG_CLANG_BUILD_ROOT}/inputs,dst=/browsergrad/inputs/build-${BG_CLANG_BUILD_ORDINAL},readonly" \
             --mount "type=bind,src=${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL},dst=/browsergrad/work/build-${BG_CLANG_BUILD_ORDINAL}" \
             --workdir /workspace/packages/browsergrad-compiler \

@@ -124,6 +124,16 @@ export async function runCppCuteBrowserBuild(argv) {
   const body = unwrapPreparedCppCuteBrowserBuildInputLock(lock).lock.body;
   const llvm = body.sources.find((source) => source.sourceId === "llvm-project");
   if (llvm === undefined) fail("$buildLock.sources", "LLVM source selection is missing");
+  const compilerPackageRoot = join(
+    arguments_["workspace-root"],
+    "packages",
+    "browsergrad-compiler",
+  );
+  const semanticCorePackageRoot = join(
+    arguments_["workspace-root"],
+    "packages",
+    "browsergrad-semantic-core",
+  );
 
   const builderBytes = await readBoundedRegularFile(
     arguments_["builder-observation"],
@@ -132,7 +142,8 @@ export async function runCppCuteBrowserBuild(argv) {
   );
   const builder = decodeCppCuteBuilderContainerObservation(builderBytes, body.builder);
   const isolation = await observeContainerIsolation([
-    arguments_["workspace-root"],
+    compilerPackageRoot,
+    semanticCorePackageRoot,
     arguments_["llvm-archive"],
     arguments_["llvm-source-root"],
   ], arguments_["work-root"]);
@@ -154,9 +165,7 @@ export async function runCppCuteBrowserBuild(argv) {
     stateRoot: join(arguments_["work-root"], "state"),
   });
   const extractorSourceInputRoot = join(
-    arguments_["workspace-root"],
-    "packages",
-    "browsergrad-compiler",
+    compilerPackageRoot,
     "scripts",
     "cpp_cute_browser_build",
     "extractor",

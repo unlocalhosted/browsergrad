@@ -51,7 +51,13 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("--cap-drop ALL");
     expect(workflow).toContain("--security-opt no-new-privileges:true");
     expect(workflow).toContain("--user \"$(id -u):$(id -g)\"");
-    expect(workflow).toContain("dst=/workspace,readonly");
+    expect(workflow).not.toContain("src=${GITHUB_WORKSPACE},dst=/workspace,readonly");
+    expect(workflow).toContain(
+      "src=${GITHUB_WORKSPACE}/packages/browsergrad-compiler,dst=/workspace/packages/browsergrad-compiler,readonly",
+    );
+    expect(workflow).toContain(
+      "src=${GITHUB_WORKSPACE}/packages/browsergrad-semantic-core,dst=/workspace/packages/browsergrad-semantic-core,readonly",
+    );
     expect(workflow).toContain("dst=/browsergrad/inputs/build-${BG_CLANG_BUILD_ORDINAL},readonly");
   });
 
