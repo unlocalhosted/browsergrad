@@ -14,6 +14,7 @@
     "scripts/cpp_cute_browser_build/cpp_cute_browser_build_executor.mjs",
     "scripts/cpp_cute_browser_build/cpp_cute_browser_build_executor.d.mts",
     "scripts/cpp_cute_browser_build/cpp_cute_browser_build_executor_process.mjs",
+    "scripts/cpp_cute_browser_build/cpp_cute_browser_build_runner.mjs",
     "scripts/cpp_cute_browser_build/*.test.ts",
     "scripts/cpp_cute_browser_build/vitest.config.ts"
   ],

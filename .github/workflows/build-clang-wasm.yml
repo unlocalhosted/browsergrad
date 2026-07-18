@@ -1,0 +1,144 @@
+name: Build pinned Clang-Wasm extractor
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clang-wasm-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Locked Linux amd64 build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Install Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Build the JavaScript verification boundary
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm -r build
+          pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:run
+
+      - name: Allocate private acquisition and build roots
+        run: |
+          set -euo pipefail
+          bg_clang_build_root="$(mktemp -d "${RUNNER_TEMP}/browsergrad-clang-wasm.XXXXXX")"
+          chmod 0700 "${bg_clang_build_root}"
+          mkdir -m 0700 "${bg_clang_build_root}/inputs" "${bg_clang_build_root}/work"
+          echo "BG_CLANG_BUILD_ROOT=${bg_clang_build_root}" >> "${GITHUB_ENV}"
+
+      - name: Acquire and verify the locked LLVM source archive
+        run: |
+          set -euo pipefail
+          bg_llvm_archive="${BG_CLANG_BUILD_ROOT}/inputs/llvm-project-22.1.8.src.tar.xz"
+          curl \
+            --fail \
+            --location \
+            --proto '=https' \
+            --retry 5 \
+            --retry-all-errors \
+            --show-error \
+            --silent \
+            --tlsv1.2 \
+            --output "${bg_llvm_archive}" \
+            'https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/llvm-project-22.1.8.src.tar.xz'
+          test "$(stat --format='%s' "${bg_llvm_archive}")" = '167061596'
+          echo '922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888  '"${bg_llvm_archive}" | sha256sum --check --strict
+          mkdir -m 0700 "${BG_CLANG_BUILD_ROOT}/inputs/llvm-project"
+          tar \
+            --extract \
+            --xz \
+            --file "${bg_llvm_archive}" \
+            --directory "${BG_CLANG_BUILD_ROOT}/inputs/llvm-project" \
+            --strip-components=1 \
+            --no-same-owner \
+            --no-same-permissions
+          test -f "${BG_CLANG_BUILD_ROOT}/inputs/llvm-project/llvm/CMakeLists.txt"
+          chmod 0444 "${bg_llvm_archive}"
+
+      - name: Pull and verify the locked builder image
+        run: |
+          set -euo pipefail
+          bg_builder_ref='docker.io/emscripten/emsdk@sha256:2a7a41cd7e2065b30ba389c8db0fbeaebd7ec06bb4e20f23cab8ba92180f25c7'
+          docker pull --platform linux/amd64 "${bg_builder_ref}"
+          bg_observed_config="$(docker image inspect --format='{{.Id}}' "${bg_builder_ref}")"
+          bg_observed_os="$(docker image inspect --format='{{.Os}}' "${bg_builder_ref}")"
+          bg_observed_arch="$(docker image inspect --format='{{.Architecture}}' "${bg_builder_ref}")"
+          test "${bg_observed_config}" = 'sha256:1998ba0793f0e61685f08c62a3e78bbcd1ef84895fefe994bf48d8d66dc1e495'
+          test "${bg_observed_os}" = 'linux'
+          test "${bg_observed_arch}" = 'amd64'
+          jq --compact-output --null-input \
+            --arg schema 'browsergrad.compiler.cpp-cute.builder-container-observation' \
+            --arg platform 'linux/amd64' \
+            --arg manifest 'sha256:2a7a41cd7e2065b30ba389c8db0fbeaebd7ec06bb4e20f23cab8ba92180f25c7' \
+            --arg config "${bg_observed_config}" \
+            '{schema:$schema,version:1,platform:$platform,platformManifestDigest:$manifest,imageConfigDigest:$config}' \
+            > "${BG_CLANG_BUILD_ROOT}/inputs/builder-observation.json"
+          chmod 0444 "${BG_CLANG_BUILD_ROOT}/inputs/builder-observation.json"
+
+      - name: Execute the locked build without network or ambient privilege
+        run: |
+          set -euo pipefail
+          bg_builder_ref='docker.io/emscripten/emsdk@sha256:2a7a41cd7e2065b30ba389c8db0fbeaebd7ec06bb4e20f23cab8ba92180f25c7'
+          docker run \
+            --rm \
+            --platform linux/amd64 \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --pids-limit 4096 \
+            --ulimit nofile=65536:65536 \
+            --user "$(id -u):$(id -g)" \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=67108864 \
+            --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/workspace,readonly" \
+            --mount "type=bind,src=${BG_CLANG_BUILD_ROOT}/inputs,dst=/browsergrad/inputs,readonly" \
+            --mount "type=bind,src=${BG_CLANG_BUILD_ROOT}/work,dst=/browsergrad/work" \
+            --workdir /workspace/packages/browsergrad-compiler \
+            --entrypoint node \
+            "${bg_builder_ref}" \
+            scripts/cpp_cute_browser_build/cpp_cute_browser_build_runner.mjs \
+            --workspace-root=/workspace \
+            --llvm-archive=/browsergrad/inputs/llvm-project-22.1.8.src.tar.xz \
+            --llvm-source-root=/browsergrad/inputs/llvm-project \
+            --work-root=/browsergrad/work \
+            --builder-observation=/browsergrad/inputs/builder-observation.json
+
+      - name: Summarize exact build outputs
+        if: success()
+        run: |
+          set -euo pipefail
+          sha256sum \
+            "${BG_CLANG_BUILD_ROOT}/work/output/build-execution-observation.v1.json" \
+            "${BG_CLANG_BUILD_ROOT}/work/output/browsergrad-cpp-cute/clang-extractor.wasm"
+          du --human-readable --summarize \
+            "${BG_CLANG_BUILD_ROOT}/work/output" \
+            "${BG_CLANG_BUILD_ROOT}/work/state/evidence"
+
+      - name: Upload bounded build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: clang-wasm-build-${{ github.run_id }}
+          path: |
+            ${{ env.BG_CLANG_BUILD_ROOT }}/work/output
+            ${{ env.BG_CLANG_BUILD_ROOT }}/work/state/evidence
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 6

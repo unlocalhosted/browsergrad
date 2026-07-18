@@ -622,6 +622,13 @@ async function prepareBuildExecutionDirectories(roots, plan) {
   await createPrivateEmptyDirectory(evidenceRoot, "$.buildEvidence");
   await createPrivateEmptyDirectory(generatedRoot, "$.generatedExtractor");
   await createPrivateEmptyDirectory(logRoot, "$.buildEvidence.logs");
+  await createPrivateEmptyDirectory(join(roots.stateRoot, "home"), "$.buildState.home");
+  await createPrivateEmptyDirectory(join(roots.stateRoot, "tmp"), "$.buildState.tmp");
+  await createPrivateEmptyDirectory(
+    join(roots.stateRoot, "empty-pkgconfig"),
+    "$.buildState.emptyPkgConfig",
+  );
+  await createPrivateEmptyDirectory(join(roots.stateRoot, "em-cache"), "$.buildState.emCache");
 }
 
 /** @param {string} path @param {string} diagnosticPath */

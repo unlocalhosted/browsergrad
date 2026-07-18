@@ -57,6 +57,7 @@
     "test:aot-docker-shell:run": "tsc -p tsconfig.docker-shell.json && oxlint scripts/cpp_cute_aot_docker_*.mjs scripts/cpp_cute_aot_docker_*.test.ts && vitest run --config vitest.docker-shell.config.ts",
     "test:browser-clang-wasm-build-plan": "pnpm run build && pnpm run test:browser-clang-wasm-build-plan:run",
     "test:browser-clang-wasm-build-plan:run": "tsc -p tsconfig.browser-build-plan.json && oxlint scripts/cpp_cute_browser_build && vitest run --config scripts/cpp_cute_browser_build/vitest.config.ts",
+    "build:browser-clang-wasm:execute": "node scripts/cpp_cute_browser_build/cpp_cute_browser_build_runner.mjs",
     "test:audit-corpus": "pnpm --dir ../.. --filter @unlocalhosted/browsergrad-kernels run build && pnpm run build && pnpm run test:audit-corpus:run",
     "test:audit-corpus:run": "node ../../scripts/test-cuda-lite-corpus-audit.mjs",
     "bench": "node ../../scripts/run-cuda-lite-tool.mjs bench",
