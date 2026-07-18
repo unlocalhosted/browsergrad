@@ -21,14 +21,45 @@ const option = (name, fallback) => {
   const value = process.argv.find((arg) => arg.startsWith(`${name}=`));
   return value === undefined ? fallback : value.slice(name.length + 1);
 };
+const options = (name) => process.argv
+  .filter((arg) => arg.startsWith(`${name}=`))
+  .map((arg) => arg.slice(name.length + 1));
 const minLines = Number.parseInt(option("--min-lines", "1000"), 10);
 const maxSourceLines = Number.parseInt(option("--max-source-lines", "5500"), 10);
 const maxTestLines = Number.parseInt(option("--max-test-lines", "4500"), 10);
 const maxHarnessLines = Number.parseInt(option("--max-harness-lines", "2500"), 10);
 const maxNativeLines = Number.parseInt(option("--max-native-lines", "2500"), 10);
+const sourceLineBudgets = parseSourceLineBudgets(options("--source-line-budget"));
 const check = args.has("--check");
 const json = args.has("--json");
 const includeTests = args.has("--include-tests") || check;
+
+function parseSourceLineBudgets(values) {
+  const budgets = new Map();
+  for (const [index, value] of values.entries()) {
+    const separator = value.lastIndexOf(":");
+    const relativeFile = separator < 1 ? "" : value.slice(0, separator);
+    const limitText = separator < 1 ? "" : value.slice(separator + 1);
+    if (!/^[A-Za-z0-9._/-]+\.ts$/u.test(relativeFile) ||
+        path.posix.isAbsolute(relativeFile) ||
+        path.posix.normalize(relativeFile) !== relativeFile ||
+        relativeFile.startsWith("../")) {
+      throw new Error(
+        `invalid --source-line-budget at index ${index}: expected normalized compiler-src-relative .ts path`,
+      );
+    }
+    if (!/^[1-9][0-9]{0,5}$/u.test(limitText)) {
+      throw new Error(
+        `invalid --source-line-budget at index ${index}: expected an integer from 1 through 999999`,
+      );
+    }
+    if (budgets.has(relativeFile)) {
+      throw new Error(`duplicate --source-line-budget for ${relativeFile}`);
+    }
+    budgets.set(relativeFile, Number.parseInt(limitText, 10));
+  }
+  return budgets;
+}
 
 function walkFiles(dir, predicate) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -317,6 +348,11 @@ const allRows = [...sourceRows, ...harnessRows, ...nativeRows, ...testRows]
   .sort((left, right) => right.lines - left.lines);
 const cycles = dependencyCycles(allRows);
 const coverageFailures = architectureCoverageFailures(harnessRows, nativeRows);
+const observedSourceFiles = new Set(sourceRows.map((row) => (
+  path.relative(compilerSrc, row.file).split(path.sep).join("/")
+)));
+const staleSourceLineBudgets = [...sourceLineBudgets.keys()]
+  .filter((relativeFile) => !observedSourceFiles.has(relativeFile));
 const report = {
   source: sourceRows.map(({ source, ...row }) => row),
   harness: harnessRows.map(({ source, ...row }) => row),
@@ -328,7 +364,13 @@ const report = {
   semanticIrRepresentationLeaks: semanticIrRepresentationLeaks(sourceRows),
   cppCuteFrontendLegacyLeaks: cppCuteFrontendLegacyLeaks(sourceRows),
   coverageFailures,
-  limits: { maxSourceLines, maxHarnessLines, maxNativeLines, maxTestLines },
+  limits: {
+    maxSourceLines,
+    sourceLineBudgets: Object.fromEntries(sourceLineBudgets),
+    maxHarnessLines,
+    maxNativeLines,
+    maxTestLines,
+  },
 };
 
 if (json) {
@@ -362,8 +404,20 @@ if (json) {
 if (check) {
   const failures = [
     ...sourceRows
-      .filter((row) => row.lines > maxSourceLines)
-      .map((row) => `${row.relativeFile} has ${row.lines} lines (limit ${maxSourceLines})`),
+      .map((row) => {
+        const relativeFile = path.relative(compilerSrc, row.file).split(path.sep).join("/");
+        const ratchet = sourceLineBudgets.get(relativeFile);
+        const limit = ratchet === undefined ? maxSourceLines : Math.min(maxSourceLines, ratchet);
+        return { row, limit, ratchet };
+      })
+      .filter(({ row, limit }) => row.lines > limit)
+      .map(({ row, limit, ratchet }) => (
+        `${row.relativeFile} has ${row.lines} lines (` +
+        `${ratchet === undefined ? "source" : "module ratchet"} limit ${limit})`
+      )),
+    ...staleSourceLineBudgets.map((relativeFile) => (
+      `source line budget names missing compiler module ${relativeFile}`
+    )),
     ...harnessRows
       .filter((row) => row.lines > maxHarnessLines)
       .map((row) => `${row.relativeFile} has ${row.lines} lines (harness limit ${maxHarnessLines})`),
