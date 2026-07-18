@@ -58,6 +58,28 @@ canonical include-root review passed and the expensive compile began. It still
 targets the unchanged extractor/build lock at `cd112795` and is not completed-
 build, ABI, reproducibility, Worker, or release evidence.
 
+Commit `df849d95` replaces the remaining two-package runtime mount for future
+runs with a staged closure containing 25 exact JavaScript/package files and the
+36 lock-listed extractor files. The stager uses no shell, refuses non-private
+or overlapping roots, copies through no-follow handles with before/after file
+identity checks, bounds file/node/byte counts, seals the tree, and then
+re-enumerates and re-hashes it. The container verifies the same closure again;
+build-execution evidence v2 records every file identity, and reproducibility
+evidence v2 requires the two runtime-closure observations to match. The focused
+boundary passes 24 files with 157 tests and 9 intentional platform skips. The
+active `29658164083` run predates this capability and remains evidence only for
+the prior package-tree mount.
+
+The first exact-source CI run containing that closure exposed an independent
+Grad reproducibility defect: parameterized layer constructors used fresh NumPy
+generators, so `torch.manual_seed` did not control initialization and a training
+fixture could cross its accuracy threshold. Commit `81984eda` routes those
+initializers through the seeded global generator and adds all-family contract
+coverage. CI `29660471267` has passed the full Pyodide/Grad lane and the
+Node 20/24/25 surfaces, including the exact native compiler harness, plus the
+real Chromium/WebGPU corpus. This is not Clang-Wasm output evidence, but it
+closes a real source of whole-workspace validation noise.
+
 That cost is partly an honest reproducibility cost and partly a harness design
 failure: configuration mismatches should not require an almost-complete LLVM
 build to discover.
@@ -66,8 +88,8 @@ build to discover.
 
 | Area | Rating | Evidence | Required improvement |
 | --- | --- | --- | --- |
-| Locked input integrity | Good but incomplete | Exact LLVM archive, builder manifest/config, extractor source closure, recipe, ABI, and resource identities are checked. The success receipt does not yet bind the harness implementation revision. | Bind the harness revision, successful output, and reviewed runtime projections before distribution. |
-| Build isolation | Strong containment; incomplete hermeticity | No network, read-only root and inputs, private work mount, zero capabilities, and no-new-privileges are observed. The unrelated checkout is no longer mounted; the container can still read the complete compiler and semantic-core package trees. | Stage or independently bind the exact runtime closure and preserve the same boundary in reproducibility runs. |
+| Locked input integrity | Good but incomplete | Exact LLVM archive, builder manifest/config, recipe, ABI, extractor source, and 25-file harness runtime closure are checked and content-bound in build evidence v2. Successful factory/Wasm identities and reviewed ABI projections remain unproven. | Complete a build under the v2 boundary, then bind reviewed outputs before distribution. |
+| Build isolation | Strong containment; new boundary not yet exercised by a completed build | No network, read-only root and declared inputs, private work mount, zero capabilities, and no-new-privileges are observed. Future runs mount only the sealed exact runtime/extractor closure instead of checkout or package trees. | Preserve the same closure in a successful validation and both reproducibility builds. |
 | Native semantic coverage | Good but incomplete | Exact Clang 22 pass integration plus native behavioral, UBSan, and ASan lanes are required in CI. | Keep the exact-version lane blocking and add executed-Wasm coverage. |
 | Evidence quality | Mixed | Bounded immutable logs, raw-Wasm inspection, authority-specific records, and a failure-only observation for available partial logs exist. | Complete successful and reproducible build evidence. |
 | Feedback speed | Weak but improving | The clean serial toolchain build dominates successful validation, but target-configuration defects now stop after native TableGen plus Wasm configuration instead of an almost-complete compile. A million-call VFS test was replaced by direct exact-boundary coverage after it timed out only under the Node 20 CI load. | Validate a safe higher parallelism only through reproducibility evidence. |
@@ -120,14 +142,19 @@ build to discover.
 16. The four largest compiler-core modules, build executor, native compile
     session, and artifact writer have exact file-specific line ratchets.
     Duplicate, invalid, or stale ratchet entries fail closed.
-17. The build container no longer mounts the whole checkout. Its read-only
-    workspace inputs are limited to `browsergrad-compiler` and
-    `browsergrad-semantic-core`, and the runner observes both effective mount
-    modes before execution.
+17. The build container no longer mounts the whole checkout. The intermediate
+    two-package boundary removed unrelated repository read authority, and the
+    runner observed both effective mount modes before execution.
 18. The VFS call-ceiling test no longer performs one million full memory-
     validated calls. The exact ABI-owned budget transition has direct boundary
     coverage, while live-handle and aggregate-byte ceilings remain integration
     tests. Exact-source Node 20 CI passes the revised suite.
+19. Future builds no longer mount either complete package tree. An exact staged
+    runtime closure contains 25 required JavaScript/package files plus the 36
+    lock-listed extractor files. It rejects symlinks, changes, missing files,
+    undeclared files/directories, and resource overruns; proves the isolated
+    runner imports from that tree; and binds the closure into build and
+    reproducibility evidence v2.
 
 ## Recommended decomposition order
 
@@ -165,13 +192,13 @@ chain is stabilized; a broad rewrite during the first Wasm/Worker integration
 would mix correctness risk with organizational work.
 
 The build container's writable authority is narrow, and its unrelated checkout
-read authority has been removed. The workflow now mounts only the compiler and
-semantic-core package trees read-only so the verification code, locked C++
-source, and schema dependency can execute. That is still broader than the exact
-runtime file closure, and current success receipts do not bind the harness
-revision. Release-grade hermeticity therefore still requires a minimal staged
-harness closure or an independently recorded revision/content identity for
-every readable harness input.
+and complete-package read authority have been removed for future runs. The
+workflow stages only the exact runner dependency graph and lock-listed C++
+source, mounts that tree read-only, independently enumerates it inside the
+container, and records every file identity. No completed build has yet exercised
+this v2 boundary, so the older active validation cannot retroactively grant it
+execution evidence. Release-grade output identity still requires a successful
+v2 build, independent raw-Wasm review, and two matching clean v2 builds.
 
 ## Open high-priority findings
 
@@ -189,9 +216,9 @@ every readable harness input.
    review.
 7. Decompose the build executor, compile session, artifact writer, and the four
    largest compiler-core modules along existing authority and semantic seams.
-8. Minimize or content-bind the read-only workspace/harness closure and record
-   its revision before granting output-identity, provenance, or release
-   authority.
+8. Exercise the content-bound runtime closure in a successful validation and
+   both clean reproducibility builds before granting output-identity,
+   provenance, or release authority.
 
 ## Capability boundary after the audit
 
