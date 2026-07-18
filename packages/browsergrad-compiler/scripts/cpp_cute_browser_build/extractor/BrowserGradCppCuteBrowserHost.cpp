@@ -31,15 +31,15 @@ extern "C" {
 
 int getpwnam_r(const char*, struct passwd* password, char*, std::size_t,
                struct passwd** result) {
-  if (password != nullptr) std::memset(password, 0, sizeof(*password));
-  if (result != nullptr) *result = nullptr;
+  std::memset(password, 0, sizeof(*password));
+  *result = nullptr;
   return ENOSYS;
 }
 
 int getpwuid_r(uid_t, struct passwd* password, char*, std::size_t,
                struct passwd** result) {
-  if (password != nullptr) std::memset(password, 0, sizeof(*password));
-  if (result != nullptr) *result = nullptr;
+  std::memset(password, 0, sizeof(*password));
+  *result = nullptr;
   return ENOSYS;
 }
 
@@ -48,10 +48,6 @@ uid_t getuid() {
 }
 
 int getrlimit(int, struct rlimit* limits) {
-  if (limits == nullptr) {
-    errno = EFAULT;
-    return -1;
-  }
   limits->rlim_cur = RLIM_INFINITY;
   limits->rlim_max = RLIM_INFINITY;
   return 0;
@@ -62,10 +58,6 @@ int setrlimit(int, const struct rlimit*) {
 }
 
 int getrusage(int, struct rusage* usage) {
-  if (usage == nullptr) {
-    errno = EFAULT;
-    return -1;
-  }
   std::memset(usage, 0, sizeof(*usage));
   return 0;
 }
