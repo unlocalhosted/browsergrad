@@ -98,4 +98,10 @@ describe("Clang-Wasm evidence workflow", () => {
       expect(line).toMatch(/uses:\s+[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}(?:\s+#.*)?$/u);
     }
   });
+
+  it("keeps Grad integration and real WebGPU suites blocking", () => {
+    expect(ciWorkflow).toContain("Run grad integration suite");
+    expect(ciWorkflow).toContain("Run kernels browser suite");
+    expect(ciWorkflow).not.toContain("continue-on-error");
+  });
 });

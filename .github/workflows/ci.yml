@@ -120,7 +120,6 @@ jobs:
       - name: Run grad integration suite
         # grad ships its own integration tests; pnpm -r picks them up
         run: pnpm --filter @unlocalhosted/browsergrad-grad test:integration
-        continue-on-error: true # safety net while grad CI stabilizes
 
   browser:
     name: Real WebGPU tests (Chromium)
@@ -148,8 +147,6 @@ jobs:
 
       - name: Run kernels browser suite
         run: pnpm --filter @unlocalhosted/browsergrad-kernels test:browser
-        continue-on-error: true # Linux SwiftShader path is still flaky;
-                                # don't gate every PR on it until stable
 
       - name: Run compiler browser suite
         run: pnpm --filter @unlocalhosted/browsergrad-compiler test:browser
