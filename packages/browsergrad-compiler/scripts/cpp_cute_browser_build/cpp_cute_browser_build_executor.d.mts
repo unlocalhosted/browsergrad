@@ -5,6 +5,9 @@ import type {
   CppCuteClangWasmBuildRoots,
   CppCuteClangWasmMaterializedTools,
 } from "./cpp_cute_browser_build_plan.mjs";
+import type {
+  CppCuteBrowserConfiguredTargetReview,
+} from "./cpp_cute_browser_configured_target_review.mjs";
 
 export interface PrepareCppCuteClangWasmBuildSourceInput {
   readonly lock: PreparedCppCuteBrowserBuildInputLock;
@@ -93,6 +96,7 @@ export interface ExecutedCppCuteClangWasmBuild {
     readonly clangTablegen: ExecutedCppCuteClangWasmNativeTool;
     readonly llvmTablegen: ExecutedCppCuteClangWasmNativeTool;
   }>;
+  readonly configuredTarget: CppCuteBrowserConfiguredTargetReview;
   readonly stepCount: number;
   readonly steps: readonly ExecutedCppCuteClangWasmBuildStep[];
   readonly factoryModulePath: string;

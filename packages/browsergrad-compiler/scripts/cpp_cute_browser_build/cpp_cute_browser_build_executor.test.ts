@@ -149,6 +149,28 @@ vi.mock("./cpp_cute_browser_build_executor_process.mjs", async (importOriginal) 
             .find((argument) => argument.startsWith("-DCMAKE_EXE_LINKER_FLAGS="));
           executorProcessState.linkMapPath = linkerFlags
             ?.match(/--Map=([^ ]+)/u)?.[1];
+          const buildRoot = input.arguments[input.arguments.indexOf("-B") + 1];
+          if (buildRoot === undefined || executorProcessState.factoryPath === undefined) {
+            throw new Error("mock did not observe the Wasm build root and factory path");
+          }
+          const targetDirectory = join(
+            buildRoot,
+            "tools",
+            "browsergrad_extractor",
+            "CMakeFiles",
+            "browsergrad-cpp-cute-extractor.dir",
+          );
+          await mkdir(targetDirectory, { recursive: true });
+          await Promise.all([
+            writeFile(
+              join(targetDirectory, "flags.make"),
+              "CXX_FLAGS = -O3 -fexceptions -DNDEBUG\n",
+            ),
+            writeFile(
+              join(targetDirectory, "link.txt"),
+              `/emsdk/upstream/emscripten/em++ -O3 -fexceptions objects.o -o ${executorProcessState.factoryPath}\n`,
+            ),
+          ]);
         }
         if (input.arguments[0] === "--build" &&
             input.arguments.includes("browsergrad-cpp-cute-extractor")) {
@@ -520,6 +542,14 @@ describe("exact Clang-Wasm build executor", () => {
       lockId: lock.lockId,
       sourceSetSha256: lock.extractorSourceSetSha256,
       stepCount: 4,
+      configuredTarget: {
+        authority: "configured-target-flags-review-only",
+        exceptionMode: "emscripten-javascript",
+        rttiRequired: true,
+        buildExecuted: false,
+        abiConformanceVerified: false,
+        releaseReady: false,
+      },
       sourceVerified: true,
       buildExecuted: true,
       factoryModuleUtf8Validated: true,

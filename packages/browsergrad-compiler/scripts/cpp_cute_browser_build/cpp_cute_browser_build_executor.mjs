@@ -16,6 +16,7 @@ import { TextDecoder } from "node:util";
 import { hashCanonicalJson } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
 import { planCppCuteClangWasmBuild } from "./cpp_cute_browser_build_plan.mjs";
+import { reviewCppCuteBrowserConfiguredTarget } from "./cpp_cute_browser_configured_target_review.mjs";
 import { CPP_CUTE_BROWSER_BUILD_EXECUTOR_FS } from "./cpp_cute_browser_build_executor_fs.mjs";
 import { createCppCuteBrowserBuildLogSink } from "./cpp_cute_browser_build_log_sink.mjs";
 import {
@@ -236,6 +237,7 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
   const logRoot = join(evidenceRoot, "build-logs");
   const receipts = [];
   let nativeToolBindings;
+  let configuredTargetReview;
   for (const [index, step] of plan.steps.entries()) {
     throwIfAborted(signal);
     await verifyBuildInputBindings(inputBindings);
@@ -251,6 +253,20 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
         unverified(`$.steps[${index}]`, "native TableGen tools were not admitted before the Wasm stage");
       }
       await verifyRegularFileBindings(nativeToolBindings);
+    }
+    if (step.id === "clang-extractor-wasm-build") {
+      try {
+        configuredTargetReview = await reviewCppCuteBrowserConfiguredTarget({
+          wasmBuildRoot: roots.wasmBuildRoot,
+          factoryModulePath: plan.generatedExtractor.factoryModulePath,
+        });
+      } catch (cause) {
+        invalid(
+          "$.configuredTarget",
+          "configured BrowserGrad target flags failed pre-build review",
+          { cause },
+        );
+      }
     }
 
     const outputSinks = await openBuildLogSinks(
@@ -319,8 +335,30 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
       ]);
     }
   }
-  if (receipts.length !== 4 || nativeToolBindings === undefined) {
+  if (receipts.length !== 4 || nativeToolBindings === undefined ||
+      configuredTargetReview === undefined) {
     unverified("$.steps", "exact four-step build did not complete");
+  }
+
+  let completedTargetReview;
+  try {
+    completedTargetReview = await reviewCppCuteBrowserConfiguredTarget({
+      wasmBuildRoot: roots.wasmBuildRoot,
+      factoryModulePath: plan.generatedExtractor.factoryModulePath,
+    });
+  } catch (cause) {
+    invalid(
+      "$.configuredTarget",
+      "configured BrowserGrad target flags failed post-build review",
+      { cause },
+    );
+  }
+  if (configuredTargetReview.compileFlagsSha256 !== completedTargetReview.compileFlagsSha256 ||
+      configuredTargetReview.linkCommandSha256 !== completedTargetReview.linkCommandSha256) {
+    conflict(
+      "$.configuredTarget",
+      "configured target flags changed between pre-build and post-build review",
+    );
   }
 
   await verifyBuildInputBindings(inputBindings);
@@ -389,6 +427,7 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
       stateRoot: roots.stateRoot,
     }),
     nativeTools,
+    configuredTarget: completedTargetReview,
     stepCount: receipts.length,
     steps: Object.freeze(receipts),
     factoryModulePath: plan.generatedExtractor.factoryModulePath,
