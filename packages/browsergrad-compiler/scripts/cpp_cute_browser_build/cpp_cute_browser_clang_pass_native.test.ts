@@ -17,6 +17,7 @@ const llvmConfigCandidates = [
 ].filter((candidate): candidate is string => candidate !== undefined);
 const llvmConfig = llvmConfigCandidates.find((candidate) => existsSync(candidate));
 const requireNativeClangPass = process.env["BROWSERGRAD_REQUIRE_NATIVE_CLANG_PASS"] === "1";
+const expectedClangVersion = "22.1.8";
 
 interface NativeClangToolchain {
   readonly compiler: string;
@@ -39,7 +40,7 @@ function discoverNativeClangToolchain(): NativeClangToolchain | undefined {
   const libraryDirectory = query("--libdir");
   const version = query("--version");
   if (bindir === undefined || includeDirectory === undefined ||
-      libraryDirectory === undefined || version === undefined) {
+      libraryDirectory === undefined || version !== expectedClangVersion) {
     return undefined;
   }
   const compiler = join(bindir, "clang++");

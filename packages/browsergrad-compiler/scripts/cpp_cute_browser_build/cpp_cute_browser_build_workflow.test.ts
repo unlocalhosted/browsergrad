@@ -11,12 +11,17 @@ import {
 } from "../../dist/cpp_cute_browser_build_lock.js";
 
 let workflow: string;
+let ciWorkflow: string;
 let body: ReturnType<typeof unwrapPreparedCppCuteBrowserBuildInputLock>["lock"]["body"];
 
 beforeAll(async () => {
   const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
   workflow = await readFile(
     join(repositoryRoot, ".github", "workflows", "build-clang-wasm.yml"),
+    "utf8",
+  );
+  ciWorkflow = await readFile(
+    join(repositoryRoot, ".github", "workflows", "ci.yml"),
     "utf8",
   );
   const lock = await decodeCppCuteBrowserBuildInputLock(
@@ -74,5 +79,15 @@ describe("Clang-Wasm evidence workflow", () => {
     for (const line of actionLines) {
       expect(line).toMatch(/uses:\s+[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}(?:\s+#.*)?$/u);
     }
+  });
+
+  it("requires the exact native Clang version used by the locked source", () => {
+    expect(ciWorkflow).toContain("llvm-toolchain-noble-22");
+    expect(ciWorkflow).toContain("/usr/lib/llvm-22/bin/llvm-config");
+    expect(ciWorkflow).toContain("--version)\" = \"22.1.8\"");
+    expect(ciWorkflow).toContain(
+      "8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d",
+    );
+    expect(ciWorkflow).not.toContain("clang-18");
   });
 });

@@ -52,12 +52,27 @@ jobs:
         if: matrix.node == 24
         run: |
           set -euo pipefail
+          bg_llvm_key="$(mktemp)"
+          curl --fail --silent --show-error --location \
+            https://apt.llvm.org/llvm-snapshot.gpg.key \
+            --output "${bg_llvm_key}"
+          echo "8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d  ${bg_llvm_key}" | sha256sum --check
+          sudo install -d -m 0755 /etc/apt/keyrings
+          sudo install -m 0644 "${bg_llvm_key}" /etc/apt/keyrings/llvm-snapshot.asc
+          echo "deb [signed-by=/etc/apt/keyrings/llvm-snapshot.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | \
+            sudo tee /etc/apt/sources.list.d/llvm22.list >/dev/null
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends clang-18 libclang-18-dev libclang-cpp18-dev llvm-18-dev
-          bg_llvm_config="/usr/lib/llvm-18/bin/llvm-config"
+          bg_llvm_package_version="1:22.1.8~++20260613092238+e80beda6e255-1~exp1~20260613092253.78"
+          sudo apt-get install --yes --no-install-recommends \
+            "clang-22=${bg_llvm_package_version}" \
+            "libclang-22-dev=${bg_llvm_package_version}" \
+            "libclang-cpp22-dev=${bg_llvm_package_version}" \
+            "llvm-22-dev=${bg_llvm_package_version}"
+          bg_llvm_config="/usr/lib/llvm-22/bin/llvm-config"
           test -x "${bg_llvm_config}"
+          test "$("${bg_llvm_config}" --version)" = "22.1.8"
           echo "BROWSERGRAD_LLVM_CONFIG=${bg_llvm_config}" >> "${GITHUB_ENV}"
-          echo "BROWSERGRAD_NATIVE_CXX=/usr/lib/llvm-18/bin/clang++" >> "${GITHUB_ENV}"
+          echo "BROWSERGRAD_NATIVE_CXX=/usr/lib/llvm-22/bin/clang++" >> "${GITHUB_ENV}"
 
       - name: Verify compiler Node-only Docker shell
         run: pnpm --filter @unlocalhosted/browsergrad-compiler test:aot-docker-shell:run
