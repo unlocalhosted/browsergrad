@@ -10,6 +10,12 @@ const compilerRequire = createRequire(path.join(compilerRoot, "package.json"));
 const ts = compilerRequire("typescript");
 const compilerSrc = path.join(compilerRoot, "src");
 const compilerTests = path.join(compilerRoot, "tests");
+const compilerBuildHarness = path.join(
+  compilerRoot,
+  "scripts",
+  "cpp_cute_browser_build",
+);
+const compilerNativeExtractor = path.join(compilerBuildHarness, "extractor");
 const args = new Set(process.argv.slice(2));
 const option = (name, fallback) => {
   const value = process.argv.find((arg) => arg.startsWith(`${name}=`));
@@ -18,16 +24,22 @@ const option = (name, fallback) => {
 const minLines = Number.parseInt(option("--min-lines", "1000"), 10);
 const maxSourceLines = Number.parseInt(option("--max-source-lines", "5500"), 10);
 const maxTestLines = Number.parseInt(option("--max-test-lines", "4500"), 10);
+const maxHarnessLines = Number.parseInt(option("--max-harness-lines", "2500"), 10);
+const maxNativeLines = Number.parseInt(option("--max-native-lines", "2500"), 10);
 const check = args.has("--check");
 const json = args.has("--json");
 const includeTests = args.has("--include-tests") || check;
 
-function walk(dir) {
+function walkFiles(dir, predicate) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return walk(full);
-    return /\.(?:ts|mts|mjs)$/u.test(entry.name) ? [full] : [];
+    if (entry.isDirectory()) return walkFiles(full, predicate);
+    return predicate(full) ? [full] : [];
   });
+}
+
+function walkModules(dir) {
+  return walkFiles(dir, (file) => /\.(?:ts|mts|mjs)$/u.test(file));
 }
 
 function rel(file) {
@@ -62,8 +74,13 @@ function importsOf(file, source) {
 
 function resolveLocalImport(file, specifier) {
   if (!specifier.startsWith(".")) return undefined;
-  const base = path.resolve(path.dirname(file), specifier.replace(/\.js$/u, ""));
-  const candidates = [`${base}.ts`, `${base}.mts`, path.join(base, "index.ts")];
+  const base = path.resolve(path.dirname(file), specifier.replace(/\.(?:m?js)$/u, ""));
+  const candidates = [
+    `${base}.ts`,
+    `${base}.mts`,
+    `${base}.mjs`,
+    path.join(base, "index.ts"),
+  ];
   return candidates.find((candidate) => fs.existsSync(candidate));
 }
 
@@ -81,7 +98,7 @@ function functionsOf(source) {
 
 function featureBucket(file) {
   const normalized = rel(file);
-  if (/\/tests\//u.test(normalized)) return "tests";
+  if (/\/tests\//u.test(normalized) || normalized.endsWith(".test.ts")) return "tests";
   const feature = normalized.match(/\/features\/([^/]+)/u)?.[1];
   if (feature) return `feature:${feature}`;
   if (/\/semantic_/u.test(normalized) || normalized.endsWith("/semantic_ir.ts")) return "semantic-ir";
@@ -92,8 +109,8 @@ function featureBucket(file) {
   return "support";
 }
 
-function moduleRows(roots) {
-  const files = roots.flatMap((root) => walk(root));
+function moduleRows(roots, predicate = () => true) {
+  const files = roots.flatMap((root) => walkModules(root)).filter(predicate);
   const byFile = new Map(files.map((file) => [file, true]));
   return files.map((file) => {
     const source = fs.readFileSync(file, "utf8");
@@ -111,6 +128,34 @@ function moduleRows(roots) {
       exports: exportsOf(source).length,
       functions: functionsOf(source).length,
       bucket: featureBucket(file),
+      source,
+    };
+  }).sort((left, right) => right.lines - left.lines);
+}
+
+function nativeModuleRows(root) {
+  const files = walkFiles(
+    root,
+    (file) => /\.(?:cpp|h|inc)$/u.test(file) || path.basename(file) === "CMakeLists.txt",
+  );
+  const byFile = new Set(files);
+  return files.map((file) => {
+    const source = fs.readFileSync(file, "utf8");
+    const imports = [...source.matchAll(/^\s*#\s*include\s+"([^"]+)"/gmu)]
+      .map((match) => match[1])
+      .filter((specifier) => specifier !== undefined);
+    const localImports = imports
+      .map((specifier) => path.resolve(path.dirname(file), specifier))
+      .filter((candidate) => byFile.has(candidate));
+    return {
+      file,
+      relativeFile: rel(file),
+      lines: source.split("\n").length,
+      imports: imports.length,
+      localImports: localImports.map((candidate) => rel(candidate)),
+      exports: 0,
+      functions: 0,
+      bucket: "native-frontend",
       source,
     };
   }).sort((left, right) => right.lines - left.lines);
@@ -257,18 +302,33 @@ function cppCuteFrontendLegacyLeaks(rows) {
 }
 
 const sourceRows = moduleRows([compilerSrc]);
-const testRows = includeTests ? moduleRows([compilerTests]) : [];
-const allRows = [...sourceRows, ...testRows];
+const harnessRows = moduleRows(
+  [compilerBuildHarness],
+  (file) => /\.(?:mjs|d\.mts)$/u.test(file) && !file.endsWith(".test.ts"),
+);
+const nativeRows = nativeModuleRows(compilerNativeExtractor);
+const testRows = includeTests
+  ? [
+      ...moduleRows([compilerTests]),
+      ...moduleRows([compilerBuildHarness], (file) => file.endsWith(".test.ts")),
+    ].sort((left, right) => right.lines - left.lines)
+  : [];
+const allRows = [...sourceRows, ...harnessRows, ...nativeRows, ...testRows]
+  .sort((left, right) => right.lines - left.lines);
 const cycles = dependencyCycles(allRows);
+const coverageFailures = architectureCoverageFailures(harnessRows, nativeRows);
 const report = {
   source: sourceRows.map(({ source, ...row }) => row),
+  harness: harnessRows.map(({ source, ...row }) => row),
+  native: nativeRows.map(({ source, ...row }) => row),
   tests: testRows.map(({ source, ...row }) => row),
   buckets: bucketSummary(allRows),
   cycles,
   legacyBackendLeaks: legacyBackendLeaks(sourceRows),
   semanticIrRepresentationLeaks: semanticIrRepresentationLeaks(sourceRows),
   cppCuteFrontendLegacyLeaks: cppCuteFrontendLegacyLeaks(sourceRows),
-  limits: { maxSourceLines, maxTestLines },
+  coverageFailures,
+  limits: { maxSourceLines, maxHarnessLines, maxNativeLines, maxTestLines },
 };
 
 if (json) {
@@ -295,6 +355,8 @@ if (json) {
   for (const leak of report.semanticIrRepresentationLeaks) console.log(`  ${leak}`);
   console.log(`C++/CuTe frontend legacy leaks: ${report.cppCuteFrontendLegacyLeaks.length}`);
   for (const leak of report.cppCuteFrontendLegacyLeaks) console.log(`  ${leak}`);
+  console.log(`Architecture coverage failures: ${coverageFailures.length}`);
+  for (const failure of coverageFailures) console.log(`  ${failure}`);
 }
 
 if (check) {
@@ -302,6 +364,12 @@ if (check) {
     ...sourceRows
       .filter((row) => row.lines > maxSourceLines)
       .map((row) => `${row.relativeFile} has ${row.lines} lines (limit ${maxSourceLines})`),
+    ...harnessRows
+      .filter((row) => row.lines > maxHarnessLines)
+      .map((row) => `${row.relativeFile} has ${row.lines} lines (harness limit ${maxHarnessLines})`),
+    ...nativeRows
+      .filter((row) => row.lines > maxNativeLines)
+      .map((row) => `${row.relativeFile} has ${row.lines} lines (native limit ${maxNativeLines})`),
     ...testRows
       .filter((row) => row.lines > maxTestLines)
       .map((row) => `${row.relativeFile} has ${row.lines} lines (limit ${maxTestLines})`),
@@ -309,10 +377,24 @@ if (check) {
     ...report.legacyBackendLeaks,
     ...report.semanticIrRepresentationLeaks,
     ...report.cppCuteFrontendLegacyLeaks,
+    ...coverageFailures,
   ];
   if (failures.length > 0) {
     console.error("Compiler architecture check failed:");
     for (const failure of failures) console.error(`  ${failure}`);
     process.exitCode = 1;
   }
+}
+
+function architectureCoverageFailures(harness, native) {
+  const observed = new Set([...harness, ...native].map((row) => row.file));
+  return [
+    path.join(compilerBuildHarness, "cpp_cute_browser_build_executor.mjs"),
+    path.join(compilerBuildHarness, "cpp_cute_browser_build_executor_process.mjs"),
+    path.join(compilerNativeExtractor, "BrowserGradCppCuteCompileSession.cpp"),
+    path.join(compilerNativeExtractor, "BrowserGradCppCuteArtifactWriter.cpp"),
+    path.join(compilerNativeExtractor, "CMakeLists.txt"),
+  ].filter((file) => !observed.has(file)).map((file) => (
+    `architecture map omitted required compiler harness source ${rel(file)}`
+  ));
 }
