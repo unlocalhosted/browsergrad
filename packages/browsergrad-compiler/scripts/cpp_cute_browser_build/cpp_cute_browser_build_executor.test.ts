@@ -550,6 +550,18 @@ describe("exact Clang-Wasm build executor", () => {
     expect(executed.factoryModuleSha256).toMatch(/^[0-9a-f]{64}$/u);
     expect(executed.wasmSha256).toMatch(/^[0-9a-f]{64}$/u);
     expect(executed.linkMapSha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(executed.nativeTools).toEqual({
+      clangTablegen: {
+        path: expectedPlan.nativeTools.clangTablegen,
+        sha256: "ca0dae392791b04184cde603e2b45357bb46005bab79a1411768e6626b292825",
+        byteLength: 22,
+      },
+      llvmTablegen: {
+        path: expectedPlan.nativeTools.llvmTablegen,
+        sha256: "d408810ec59188c5ef1e7ca809630c6fbdc46ac87a37d5b6f816008e2fa2acaf",
+        byteLength: 21,
+      },
+    });
     await expect(lstat(destination(input))).rejects.toMatchObject({ code: "ENOENT" });
   });
 

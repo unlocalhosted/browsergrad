@@ -38,8 +38,10 @@ const MAX_SOURCE_TOTAL_BYTE_LENGTH = 1024 * 1024;
 const MAX_WASM_SIDECAR_BYTE_LENGTH = 256 * 1024 * 1024;
 const MAX_FACTORY_MODULE_BYTE_LENGTH = 32 * 1024 * 1024;
 const MAX_LINK_MAP_BYTE_LENGTH = 128 * 1024 * 1024;
+const MAX_NATIVE_TABLEGEN_BYTE_LENGTH = 256 * 1024 * 1024;
 const MAX_STEP_OUTPUT_BYTE_LENGTH = 16 * 1024 * 1024;
 const MAX_STEP_DURATION_MS = 4 * 60 * 60 * 1_000;
+const HASH_BUFFER_BYTE_LENGTH = 1024 * 1024;
 const PORTABLE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._+/-]+$/u;
 const WASM_HEADER = Uint8Array.of(
   0x00, 0x61, 0x73, 0x6d,
@@ -314,6 +316,18 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
 
   await verifyBuildInputBindings(inputBindings);
   await verifyRegularFileBindings(nativeToolBindings);
+  const nativeTools = Object.freeze({
+    clangTablegen: await observeBoundRegularFile(
+      nativeToolBindings[0],
+      MAX_NATIVE_TABLEGEN_BYTE_LENGTH,
+      signal,
+    ),
+    llvmTablegen: await observeBoundRegularFile(
+      nativeToolBindings[1],
+      MAX_NATIVE_TABLEGEN_BYTE_LENGTH,
+      signal,
+    ),
+  });
   await verifyStagedSourceClosure(
     prepared.stagedSourceRoot,
     stored.snapshots,
@@ -357,6 +371,7 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
     authority: "clang-wasm-build-execution-observation-only",
     lockId: plan.lockId,
     sourceSetSha256: prepared.sourceSetSha256,
+    nativeTools,
     stepCount: receipts.length,
     steps: Object.freeze(receipts),
     factoryModulePath: plan.generatedExtractor.factoryModulePath,
@@ -385,6 +400,58 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
     linkMapIdentity: linkMap.identity,
   }));
   return /** @type {import("./cpp_cute_browser_build_executor.mjs").ExecutedCppCuteClangWasmBuild} */ (executed);
+}
+
+/**
+ * @param {RegularFileBinding} binding
+ * @param {number} maximumByteLength
+ * @param {AbortSignal | undefined} signal
+ */
+async function observeBoundRegularFile(binding, maximumByteLength, signal) {
+  let handle;
+  try {
+    handle = await open(binding.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const before = await handle.stat({ bigint: true });
+    if (!before.isFile() || before.size <= 0n ||
+        !sameFileVersionIdentity(fileVersionIdentity(before), binding.identity)) {
+      conflict(binding.diagnosticPath, "bound build tool changed before its identity was observed");
+    }
+    if (before.size > BigInt(maximumByteLength)) {
+      resource(binding.diagnosticPath, `build tool exceeds ${maximumByteLength} bytes`);
+    }
+    const hash = createHash("sha256");
+    const buffer = new Uint8Array(HASH_BUFFER_BYTE_LENGTH);
+    let offset = 0;
+    const byteLength = Number(before.size);
+    while (offset < byteLength) {
+      throwIfAborted(signal);
+      const maximum = Math.min(buffer.byteLength, byteLength - offset);
+      const { bytesRead } = await handle.read(buffer, 0, maximum, offset);
+      if (bytesRead === 0) {
+        conflict(binding.diagnosticPath, "bound build tool became shorter while hashing");
+      }
+      hash.update(buffer.subarray(0, bytesRead));
+      offset += bytesRead;
+    }
+    const after = await handle.stat({ bigint: true });
+    if (!sameFileSnapshot(before, after) ||
+        !sameFileVersionIdentity(fileVersionIdentity(after), binding.identity)) {
+      conflict(binding.diagnosticPath, "bound build tool changed while its identity was observed");
+    }
+    return Object.freeze({
+      path: binding.path,
+      sha256: hash.digest("hex"),
+      byteLength,
+    });
+  } catch (cause) {
+    rethrowExecutorOrIo(
+      cause,
+      binding.diagnosticPath,
+      "failed to observe the bound build-tool identity",
+    );
+  } finally {
+    await handle?.close();
+  }
 }
 
 /**

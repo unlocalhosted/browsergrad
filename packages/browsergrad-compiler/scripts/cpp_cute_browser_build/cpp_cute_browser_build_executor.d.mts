@@ -55,6 +55,12 @@ export interface ExecutedCppCuteClangWasmBuildStep {
   readonly stderrByteLength: number;
 }
 
+export interface ExecutedCppCuteClangWasmNativeTool {
+  readonly path: string;
+  readonly sha256: string;
+  readonly byteLength: number;
+}
+
 declare const executedCppCuteClangWasmBuildBrand: unique symbol;
 
 /**
@@ -67,6 +73,10 @@ export interface ExecutedCppCuteClangWasmBuild {
   readonly authority: "clang-wasm-build-execution-observation-only";
   readonly lockId: string;
   readonly sourceSetSha256: string;
+  readonly nativeTools: Readonly<{
+    readonly clangTablegen: ExecutedCppCuteClangWasmNativeTool;
+    readonly llvmTablegen: ExecutedCppCuteClangWasmNativeTool;
+  }>;
   readonly stepCount: number;
   readonly steps: readonly ExecutedCppCuteClangWasmBuildStep[];
   readonly factoryModulePath: string;
