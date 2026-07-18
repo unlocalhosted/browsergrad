@@ -14,6 +14,7 @@ const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const LOCK_ID = /^bg\.cpp\.browser-build-input-lock\.sha256\.[0-9a-f]{64}$/u;
 const MAX_LOG_BYTE_LENGTH = 16 * 1024 * 1024;
 const MAX_FAILURE_STRING_LENGTH = 4_096;
+const MAX_FAILURE_CAUSE_DEPTH = 4;
 const STEP_IDS = Object.freeze([
   "native-tablegen-configure",
   "native-tablegen-build",
@@ -54,10 +55,10 @@ export async function persistCppCuteBrowserBuildFailureObservation(input) {
   );
   await admitPrivateDirectory(input.outputRoot, "$.outputRoot");
   const logs = await collectPartialLogs(input.stateRoot);
-  const failure = failureProjection(input.cause);
+  const failure = projectCppCuteBrowserBuildFailure(input.cause);
   const observation = Object.freeze({
     schema: "browsergrad.compiler.cpp-cute.clang-wasm-build-failure-observation",
-    version: 1,
+    version: 2,
     authority: "build-failure-observation-only",
     lockId,
     sourceSetSha256,
@@ -75,7 +76,7 @@ export async function persistCppCuteBrowserBuildFailureObservation(input) {
   const bytes = canonicalJsonBytes(observation);
   const outputPath = join(
     input.outputRoot,
-    "build-failure-observation.v1.json",
+    "build-failure-observation.v2.json",
   );
   await writeExclusiveReadOnlyFile(outputPath, bytes);
   return Object.freeze({
@@ -159,7 +160,40 @@ async function readOptionalBoundedFile(path, diagnosticPath) {
 }
 
 /** @param {unknown} cause */
-function failureProjection(cause) {
+export function projectCppCuteBrowserBuildFailure(cause) {
+  const root = singleFailureProjection(cause);
+  if (!(cause instanceof Error)) {
+    return Object.freeze({
+      ...root,
+      causes: Object.freeze([]),
+      causeChainComplete: true,
+    });
+  }
+  const causes = [];
+  const seen = new WeakSet([cause]);
+  let current = cause;
+  let causeChainComplete = true;
+  while (true) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, "cause");
+    if (descriptor === undefined || ("value" in descriptor && descriptor.value === undefined)) break;
+    if (!("value" in descriptor) || !(descriptor.value instanceof Error) ||
+        seen.has(descriptor.value) || causes.length === MAX_FAILURE_CAUSE_DEPTH) {
+      causeChainComplete = false;
+      break;
+    }
+    current = descriptor.value;
+    seen.add(current);
+    causes.push(singleFailureProjection(current));
+  }
+  return Object.freeze({
+    ...root,
+    causes: Object.freeze(causes),
+    causeChainComplete,
+  });
+}
+
+/** @param {unknown} cause */
+function singleFailureProjection(cause) {
   if (!(cause instanceof Error)) {
     return Object.freeze({
       name: "Error",

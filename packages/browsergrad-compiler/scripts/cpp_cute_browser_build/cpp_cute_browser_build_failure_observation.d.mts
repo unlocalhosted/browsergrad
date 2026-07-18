@@ -6,6 +6,19 @@ export interface CppCuteBrowserBuildFailureObservationResult {
   readonly successfulBuildReceiptWritten: false;
 }
 
+export interface CppCuteBrowserBuildFailureCauseProjection {
+  readonly name: string;
+  readonly code: string;
+  readonly path: string;
+  readonly message: string;
+}
+
+export interface CppCuteBrowserBuildFailureProjection
+  extends CppCuteBrowserBuildFailureCauseProjection {
+  readonly causes: readonly CppCuteBrowserBuildFailureCauseProjection[];
+  readonly causeChainComplete: boolean;
+}
+
 export class CppCuteBrowserBuildFailureObservationError extends Error {
   readonly code:
     | "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-FAILURE-OBSERVATION-INVALID"
@@ -21,3 +34,7 @@ export function persistCppCuteBrowserBuildFailureObservation(input: Readonly<{
   sourceSetSha256: string;
   cause: unknown;
 }>): Promise<CppCuteBrowserBuildFailureObservationResult>;
+
+export function projectCppCuteBrowserBuildFailure(
+  cause: unknown,
+): CppCuteBrowserBuildFailureProjection;
