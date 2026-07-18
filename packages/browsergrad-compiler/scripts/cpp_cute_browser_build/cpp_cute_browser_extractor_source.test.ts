@@ -143,6 +143,14 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect(cmake).toContain("BROWSERGRAD_EXTRACTOR_FACTORY_OUTPUT_PATH");
     expect(cmake).toContain('SUFFIX ".mjs"');
     expect(cmake).not.toContain('SUFFIX ".wasm"');
+    expect(cmake).toContain('"${LLVM_MAIN_SRC_DIR}/../clang/include"');
+    expect(cmake).toContain('"${LLVM_BINARY_DIR}/tools/clang/include"');
+    expect(cmake).toContain(
+      "target_include_directories(browsergrad-cpp-cute-extractor PRIVATE",
+    );
+    expect(cmake).toContain(
+      "add_dependencies(browsergrad-cpp-cute-extractor clang-tablegen-targets)",
+    );
     for (const library of [
       "clangAST", "clangBasic", "clangDriver", "clangFrontend", "clangIndex",
       "clangLex", "clangParse", "clangSema", "clangSerialization", "clangTooling",

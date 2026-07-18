@@ -64,6 +64,26 @@ add_llvm_executable(browsergrad-cpp-cute-extractor
   BrowserGradCppCuteVirtualPath.h
 )
 
+# LLVM external projects are configured as siblings of Clang rather than below
+# clang/CMakeLists.txt, so they do not inherit Clang's directory-scoped source
+# and generated-header include paths. Use the exact equivalent paths owned by
+# the in-tree Clang build and fail at configuration if that layout drifts.
+set(BROWSERGRAD_CLANG_SOURCE_INCLUDE_DIRECTORY
+  "${LLVM_MAIN_SRC_DIR}/../clang/include")
+set(BROWSERGRAD_CLANG_BINARY_INCLUDE_DIRECTORY
+  "${LLVM_BINARY_DIR}/tools/clang/include")
+if(NOT IS_DIRECTORY "${BROWSERGRAD_CLANG_SOURCE_INCLUDE_DIRECTORY}")
+  message(FATAL_ERROR "the pinned Clang source include directory is missing")
+endif()
+if(NOT IS_DIRECTORY "${BROWSERGRAD_CLANG_BINARY_INCLUDE_DIRECTORY}")
+  message(FATAL_ERROR "the configured Clang generated include directory is missing")
+endif()
+target_include_directories(browsergrad-cpp-cute-extractor PRIVATE
+  "${BROWSERGRAD_CLANG_BINARY_INCLUDE_DIRECTORY}"
+  "${BROWSERGRAD_CLANG_SOURCE_INCLUDE_DIRECTORY}"
+)
+add_dependencies(browsergrad-cpp-cute-extractor clang-tablegen-targets)
+
 target_compile_features(browsergrad-cpp-cute-extractor PRIVATE cxx_std_20)
 set_target_properties(browsergrad-cpp-cute-extractor PROPERTIES
   CXX_EXTENSIONS OFF

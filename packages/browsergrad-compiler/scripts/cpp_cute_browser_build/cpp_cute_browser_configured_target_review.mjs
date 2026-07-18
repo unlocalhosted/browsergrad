@@ -41,6 +41,7 @@ export class CppCuteBrowserConfiguredTargetReviewError extends Error {
  *
  * @param {Readonly<{
  *   wasmBuildRoot: string;
+ *   llvmProjectSourceRoot: string;
  *   factoryModulePath: string;
  * }>} input
  */
@@ -48,6 +49,10 @@ export async function reviewCppCuteBrowserConfiguredTarget(input) {
   const wasmBuildRoot = exactAbsolutePath(
     input.wasmBuildRoot,
     "$.wasmBuildRoot",
+  );
+  const llvmProjectSourceRoot = exactAbsolutePath(
+    input.llvmProjectSourceRoot,
+    "$.llvmProjectSourceRoot",
   );
   const factoryModulePath = exactAbsolutePath(
     input.factoryModulePath,
@@ -72,6 +77,21 @@ export async function reviewCppCuteBrowserConfiguredTarget(input) {
   );
   requireFlag(cxxFlags, REQUIRED_EXCEPTION_FLAG, "$.compileFlags.CXX_FLAGS", "-fexceptions");
   forbidFlags(cxxFlags, FORBIDDEN_COMPILE_FLAGS, "$.compileFlags.CXX_FLAGS");
+  const cxxIncludes = exactMakeVariable(
+    compileFlags.text,
+    "CXX_INCLUDES",
+    "$.compileFlags.CXX_INCLUDES",
+  );
+  requireIncludeDirectory(
+    cxxIncludes,
+    join(llvmProjectSourceRoot, "clang", "include"),
+    "$.compileFlags.CXX_INCLUDES",
+  );
+  requireIncludeDirectory(
+    cxxIncludes,
+    join(wasmBuildRoot, "tools", "clang", "include"),
+    "$.compileFlags.CXX_INCLUDES",
+  );
 
   const linkLine = exactNonemptyLine(linkCommand.text, "$.linkCommand");
   requireFlag(linkLine, REQUIRED_EXCEPTION_FLAG, "$.linkCommand", "-fexceptions");
@@ -84,6 +104,7 @@ export async function reviewCppCuteBrowserConfiguredTarget(input) {
     authority: "configured-target-flags-review-only",
     exceptionMode: "emscripten-javascript",
     rttiRequired: true,
+    clangIncludeDirectoriesVerified: true,
     compileFlagsPath: compileFlags.path,
     compileFlagsSha256: compileFlags.sha256,
     compileFlagsByteLength: compileFlags.byteLength,
@@ -173,6 +194,14 @@ function exactNonemptyLine(text, path) {
 /** @param {string} value @param {RegExp} pattern @param {string} path @param {string} flag */
 function requireFlag(value, pattern, path, flag) {
   if (!pattern.test(value)) invalid(path, `configured target is missing required ${flag}`);
+}
+
+/** @param {string} value @param {string} directory @param {string} path */
+function requireIncludeDirectory(value, directory, path) {
+  const tokens = value.split(/\s+/u).filter((token) => token.length > 0);
+  if (!tokens.includes(`-I${directory}`)) {
+    invalid(path, `configured target is missing required Clang include directory ${directory}`);
+  }
 }
 
 /** @param {string} value @param {readonly RegExp[]} patterns @param {string} path */

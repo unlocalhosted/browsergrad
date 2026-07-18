@@ -2,6 +2,7 @@ export interface CppCuteBrowserConfiguredTargetReview {
   readonly authority: "configured-target-flags-review-only";
   readonly exceptionMode: "emscripten-javascript";
   readonly rttiRequired: true;
+  readonly clangIncludeDirectoriesVerified: true;
   readonly compileFlagsPath: string;
   readonly compileFlagsSha256: string;
   readonly compileFlagsByteLength: number;
@@ -20,5 +21,6 @@ export class CppCuteBrowserConfiguredTargetReviewError extends Error {
 
 export function reviewCppCuteBrowserConfiguredTarget(input: Readonly<{
   wasmBuildRoot: string;
+  llvmProjectSourceRoot: string;
   factoryModulePath: string;
 }>): Promise<CppCuteBrowserConfiguredTargetReview>;

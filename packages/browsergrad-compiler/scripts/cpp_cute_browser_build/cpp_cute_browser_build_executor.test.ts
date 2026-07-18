@@ -50,6 +50,7 @@ const executorProcessState = vi.hoisted(() => ({
   factoryPath: undefined as string | undefined,
   linkMapPath: undefined as string | undefined,
   invalidConfiguredTarget: false,
+  missingClangInclude: false,
   malformedFactory: false,
   malformedWasm: false,
 }));
@@ -127,7 +128,7 @@ vi.mock("./cpp_cute_browser_build_executor_process.mjs", async (importOriginal) 
         }
 
         const { chmod, mkdir, writeFile } = await import("node:fs/promises");
-        const { join } = await import("node:path");
+        const { dirname, join } = await import("node:path");
         if (input.arguments[0] === "--build" &&
             input.arguments.includes("clang-tblgen")) {
           const bin = join(input.cwd, "bin");
@@ -151,9 +152,12 @@ vi.mock("./cpp_cute_browser_build_executor_process.mjs", async (importOriginal) 
           executorProcessState.linkMapPath = linkerFlags
             ?.match(/--Map=([^ ]+)/u)?.[1];
           const buildRoot = input.arguments[input.arguments.indexOf("-B") + 1];
-          if (buildRoot === undefined || executorProcessState.factoryPath === undefined) {
+          const llvmSourceRoot = input.arguments[input.arguments.indexOf("-S") + 1];
+          if (buildRoot === undefined || llvmSourceRoot === undefined ||
+              executorProcessState.factoryPath === undefined) {
             throw new Error("mock did not observe the Wasm build root and factory path");
           }
+          const llvmProjectSourceRoot = dirname(llvmSourceRoot);
           const targetDirectory = join(
             buildRoot,
             "tools",
@@ -165,9 +169,16 @@ vi.mock("./cpp_cute_browser_build_executor_process.mjs", async (importOriginal) 
           await Promise.all([
             writeFile(
               join(targetDirectory, "flags.make"),
-              executorProcessState.invalidConfiguredTarget
-                ? "CXX_FLAGS = -O3 -fno-exceptions -DNDEBUG\n"
-                : "CXX_FLAGS = -O3 -fexceptions -DNDEBUG\n",
+              [
+                executorProcessState.missingClangInclude
+                  ? `CXX_INCLUDES = -I${join(buildRoot, "tools", "clang", "include")}`
+                  : `CXX_INCLUDES = -I${join(buildRoot, "tools", "clang", "include")} ` +
+                    `-I${join(llvmProjectSourceRoot, "clang", "include")}`,
+                executorProcessState.invalidConfiguredTarget
+                  ? "CXX_FLAGS = -O3 -fno-exceptions -DNDEBUG"
+                  : "CXX_FLAGS = -O3 -fexceptions -DNDEBUG",
+                "",
+              ].join("\n"),
             ),
             writeFile(
               join(targetDirectory, "link.txt"),
@@ -253,6 +264,7 @@ afterEach(async () => {
   executorProcessState.factoryPath = undefined;
   executorProcessState.linkMapPath = undefined;
   executorProcessState.invalidConfiguredTarget = false;
+  executorProcessState.missingClangInclude = false;
   executorProcessState.malformedFactory = false;
   executorProcessState.malformedWasm = false;
   await Promise.all(temporaryRoots.splice(0).map(async (root) => {
@@ -635,6 +647,21 @@ describe("exact Clang-Wasm build executor", () => {
     const { input } = await fixture(true);
     const prepared = await prepareCppCuteClangWasmBuildSource(input);
     executorProcessState.invalidConfiguredTarget = true;
+
+    await expect(executeCppCuteClangWasmBuild(prepared)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-INVALID",
+      path: "$.configuredTarget",
+    });
+    expect(executorProcessState.calls).toHaveLength(3);
+    const logs = await readdir(join(input.roots.stateRoot, "evidence", "build-logs"));
+    expect(logs).not.toContain("clang-extractor-wasm-build.stdout.log");
+    expect(logs).not.toContain("clang-extractor-wasm-build.stderr.log");
+  });
+
+  it("rejects missing Clang include wiring before the expensive Wasm build", async () => {
+    const { input } = await fixture(true);
+    const prepared = await prepareCppCuteClangWasmBuildSource(input);
+    executorProcessState.missingClangInclude = true;
 
     await expect(executeCppCuteClangWasmBuild(prepared)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-INVALID",

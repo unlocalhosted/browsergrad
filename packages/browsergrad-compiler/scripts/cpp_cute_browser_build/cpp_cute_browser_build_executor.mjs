@@ -258,6 +258,7 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
       try {
         configuredTargetReview = await reviewCppCuteBrowserConfiguredTarget({
           wasmBuildRoot: roots.wasmBuildRoot,
+          llvmProjectSourceRoot: roots.llvmProjectSourceRoot,
           factoryModulePath: plan.generatedExtractor.factoryModulePath,
         });
       } catch (cause) {
@@ -344,6 +345,7 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
   try {
     completedTargetReview = await reviewCppCuteBrowserConfiguredTarget({
       wasmBuildRoot: roots.wasmBuildRoot,
+      llvmProjectSourceRoot: roots.llvmProjectSourceRoot,
       factoryModulePath: plan.generatedExtractor.factoryModulePath,
     });
   } catch (cause) {
