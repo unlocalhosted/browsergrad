@@ -24,7 +24,15 @@ describe("native C++ test harness compiler discovery", () => {
     try {
       writeFileSync(
         canonicalCompiler,
-        "#!/bin/sh\nprintf 'clang version 18.1.3\\n'\n",
+        [
+          "#!/bin/sh",
+          "if [ \"${1:-}\" = \"--version\" ]; then",
+          "  printf 'Ubuntu clang version 22.1.8\\n'",
+          "else",
+          "  printf '#define __clang__ 1\\n'",
+          "fi",
+          "",
+        ].join("\n"),
         { mode: 0o755 },
       );
       chmodSync(canonicalCompiler, 0o755);
@@ -42,5 +50,31 @@ describe("native C++ test harness compiler discovery", () => {
 
   it("rejects relative compiler candidates", () => {
     expect(resolveNativeCompiler(["clang++"])).toBeUndefined();
+  });
+
+  it("does not trust a Clang-shaped version banner without compiler macros", () => {
+    const root = mkdtempSync(join(tmpdir(), "browsergrad-fake-clang-"));
+    const compiler = join(root, "clang++");
+    try {
+      writeFileSync(
+        compiler,
+        [
+          "#!/bin/sh",
+          "if [ \"${1:-}\" = \"--version\" ]; then",
+          "  printf 'clang version 22.1.8\\n'",
+          "else",
+          "  printf '#define __GNUC__ 14\\n'",
+          "fi",
+          "",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+      expect(resolveNativeCompiler([compiler])).toMatchObject({
+        path: compiler,
+        isClang: false,
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

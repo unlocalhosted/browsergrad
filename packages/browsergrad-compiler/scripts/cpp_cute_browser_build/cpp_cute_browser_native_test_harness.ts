@@ -39,10 +39,17 @@ export function resolveNativeCompiler(
         timeout: 5_000,
       });
       if (version.status !== 0 || version.error !== undefined) continue;
+      const predefinedMacros = spawnSync(
+        invocationPath,
+        ["-dM", "-E", "-x", "c++", "/dev/null"],
+        { encoding: "utf8", timeout: 5_000 },
+      );
       return {
         path: invocationPath,
         canonicalPath,
-        isClang: /(?:^|\n)(?:Apple )?clang version /u.test(version.stdout),
+        isClang: predefinedMacros.status === 0 &&
+          predefinedMacros.error === undefined &&
+          /^#define __clang__ 1$/mu.test(predefinedMacros.stdout),
       };
     } catch {
       // Try the next closed candidate. A required lane fails through the
@@ -58,6 +65,11 @@ export const nativeCompiler = discovery?.path;
 export const nativeCompilerCanonicalPath = discovery?.canonicalPath;
 export const nativeCompilerRequired =
   process.env["BROWSERGRAD_REQUIRE_NATIVE_CPP_TESTS"] === "1";
+if (nativeCompilerRequired && discovery !== undefined && !discovery.isClang) {
+  throw new Error(
+    "BROWSERGRAD_REQUIRE_NATIVE_CPP_TESTS requires a compiler that defines __clang__",
+  );
+}
 export const nativeCompilerUnavailableUnlessOptional =
   nativeCompiler === undefined && !nativeCompilerRequired;
 export const nativeCompilerIsClang = discovery?.isClang === true;
