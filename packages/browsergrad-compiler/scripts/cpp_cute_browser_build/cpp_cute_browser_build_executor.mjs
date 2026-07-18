@@ -15,6 +15,7 @@ import { TextDecoder } from "node:util";
 
 import { hashCanonicalJson } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
+import { CppCuteBrowserBuildCacheReuseError, invalidateCachedCppCuteExtractorObjects } from "./cpp_cute_browser_build_cache_reuse.mjs";
 import { planCppCuteClangWasmBuild } from "./cpp_cute_browser_build_plan.mjs";
 import { reviewCppCuteBrowserConfiguredTarget } from "./cpp_cute_browser_configured_target_review.mjs";
 import { CPP_CUTE_BROWSER_BUILD_EXECUTOR_FS } from "./cpp_cute_browser_build_executor_fs.mjs";
@@ -152,6 +153,7 @@ export async function prepareCppCuteClangWasmBuildSource(input, options = {}) {
     stagedSourceIdentity = await stageSourceSnapshots(
       selected.roots.extractorSourceRoot,
       snapshots,
+      sourceDateEpochSeconds(plan),
       signal,
     );
   } catch (cause) {
@@ -232,7 +234,12 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
   let inputBindings;
   try {
     inputBindings = await snapshotBuildInputBindings(roots, tools);
-    await prepareBuildExecutionDirectories(roots, plan, buildDirectoryPolicy);
+    await prepareBuildExecutionDirectories(
+      roots,
+      plan,
+      stored.snapshots,
+      buildDirectoryPolicy,
+    );
   } catch (cause) {
     rethrowExecutorOrIo(cause, "$.buildInputs", "failed to admit the materialized build inputs");
   }
@@ -806,7 +813,12 @@ function decodeMountInfoPath(value) {
  * @param {import("./cpp_cute_browser_build_plan.mjs").CppCuteClangWasmBuildRoots} roots
  * @param {import("./cpp_cute_browser_build_plan.mjs").CppCuteClangWasmBuildPlan} plan
  */
-async function prepareBuildExecutionDirectories(roots, plan, buildDirectoryPolicy) {
+async function prepareBuildExecutionDirectories(
+  roots,
+  plan,
+  snapshots,
+  buildDirectoryPolicy,
+) {
   const evidenceRoot = join(roots.stateRoot, "evidence");
   const generatedRoot = join(evidenceRoot, "generated");
   const logRoot = join(evidenceRoot, "build-logs");
@@ -823,6 +835,19 @@ async function prepareBuildExecutionDirectories(roots, plan, buildDirectoryPolic
       await createOrReusePrivateBuildDirectory(path, diagnosticPath);
     } else {
       await createPrivateEmptyDirectory(path, diagnosticPath);
+    }
+  }
+  if (buildDirectoryPolicy === "reuse-untrusted-diagnostic") {
+    try {
+      await invalidateCachedCppCuteExtractorObjects({
+        wasmBuildRoot: roots.wasmBuildRoot,
+        sourcePaths: snapshots.map((snapshot) => snapshot.path),
+      });
+    } catch (cause) {
+      if (cause instanceof CppCuteBrowserBuildCacheReuseError) {
+        conflict(`$.cachedExtractorObjects.${cause.path}`, cause.message);
+      }
+      throw cause;
     }
   }
   await createPrivateEmptyDirectory(roots.stateRoot, "$.roots.stateRoot");
@@ -1165,10 +1190,11 @@ async function snapshotSourceClosure(sourceRoot, expectedFiles, signal) {
 /**
  * @param {string} stagedRoot
  * @param {readonly { readonly path: string; readonly sha256: string; readonly byteLength: string; readonly bytes: Uint8Array }[]} snapshots
+ * @param {number} sourceDateEpoch
  * @param {AbortSignal | undefined} signal
  * @returns {Promise<StagedSourceIdentity>}
  */
-async function stageSourceSnapshots(stagedRoot, snapshots, signal) {
+async function stageSourceSnapshots(stagedRoot, snapshots, sourceDateEpoch, signal) {
   const parentPath = dirname(stagedRoot);
   const parentIdentity = await assertPrivateOwnedDirectory(
     parentPath,
@@ -1208,6 +1234,7 @@ async function stageSourceSnapshots(stagedRoot, snapshots, signal) {
       try {
         await handle.writeFile(snapshot.bytes);
         await handle.sync();
+        await handle.utimes(sourceDateEpoch, sourceDateEpoch);
         await handle.chmod(0o444);
       } finally {
         await handle.close();
@@ -1239,6 +1266,16 @@ async function stageSourceSnapshots(stagedRoot, snapshots, signal) {
     }
     throw cause;
   }
+}
+
+/** @param {import("./cpp_cute_browser_build_plan.mjs").CppCuteClangWasmBuildPlan} plan */
+function sourceDateEpochSeconds(plan) {
+  const value = plan.steps[0]?.environment.SOURCE_DATE_EPOCH;
+  const seconds = Number(value);
+  if (value === undefined || !Number.isSafeInteger(seconds) || seconds <= 0) {
+    invalid("$.buildPlan.environment.SOURCE_DATE_EPOCH", "expected a positive safe epoch");
+  }
+  return seconds;
 }
 
 /**

@@ -458,6 +458,10 @@ describe("bounded Clang-WASM build source executor", () => {
     await writeFile(join(input.extractorSourceInputRoot, "BrowserGradCppCuteExtractor.cpp"), "mutated after snapshot");
     expect(await readFile(stagedCpp)).toEqual(before);
     expect((await lstat(stagedCpp)).mode & 0o222).toBe(0);
+    const sourceDateEpoch = Number(
+      unwrapPreparedCppCuteBrowserBuildInputLock(lock).lock.body.recipe.sourceDateEpoch,
+    );
+    expect(Math.trunc((await lstat(stagedCpp)).mtimeMs / 1_000)).toBe(sourceDateEpoch);
   });
 
   it.each([
@@ -648,9 +652,22 @@ describe("exact Clang-Wasm build executor", () => {
     ]);
     const nativeSentinel = join(diagnostic.input.roots.nativeBuildRoot, "cached.txt");
     const wasmSentinel = join(diagnostic.input.roots.wasmBuildRoot, "cached.txt");
+    const cachedTargetRoot = join(
+      diagnostic.input.roots.wasmBuildRoot,
+      "tools",
+      "browsergrad_extractor",
+      "CMakeFiles",
+      "browsergrad-cpp-cute-extractor.dir",
+    );
+    const cachedExtractorObject = join(
+      cachedTargetRoot,
+      "BrowserGradCppCuteExtractor.cpp.o",
+    );
     await Promise.all([
       writeFile(nativeSentinel, "cached native toolchain\n"),
       writeFile(wasmSentinel, "cached wasm toolchain\n"),
+      mkdir(cachedTargetRoot, { recursive: true }).then(async () =>
+        writeFile(cachedExtractorObject, "stale extractor object\n")),
     ]);
     const diagnosticPrepared = await prepareCppCuteClangWasmBuildSource(diagnostic.input);
     const executed = await executeCppCuteClangWasmBuild(diagnosticPrepared, {
@@ -660,6 +677,7 @@ describe("exact Clang-Wasm build executor", () => {
     expect(executed.buildExecuted).toBe(true);
     await expect(readFile(nativeSentinel, "utf8")).resolves.toBe("cached native toolchain\n");
     await expect(readFile(wasmSentinel, "utf8")).resolves.toBe("cached wasm toolchain\n");
+    await expect(lstat(cachedExtractorObject)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("persists failed-step logs and halts before later build steps", async () => {
