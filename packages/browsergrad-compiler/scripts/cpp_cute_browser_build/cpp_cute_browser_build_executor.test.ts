@@ -610,6 +610,20 @@ describe("exact Clang-Wasm build executor", () => {
     expect(executorProcessState.calls).toHaveLength(1);
   });
 
+  it("rejects writable build inputs when no read-only mount protects them", async () => {
+    const { input } = await fixture(true);
+    const writableSearchDirectory = input.tools.searchPath[2];
+    if (writableSearchDirectory === undefined) throw new Error("missing search fixture");
+    await chmod(writableSearchDirectory, 0o777);
+    const prepared = await prepareCppCuteClangWasmBuildSource(input);
+
+    await expect(executeCppCuteClangWasmBuild(prepared)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-INVALID",
+      path: "$.tools.emscriptenToolchainFile",
+    });
+    expect(executorProcessState.calls).toHaveLength(0);
+  });
+
   it("rejects malformed factory and Wasm outputs after all exact steps", async () => {
     const malformedFactory = await fixture(true);
     const preparedFactory = await prepareCppCuteClangWasmBuildSource(malformedFactory.input);

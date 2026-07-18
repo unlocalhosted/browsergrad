@@ -596,7 +596,7 @@ async function assertTrustedOwnerAndMode(stat, path, diagnosticPath) {
     await assertPathOnReadOnlyLinuxMount(path, diagnosticPath);
   }
   if ((stat.mode & 0o022n) !== 0n) {
-    invalid(diagnosticPath, "build input must not be writable by group or other users");
+    await assertPathOnReadOnlyLinuxMount(path, diagnosticPath);
   }
 }
 
