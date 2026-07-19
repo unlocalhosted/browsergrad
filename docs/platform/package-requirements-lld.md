@@ -36,11 +36,15 @@ same-process authority that can reread every source byte immediately before
 materialization. The materializer writes only canonical BrowserGrad VFS packs
 into a private no-clobber tree, rereads and independently inspects the persisted
 bytes, and rejects symlinks, hardlinks, special files, mutations, and incomplete
-trees. All ten distribution notices already approved by the build lock are
+trees. The acquisition boundary separately admits the exact current-lock LLVM
+22.1.8 and CUTLASS 3.7.0 archives as current-user-owned, canonical,
+single-link, non-writable regular files, streams their full 196,789,917 bytes
+through SHA-256, and retains local paths only behind opaque same-process
+authority. All ten distribution notices already approved by the build lock are
 checked in as exact locked bytes and independently rehashed. This is packaging
-capability, not real-pack or license authority: the real upstream header trees
-have not yet been acquired and materialized, CUDA 12.6.3 plus the Linux sysroot
-still need distribution-policy closure, and an externally reviewed per-file
+capability plus exact archive-byte admission, not extracted-tree, real-pack, or
+license authority: CUDA 12.6.3 plus the Linux sysroot still need exact source
+selection and distribution-policy closure, and an externally reviewed per-file
 license map remains mandatory.
 
 The original cold diagnostic run `29658164083` spent 97 minutes 5 seconds in
@@ -60,13 +64,13 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 400 tests across 37 files covering the build plan, runtime ABI,
+clean, then runs 406 tests across 38 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
 package invocation, Worker entry, production controller, exact header-tree
-inventory/materialization, and distribution-notice verification. The current
-gate measured 29.98 seconds end to end on Node 25; its Vitest phase took 21.72
-seconds. Clean validation and two-build reproducibility still restore no cache
-and remain intentionally more expensive.
+inventory/materialization, source-archive admission, and distribution-notice
+verification. The current gate measured 27.49 seconds end to end on Node 25;
+its Vitest phase took 19.08 seconds. Clean validation and two-build
+reproducibility still restore no cache and remain intentionally more expensive.
 
 The current CMake-stable primary cache is now proved at exact source.
 Migration run `29680686426` completed in 4 minutes 14 seconds and populated the
@@ -153,8 +157,8 @@ isolated build. Its 31,641,377-byte module has SHA-256
 `5fc425bbc051a2f5be588c2acbb164efb5e43f949afb48a373f3ed022c3b8758` and
 passes raw review with zero mismatches. The ABI 1.8 local fast gate passes 30
 files/338 tests in 24.7 seconds on Node 25; the later controller-complete gate
-passed 34 files/381 tests in 25.26 seconds, and the current reproducibility- and
-header-capable gate passes 37 files/400 tests in 29.98 seconds.
+passed 34 files/381 tests in 25.26 seconds, and the current reproducibility-,
+archive-, and header-capable gate passes 38 files/406 tests in 27.49 seconds.
 
 The harness audit found strong isolation, exact-input closure, bounded logs,
 independent Wasm parsing, and separate authority tiers. It also records real
