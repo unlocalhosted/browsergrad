@@ -49,7 +49,11 @@ jobs:
           set -euo pipefail
           pnpm install --frozen-lockfile
           pnpm --filter @unlocalhosted/browsergrad-compiler... build
-          pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:run
+          if [[ "${{ inputs.mode }}" == 'fast-validation' ]]; then
+            pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:fast
+          else
+            pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:run
+          fi
 
       - name: Project the diagnostic toolchain cache key
         id: toolchain-cache-key

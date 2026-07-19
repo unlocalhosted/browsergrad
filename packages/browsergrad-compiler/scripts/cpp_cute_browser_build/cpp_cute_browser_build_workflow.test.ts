@@ -121,6 +121,8 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("clang-extractor-wasm/lib/libclangTooling.a");
     expect(workflow).toContain("--execution-mode=\"${{ inputs.mode == 'fast-validation' && 'cached-diagnostic' || 'clean' }}\"");
     expect(workflow).toContain("fast-validation-observation.v1.json");
+    expect(workflow).toContain("test:browser-clang-wasm-build-plan:fast");
+    expect(workflow).toContain("test:browser-clang-wasm-build-plan:run");
     expect(workflow).not.toContain("restore-keys:");
   });
 
