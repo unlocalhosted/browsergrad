@@ -9,6 +9,11 @@ type GeneratedImportRuntimeRole =
   | "javascript-exception-control-flow"
   | "stack-overflow-trap"
   | "stdout-stderr-only";
+type SupportExportRuntimeRole =
+  | "allocator-runtime"
+  | "javascript-exception-bridge"
+  | "module-initialization"
+  | "stack-runtime";
 
 function generatedImport(
   moduleName: "env" | "wasi_snapshot_preview1",
@@ -20,6 +25,15 @@ function generatedImport(
   return { moduleName, fieldName, wasmParameters, wasmResults, runtimeRole } as const;
 }
 
+function supportExport(
+  name: string,
+  wasmParameters: readonly WasmValueType[],
+  wasmResults: readonly WasmValueType[],
+  runtimeRole: SupportExportRuntimeRole,
+) {
+  return { name, wasmParameters, wasmResults, runtimeRole } as const;
+}
+
 /**
  * Canonical design contract for the browser-local Clang-WASM extractor.
  *
@@ -29,8 +43,8 @@ function generatedImport(
  */
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
-  version: { major: 1, minor: 2 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.0f80448a33bbf0e08a5d1091b0f14148d5cafa52f10644330e2bfc2818a12eaa",
+  version: { major: 1, minor: 3 },
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.e74ecc5e8942a8f1acc2c8892ab20a3e61b8c1c69cfd5922857a4b5199b43283",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -73,13 +87,56 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
       startSection: "forbidden",
       unlistedCExports: "forbidden",
       supportExports: {
-        status: "unresolved-first-build-review-required",
-        exactFunctionAllowlist: [],
+        status: "function-exports-reviewed-structure-pending",
+        functionAllowlistSha256: "54fcf849f006f656162394c9feaeec801af059cbc7b0d61e612bcdebc6abb361",
+        functionReview: {
+          basis: "pinned-emscripten-runtime-sources-locked-link-flags-and-detached-raw-wasm-inspection",
+          emscriptenVersion: "6.0.3",
+          emscriptenCommit: "283e2d130132859fde6a4e4c87fd254b38127651",
+          visibility: "worker-internal-not-browsergrad-c-api",
+          runtimeRoles: [
+            { name: "allocator-runtime", exactFunctionCount: 14 },
+            { name: "javascript-exception-bridge", exactFunctionCount: 6 },
+            { name: "module-initialization", exactFunctionCount: 1 },
+            { name: "stack-runtime", exactFunctionCount: 8 },
+          ],
+        },
+        exactFunctionAllowlist: [
+          supportExport("__wasm_call_ctors", [], [], "module-initialization"),
+          supportExport("free", ["i32"], [], "allocator-runtime"),
+          supportExport("malloc", ["i32"], ["i32"], "allocator-runtime"),
+          supportExport("__libc_malloc", ["i32"], ["i32"], "allocator-runtime"),
+          supportExport("calloc", ["i32", "i32"], ["i32"], "allocator-runtime"),
+          supportExport("__libc_calloc", ["i32", "i32"], ["i32"], "allocator-runtime"),
+          supportExport("__libc_free", ["i32"], [], "allocator-runtime"),
+          supportExport("realloc", ["i32", "i32"], ["i32"], "allocator-runtime"),
+          supportExport("__libc_realloc", ["i32", "i32"], ["i32"], "allocator-runtime"),
+          supportExport("reallocarray", ["i32", "i32", "i32"], ["i32"], "allocator-runtime"),
+          supportExport("aligned_alloc", ["i32", "i32"], ["i32"], "allocator-runtime"),
+          supportExport("memalign", ["i32", "i32"], ["i32"], "allocator-runtime"),
+          supportExport("posix_memalign", ["i32", "i32", "i32"], ["i32"], "allocator-runtime"),
+          supportExport("valloc", ["i32"], ["i32"], "allocator-runtime"),
+          supportExport("pvalloc", ["i32"], ["i32"], "allocator-runtime"),
+          supportExport("setThrew", ["i32", "i32"], [], "javascript-exception-bridge"),
+          supportExport("_emscripten_tempret_set", ["i32"], [], "javascript-exception-bridge"),
+          supportExport("emscripten_stack_init", [], [], "stack-runtime"),
+          supportExport("emscripten_stack_get_free", [], ["i32"], "stack-runtime"),
+          supportExport("emscripten_stack_get_base", [], ["i32"], "stack-runtime"),
+          supportExport("emscripten_stack_get_end", [], ["i32"], "stack-runtime"),
+          supportExport("_emscripten_stack_restore", ["i32"], [], "stack-runtime"),
+          supportExport("_emscripten_stack_alloc", ["i32"], ["i32"], "stack-runtime"),
+          supportExport("emscripten_stack_get_current", [], ["i32"], "stack-runtime"),
+          supportExport("__cxa_decrement_exception_refcount", ["i32"], [], "javascript-exception-bridge"),
+          supportExport("__cxa_increment_exception_refcount", ["i32"], [], "javascript-exception-bridge"),
+          supportExport("__cxa_can_catch", ["i32", "i32", "i32"], ["i32"], "javascript-exception-bridge"),
+          supportExport("__cxa_get_exception_ptr", ["i32"], ["i32"], "javascript-exception-bridge"),
+          supportExport("__set_stack_limits", ["i32", "i32"], [], "stack-runtime"),
+        ],
         exactGlobalAllowlist: [],
         exactTableAllowlist: [],
         unlistedExports: "forbidden",
         observedModuleCannotExtendAllowlist: true,
-        releaseConformance: "forbidden-until-independent-review-and-manifest-repin",
+        releaseConformance: "forbidden-until-table-and-global-structure-review",
       },
       structuralPolicy: {
         status: "unresolved-first-build-review-required",

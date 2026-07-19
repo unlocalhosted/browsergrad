@@ -21,16 +21,18 @@ import {
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
-export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 2;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 3;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.0f80448a33bbf0e08a5d1091b0f14148d5cafa52f10644330e2bfc2818a12eaa";
+  "bg.cpp.browser-runtime-abi.sha256.e74ecc5e8942a8f1acc2c8892ab20a3e61b8c1c69cfd5922857a4b5199b43283";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "23a312642150954b20a206e3ecd9ce03524f9cb0345690cfea444bc644385b82";
+  "e9678bd9df9f0904a804055a12ab1625b420b866a8e24b2f2530f349f59ebe04";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "5d8d33cc9590d6ecbbe460b01619b1bd606ad702226cf6b675e6e869ae6a5ea1";
+  "77a14c6d8f0b613db6193ba45548c450cf8cdb37646beb465128c80420cbb3ed";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "8b48a9e038fc9c2b3ed677d6df99e7d0803da9083db19c41a3017f844fa10f48";
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 =
+  "54fcf849f006f656162394c9feaeec801af059cbc7b0d61e612bcdebc6abb361";
 
 const MANIFEST_ID = /^bg\.cpp\.browser-runtime-abi\.sha256\.[0-9a-f]{64}$/u;
 const PREPARED_MANIFESTS = new WeakMap<object, StoredCppCuteBrowserRuntimeAbiManifest>();
@@ -68,6 +70,7 @@ export interface PreparedCppCuteBrowserRuntimeAbiManifest {
   readonly resourceSha256: string;
   readonly contractSha256: string;
   readonly generatedImportAllowlistSha256: string;
+  readonly supportFunctionAllowlistSha256: string;
   readonly resourceByteLength: number;
   readonly designAuthority: true;
   readonly interfaceReviewReady: false;
@@ -155,13 +158,19 @@ export async function decodeCppCuteBrowserRuntimeAbiManifest(
     hashMismatch("$.manifestId", `manifest ID must equal ${expectedManifestId}`);
   }
   throwIfAborted(signal);
-  const [resourceSha256, contractSha256, generatedImportAllowlistSha256] = await Promise.all([
+  const [
+    resourceSha256,
+    contractSha256,
+    generatedImportAllowlistSha256,
+    supportFunctionAllowlistSha256,
+  ] = await Promise.all([
     hashBytes(snapshot, "$bytes"),
     hashJson({
       domain: "browsergrad.compiler.cpp-cute.browser-runtime-abi-contract.v1",
       body: manifest.body,
     }, "$.body"),
     deriveGeneratedImportAllowlistSha256(manifest.body),
+    deriveSupportFunctionAllowlistSha256(manifest.body),
   ]);
   if (resourceSha256 !== CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256) {
     hashMismatch("$bytes", "canonical resource SHA-256 does not equal the pinned v1 resource identity");
@@ -178,6 +187,15 @@ export async function decodeCppCuteBrowserRuntimeAbiManifest(
       "generated-import allowlist SHA-256 does not equal the closed v1 policy projection",
     );
   }
+  if (supportFunctionAllowlistSha256 !==
+      CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 ||
+      manifest.body.wasm.supportExports.functionAllowlistSha256 !==
+        supportFunctionAllowlistSha256) {
+    hashMismatch(
+      "$.body.wasm.supportExports.functionAllowlistSha256",
+      "support-function export allowlist SHA-256 does not equal the closed v1 policy projection",
+    );
+  }
   throwIfAborted(signal);
   const prepared = Object.freeze({
     manifestId: expectedManifestId,
@@ -185,6 +203,7 @@ export async function decodeCppCuteBrowserRuntimeAbiManifest(
     resourceSha256,
     contractSha256,
     generatedImportAllowlistSha256,
+    supportFunctionAllowlistSha256,
     resourceByteLength: snapshot.byteLength,
     designAuthority: true,
     interfaceReviewReady: false,
@@ -212,6 +231,12 @@ export async function deriveCppCuteBrowserGeneratedImportAllowlistSha256(
   body: CppCuteBrowserRuntimeAbiBodyV1,
 ): Promise<string> {
   return deriveGeneratedImportAllowlistSha256(body);
+}
+
+export async function deriveCppCuteBrowserSupportFunctionAllowlistSha256(
+  body: CppCuteBrowserRuntimeAbiBodyV1,
+): Promise<string> {
+  return deriveSupportFunctionAllowlistSha256(body);
 }
 
 export function unwrapPreparedCppCuteBrowserRuntimeAbiManifest(
@@ -276,15 +301,71 @@ function validateBodyInvariants(value: JsonObject): void {
       invalid("$.body.wasm", "module role, ABI version, start, or export closure differs from runtime v1");
     }
     const supportExports = body.wasm.supportExports;
-    if (supportExports.status !== "unresolved-first-build-review-required" ||
-        supportExports.exactFunctionAllowlist.length !== 0 ||
+    if (supportExports.status !== "function-exports-reviewed-structure-pending" ||
+        supportExports.functionAllowlistSha256 !==
+          CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 ||
+        supportExports.exactFunctionAllowlist.length !== 29 ||
         supportExports.exactGlobalAllowlist.length !== 0 ||
         supportExports.exactTableAllowlist.length !== 0 ||
         supportExports.unlistedExports !== "forbidden" ||
         supportExports.observedModuleCannotExtendAllowlist !== true ||
         supportExports.releaseConformance !==
-          "forbidden-until-independent-review-and-manifest-repin") {
-      invalid("$.body.wasm.supportExports", "support exports must remain empty and release-blocked pending review");
+          "forbidden-until-table-and-global-structure-review") {
+      invalid(
+        "$.body.wasm.supportExports",
+        "support-function exports must equal the reviewed policy while structural exports remain blocked",
+      );
+    }
+    const supportReview = supportExports.functionReview;
+    if (supportReview.basis !==
+          "pinned-emscripten-runtime-sources-locked-link-flags-and-detached-raw-wasm-inspection" ||
+        supportReview.emscriptenVersion !== "6.0.3" ||
+        supportReview.emscriptenCommit !== "283e2d130132859fde6a4e4c87fd254b38127651" ||
+        supportReview.visibility !== "worker-internal-not-browsergrad-c-api") {
+      invalid(
+        "$.body.wasm.supportExports.functionReview",
+        "support-function review must bind the selected Emscripten runtime and worker-only visibility",
+      );
+    }
+    const expectedSupportRoles = [
+      ["allocator-runtime", 14],
+      ["javascript-exception-bridge", 6],
+      ["module-initialization", 1],
+      ["stack-runtime", 8],
+    ] as const;
+    if (supportReview.runtimeRoles.length !== expectedSupportRoles.length ||
+        supportReview.runtimeRoles.some((role, index) => {
+          const expected = expectedSupportRoles[index];
+          return expected === undefined || role.name !== expected[0] ||
+            role.exactFunctionCount !== expected[1];
+        })) {
+      invalid(
+        "$.body.wasm.supportExports.functionReview.runtimeRoles",
+        "support-function runtime-role inventory differs from the independent review",
+      );
+    }
+    const supportNames = new Set<string>();
+    const supportRoleCounts = new Map<string, number>();
+    for (const [index, entry] of supportExports.exactFunctionAllowlist.entries()) {
+      if (entry.name.length === 0 || entry.name.startsWith("bg_cpp_cute_") ||
+          supportNames.has(entry.name) || entry.wasmResults.length > 1 ||
+          [...entry.wasmParameters, ...entry.wasmResults].some((value) =>
+            value !== "f32" && value !== "f64" && value !== "i32" && value !== "i64")) {
+        invalid(
+          `$.body.wasm.supportExports.exactFunctionAllowlist[${index}]`,
+          "support export has an invalid, duplicate, public-API, or non-core-Wasm signature",
+        );
+      }
+      supportNames.add(entry.name);
+      supportRoleCounts.set(entry.runtimeRole, (supportRoleCounts.get(entry.runtimeRole) ?? 0) + 1);
+    }
+    for (const [name, count] of expectedSupportRoles) {
+      if (supportRoleCounts.get(name) !== count) {
+        invalid(
+          "$.body.wasm.supportExports.exactFunctionAllowlist",
+          `support export runtime role ${name} must contain exactly ${count} functions`,
+        );
+      }
     }
     const structural = body.wasm.structuralPolicy;
     if (structural.status !== "unresolved-first-build-review-required" ||
@@ -846,6 +927,15 @@ async function deriveGeneratedImportAllowlistSha256(
     policyId: policy.policyId,
     exactFunctions: policy.exactFunctions,
   }, "$.body.hostImports.generatedImportAllowlist.allowlistSha256");
+}
+
+async function deriveSupportFunctionAllowlistSha256(
+  body: CppCuteBrowserRuntimeAbiBodyV1,
+): Promise<string> {
+  return hashJson({
+    domain: "browsergrad.compiler.cpp-cute.emscripten-support-function-export-allowlist.v1",
+    exactFunctions: body.wasm.supportExports.exactFunctionAllowlist,
+  }, "$.body.wasm.supportExports.functionAllowlistSha256");
 }
 
 function storedManifest(

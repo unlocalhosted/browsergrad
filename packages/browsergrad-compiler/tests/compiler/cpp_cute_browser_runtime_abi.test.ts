@@ -12,11 +12,13 @@ import {
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256,
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256,
   canonicalCppCuteBrowserRuntimeAbiManifestBytes,
   cppCuteBrowserRuntimeAbiManifestResourceBytes,
   decodeCppCuteBrowserRuntimeAbiManifest,
   deriveCppCuteBrowserRuntimeAbiManifestId,
   deriveCppCuteBrowserGeneratedImportAllowlistSha256,
+  deriveCppCuteBrowserSupportFunctionAllowlistSha256,
   unwrapPreparedCppCuteBrowserRuntimeAbiManifest,
   type PreparedCppCuteBrowserRuntimeAbiManifest,
 } from "../../src/cpp_cute_browser_runtime_abi.js";
@@ -70,7 +72,9 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       contractSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256,
       generatedImportAllowlistSha256:
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256,
-      resourceByteLength: 29_267,
+      supportFunctionAllowlistSha256:
+        CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256,
+      resourceByteLength: 33_063,
       designAuthority: true,
       interfaceReviewReady: false,
       observedWasmVerified: false,
@@ -78,13 +82,16 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     });
     expect(canonicalCppCuteBrowserRuntimeAbiManifestBytes(prepared)).toEqual(resource);
     const record = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(prepared);
-    expect(record.manifest.version).toEqual({ major: 1, minor: 2 });
+    expect(record.manifest.version).toEqual({ major: 1, minor: 3 });
     expect(record.manifest.body.wasm.cAbiVersion).toBe(65_537);
     expect(await deriveCppCuteBrowserRuntimeAbiManifestId(record.manifest.body)).toBe(
       CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
     );
     expect(await deriveCppCuteBrowserGeneratedImportAllowlistSha256(record.manifest.body)).toBe(
       CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256,
+    );
+    expect(await deriveCppCuteBrowserSupportFunctionAllowlistSha256(record.manifest.body)).toBe(
+      CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256,
     );
     expect(record.manifest.body.authority).toEqual({
       kind: "design-contract-only",
@@ -314,7 +321,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     expect(manifest.vfs.statuses.map((entry) => entry.code)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 
-  it("pins reviewed generated imports while support exports remain first-build blocked", async () => {
+  it("pins reviewed generated imports and worker-internal support functions", async () => {
     const prepared = await decodeCppCuteBrowserRuntimeAbiManifest(
       cppCuteBrowserRuntimeAbiManifestResourceBytes(),
     );
@@ -342,15 +349,30 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
         wasmParameters: ["i32", "i32", "i32", "i32"],
         wasmResults: ["i32"],
       })]);
-    expect(wasm.supportExports).toEqual({
-      status: "unresolved-first-build-review-required",
-      exactFunctionAllowlist: [],
+    expect(wasm.supportExports).toMatchObject({
+      status: "function-exports-reviewed-structure-pending",
+      functionAllowlistSha256:
+        CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256,
       exactGlobalAllowlist: [],
       exactTableAllowlist: [],
       unlistedExports: "forbidden",
       observedModuleCannotExtendAllowlist: true,
-      releaseConformance: "forbidden-until-independent-review-and-manifest-repin",
+      releaseConformance: "forbidden-until-table-and-global-structure-review",
     });
+    expect(wasm.supportExports.exactFunctionAllowlist).toHaveLength(29);
+    expect(wasm.supportExports.functionReview).toMatchObject({
+      emscriptenVersion: "6.0.3",
+      emscriptenCommit: "283e2d130132859fde6a4e4c87fd254b38127651",
+      visibility: "worker-internal-not-browsergrad-c-api",
+      runtimeRoles: [
+        { name: "allocator-runtime", exactFunctionCount: 14 },
+        { name: "javascript-exception-bridge", exactFunctionCount: 6 },
+        { name: "module-initialization", exactFunctionCount: 1 },
+        { name: "stack-runtime", exactFunctionCount: 8 },
+      ],
+    });
+    expect(wasm.supportExports.exactFunctionAllowlist.some((entry) =>
+      entry.name.startsWith("bg_cpp_cute_"))).toBe(false);
   });
 
   it("bounds unresolved table, global, tag, and custom-section projections", async () => {
@@ -669,7 +691,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
   });
 
   it("rejects unsupported versions before accepting a closed contract", async () => {
-    for (const [field, value] of [["major", 2], ["minor", 3]] as const) {
+    for (const [field, value] of [["major", 2], ["minor", 4]] as const) {
       const resource = mutableResource();
       objectField(resource, "version")[field] = value;
       await expectDecodeError(
