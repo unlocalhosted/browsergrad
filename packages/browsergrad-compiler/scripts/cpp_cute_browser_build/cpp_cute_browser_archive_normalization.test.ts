@@ -90,6 +90,33 @@ describe("host archive normalization", () => {
       .rejects.toThrow(CppCuteBrowserArchiveNormalizationError);
   });
 
+  it("drains normalized stdout beyond pipe capacity before finalizing the tar parser", async () => {
+    const root = await fixtureRoot("stdout-backpressure");
+    const payload = Buffer.alloc(256 * 1024, 0x61);
+    const selectedTar = tar([{ path: "pkg/include/large.hpp", bytes: payload }]);
+    const toolPath = await fakeBsdtar(root, selectedTar, new Uint8Array());
+    const archivePath = join(root, "source.archive");
+    await writeFile(archivePath, "caller-observed-archive", { mode: 0o400 });
+    const tool = await admitCppCuteBrowserBsdtarTool({ executablePath: toolPath });
+
+    const normalized = await materializeCppCuteBrowserNormalizedArchive({
+      archiveFormat: "tar.xz",
+      archivePath,
+      outputRoot: join(root, "output"),
+      selections: selection(),
+      tool,
+    });
+    const copied = await copyCppCuteBrowserArchiveNormalizationFile(
+      normalized,
+      "headers",
+      "large.hpp",
+    );
+
+    expect(normalized.totals.consumedTarByteLength).toBe(String(selectedTar.byteLength));
+    expect(createHash("sha256").update(copied).digest("hex"))
+      .toBe(createHash("sha256").update(payload).digest("hex"));
+  });
+
   it.runIf(process.platform === "darwin" && process.arch === "arm64" && process.version === "v25.9.0")(
     "pins the reviewed Darwin bsdtar and Node/Zstd builder closure",
     async () => {
@@ -152,6 +179,8 @@ async function fakeBsdtar(
   fail = false,
 ): Promise<string> {
   const path = join(root, fail ? "failing-bsdtar" : "bsdtar");
+  await writeFile(join(root, "normalized.tar"), normalizedTar, { mode: 0o400 });
+  await writeFile(join(root, "compressed-member.bin"), compressedMember, { mode: 0o400 });
   const source = `#!/bin/sh
 if [ "$1" = "--version" ]; then
   printf '%s\\n' 'bsdtar 3.5.3 - libarchive 3.5.3'
@@ -161,19 +190,14 @@ elif [ "${fail ? "yes" : "no"}" = "yes" ]; then
 else
   for argument in "$@"; do
     if [ "$argument" = "-xOf" ]; then
-      printf '%b' '${shellBytes(compressedMember)}'
-      exit 0
+      exec /bin/cat ./compressed-member.bin
     fi
   done
-  printf '%b' '${shellBytes(normalizedTar)}'
+  exec /bin/cat ./normalized.tar
 fi
 `;
   await writeFile(path, source, { mode: 0o500 });
   return path;
-}
-
-function shellBytes(value: Uint8Array): string {
-  return [...value].map((byte) => `\\${byte.toString(8).padStart(3, "0")}`).join("");
 }
 
 function selection() {
