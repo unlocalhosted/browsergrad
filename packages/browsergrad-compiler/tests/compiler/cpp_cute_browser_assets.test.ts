@@ -76,12 +76,12 @@ describe("C++/CuTe browser-local asset manifest", () => {
       minor: CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR,
     });
     expect(fixture.input.manifestId).toBe(
-      "bg.cpp.browser-assets.sha256.f0c59130e661ef6e4722d9bbc5ae0bc12f5165ea8bfd8850b6e4004fb3f59ff8",
+      "bg.cpp.browser-assets.sha256.a98e7c2c56de7edc486fdac10a0162374254a510f47288eceb8153a8800bfe17",
     );
-    expect(first.assetSetSha256).toBe("4dfc14a9608bf3df54c13d89787350f73933055f969a8419139c6fe67d475416");
+    expect(first.assetSetSha256).toBe("a2b055b418bef301502d6d2eedead44f7cf6bc2dbf7a1532355ec32a74f36c6a");
     expect(first.assetCount).toBe(9);
-    expect(first.manifestSha256).toBe("c84e7d3421abd60e8097e215e84d3b4298546bd631333fdc89739caa8ae804aa");
-    expect(first.manifestByteLength).toBe("11058");
+    expect(first.manifestSha256).toBe("a74471670867ab31f191930b7078b159173929e719c0d2178e4f869740586331");
+    expect(first.manifestByteLength).toBe("11118");
     expect(Object.isFrozen(first)).toBe(true);
     const record = unwrapPreparedCppCuteBrowserAssetManifest(first);
     expect(record.profile).toBe(fixture.profile);
@@ -388,7 +388,7 @@ describe("C++/CuTe browser-local asset manifest", () => {
     }
   });
 
-  it("rejects self-resigned URL and provenance drift against profile asset-set lock", async () => {
+  it("rejects self-resigned URL and build-subject drift against profile asset-set lock", async () => {
     const fixture = await createCppCuteBrowserAssetFixture();
     const wasm = cloneCppCuteBrowserAssetInput(fixture.input);
     const wasmAsset = assets(wasm).find((asset) => asset["kind"] === "clang-extractor-wasm");
@@ -410,13 +410,13 @@ describe("C++/CuTe browser-local asset manifest", () => {
       "$.body.assetSetSha256",
     );
 
-    const provenance = cloneCppCuteBrowserAssetInput(fixture.input);
-    const replacement = `bg.build-provenance.sha256.${"a".repeat(64)}`;
-    for (const asset of assets(provenance)) asset["buildProvenanceId"] = replacement;
-    body(provenance)["buildProvenanceIds"] = [replacement];
-    await rederiveAssetSetAndResign(provenance);
+    const buildSubject = cloneCppCuteBrowserAssetInput(fixture.input);
+    const replacement = `bg.cpp.browser-build-subject.sha256.${"a".repeat(64)}`;
+    for (const asset of assets(buildSubject)) asset["buildSubjectId"] = replacement;
+    body(buildSubject)["buildSubjectIds"] = [replacement];
+    await rederiveAssetSetAndResign(buildSubject);
     await expectAssetError(
-      prepareCppCuteBrowserAssetManifest(provenance, fixture.profile),
+      prepareCppCuteBrowserAssetManifest(buildSubject, fixture.profile),
       "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-HASH-MISMATCH",
       "$.body.assetSetSha256",
     );

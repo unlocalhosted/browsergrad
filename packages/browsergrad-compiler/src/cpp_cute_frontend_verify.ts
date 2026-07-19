@@ -1304,6 +1304,9 @@ function verifyExpressionTree(
     if (fact.kind !== "target-intrinsic" || fact.resultTypeId !== expression.typeId) {
       invalid(`${path}.intrinsicFactId`, "target-intrinsic expression must reference a matching intrinsic fact");
     }
+    fact.operandExpressionIds.forEach((operandId, index) => {
+      child(operandId, `${path}.intrinsicFactId.operandExpressionIds[${index}]`);
+    });
   }
   active.delete(id);
 }
@@ -1406,6 +1409,12 @@ function verifyTargetIntrinsicFact(
     if (diagnostic.severity === "error" || diagnostic.severity === "fatal") {
       invalid(`${path}.availability.diagnosticId`, "represented unsupported intrinsic must not become a frontend rejection");
     }
+    if (diagnostic.subject.kind !== "fact" || diagnostic.subject.factId !== fact.factId) {
+      invalid(
+        `${path}.availability.diagnosticId`,
+        "represented unsupported intrinsic diagnostic must be owned by that exact fact",
+      );
+    }
   }
 }
 
@@ -1427,12 +1436,208 @@ function verifyEntries(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndex
         );
       }
     } else {
-      const source = ref(indexes.facts, entry.sourceTensorFactId, `${path}.sourceTensorFactId`, "fact");
-      const destination = ref(indexes.facts, entry.destinationTensorFactId, `${path}.destinationTensorFactId`, "fact");
-      if (source.kind !== "tensor" || destination.kind !== "tensor") invalid(path, "view-copy entry must reference source and destination tensor facts");
-      ref(indexes.expressions, entry.operationExpressionId, `${path}.operationExpressionId`, "expression");
+      verifyViewCopyEntry(payload, entry, path, indexes);
     }
   }
+}
+
+function verifyViewCopyEntry(
+  payload: CppCuteFrontendPayloadV3,
+  entry: Extract<CppCuteFrontendPayloadV3["entries"][number], { readonly kind: "view-copy" }>,
+  path: string,
+  indexes: ArtifactIndexes,
+): void {
+  const source = ref(indexes.facts, entry.sourceTensorFactId, `${path}.sourceTensorFactId`, "fact");
+  const destination = ref(indexes.facts, entry.destinationTensorFactId, `${path}.destinationTensorFactId`, "fact");
+  if (source.kind !== "tensor" || destination.kind !== "tensor") {
+    invalid(path, "view-copy entry must reference source and destination tensor facts");
+  }
+  if (source.factId === destination.factId || source.resultDeclarationId === destination.resultDeclarationId) {
+    invalid(path, "view-copy entry requires distinct source and destination tensor declarations");
+  }
+
+  if (entry.selectedRootDeclarationIds.length !== 1) {
+    invalid(`${path}.selectedRootDeclarationIds`, "view-copy entry must select exactly one function root");
+  }
+  const rootDeclarationId = entry.selectedRootDeclarationIds[0];
+  if (rootDeclarationId === undefined) {
+    invalid(`${path}.selectedRootDeclarationIds`, "view-copy entry must select exactly one function root");
+  }
+  const root = ref(indexes.declarations, rootDeclarationId, `${path}.selectedRootDeclarationIds[0]`, "declaration");
+  if (root.kind !== "function" || root.definitionKind !== "definition") {
+    invalid(`${path}.selectedRootDeclarationIds[0]`, "view-copy entry root must be a defined function");
+  }
+  const body = payload.functionBodies.find((candidate) => candidate.declarationId === root.declarationId);
+  if (body === undefined) {
+    invalid(`${path}.selectedRootDeclarationIds[0]`, "view-copy entry root must own one serialized function body");
+  }
+  const operationExpression = body.expressions.find(
+    (expression) => expression.expressionId === entry.operationExpressionId,
+  );
+  if (operationExpression === undefined) {
+    invalid(`${path}.operationExpressionId`, "view-copy operation must be reachable from the selected function body");
+  }
+  if (operationExpression.kind !== "target-intrinsic") {
+    invalid(`${path}.operationExpressionId`, "view-copy operation must be a typed target-intrinsic expression");
+  }
+  const intrinsic = ref(
+    indexes.facts,
+    operationExpression.intrinsicFactId,
+    `${path}.operationExpressionId.intrinsicFactId`,
+    "fact",
+  );
+  if (intrinsic.kind !== "target-intrinsic" || intrinsic.operation.kind !== "copy") {
+    invalid(`${path}.operationExpressionId`, "view-copy operation must reference a typed copy fact");
+  }
+
+  if (intrinsic.operandExpressionIds.length !== 2) {
+    invalid(
+      `${path}.operationExpressionId.intrinsicFactId.operandExpressionIds`,
+      "view-copy intrinsic must bind exactly ordered source and destination operands",
+    );
+  }
+  const operandExpressions = new Map(body.expressions.map((expression) => [expression.expressionId, expression]));
+  const sourceOperand = ref(
+    operandExpressions,
+    intrinsic.operandExpressionIds[0] ?? "",
+    `${path}.operationExpressionId.intrinsicFactId.operandExpressionIds[0]`,
+    "expression",
+  );
+  const destinationOperand = ref(
+    operandExpressions,
+    intrinsic.operandExpressionIds[1] ?? "",
+    `${path}.operationExpressionId.intrinsicFactId.operandExpressionIds[1]`,
+    "expression",
+  );
+  if (sourceOperand.kind !== "declaration-reference" ||
+      sourceOperand.declarationId !== source.resultDeclarationId) {
+    invalid(
+      `${path}.operationExpressionId.intrinsicFactId.operandExpressionIds[0]`,
+      "view-copy source operand must reference the source tensor declaration",
+    );
+  }
+  if (destinationOperand.kind !== "declaration-reference" ||
+      destinationOperand.declarationId !== destination.resultDeclarationId) {
+    invalid(
+      `${path}.operationExpressionId.intrinsicFactId.operandExpressionIds[1]`,
+      "view-copy destination operand must reference the destination tensor declaration",
+    );
+  }
+  const sourceDeclaration = ref(
+    indexes.declarations,
+    source.resultDeclarationId,
+    `${path}.sourceTensorFactId.resultDeclarationId`,
+    "declaration",
+  );
+  const destinationDeclaration = ref(
+    indexes.declarations,
+    destination.resultDeclarationId,
+    `${path}.destinationTensorFactId.resultDeclarationId`,
+    "declaration",
+  );
+  if (findEnclosingFunctionId(sourceDeclaration, indexes) !== root.declarationId ||
+      findEnclosingFunctionId(destinationDeclaration, indexes) !== root.declarationId) {
+    invalid(path, "view-copy tensor declarations must belong to the selected function root");
+  }
+
+  if (source.elementTypeId !== destination.elementTypeId) {
+    invalid(path, "view-copy source and destination element types must match exactly");
+  }
+  const sourceLayout = ref(indexes.facts, source.layoutFactId, `${path}.sourceTensorFactId.layoutFactId`, "fact");
+  const destinationLayout = ref(
+    indexes.facts,
+    destination.layoutFactId,
+    `${path}.destinationTensorFactId.layoutFactId`,
+    "fact",
+  );
+  if (sourceLayout.kind !== "affine-layout" || destinationLayout.kind !== "affine-layout") {
+    invalid(path, "view-copy tensors must reference affine-layout facts");
+  }
+  if (sourceLayout.rank !== destinationLayout.rank ||
+      sourceLayout.leafRank !== destinationLayout.leafRank ||
+      !sameHierarchy(sourceLayout.shape, destinationLayout.shape) ||
+      !sameIntegerExpression(sourceLayout.size, destinationLayout.size)) {
+    invalid(path, "view-copy source and destination layouts must have the same logical shape and size");
+  }
+
+  const sourceEngineDeclarations = tensorEngineDeclarationIds(source.engine);
+  const destinationEngineDeclarations = new Set(tensorEngineDeclarationIds(destination.engine));
+  if (sourceEngineDeclarations.some((declarationId) => destinationEngineDeclarations.has(declarationId))) {
+    invalid(path, "view-copy source and destination tensor engines must be distinct");
+  }
+
+  if (intrinsic.operation.sourceSpace !== source.memorySpace ||
+      intrinsic.operation.destinationSpace !== destination.memorySpace) {
+    invalid(
+      `${path}.operationExpressionId.intrinsicFactId.operation`,
+      "view-copy intrinsic address spaces must match its source and destination tensor facts",
+    );
+  }
+  if (!intrinsic.effects.readsMemory || !intrinsic.effects.writesMemory ||
+      intrinsic.effects.synchronizes || intrinsic.effects.convergent) {
+    invalid(
+      `${path}.operationExpressionId.intrinsicFactId.effects`,
+      "view-copy intrinsic requires exact read/write-only effects",
+    );
+  }
+
+  const elementAbi = payload.sourceAbi.types.filter(
+    (abi) => abi.domain === "device" && abi.deviceTypeId === source.elementTypeId,
+  );
+  if (elementAbi.length !== 1) {
+    invalid(path, "view-copy element type requires one exact device ABI width");
+  }
+  const exactElementAbi = elementAbi[0];
+  if (exactElementAbi === undefined) {
+    invalid(path, "view-copy element type requires one exact device ABI width");
+  }
+  const transferBits = wireIntegerToBigInt(exactElementAbi.sizeBits);
+  if (BigInt(intrinsic.operation.transferBits) !== transferBits) {
+    invalid(
+      `${path}.operationExpressionId.intrinsicFactId.operation.transferBits`,
+      "view-copy transfer width must equal the exact element ABI width",
+    );
+  }
+}
+
+function tensorEngineDeclarationIds(
+  engine: Extract<CppCuteResolvedFactV1, { readonly kind: "tensor" }>["engine"],
+): readonly string[] {
+  if (engine.kind === "global-pointer" || engine.kind === "shared-pointer") {
+    return [engine.pointerDeclarationId];
+  }
+  if (engine.kind === "register-array") return [engine.arrayDeclarationId];
+  if (engine.kind === "pointer-array") return engine.pointerDeclarationIds;
+  return [engine.engineDeclarationId];
+}
+
+function sameHierarchy(left: CppCuteHierarchyV1, right: CppCuteHierarchyV1): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "scalar") {
+    return right.kind === "scalar" && sameIntegerExpression(left.value, right.value);
+  }
+  return right.kind === "tuple" && left.elements.length === right.elements.length &&
+    left.elements.every((element, index) => {
+      const other = right.elements[index];
+      return other !== undefined && sameHierarchy(element, other);
+    });
+}
+
+function sameIntegerExpression(left: CppCuteIntegerExprV1, right: CppCuteIntegerExprV1): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "integer") return right.kind === "integer" && left.value === right.value;
+  if (left.kind === "runtime") return right.kind === "runtime" && left.declarationId === right.declarationId;
+  if (left.kind === "add" || left.kind === "multiply" || left.kind === "minimum" || left.kind === "maximum") {
+    return right.kind === left.kind && left.values.length === right.values.length &&
+      left.values.every((value, index) => {
+        const other = right.values[index];
+        return other !== undefined && sameIntegerExpression(value, other);
+      });
+  }
+  return (right.kind === "floor-divide" || right.kind === "ceil-divide" || right.kind === "modulo") &&
+    right.kind === left.kind &&
+    sameIntegerExpression(left.value, right.value) &&
+    sameIntegerExpression(left.divisor, right.divisor);
 }
 
 function verifyDiagnosticsAndOutcome(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndexes): void {

@@ -25,6 +25,7 @@ export default defineConfig({
       "tests/compiler/cpp_cute_browser_worker_protocol.test.ts",
       "tests/compiler/cpp_cute_browser_worker_runtime.test.ts",
       "tests/compiler/cpp_cute_browser_worker_transfer.test.ts",
+      "tests/compiler/cpp_cute_frontend_artifact.test.ts",
       "tests/compiler/cpp_cute_frontend_profile.test.ts",
     ],
     exclude: ["scripts/cpp_cute_browser_build/*_native.test.ts"],

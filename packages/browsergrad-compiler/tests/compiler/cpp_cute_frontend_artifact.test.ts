@@ -27,6 +27,19 @@ import {
   createCppCuteArtifactInput,
   createCppCuteProfileInput,
 } from "./support/cpp_cute_frontend_fixtures.js";
+import {
+  CPP_CUTE_VIEW_COPY_DESTINATION_LAYOUT_FACT_ID,
+  CPP_CUTE_VIEW_COPY_DESTINATION_TENSOR_FACT_ID,
+  CPP_CUTE_VIEW_COPY_FUNCTION_DECLARATION_ID,
+  CPP_CUTE_VIEW_COPY_INTRINSIC_FACT_ID,
+  CPP_CUTE_VIEW_COPY_OPERATION_EXPRESSION_ID,
+  CPP_CUTE_VIEW_COPY_SOURCE_ENGINE_DECLARATION_ID,
+  CPP_CUTE_VIEW_COPY_SOURCE_EXPRESSION_ID,
+  CPP_CUTE_VIEW_COPY_SOURCE_TENSOR_DECLARATION_ID,
+  CPP_CUTE_VIEW_COPY_SOURCE_TENSOR_FACT_ID,
+  CPP_CUTE_VIEW_COPY_VOID_TYPE_ID,
+  createCppCuteViewCopyArtifactInput,
+} from "./support/cpp_cute_frontend_view_copy_fixtures.js";
 
 function stableId(kind: string, digit: string): string {
   return `bg.cpp.${kind}.sha256.${digit.repeat(64)}`;
@@ -67,6 +80,34 @@ function clearNotRunPass(pass: Record<string, unknown>): void {
   pass["diagnosticIds"] = [];
 }
 
+function payloadRecord(artifact: Record<string, unknown>): Record<string, unknown> {
+  return artifact["payload"] as Record<string, unknown>;
+}
+
+function recordById(
+  payload: Record<string, unknown>,
+  collection: string,
+  idField: string,
+  id: string,
+): Record<string, unknown> {
+  const record = (payload[collection] as Record<string, unknown>[])
+    .find((candidate) => candidate[idField] === id);
+  if (record === undefined) throw new Error(`view-copy fixture lost ${collection} record ${id}`);
+  return record;
+}
+
+async function expectInvalidViewCopy(
+  mutate: (payload: Record<string, unknown>) => void,
+  path: string | RegExp,
+): Promise<void> {
+  const value = await createCppCuteViewCopyArtifactInput();
+  mutate(payloadRecord(value));
+  await expect(verifyCppCuteFrontendArtifact(value)).rejects.toMatchObject({
+    code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+    path: typeof path === "string" ? path : expect.stringMatching(path),
+  });
+}
+
 describe("C++/CuTe frontend artifact", () => {
   it("verifies one closed layout artifact with typed unsupported target fact", async () => {
     const verified = await verifyCppCuteFrontendArtifact(await createCppCuteArtifactInput());
@@ -104,6 +145,121 @@ describe("C++/CuTe frontend artifact", () => {
     }));
     expect(Object.isFrozen(verified)).toBe(true);
     expect(Object.isFrozen(record.envelope.payload)).toBe(true);
+  });
+
+  it("verifies one function-owned typed view-copy graph with compatible strided layouts", async () => {
+    const verified = await verifyCppCuteFrontendArtifact(await createCppCuteViewCopyArtifactInput());
+    const payload = unwrapVerifiedCppCuteFrontendArtifact(verified).envelope.payload;
+    expect(payload.entries).toEqual([{
+      entryId: expect.any(String),
+      kind: "view-copy",
+      sourceTensorFactId: CPP_CUTE_VIEW_COPY_SOURCE_TENSOR_FACT_ID,
+      destinationTensorFactId: CPP_CUTE_VIEW_COPY_DESTINATION_TENSOR_FACT_ID,
+      operationExpressionId: CPP_CUTE_VIEW_COPY_OPERATION_EXPRESSION_ID,
+      selectedRootDeclarationIds: [CPP_CUTE_VIEW_COPY_FUNCTION_DECLARATION_ID],
+    }]);
+    expect(payload.facts).toContainEqual(expect.objectContaining({
+      factId: CPP_CUTE_VIEW_COPY_INTRINSIC_FACT_ID,
+      operation: expect.objectContaining({
+        kind: "copy",
+        sourceSpace: "global",
+        destinationSpace: "global",
+        transferBits: 32,
+      }),
+      effects: {
+        readsMemory: true,
+        writesMemory: true,
+        synchronizes: false,
+        convergent: false,
+      },
+    }));
+  });
+
+  it("rejects cross-wired view-copy roots, operands, tensor contracts, engines, and intrinsic contracts", async () => {
+    await expectInvalidViewCopy((payload) => {
+      const entry = (payload["entries"] as Record<string, unknown>[])[0];
+      if (entry === undefined) throw new Error("view-copy fixture lost entry");
+      entry["selectedRootDeclarationIds"] = [CPP_CUTE_FIXTURE_RECORD_DECLARATION_ID];
+    }, "$.payload.entries[0].selectedRootDeclarationIds[0]");
+
+    await expectInvalidViewCopy((payload) => {
+      const entry = (payload["entries"] as Record<string, unknown>[])[0];
+      if (entry === undefined) throw new Error("view-copy fixture lost entry");
+      entry["operationExpressionId"] = CPP_CUTE_VIEW_COPY_SOURCE_EXPRESSION_ID;
+    }, "$.payload.entries[0].operationExpressionId");
+
+    await expectInvalidViewCopy((payload) => {
+      const intrinsic = recordById(payload, "facts", "factId", CPP_CUTE_VIEW_COPY_INTRINSIC_FACT_ID);
+      intrinsic["operandExpressionIds"] = [
+        (intrinsic["operandExpressionIds"] as string[])[1],
+        (intrinsic["operandExpressionIds"] as string[])[0],
+      ];
+    }, "$.payload.entries[0].operationExpressionId.intrinsicFactId.operandExpressionIds[0]");
+
+    await expectInvalidViewCopy((payload) => {
+      const intrinsic = recordById(payload, "facts", "factId", CPP_CUTE_VIEW_COPY_INTRINSIC_FACT_ID);
+      intrinsic["operandExpressionIds"] = [
+        CPP_CUTE_VIEW_COPY_SOURCE_EXPRESSION_ID,
+        CPP_CUTE_VIEW_COPY_OPERATION_EXPRESSION_ID,
+      ];
+    }, /operandExpressionIds\[1\]$/u);
+
+    await expectInvalidViewCopy((payload) => {
+      const sourceDeclaration = recordById(
+        payload,
+        "declarations",
+        "declarationId",
+        CPP_CUTE_VIEW_COPY_SOURCE_TENSOR_DECLARATION_ID,
+      );
+      sourceDeclaration["lexicalParentId"] = null;
+      sourceDeclaration["semanticParentId"] = null;
+    }, "$.payload.entries[0]");
+
+    await expectInvalidViewCopy((payload) => {
+      const destination = recordById(payload, "facts", "factId", CPP_CUTE_VIEW_COPY_DESTINATION_TENSOR_FACT_ID);
+      destination["elementTypeId"] = CPP_CUTE_VIEW_COPY_VOID_TYPE_ID;
+    }, "$.payload.entries[0]");
+
+    await expectInvalidViewCopy((payload) => {
+      const layout = recordById(payload, "facts", "factId", CPP_CUTE_VIEW_COPY_DESTINATION_LAYOUT_FACT_ID);
+      const shape = layout["shape"] as Record<string, unknown>;
+      const first = (shape["elements"] as Record<string, unknown>[])[0];
+      if (first === undefined) throw new Error("view-copy fixture lost layout shape");
+      (first["value"] as Record<string, unknown>)["value"] = "4";
+      layout["size"] = { kind: "integer", value: "8" };
+      layout["cosize"] = { kind: "integer", value: "8" };
+    }, "$.payload.entries[0]");
+
+    await expectInvalidViewCopy((payload) => {
+      const destination = recordById(payload, "facts", "factId", CPP_CUTE_VIEW_COPY_DESTINATION_TENSOR_FACT_ID);
+      destination["engine"] = {
+        kind: "global-pointer",
+        pointerDeclarationId: CPP_CUTE_VIEW_COPY_SOURCE_ENGINE_DECLARATION_ID,
+        nullable: false,
+      };
+    }, "$.payload.entries[0]");
+
+    await expectInvalidViewCopy((payload) => {
+      const intrinsic = recordById(payload, "facts", "factId", CPP_CUTE_VIEW_COPY_INTRINSIC_FACT_ID);
+      (intrinsic["operation"] as Record<string, unknown>)["sourceSpace"] = "shared";
+    }, "$.payload.entries[0].operationExpressionId.intrinsicFactId.operation");
+
+    await expectInvalidViewCopy((payload) => {
+      const intrinsic = recordById(payload, "facts", "factId", CPP_CUTE_VIEW_COPY_INTRINSIC_FACT_ID);
+      (intrinsic["effects"] as Record<string, unknown>)["writesMemory"] = false;
+    }, "$.payload.entries[0].operationExpressionId.intrinsicFactId.effects");
+
+    await expectInvalidViewCopy((payload) => {
+      const intrinsic = recordById(payload, "facts", "factId", CPP_CUTE_VIEW_COPY_INTRINSIC_FACT_ID);
+      (intrinsic["operation"] as Record<string, unknown>)["transferBits"] = 16;
+    }, "$.payload.entries[0].operationExpressionId.intrinsicFactId.operation.transferBits");
+  });
+
+  it("requires every recognized-unsupported intrinsic diagnostic to name its exact fact", async () => {
+    await expectInvalidViewCopy((payload) => {
+      const diagnostic = recordById(payload, "diagnostics", "diagnosticId", CPP_CUTE_FIXTURE_DIAGNOSTIC_ID);
+      diagnostic["subject"] = { kind: "fact", factId: CPP_CUTE_VIEW_COPY_INTRINSIC_FACT_ID };
+    }, /\.availability\.diagnosticId$/u);
   });
 
   it("closes semantic-pass evidence and rejects missing, duplicate, reordered, or cross-domain facts", async () => {
@@ -909,9 +1065,23 @@ describe("C++/CuTe frontend artifact", () => {
     const compiler = await cloneCppCuteArtifactInput();
     const compilerPayload = compiler["payload"] as Record<string, unknown>;
     const diagnostics = compilerPayload["diagnostics"] as Record<string, unknown>[];
-    if (diagnostics[0] === undefined) throw new Error("fixture lost diagnostic");
-    diagnostics[0]["location"] = { kind: "none" };
-    diagnostics[0]["subject"] = { kind: "compiler" };
+    const compilerDiagnosticId = stableId("diagnostic", "f");
+    diagnostics.push({
+      diagnosticId: compilerDiagnosticId,
+      phase: "artifact-extraction",
+      severity: "warning",
+      code: "browsergrad.cpp-cute:compiler-observation",
+      renderedMessage: "Compiler observation has no source location.",
+      location: { kind: "none" },
+      subject: { kind: "compiler" },
+      parentDiagnosticId: null,
+    });
+    const devicePass = (compilerPayload["semanticPasses"] as Record<string, unknown>[])[0];
+    if (devicePass === undefined) throw new Error("fixture lost device pass");
+    devicePass["diagnosticIds"] = [
+      ...(devicePass["diagnosticIds"] as string[]),
+      compilerDiagnosticId,
+    ].sort();
     await rebindArtifactId(compiler);
     await expect(verifyCppCuteFrontendArtifact(compiler)).resolves.toMatchObject({ outcome: "accepted" });
 

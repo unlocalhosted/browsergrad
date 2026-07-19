@@ -36,7 +36,7 @@ import {
   type CppCuteBrowserProfileFixtureOptions,
 } from "./cpp_cute_frontend_fixtures.js";
 
-const PROVENANCE_ID = `bg.build-provenance.sha256.${"9".repeat(64)}`;
+const BUILD_SUBJECT_ID = `bg.cpp.browser-build-subject.sha256.${"9".repeat(64)}`;
 const SEMANTIC_ADAPTER_RESOURCE_BYTE_LENGTH =
   cppCuteSemanticAdapterManifestResourceBytes().byteLength;
 const DIAGNOSTIC_NORMALIZATION_RESOURCE_BYTE_LENGTH =
@@ -84,7 +84,7 @@ export async function createCppCuteBrowserAssetFixture(
       unpackedByteLength: wire(SEMANTIC_ADAPTER_RESOURCE_BYTE_LENGTH),
       mediaType: "application/vnd.browsergrad.cpp-cute.semantic-adapter.v1+json",
       compression: "identity",
-      buildProvenanceId: PROVENANCE_ID,
+      buildSubjectId: BUILD_SUBJECT_ID,
     },
     {
       assetId: "clang-wasm",
@@ -96,7 +96,7 @@ export async function createCppCuteBrowserAssetFixture(
       unpackedByteLength: wire(4_096),
       mediaType: "application/wasm",
       compression: "identity",
-      buildProvenanceId: PROVENANCE_ID,
+      buildSubjectId: BUILD_SUBJECT_ID,
       sourceAbiSha256,
     },
     {
@@ -109,7 +109,7 @@ export async function createCppCuteBrowserAssetFixture(
       unpackedByteLength: wire(DIAGNOSTIC_NORMALIZATION_RESOURCE_BYTE_LENGTH),
       mediaType: "application/vnd.browsergrad.cpp-cute.diagnostic-normalization.v1+json",
       compression: "identity",
-      buildProvenanceId: PROVENANCE_ID,
+      buildSubjectId: BUILD_SUBJECT_ID,
     },
     {
       assetId: "runtime-abi",
@@ -121,11 +121,11 @@ export async function createCppCuteBrowserAssetFixture(
       unpackedByteLength: wire(cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength),
       mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
       compression: "identity",
-      buildProvenanceId: PROVENANCE_ID,
+      buildSubjectId: BUILD_SUBJECT_ID,
       runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
       runtimeAbiManifestId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
     },
-    compilerResourceAsset(provisionalRecord, PROVENANCE_ID, options.packOverrides),
+    compilerResourceAsset(provisionalRecord, BUILD_SUBJECT_ID, options.packOverrides),
     ...provisionalRecord.virtualFileSystem.includeRoots
       .filter((root) => root.owner.kind === "dependency")
       .map((root, index): CppCuteBrowserAssetV1 => {
@@ -143,7 +143,7 @@ export async function createCppCuteBrowserAssetFixture(
           fileContentByteLength: wire(override?.fileContentByteLength ?? 16_000 + index),
           mediaType: "application/vnd.browsergrad.vfs-pack.v1",
           compression: "identity",
-          buildProvenanceId: PROVENANCE_ID,
+          buildSubjectId: BUILD_SUBJECT_ID,
           dependencyId: root.owner.dependencyId,
           includeRootId: root.includeRootId,
           mountedVirtualRoot: root.virtualPath,
@@ -166,7 +166,7 @@ export async function createCppCuteBrowserAssetFixture(
   const assetSetSha256 = await deriveCppCuteBrowserAssetSetSha256({
     sourceAbiSha256,
     dependencyIds: provisionalRecord.toolchain.dependencies.map((dependency) => dependency.dependencyId),
-    buildProvenanceIds: [PROVENANCE_ID],
+    buildSubjectIds: [BUILD_SUBJECT_ID],
     mountedVirtualRoots,
     assets,
   });
@@ -189,7 +189,7 @@ export async function createCppCuteBrowserAssetFixture(
     sourceAbiSha256,
     assetSetSha256,
     dependencyIds: profileRecord.toolchain.dependencies.map((dependency) => dependency.dependencyId),
-    buildProvenanceIds: [PROVENANCE_ID],
+    buildSubjectIds: [BUILD_SUBJECT_ID],
     mountedVirtualRoots,
     assets,
     totals: {
@@ -218,7 +218,7 @@ export function cloneCppCuteBrowserAssetInput(
 
 function compilerResourceAsset(
   profile: ReturnType<typeof unwrapPreparedCppCuteBrowserFrontendProfile>["profile"],
-  buildProvenanceId: string,
+  buildSubjectId: string,
   overrides: CppCuteBrowserAssetFixtureOptions["packOverrides"],
 ): CppCuteBrowserAssetV1 {
   const root = profile.virtualFileSystem.includeRoots.find((entry) =>
@@ -237,7 +237,7 @@ function compilerResourceAsset(
     fileContentByteLength: wire(override?.fileContentByteLength ?? 8_000),
     mediaType: "application/vnd.browsergrad.vfs-pack.v1",
     compression: "identity",
-    buildProvenanceId,
+    buildSubjectId,
     includeRootId: root.includeRootId,
     mountedVirtualRoot: root.virtualPath,
     contentSetSha256: override?.contentSetSha256 ?? root.manifestSha256,

@@ -66,7 +66,7 @@ import {
 import { createCppCuteBrowserProfileInput } from "./support/cpp_cute_frontend_fixtures.js";
 
 const ORIGIN = "https://assets.example.test";
-const PROVENANCE_ID = `bg.build-provenance.sha256.${"9".repeat(64)}`;
+const BUILD_SUBJECT_ID = `bg.cpp.browser-build-subject.sha256.${"9".repeat(64)}`;
 
 interface Environment {
   readonly manifest: PreparedCppCuteBrowserAssetManifest;
@@ -217,7 +217,7 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
       unpackedByteLength: wire(adapterBytes.byteLength),
       mediaType: "application/vnd.browsergrad.cpp-cute.semantic-adapter.v1+json",
       compression: "identity",
-      buildProvenanceId: PROVENANCE_ID,
+      buildSubjectId: BUILD_SUBJECT_ID,
     },
     {
       assetId: "clang-wasm",
@@ -229,7 +229,7 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
       unpackedByteLength: wire(wasmBytes.byteLength),
       mediaType: "application/wasm",
       compression: "identity",
-      buildProvenanceId: PROVENANCE_ID,
+      buildSubjectId: BUILD_SUBJECT_ID,
       sourceAbiSha256,
     },
     {
@@ -242,7 +242,7 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
       unpackedByteLength: wire(diagnosticNormalizationBytes.byteLength),
       mediaType: "application/vnd.browsergrad.cpp-cute.diagnostic-normalization.v1+json",
       compression: "identity",
-      buildProvenanceId: PROVENANCE_ID,
+      buildSubjectId: BUILD_SUBJECT_ID,
     },
     {
       assetId: "runtime-abi",
@@ -254,7 +254,7 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
       unpackedByteLength: wire(runtimeAbiBytes.byteLength),
       mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
       compression: "identity",
-      buildProvenanceId: PROVENANCE_ID,
+      buildSubjectId: BUILD_SUBJECT_ID,
       runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
       runtimeAbiManifestId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
     },
@@ -275,7 +275,7 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
       fileContentByteLength: pack.fileContentByteLength,
       mediaType: "application/vnd.browsergrad.vfs-pack.v1" as const,
       compression: "identity" as const,
-      buildProvenanceId: PROVENANCE_ID,
+      buildSubjectId: BUILD_SUBJECT_ID,
       includeRootId: root.includeRootId,
       mountedVirtualRoot: root.virtualPath,
       contentSetSha256: pack.contentSetSha256,
@@ -293,7 +293,7 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
   const assetSetSha256 = await deriveCppCuteBrowserAssetSetSha256({
     sourceAbiSha256,
     dependencyIds,
-    buildProvenanceIds: [PROVENANCE_ID],
+    buildSubjectIds: [BUILD_SUBJECT_ID],
     mountedVirtualRoots,
     assets,
   });
@@ -311,7 +311,7 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
     sourceAbiSha256,
     assetSetSha256,
     dependencyIds,
-    buildProvenanceIds: [PROVENANCE_ID],
+    buildSubjectIds: [BUILD_SUBJECT_ID],
     mountedVirtualRoots,
     assets,
     totals: {

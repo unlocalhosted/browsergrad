@@ -33,12 +33,12 @@ describe("C++/CuTe browser build provenance syntax prerequisite", () => {
     });
     expect(identity.buildSubjectId).not.toContain("build-provenance");
     const projectionText = JSON.stringify(identity.projection);
-    expect(projectionText).not.toContain("buildProvenanceId");
+    expect(projectionText).not.toContain("buildSubjectId");
     expect(projectionText).not.toContain("profileHash");
     expect(projectionText).not.toContain("manifestId");
     expect(projectionText).not.toContain("assetSetSha256");
     expect(identity.projection.assets.every((asset) =>
-      !Object.hasOwn(asset, "buildProvenanceId"))).toBe(true);
+      !Object.hasOwn(asset, "buildSubjectId"))).toBe(true);
     expect(repeated.buildSubject.buildSubjectId).toBe(identity.buildSubjectId);
 
     await expect(deriveCppCuteBrowserBuildSubjectIdentity({

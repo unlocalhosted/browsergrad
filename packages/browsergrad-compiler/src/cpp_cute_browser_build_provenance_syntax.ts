@@ -55,13 +55,13 @@ const ASSET_MANIFEST_ID = /^bg\.cpp\.browser-assets\.sha256\.[0-9a-f]{64}$/u;
 const WORKER_BUNDLE_ID = /^bg\.cpp\.browser-worker-bundle\.sha256\.[0-9a-f]{64}$/u;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 
-export type CppCuteBrowserBuildSubjectAssetV1 = Omit<CppCuteBrowserAssetV1, "buildProvenanceId">;
+export type CppCuteBrowserBuildSubjectAssetV1 = Omit<CppCuteBrowserAssetV1, "buildSubjectId">;
 
 /**
  * Cycle-free identity projection for one browser compiler build subject.
  *
  * It intentionally excludes the profile hash, manifest identity, asset-set
- * identity, and every build-provenance reference. Those identities depend on
+ * identity, and every build-subject reference. Those identities depend on
  * the build-subject reference and would create a hash cycle if included here.
  */
 export interface CppCuteBrowserBuildSubjectProjectionV1 extends JsonObject {
@@ -226,7 +226,7 @@ export async function deriveCppCuteBrowserBuildSubjectIdentity(
   unwrapPreparedCppCuteBrowserBuildInputLock(values.buildInputLock);
   const worker = inspectVerifiedCppCuteBrowserWorkerBundle(values.workerBundle);
   const body = manifestRecord.manifest.body;
-  const assets = body.assets.map(stripBuildProvenanceReference);
+  const assets = body.assets.map(stripBuildSubjectReference);
   const projection = deepFreezeJson({
     sourceAbiSha256: body.sourceAbiSha256,
     dependencyIds: body.dependencyIds,
@@ -520,10 +520,10 @@ function parseSignature(value: JsonValue, path: string): CppCuteBrowserBuildDsse
   return { keyid, sig };
 }
 
-function stripBuildProvenanceReference(asset: CppCuteBrowserAssetV1): CppCuteBrowserBuildSubjectAssetV1 {
+function stripBuildSubjectReference(asset: CppCuteBrowserAssetV1): CppCuteBrowserBuildSubjectAssetV1 {
   const output: Record<string, JsonValue> = {};
   for (const key of Object.keys(asset)) {
-    if (key === "buildProvenanceId") continue;
+    if (key === "buildSubjectId") continue;
     const value = asset[key];
     if (value !== undefined) output[key] = value;
   }

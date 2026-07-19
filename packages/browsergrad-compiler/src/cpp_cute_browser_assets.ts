@@ -46,13 +46,13 @@ import {
 export const CPP_CUTE_BROWSER_ASSET_MANIFEST_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-asset-manifest";
 export const CPP_CUTE_BROWSER_ASSET_MANIFEST_MAJOR = 1;
-export const CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR = 2;
+export const CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR = 3;
 export const CPP_CUTE_BROWSER_ASSET_MANIFEST_BYTE_LIMIT = 256 * 1024;
 
 const MANIFEST_ID = /^bg\.cpp\.browser-assets\.sha256\.[0-9a-f]{64}$/u;
 const ASSET_ID = /^[a-z][a-z0-9._-]*$/u;
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
-const BUILD_PROVENANCE_ID = /^bg\.build-provenance\.sha256\.[0-9a-f]{64}$/u;
+const BUILD_SUBJECT_ID = /^bg\.cpp\.browser-build-subject\.sha256\.[0-9a-f]{64}$/u;
 const SAME_ORIGIN_ROOT_RELATIVE_URL = /^\/(?:[A-Za-z0-9._~-]+\/)*[A-Za-z0-9._~-]+$/u;
 const MAX_ASSETS = 256;
 const HARD_MAX_ASSET_COMPRESSED_BYTES = 1024n * 1024n * 1024n;
@@ -110,7 +110,7 @@ interface CppCuteBrowserAssetCommonV1 extends JsonObject {
   readonly sha256: string;
   readonly byteLength: WireU64;
   readonly unpackedByteLength: WireU64;
-  readonly buildProvenanceId: string;
+  readonly buildSubjectId: string;
 }
 
 export type CppCuteBrowserAssetV1 =
@@ -163,7 +163,7 @@ export interface CppCuteBrowserAssetManifestBodyV1 extends JsonObject {
   readonly sourceAbiSha256: string;
   readonly assetSetSha256: string;
   readonly dependencyIds: readonly string[];
-  readonly buildProvenanceIds: readonly string[];
+  readonly buildSubjectIds: readonly string[];
   readonly mountedVirtualRoots: readonly string[];
   readonly assets: readonly CppCuteBrowserAssetV1[];
   readonly totals: CppCuteBrowserAssetTotalsV1;
@@ -374,7 +374,7 @@ export async function deriveCppCuteBrowserAssetSetSha256(
     CppCuteBrowserAssetManifestBodyV1,
     | "sourceAbiSha256"
     | "dependencyIds"
-    | "buildProvenanceIds"
+    | "buildSubjectIds"
     | "mountedVirtualRoots"
     | "assets"
   >,
@@ -389,7 +389,7 @@ export async function deriveCppCuteBrowserAssetSetSha256(
     domain: "browsergrad.compiler.cpp-cute.browser-asset-set.v1",
     sourceAbiSha256: body.sourceAbiSha256,
     dependencyIds: body.dependencyIds,
-    buildProvenanceIds: body.buildProvenanceIds,
+    buildSubjectIds: body.buildSubjectIds,
     mountedVirtualRoots: body.mountedVirtualRoots,
     assets: body.assets,
   }, "$.body.assetSetSha256");
@@ -467,7 +467,7 @@ function parseBody(
     "sourceAbiSha256",
     "assetSetSha256",
     "dependencyIds",
-    "buildProvenanceIds",
+    "buildSubjectIds",
     "mountedVirtualRoots",
     "assets",
     "totals",
@@ -486,12 +486,12 @@ function parseBody(
     `${path}.dependencyIds`,
     /^[a-z][a-z0-9._-]*$/u,
   );
-  const buildProvenanceIds = sortedIdentifierArray(
-    field(object, "buildProvenanceIds", path),
-    `${path}.buildProvenanceIds`,
-    BUILD_PROVENANCE_ID,
+  const buildSubjectIds = sortedIdentifierArray(
+    field(object, "buildSubjectIds", path),
+    `${path}.buildSubjectIds`,
+    BUILD_SUBJECT_ID,
   );
-  if (buildProvenanceIds.length === 0) invalid(`${path}.buildProvenanceIds`, "at least one build provenance ID is required");
+  if (buildSubjectIds.length === 0) invalid(`${path}.buildSubjectIds`, "at least one build subject ID is required");
   const mountedVirtualRoots = sortedStringArray(
     field(object, "mountedVirtualRoots", path),
     `${path}.mountedVirtualRoots`,
@@ -504,9 +504,9 @@ function parseBody(
   requireUnique(assets.map((asset) => asset.url), `${path}.assets`, "asset URLs must be unique");
   const totals = parseTotals(field(object, "totals", path));
 
-  const referencedBuildIds = [...new Set(assets.map((asset) => asset.buildProvenanceId))].sort();
-  if (!equalStrings(referencedBuildIds, buildProvenanceIds)) {
-    invalid(`${path}.buildProvenanceIds`, "build provenance IDs must exactly equal asset references");
+  const referencedBuildIds = [...new Set(assets.map((asset) => asset.buildSubjectId))].sort();
+  if (!equalStrings(referencedBuildIds, buildSubjectIds)) {
+    invalid(`${path}.buildSubjectIds`, "build subject IDs must exactly equal asset references");
   }
   const actualRoots = assets.flatMap((asset): string[] =>
     asset.kind === "compiler-resource-pack" || asset.kind === "dependency-header-pack"
@@ -522,7 +522,7 @@ function parseBody(
     sourceAbiSha256,
     assetSetSha256,
     dependencyIds,
-    buildProvenanceIds,
+    buildSubjectIds,
     mountedVirtualRoots,
     assets,
     totals,
@@ -550,7 +550,7 @@ function parseTotals(value: JsonValue): CppCuteBrowserAssetTotalsV1 {
 function parseAsset(value: JsonValue, path: string): CppCuteBrowserAssetV1 {
   const base = closedObject(value, [
     "assetId", "kind", "url", "urlPolicy", "sha256", "byteLength", "unpackedByteLength",
-    "mediaType", "compression", "buildProvenanceId", "sourceAbiSha256", "dependencyId",
+    "mediaType", "compression", "buildSubjectId", "sourceAbiSha256", "dependencyId",
     "includeRootId", "mountedVirtualRoot", "contentSetSha256",
     "fileContentByteLength", "runtimeAbiId", "runtimeAbiManifestId",
   ], path, false);
@@ -562,17 +562,17 @@ function parseAsset(value: JsonValue, path: string): CppCuteBrowserAssetV1 {
     sha256: sha256(field(base, "sha256", path), `${path}.sha256`),
     byteLength: wirePositive(field(base, "byteLength", path), `${path}.byteLength`),
     unpackedByteLength: wirePositive(field(base, "unpackedByteLength", path), `${path}.unpackedByteLength`),
-    buildProvenanceId: boundedPattern(
-      field(base, "buildProvenanceId", path),
-      `${path}.buildProvenanceId`,
-      BUILD_PROVENANCE_ID,
+    buildSubjectId: boundedPattern(
+      field(base, "buildSubjectId", path),
+      `${path}.buildSubjectId`,
+      BUILD_SUBJECT_ID,
     ),
   };
 
   if (kind === "clang-extractor-wasm") {
     requireExactFields(base, [
       "assetId", "kind", "url", "urlPolicy", "sha256", "byteLength", "unpackedByteLength",
-      "mediaType", "compression", "buildProvenanceId", "sourceAbiSha256",
+      "mediaType", "compression", "buildSubjectId", "sourceAbiSha256",
     ], path);
     exactString(field(base, "mediaType", path), "application/wasm", `${path}.mediaType`);
     exactString(field(base, "compression", path), "identity", `${path}.compression`);
@@ -588,7 +588,7 @@ function parseAsset(value: JsonValue, path: string): CppCuteBrowserAssetV1 {
   if (kind === "compiler-resource-pack") {
     requireExactFields(base, [
       "assetId", "kind", "url", "urlPolicy", "sha256", "byteLength", "unpackedByteLength",
-      "mediaType", "compression", "buildProvenanceId", "includeRootId", "mountedVirtualRoot",
+      "mediaType", "compression", "buildSubjectId", "includeRootId", "mountedVirtualRoot",
       "contentSetSha256", "fileContentByteLength",
     ], path);
     exactString(
@@ -617,7 +617,7 @@ function parseAsset(value: JsonValue, path: string): CppCuteBrowserAssetV1 {
   if (kind === "dependency-header-pack") {
     requireExactFields(base, [
       "assetId", "kind", "url", "urlPolicy", "sha256", "byteLength", "unpackedByteLength",
-      "mediaType", "compression", "buildProvenanceId", "dependencyId", "includeRootId",
+      "mediaType", "compression", "buildSubjectId", "dependencyId", "includeRootId",
       "mountedVirtualRoot", "contentSetSha256", "fileContentByteLength",
     ], path);
     exactString(
@@ -647,7 +647,7 @@ function parseAsset(value: JsonValue, path: string): CppCuteBrowserAssetV1 {
   if (kind === "semantic-adapter-manifest") {
     requireExactFields(base, [
       "assetId", "kind", "url", "urlPolicy", "sha256", "byteLength", "unpackedByteLength",
-      "mediaType", "compression", "buildProvenanceId",
+      "mediaType", "compression", "buildSubjectId",
     ], path);
     exactString(
       field(base, "mediaType", path),
@@ -666,7 +666,7 @@ function parseAsset(value: JsonValue, path: string): CppCuteBrowserAssetV1 {
   if (kind === "diagnostic-normalization-manifest") {
     requireExactFields(base, [
       "assetId", "kind", "url", "urlPolicy", "sha256", "byteLength", "unpackedByteLength",
-      "mediaType", "compression", "buildProvenanceId",
+      "mediaType", "compression", "buildSubjectId",
     ], path);
     exactString(
       field(base, "mediaType", path),
@@ -685,7 +685,7 @@ function parseAsset(value: JsonValue, path: string): CppCuteBrowserAssetV1 {
   if (kind === "runtime-abi-manifest") {
     requireExactFields(base, [
       "assetId", "kind", "url", "urlPolicy", "sha256", "byteLength", "unpackedByteLength",
-      "mediaType", "compression", "buildProvenanceId", "runtimeAbiId", "runtimeAbiManifestId",
+      "mediaType", "compression", "buildSubjectId", "runtimeAbiId", "runtimeAbiManifestId",
     ], path);
     exactString(
       field(base, "mediaType", path),

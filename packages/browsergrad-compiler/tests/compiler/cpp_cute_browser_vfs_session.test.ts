@@ -93,7 +93,7 @@ import {
 import { createCppCuteBrowserProfileInput } from "./support/cpp_cute_frontend_fixtures.js";
 
 const ORIGIN = "https://vfs.example.test";
-const PROVENANCE_ID = `bg.build-provenance.sha256.${"9".repeat(64)}`;
+const BUILD_SUBJECT_ID = `bg.cpp.browser-build-subject.sha256.${"9".repeat(64)}`;
 const MAIN_PATH = "/workspace/src/main.cu";
 const HEADER_PATH = "/workspace/src/project.hpp";
 const MAIN_BYTES = new TextEncoder().encode('#include "project.hpp"\nauto layout = make_layout(Int<2>{});\n');
@@ -980,7 +980,7 @@ async function createAuthorityFixture(
       unpackedByteLength: wire(adapterBytes.byteLength),
       mediaType: "application/vnd.browsergrad.cpp-cute.semantic-adapter.v1+json",
       compression: "identity",
-      buildProvenanceId: PROVENANCE_ID,
+      buildSubjectId: BUILD_SUBJECT_ID,
     },
     {
       assetId: "clang-wasm",
@@ -992,7 +992,7 @@ async function createAuthorityFixture(
       unpackedByteLength: wire(wasmBytes.byteLength),
       mediaType: "application/wasm",
       compression: "identity",
-      buildProvenanceId: PROVENANCE_ID,
+      buildSubjectId: BUILD_SUBJECT_ID,
       sourceAbiSha256,
     },
     {
@@ -1006,7 +1006,7 @@ async function createAuthorityFixture(
       mediaType:
         "application/vnd.browsergrad.cpp-cute.diagnostic-normalization.v1+json",
       compression: "identity",
-      buildProvenanceId: PROVENANCE_ID,
+      buildSubjectId: BUILD_SUBJECT_ID,
     },
     {
       assetId: "runtime-abi",
@@ -1018,7 +1018,7 @@ async function createAuthorityFixture(
       unpackedByteLength: wire(runtimeAbiBytes.byteLength),
       mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
       compression: "identity",
-      buildProvenanceId: PROVENANCE_ID,
+      buildSubjectId: BUILD_SUBJECT_ID,
       runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
       runtimeAbiManifestId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
     },
@@ -1039,7 +1039,7 @@ async function createAuthorityFixture(
       fileContentByteLength: pack.fileContentByteLength,
       mediaType: "application/vnd.browsergrad.vfs-pack.v1" as const,
       compression: "identity" as const,
-      buildProvenanceId: PROVENANCE_ID,
+      buildSubjectId: BUILD_SUBJECT_ID,
       includeRootId: root.includeRootId,
       mountedVirtualRoot: root.virtualPath,
       contentSetSha256: pack.contentSetSha256,
@@ -1061,7 +1061,7 @@ async function createAuthorityFixture(
   const assetSetSha256 = await deriveCppCuteBrowserAssetSetSha256({
     sourceAbiSha256,
     dependencyIds,
-    buildProvenanceIds: [PROVENANCE_ID],
+    buildSubjectIds: [BUILD_SUBJECT_ID],
     mountedVirtualRoots,
     assets,
   });
@@ -1111,7 +1111,7 @@ async function prepareManifest(
     sourceAbiSha256,
     assetSetSha256,
     dependencyIds: profileRecord.toolchain.dependencies.map((entry) => entry.dependencyId),
-    buildProvenanceIds: [PROVENANCE_ID],
+    buildSubjectIds: [BUILD_SUBJECT_ID],
     mountedVirtualRoots,
     assets,
     totals: {
