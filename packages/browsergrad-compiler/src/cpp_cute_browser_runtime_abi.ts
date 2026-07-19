@@ -21,14 +21,14 @@ import {
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
-export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 6;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 7;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.418401b7b55bfe45e1e9111d6956c5aeade7d693c1410c8ca6bcdd90b1db42b4";
+  "bg.cpp.browser-runtime-abi.sha256.527ed068f0479a087d5198749a1d0103f0c463566bf56af833777268c342a36c";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "ffe39cfacdd7040d2ceae355f2994e48fe828ead1289f1cfb195c27701a0fe9a";
+  "ada8e6da61153e3e92f359a5c63bc2ba8926e58362c3f7a9e88f4b3a67f57d15";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "af0245a407df64e9485d650c80769a0a37a233e82a280a0212a5953fc9b9134e";
+  "60fb1887eabc14dc77d4c935bd9b4d9f899e981f1b9cfbbab72c3b0dfa83abc4";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "8b48a9e038fc9c2b3ed677d6df99e7d0803da9083db19c41a3017f844fa10f48";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 =
@@ -442,7 +442,7 @@ function validateBodyInvariants(value: JsonObject): void {
       "atomics", "exception-handling", "memory64", "multimemory", "simd128",
     ], "$.body.wasm.structuralPolicy.customSections.targetFeatures.forbiddenDeclarations");
     assertExactStrings(body.wasm.requiredFeatures, [
-      "bulk-memory", "bulk-memory-opt", "mutable-globals", "nontrapping-fptoint", "sign-extension",
+      "bulk-memory", "mutable-globals", "nontrapping-fptoint", "sign-extension",
     ], "$.body.wasm.requiredFeatures");
     assertExactStrings(body.wasm.forbiddenFeatures, [
       "atomics", "exception-handling", "memory64", "multi-memory", "simd128", "threads",
@@ -470,11 +470,9 @@ function validateBodyInvariants(value: JsonObject): void {
       ["memory.copy", "memory.fill"],
       "$.body.wasm.featurePolicy.reviewedSubsets[0].exactInstructions",
     );
-    assertExactStrings(
-      featurePolicy.allowedExtensions,
-      body.wasm.requiredFeatures,
-      "$.body.wasm.featurePolicy.allowedExtensions",
-    );
+    assertExactStrings(featurePolicy.allowedExtensions, [
+      "bulk-memory", "bulk-memory-opt", "mutable-globals", "nontrapping-fptoint", "sign-extension",
+    ], "$.body.wasm.featurePolicy.allowedExtensions");
     const memory = body.wasm.memory;
     if (body.wasm.addressBits !== 32 || memory.count !== 1 || memory.addressType !== "i32" ||
         memory.imported !== false || memory.exported !== true || memory.exportName !== "memory" ||

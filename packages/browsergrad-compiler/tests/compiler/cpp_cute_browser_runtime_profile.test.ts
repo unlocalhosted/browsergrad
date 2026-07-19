@@ -50,6 +50,10 @@ function expectProfileError(
 
 describe("browser C++/CuTe compiler-runtime profile", () => {
   it("pins the canonical runtime-ABI manifest and fixed module shape", async () => {
+    await expect(prepareCppCuteFrontendProfile(browserProfileInput())).resolves.toMatchObject({
+      deploymentMode: "browser-local",
+    });
+
     const missingManifest = browserProfileInput();
     delete runtime(missingManifest)["runtimeAbiManifestSha256"];
     await expectProfileError(

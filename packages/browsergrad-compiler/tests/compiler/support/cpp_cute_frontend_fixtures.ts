@@ -9,6 +9,9 @@ import {
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
 } from "../../../src/cpp_cute_browser_runtime_abi.js";
 import {
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE,
+} from "../../../src/resources/cpp_cute_browser_runtime_abi_v1.js";
+import {
   CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256,
 } from "../../../src/cpp_cute_semantic_adapter_manifest.js";
 import {
@@ -303,10 +306,7 @@ export function createCppCuteBrowserProfileInput(
           options.runtimeAbiManifestSha256 ?? CPP_CUTE_FIXTURE_RUNTIME_ABI_MANIFEST_SHA256,
         wasmAddressBits: 32,
         requiredWasmFeatures: [
-          "bulk-memory",
-          "mutable-globals",
-          "nontrapping-fptoint",
-          "sign-extension",
+          ...CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE.body.wasm.requiredFeatures,
         ],
         moduleHandoff: "host-verified-module-or-bytes",
         workerSideFetch: "forbidden",

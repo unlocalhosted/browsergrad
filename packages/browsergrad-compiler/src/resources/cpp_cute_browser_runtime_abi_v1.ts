@@ -43,8 +43,8 @@ function supportExport(
  */
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
-  version: { major: 1, minor: 6 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.418401b7b55bfe45e1e9111d6956c5aeade7d693c1410c8ca6bcdd90b1db42b4",
+  version: { major: 1, minor: 7 },
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.527ed068f0479a087d5198749a1d0103f0c463566bf56af833777268c342a36c",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -58,9 +58,9 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
       addressBits: 32,
       cAbiVersion: 65_537,
       cAbiVersionEncoding: "major-shift-left-16-bitwise-or-minor",
+      // Browser-visible WebAssembly capabilities required for instantiation.
       requiredFeatures: [
         "bulk-memory",
-        "bulk-memory-opt",
         "mutable-globals",
         "nontrapping-fptoint",
         "sign-extension",
@@ -75,6 +75,8 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
       ],
       featurePolicy: {
         instructionSetBaseline: "webassembly-mvp",
+        // Static-inspector vocabulary. `bulk-memory-opt` is an exact opcode
+        // subset marker, not a browser feature exposed through the profile.
         allowedExtensions: [
           "bulk-memory",
           "bulk-memory-opt",
