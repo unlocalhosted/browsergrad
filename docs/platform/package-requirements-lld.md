@@ -18,10 +18,12 @@ general emphasis.
 Gates 0 through 2 remain verified; Gate 3 is active; Gates 4 through 7 have not
 started. The strict native producer, pinned no-shell Clang-Wasm executor,
 isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
-are implemented on `main` through `eda1ad9d`. The current source additionally
+are implemented on `main` through `9945c7f6`. The current source additionally
 owns exact frontend-work instrumentation, the local Wasm C-ABI runner, and a
-canonical Worker result-control encoder; the production host controller remains
-blocked on one self-contained package-owned Worker bundle.
+canonical Worker result-control encoder. It now also pins one exact
+572,755-byte package-owned Worker module with zero static or dynamic imports;
+the production host controller remains blocked on captured platform effects
+and package-owned invocation composition.
 
 The original cold diagnostic run `29658164083` spent 97 minutes 5 seconds in
 isolated execution before failing closed at link. That result exposed two
@@ -40,9 +42,10 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 333 tests across the build plan, runtime ABI, browser profile,
-and browser asset identity chain. Measured end-to-end runs complete in 21.74 to
-26.37 seconds on Node 25. Clean validation and two-build reproducibility still
+clean, then runs 337 tests across the build plan, runtime ABI, browser profile,
+browser asset identity chain, and exact Worker-bundle authoring check. The
+pre-bundle gate measured 21.74 to 26.37 seconds on Node 25; the expanded gate
+measured 29.24 seconds end to end. Clean validation and two-build reproducibility still
 restore no cache and remain intentionally more expensive.
 
 The first successful uncached clean validation, run `29674887505`, completed in
@@ -73,9 +76,9 @@ Production run `29674599138` at `348d7373` completed in 4 minutes 44 seconds and
 reviewed a 31,307,826-byte module with SHA-256
 `b7a5daf6d121c306a2d07b5d3c14c00a664aaa2ff4ae3357a8b389326eeeb06f`, zero
 ABI mismatches, raw-Wasm verification, and exact interface conformance. This
-does not grant Worker or release authority: clean-build, reproducibility,
-factory-bundle, header-license, and Worker-instantiation evidence remain
-separate gates.
+does not grant Worker or release authority: current-source clean-build,
+reproducibility, header-license, valid Worker-instantiation, and production
+execution evidence remain separate gates.
 
 The harness audit found strong isolation, exact-input closure, bounded logs,
 independent Wasm parsing, and separate authority tiers. It also records real
@@ -100,9 +103,11 @@ specification instead of assuming one platform declaration.
 An active or failed run is not build, ABI, reproducibility, Worker, browser, or
 release evidence. The Worker-local runtime now executes the pinned generated
 factory and C ABI, verifies exact frontend-work/VFS/runtime observations, and
-emits canonical control plus artifact bytes. The production host path remains
-capability-blocked until the generated factory and Worker graph are bundled
-into exact package-owned Worker bytes. Use the linked implementation ledger
+emits canonical control plus artifact bytes. The package-owned Worker graph is
+pinned at SHA-256 `669f20f8994f96e69c40d1437f5fb15efe5208732b327df4af9a886525b19e78`;
+the production host path remains capability-blocked until a captured platform
+adapter and package-owned invocation composition consume those verified bytes.
+Use the linked implementation ledger
 for exact chronology, failures, and evidence. This checkpoint is informational: the
 remainder of this document continues to define the normative target and does
 not become a mutable status dashboard.

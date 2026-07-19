@@ -649,7 +649,7 @@ describe("C++/CuTe host-owned browser Worker controller", () => {
 
   it("identifies controller errors nominally", () => {
     expect(CPP_CUTE_BROWSER_WORKER_RUNTIME_IMPLEMENTATION_STATUS).toBe(
-      "missing-self-contained-package-worker-and-transferred-emscripten-factory",
+      "package-worker-bundle-pinned-production-controller-disabled",
     );
     const error = new CppCuteBrowserWorkerControllerError(
       "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-CAPABILITY",

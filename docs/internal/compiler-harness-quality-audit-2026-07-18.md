@@ -18,6 +18,27 @@ No completed Clang-Wasm build, raw-Wasm ABI conformance, two-build
 reproducibility result, valid production Worker compile, or browser-local C++
 execution is claimed by this audit.
 
+## 2026-07-19 follow-up
+
+The original speed verdict is now materially better. Cached source iteration
+stabilized between 4 minutes 27 seconds and 5 minutes 4 seconds, while the
+canonical local fast gate moved ordinary harness feedback off the native build
+path. Before bundle checks it measured 21.74 to 26.37 seconds; the expanded
+30-file/337-test gate, including deterministic Worker-bundle authoring, measures
+29.24 seconds end to end on Node 25. Clean proof remains cache-free and is not
+part of the edit loop; the first successful historical clean run completed in
+39 minutes 29 seconds.
+
+Maintainability also improved without relaxing ratchets: compile-session limit
+access was consolidated and the file is now 2,112 lines against its 2,121-line
+ceiling, while the 1,784-line artifact writer remains exactly capped. Exact
+frontend-work records replaced estimate-only compiler work counters, and the
+reproducibility comparator now admits and compares the ABI-review sidecar that
+the workflow itself produces. One exact 572,755-byte zero-import Worker graph
+is now authored twice, hash-pinned, checked in the fast gate, and loaded from
+verified Blob bytes in Chromium. Production Worker execution, current-ABI clean
+proof, licensed header packs, and two-build reproducibility remain open.
+
 ## Why feedback was slow
 
 The locked recipe originally performed a clean LLVM/Clang 22.1.8 build with
@@ -135,7 +156,7 @@ build to discover.
 | Build isolation | Strong containment; new boundary not yet exercised by a completed build | No network, read-only root and declared inputs, private work mount, zero capabilities, and no-new-privileges are observed. Future runs mount only the sealed exact runtime/extractor closure instead of checkout or package trees. | Preserve the same closure in a successful validation and both reproducibility builds. |
 | Native semantic coverage | Good but incomplete | Exact Clang 22 pass integration plus native behavioral, UBSan, and ASan lanes are required in CI. | Keep the exact-version lane blocking and add executed-Wasm coverage. |
 | Evidence quality | Mixed | Bounded immutable logs, raw-Wasm inspection, authority-specific records, and a failure-only observation for available partial logs exist. | Complete successful and reproducible build evidence. |
-| Feedback speed | Improving; warm timing pending | Clean builds now use four jobs, and ordinary extractor edits reuse a content-addressed untrusted toolchain layer. Diagnostic cache output cannot satisfy clean/reproducibility gates. Local required-native feedback is back to 89 seconds with exact Clang 22. | Measure cold and warm workflow runs; keep clean cache-free proof runs off the edit loop. |
+| Feedback speed | Good for local harness work; native link remains minutes | The canonical Node 25 gate passes 30 files/337 tests in 29.24 seconds. Cached source validation is 4 minutes 27 seconds to 5 minutes 4 seconds; clean/reproducibility gates stay cache-free and authoritative. | Reduce the cached Emscripten system-library regeneration cost without allowing diagnostic cache state to satisfy clean proof. |
 | Maintainability | Weak but improving | The build executor is down to 2,198 lines; native compile session is 2,121 lines; artifact writer is 1,784 lines. Existing compiler-core modules range from roughly 5,400 to 8,000 lines. Exact per-module ratchets prevent all named monoliths from growing. | Continue extracting effect boundaries and semantic subcomponents without creating parallel execution paths, lowering each ratchet as code moves out. |
 | Delivery truthfulness | Good | Production Worker/controller paths remain capability-blocked; CPU, parser, Wasm, Worker, and WebGPU claims are distinct. | Do not relax blockers until reviewed factory/Wasm bytes execute in the package Worker. |
 
@@ -251,8 +272,9 @@ v2 build, independent raw-Wasm review, and two matching clean v2 builds.
    custom sections.
 3. Run two distinct clean builds and prove byte equality for the factory,
    Wasm, link map, and admitted output set.
-4. Bundle the reviewed Emscripten factory and Worker module as package-owned
-   bytes; do not accept caller-supplied code or ambient fetch authority.
+4. Reconcile the pinned bundle with the active current-source clean factory,
+   then wire only a captured production platform adapter and package-owned
+   invocation issuer; do not accept caller-supplied code or ambient fetch authority.
 5. Execute one valid browser-local C++ request through the Worker, verified
    Artifact V3, shared semantic lowering, and real WebGPU.
 6. Acquire the exact header packs and close per-file license and notice

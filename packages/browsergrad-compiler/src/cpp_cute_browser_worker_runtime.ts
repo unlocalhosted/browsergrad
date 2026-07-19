@@ -39,10 +39,8 @@ import {
 export const CPP_CUTE_BROWSER_WORKER_RUNTIME_PROTOCOL =
   "browsergrad.compiler.cpp-cute.package-worker-runtime@1";
 export const CPP_CUTE_BROWSER_WORKER_RUNTIME_BUNDLE_STATUS =
-  "blocked-missing-self-contained-bundle";
-export const CPP_CUTE_BROWSER_WORKER_RUNTIME_BLOCKERS = Object.freeze([
-  "missing-self-contained-package-worker-bundle-bytes",
-] as const);
+  "package-owned-self-contained-module-graph";
+export const CPP_CUTE_BROWSER_WORKER_RUNTIME_BLOCKERS = Object.freeze([] as const);
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const NATIVE_UINT8_ARRAY = Uint8Array;

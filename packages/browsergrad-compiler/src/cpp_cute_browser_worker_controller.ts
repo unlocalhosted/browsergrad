@@ -33,7 +33,7 @@ export type {
   CppCuteBrowserWorkerControllerTerminalMessage,
 };
 export const CPP_CUTE_BROWSER_WORKER_RUNTIME_IMPLEMENTATION_STATUS =
-  "missing-self-contained-package-worker-and-transferred-emscripten-factory";
+  "package-worker-bundle-pinned-production-controller-disabled";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const INVOCATION_ID = /^bg\.cpp\.browser-worker-invocation\.sha256\.[0-9a-f]{64}$/u;
@@ -181,8 +181,9 @@ const TEST_EXECUTIONS = new WeakMap<object, CppCuteBrowserWorkerTestSimulationRe
 
 /**
  * Production is fail-closed before inspecting caller input or ambient browser
- * globals. Future enablement must bind an internally pinned package Worker
- * module; a caller profile/module byte pair is not package-code authority.
+ * globals. The self-contained package Worker is now pinned, but production
+ * enablement still requires a captured platform adapter and package-owned
+ * invocation composition; caller data cannot become executable authority.
  */
 export async function executeCppCuteBrowserWorker(
   _input: PrepareCppCuteBrowserWorkerInvocationInput,
@@ -190,7 +191,7 @@ export async function executeCppCuteBrowserWorker(
 ): Promise<ObservedCppCuteBrowserWorkerExecution> {
   capability(
     "$.runtime",
-    "production browser Worker execution is disabled while the self-contained package Worker and transferred Emscripten factory are missing; enabling it requires internally pinned package module bytes and cannot trust caller profile bytes",
+    "production browser Worker execution is disabled until the captured platform adapter and package-owned invocation composition consume the pinned Worker bundle; caller profile or module bytes cannot establish package-code authority",
   );
 }
 
