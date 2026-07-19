@@ -137,6 +137,28 @@ unsigned alarm(unsigned) {
   return 0;
 }
 
+#if defined(__EMSCRIPTEN__)
+[[noreturn]] void abort() noexcept {
+  __builtin_trap();
+}
+
+[[noreturn]] void exit(int) {
+  __builtin_trap();
+}
+
+[[noreturn]] void _Exit(int) {
+  __builtin_trap();
+}
+
+[[noreturn]] void _exit(int) {
+  __builtin_trap();
+}
+#endif
+
+int raise(int) {
+  return ENOSYS;
+}
+
 int close(int) {
   return fail_with_enosys();
 }

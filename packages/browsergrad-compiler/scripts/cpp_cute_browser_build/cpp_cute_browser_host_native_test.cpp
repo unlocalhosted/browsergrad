@@ -93,6 +93,7 @@ int run_browser_host_tests() {
   errno = 0;
   BG_CHECK(alarm(1) == 0);
   BG_CHECK(errno == ENOSYS);
+  BG_CHECK(raise(SIGTERM) == ENOSYS);
 
   unsigned char descriptor_byte = 0x5a;
   struct stat descriptor_status;
