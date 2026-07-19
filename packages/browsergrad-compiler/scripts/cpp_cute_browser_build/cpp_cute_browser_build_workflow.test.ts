@@ -239,6 +239,17 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(ciWorkflow).not.toContain("continue-on-error");
   });
 
+  it("shards complete real-world CUDA gates by bundle without changing corpus selection", () => {
+    expect(ciWorkflow).toContain("browser-real-world:");
+    expect(ciWorkflow).toContain("bundle: [src, dist]");
+    expect(ciWorkflow).toContain("verify:real-world-cuda --");
+    expect(ciWorkflow).toContain("--skip-build");
+    expect(ciWorkflow).toContain("--require-webgpu");
+    expect(ciWorkflow).toContain("--bundle=${{ matrix.bundle }}");
+    expect(ciWorkflow.match(/verify:real-world-cuda/gu)).toHaveLength(1);
+    expect(ciWorkflow).not.toMatch(/--(?:only|corpus)(?:=|\s)/u);
+  });
+
   it("keeps oldest, LTS native-harness, and Node 25 default compatibility lanes", () => {
     expect(ciWorkflow).toContain("node: [20, 24, 25]");
     expect(ciWorkflow).toContain("if: matrix.node == 24");
