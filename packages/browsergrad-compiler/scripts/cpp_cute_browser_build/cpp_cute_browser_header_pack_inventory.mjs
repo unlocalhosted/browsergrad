@@ -235,15 +235,30 @@ export async function copyCppCuteBrowserHeaderPackInventorySourceFile(
 }
 
 export function canonicalCppCuteBrowserHeaderPackInventoryBytes(inventory) {
-  if (typeof inventory !== "object" || inventory === null ||
-      inventory.schema !== CPP_CUTE_BROWSER_HEADER_PACK_INVENTORY_SCHEMA) {
-    invalid("$.inventory", "expected one header-pack source inventory");
-  }
+  requireCppCuteBrowserHeaderPackInventorySourceAuthority(inventory);
   const bytes = canonicalJsonBytes(inventory);
   if (bytes.byteLength > MAX_OUTPUT_BYTES) {
     resource("$.inventory", `canonical inventory exceeds ${MAX_OUTPUT_BYTES} bytes`);
   }
   return bytes;
+}
+
+export function requireCppCuteBrowserHeaderPackInventorySourceAuthority(inventory) {
+  if (INVENTORY_SOURCE_FILES.get(inventory) === undefined) {
+    invalid("$.inventory", "inventory has no live source-tree authority");
+  }
+}
+
+export async function readCppCuteBrowserHeaderPackInventorySpecification(inputPath) {
+  const path = absolutePath(inputPath, "$.inputPath");
+  const inputBytes = await readBoundedRegularFile(path, MAX_INPUT_BYTES, "$.inputPath");
+  let specification;
+  try {
+    specification = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(inputBytes));
+  } catch (cause) {
+    invalid("$.inputPath", "input must be strict UTF-8 JSON", { cause });
+  }
+  return specification;
 }
 
 export function parseCppCuteBrowserHeaderPackInventoryArguments(argv) {
@@ -271,13 +286,7 @@ export async function authorCppCuteBrowserHeaderPackInventory(input) {
   const outputPath = absolutePath(object.outputPath, "$.input.outputPath");
   if (inputPath === outputPath) invalid("$.input", "input and output paths must differ");
   await admitCanonicalDirectory(dirname(outputPath), "$.input.outputPath.parent");
-  const inputBytes = await readBoundedRegularFile(inputPath, MAX_INPUT_BYTES, "$.input.inputPath");
-  let specification;
-  try {
-    specification = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(inputBytes));
-  } catch (cause) {
-    invalid("$.input.inputPath", "input must be strict UTF-8 JSON", { cause });
-  }
+  const specification = await readCppCuteBrowserHeaderPackInventorySpecification(inputPath);
   const inventory = await inventoryCppCuteBrowserHeaderPackSources(specification);
   const outputBytes = canonicalCppCuteBrowserHeaderPackInventoryBytes(inventory);
   await writeExclusiveRegularFile(outputPath, outputBytes, "$.input.outputPath");
