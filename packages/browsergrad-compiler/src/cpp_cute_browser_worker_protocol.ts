@@ -306,6 +306,7 @@ export type CppCuteBrowserWorkerInvocationDiscardReason =
   | "caller-timeout"
   | "malformed-frame"
   | "worker-unavailable"
+  | "result-control-unavailable"
   | "abandoned";
 
 /** Local lifecycle closure only. It proves neither Worker execution nor termination. */
@@ -793,7 +794,8 @@ export function discardCppCuteBrowserWorkerInvocation(
   reason: CppCuteBrowserWorkerInvocationDiscardReason,
 ): DiscardedCppCuteBrowserWorkerInvocation {
   if (![
-    "caller-cancelled", "caller-timeout", "malformed-frame", "worker-unavailable", "abandoned",
+    "caller-cancelled", "caller-timeout", "malformed-frame", "worker-unavailable",
+    "result-control-unavailable", "abandoned",
   ].includes(reason)) invalid("$.reason", "unknown invocation discard reason");
   beginTerminal(invocation);
   return Object.freeze({

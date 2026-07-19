@@ -1,6 +1,18 @@
 import {
+  inspectUnsharedPlainUint8Array,
+} from "./cpp_cute_aot_bytes.js";
+import {
   copyPreparedCppCuteBrowserInputFrameBytes,
 } from "./cpp_cute_browser_input_frame.js";
+import {
+  discardCppCuteBrowserEmscriptenFactory,
+  inspectCppCuteBrowserEmscriptenFactory,
+  prepareCppCuteBrowserEmscriptenFactory,
+  type PreparedCppCuteBrowserEmscriptenFactory,
+} from "./cpp_cute_browser_emscripten_factory.js";
+import {
+  CPP_CUTE_BROWSER_GENERATED_FACTORY,
+} from "./cpp_cute_browser_generated_factory.js";
 import {
   discardCppCuteBrowserWorkerInvocation,
   unwrapPreparedCppCuteBrowserWorkerInvocation,
@@ -15,6 +27,9 @@ import {
   type PreparedCppCuteBrowserVfsMount,
 } from "./cpp_cute_browser_vfs_session.js";
 import {
+  executeCppCuteBrowserWasmCompiler,
+} from "./cpp_cute_browser_wasm_compiler.js";
+import {
   takeCppCuteBrowserWorkerRealmInput,
   type PreparedCppCuteBrowserWorkerRealmInput,
 } from "./cpp_cute_browser_worker_transfer.js";
@@ -22,11 +37,10 @@ import {
 export const CPP_CUTE_BROWSER_WORKER_RUNTIME_PROTOCOL =
   "browsergrad.compiler.cpp-cute.package-worker-runtime@1";
 export const CPP_CUTE_BROWSER_WORKER_RUNTIME_BUNDLE_STATUS =
-  "blocked-missing-reviewed-first-build-projections-and-package-emscripten-factory";
+  "blocked-missing-self-contained-bundle-and-instrumented-result-control";
 export const CPP_CUTE_BROWSER_WORKER_RUNTIME_BLOCKERS = Object.freeze([
-  "missing-reviewed-first-build-wasm-projections",
   "missing-self-contained-package-worker-bundle-bytes",
-  "missing-package-owned-emscripten-factory-bytes",
+  "missing-instrumented-frontend-work-result-control",
 ] as const);
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
@@ -98,7 +112,7 @@ export interface CppCuteBrowserWorkerRuntimeResult {
 }
 
 export interface CppCuteBrowserWorkerRuntimeBindingInspection {
-  readonly state: "prepared" | "blocked-terminal" | "discarded";
+  readonly state: "prepared" | "execution-blocked-terminal" | "discarded";
   readonly invocationId: string;
   readonly inputFrameByteLength: number;
   readonly clangWasmByteLength: number;
@@ -107,7 +121,9 @@ export interface CppCuteBrowserWorkerRuntimeBindingInspection {
     "byte-copy-hash-wasm-object-inspection-and-authority-bookkeeping";
   readonly requiredWasmConstructionIntrinsicsAvailable: boolean;
   readonly networkAuthorityGranted: false;
-  readonly factoryInvoked: false;
+  readonly factoryInvoked: boolean;
+  readonly cAbiExecutionObserved: boolean;
+  readonly artifactVerificationObserved: false;
   readonly workerExecutionObserved: false;
   readonly loweringAuthorityMinted: false;
 }
@@ -116,6 +132,7 @@ export type CppCuteBrowserWorkerRuntimeErrorCode =
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-INVALID"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-MISMATCH"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CAPABILITY"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-EXECUTION"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-HASH-UNAVAILABLE"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CLEANUP"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-STATE"
@@ -142,9 +159,14 @@ interface ActiveRuntimeBinding {
 }
 
 interface StoredRuntimeBinding {
-  state: "prepared" | "blocked-terminal" | "discarded";
+  state: "prepared" | "execution-blocked-terminal" | "discarded";
   active: ActiveRuntimeBinding | null;
-  readonly inspection: Omit<CppCuteBrowserWorkerRuntimeBindingInspection, "state">;
+  readonly inspection: Omit<
+    CppCuteBrowserWorkerRuntimeBindingInspection,
+    "state" | "factoryInvoked" | "cAbiExecutionObserved"
+  >;
+  factoryInvoked: boolean;
+  cAbiExecutionObserved: boolean;
 }
 
 const RUNTIME_BINDINGS = new WeakMap<object, StoredRuntimeBinding>();
@@ -253,10 +275,12 @@ export async function prepareCppCuteBrowserWorkerRuntimeBinding(
         requiredWasmConstructionIntrinsicsAvailable: NATIVE_WASM_COMPILE !== undefined &&
           NATIVE_WASM_INSTANTIATE !== undefined && NATIVE_WASM_MEMORY !== undefined,
         networkAuthorityGranted: false,
-        factoryInvoked: false,
         workerExecutionObserved: false,
+        artifactVerificationObserved: false,
         loweringAuthorityMinted: false,
       }),
+      factoryInvoked: false,
+      cAbiExecutionObserved: false,
     });
     return prepared;
   } catch (cause) {
@@ -271,29 +295,109 @@ export async function prepareCppCuteBrowserWorkerRuntimeBinding(
   }
 }
 
-/**
- * Production runtime start remains deliberately unreachable until real,
- * internally pinned bundle/factory bytes and reviewed first-build projections
- * replace the blocker constants. No ambient resource-acquisition or
- * caller-supplied factory seam exists here.
+/** Executes the package-pinned factory and C ABI, then fails closed until the
+ * native producer exposes exact instrumented-work counters for result control.
  */
 export async function startCppCuteBrowserWorkerRuntime(
   binding: PreparedCppCuteBrowserWorkerRuntimeBinding,
 ): Promise<CppCuteBrowserWorkerRuntimeResult> {
   const stored = storedBinding(binding);
   if (stored.state !== "prepared" || stored.active === null) {
-    state("$.binding", "runtime binding already reached its terminal blocked state");
+    state("$.binding", "runtime binding already reached its terminal execution state");
   }
   const active = stored.active;
-  stored.state = "blocked-terminal";
+  stored.state = "execution-blocked-terminal";
   stored.active = null;
-  cleanupAdoptedRuntimeInput(active, undefined, "blocked start", "worker-unavailable");
-  capability(
-    "$.bundle",
-    "package Worker runtime is blocked: missing-reviewed-first-build-wasm-projections, " +
-      "missing-self-contained-package-worker-bundle-bytes, " +
-      "missing-package-owned-emscripten-factory-bytes",
+  let artifactBytes: Uint8Array | undefined;
+  let preparedFactory: PreparedCppCuteBrowserEmscriptenFactory | undefined;
+  try {
+    const invocationRecord = unwrapPreparedCppCuteBrowserWorkerInvocation(active.invocation);
+    preparedFactory = await prepareCppCuteBrowserEmscriptenFactory({
+      factory: CPP_CUTE_BROWSER_GENERATED_FACTORY,
+      clangWasmBytes: active.clangWasmBytes,
+      expectedWasmSha256: binding.clangWasmSha256,
+      expectedWasmByteLength: binding.clangWasmByteLength,
+      vfsMount: active.vfsMount,
+    });
+    stored.factoryInvoked = true;
+    const execution = executeCppCuteBrowserWasmCompiler({
+      factory: preparedFactory,
+      profile: invocationRecord.profile,
+      inputFrameBytes: active.inputFrameBytes,
+    });
+    artifactBytes = execution.artifactBytes;
+    let artifactByteLength: number;
+    try {
+      artifactByteLength = inspectUnsharedPlainUint8Array(artifactBytes).byteLength;
+    } catch (cause) {
+      invalid(
+        "$.runtime.execution.artifactBytes",
+        "local C ABI execution returned a non-plain or shared artifact view",
+        { cause },
+      );
+    }
+    if (execution.authority !== "wasm-c-abi-local-execution-only" ||
+        execution.profileHash !== binding.profileHash ||
+        execution.wasmSha256 !== binding.clangWasmSha256 ||
+        execution.wasmByteLength !== binding.clangWasmByteLength ||
+        execution.inputFrameByteLength !== binding.inputFrameByteLength ||
+        execution.resultByteLength !== artifactByteLength ||
+        execution.compileStatus.code !== 0 ||
+        execution.cAbiExecutionObserved !== true ||
+        execution.artifactVerificationObserved !== false ||
+        execution.workerExecutionObserved !== false ||
+        execution.loweringAuthorityMinted !== false) {
+      mismatch(
+        "$.runtime.execution",
+        "local C ABI execution projection differs from the exact runtime binding",
+      );
+    }
+    stored.cAbiExecutionObserved = true;
+  } catch (cause) {
+    const startCause = settlePreparedFactoryAfterFailedStart(preparedFactory, cause);
+    zeroBytes(artifactBytes);
+    cleanupAdoptedRuntimeInput(
+      active,
+      startCause,
+      "failed C ABI start",
+      "worker-unavailable",
+    );
+    executionFailure(
+      "$.runtime.execution",
+      "package-generated factory or exact C ABI execution failed",
+      startCause,
+    );
+  }
+  zeroBytes(artifactBytes);
+  cleanupAdoptedRuntimeInput(
+    active,
+    undefined,
+    "result-control blocked start",
+    "result-control-unavailable",
   );
+  capability(
+    "$.resultControl",
+    "package Worker C ABI executed, but result control is blocked until exact " +
+      "instrumented frontend-work counters are exported by the native producer",
+  );
+}
+
+function settlePreparedFactoryAfterFailedStart(
+  prepared: PreparedCppCuteBrowserEmscriptenFactory | undefined,
+  primaryCause: unknown,
+): unknown {
+  if (prepared === undefined) return primaryCause;
+  try {
+    if (inspectCppCuteBrowserEmscriptenFactory(prepared).state === "prepared") {
+      discardCppCuteBrowserEmscriptenFactory(prepared);
+    }
+    return primaryCause;
+  } catch (cause) {
+    return new NATIVE_AGGREGATE_ERROR(
+      [primaryCause, cause],
+      "package-generated factory cleanup failed after Worker runtime start failure",
+    );
+  }
 }
 
 /** Abandons a prepared runtime binding without attempting Worker execution. */
@@ -318,7 +422,9 @@ function cleanupAdoptedRuntimeInput(
 ): void {
   const cleanupCauses: unknown[] = [];
   try {
-    discardCppCuteBrowserVfsMount(active.vfsMount);
+    if (observeCppCuteBrowserVfsMount(active.vfsMount).state === "prepared") {
+      discardCppCuteBrowserVfsMount(active.vfsMount);
+    }
   } catch (cause) {
     cleanupCauses.push(cause);
   }
@@ -341,7 +447,8 @@ function cleanupAdoptedRuntimeInput(
   }
 }
 
-function zeroBytes(bytes: Uint8Array): void {
+function zeroBytes(bytes: Uint8Array | undefined): void {
+  if (bytes === undefined) return;
   try {
     NATIVE_REFLECT_APPLY(NATIVE_UINT8_ARRAY_FILL, bytes, [0]);
   } catch {
@@ -353,7 +460,12 @@ export function inspectCppCuteBrowserWorkerRuntimeBinding(
   binding: PreparedCppCuteBrowserWorkerRuntimeBinding,
 ): CppCuteBrowserWorkerRuntimeBindingInspection {
   const stored = storedBinding(binding);
-  return NATIVE_OBJECT_FREEZE({ state: stored.state, ...stored.inspection });
+  return NATIVE_OBJECT_FREEZE({
+    state: stored.state,
+    ...stored.inspection,
+    factoryInvoked: stored.factoryInvoked,
+    cAbiExecutionObserved: stored.cAbiExecutionObserved,
+  });
 }
 
 function capturedCopy(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
@@ -488,6 +600,15 @@ function mismatch(path: string, message: string): never {
 
 function capability(path: string, message: string): never {
   fail("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CAPABILITY", path, message);
+}
+
+function executionFailure(path: string, message: string, cause: unknown): never {
+  fail(
+    "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-EXECUTION",
+    path,
+    message,
+    { cause },
+  );
 }
 
 function cleanup(path: string, message: string, cause: AggregateError): never {

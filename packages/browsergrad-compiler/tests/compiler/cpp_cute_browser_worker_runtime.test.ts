@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 interface InvocationState {
   record: {
+    readonly profile: object;
     readonly rawWasmConformance: {
       readonly wasmSha256: string;
       readonly wasmByteLength: number;
@@ -30,6 +31,14 @@ interface MountState {
   importCalls: number;
   discardCalls: number;
   discardFailure: Error | undefined;
+  factoryFailure: Error | undefined;
+  executionFailure: Error | undefined;
+  factoryPrepareCalls: number;
+  executionCalls: number;
+  executionArtifactBytes: Uint8Array | undefined;
+  factoryState: "prepared" | "taken" | "discarded" | undefined;
+  preparedWasmSha256: string | undefined;
+  preparedWasmByteLength: number | undefined;
 }
 
 interface RealmInputRecord {
@@ -65,6 +74,7 @@ const authorities = vi.hoisted(() => ({
   frames: new WeakMap<object, FrameState>(),
   mounts: new WeakMap<object, MountState>(),
   realmInputs: new WeakMap<object, RealmInputState>(),
+  factoryBindings: new WeakMap<object, MountState>(),
 }));
 
 function authorityError(name: string, code: string, path: string, message: string): Error {
@@ -196,6 +206,91 @@ vi.mock("../../src/cpp_cute_browser_worker_transfer.js", () => ({
   },
 }));
 
+vi.mock("../../src/cpp_cute_browser_generated_factory.js", () => ({
+  CPP_CUTE_BROWSER_GENERATED_FACTORY: async function (): Promise<never> {
+    throw new Error("test generated factory must be consumed by the preparation mock");
+  },
+}));
+
+vi.mock("../../src/cpp_cute_browser_emscripten_factory.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../src/cpp_cute_browser_emscripten_factory.js")
+  >();
+  return {
+    ...actual,
+    prepareCppCuteBrowserEmscriptenFactory: async (input: {
+      readonly vfsMount: object;
+      readonly clangWasmBytes: Uint8Array;
+      readonly expectedWasmSha256: string;
+      readonly expectedWasmByteLength: number;
+    }) => {
+      const stored = authorities.mounts.get(input.vfsMount);
+      if (stored === undefined) throw new Error("unregistered factory test mount");
+      stored.factoryPrepareCalls += 1;
+      if (stored.factoryFailure !== undefined) throw stored.factoryFailure;
+      if (stored.state !== "prepared") throw new Error("factory test mount is not prepared");
+      stored.state = "bound";
+      const factory = Object.freeze({
+        wasmSha256: input.expectedWasmSha256,
+        wasmByteLength: input.expectedWasmByteLength,
+      });
+      stored.factoryState = "prepared";
+      stored.preparedWasmSha256 = input.expectedWasmSha256;
+      stored.preparedWasmByteLength = input.expectedWasmByteLength;
+      authorities.factoryBindings.set(factory, stored);
+      return factory;
+    },
+    inspectCppCuteBrowserEmscriptenFactory: (factory: object) => {
+      const stored = authorities.factoryBindings.get(factory);
+      if (stored === undefined || stored.factoryState === undefined) {
+        throw new Error("unregistered factory inspection");
+      }
+      return Object.freeze({ state: stored.factoryState });
+    },
+    discardCppCuteBrowserEmscriptenFactory: (factory: object) => {
+      const stored = authorities.factoryBindings.get(factory);
+      if (stored === undefined || stored.factoryState !== "prepared") {
+        throw new Error("test factory is not discardable");
+      }
+      stored.factoryState = "discarded";
+    },
+  };
+});
+
+vi.mock("../../src/cpp_cute_browser_wasm_compiler.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/cpp_cute_browser_wasm_compiler.js")>();
+  return {
+    ...actual,
+    executeCppCuteBrowserWasmCompiler: (input: {
+      readonly factory: object;
+      readonly inputFrameBytes: Uint8Array;
+    }) => {
+      const stored = authorities.factoryBindings.get(input.factory);
+      if (stored === undefined) throw new Error("unregistered execution test factory");
+      stored.executionCalls += 1;
+      if (stored.factoryState !== "prepared") throw new Error("test factory is not executable");
+      stored.factoryState = "taken";
+      if (stored.executionFailure !== undefined) throw stored.executionFailure;
+      const artifactBytes = Uint8Array.of(7, 8, 9, input.inputFrameBytes.byteLength);
+      stored.executionArtifactBytes = artifactBytes;
+      return Object.freeze({
+        authority: "wasm-c-abi-local-execution-only",
+        profileHash: stored.profileHash,
+        wasmSha256: stored.preparedWasmSha256,
+        wasmByteLength: stored.preparedWasmByteLength,
+        inputFrameByteLength: input.inputFrameBytes.byteLength,
+        resultByteLength: artifactBytes.byteLength,
+        compileStatus: Object.freeze({ code: 0, name: "artifact-ready" }),
+        artifactBytes,
+        cAbiExecutionObserved: true,
+        artifactVerificationObserved: false,
+        workerExecutionObserved: false,
+        loweringAuthorityMinted: false,
+      });
+    },
+  };
+});
+
 import {
   CPP_CUTE_BROWSER_WORKER_RUNTIME_BLOCKERS,
   CPP_CUTE_BROWSER_WORKER_RUNTIME_BUNDLE_STATUS,
@@ -250,6 +345,8 @@ interface RuntimeFixtureOptions {
   readonly adoptedImportsDiffer?: boolean;
   readonly discardFailure?: Error;
   readonly mountDiscardFailure?: Error;
+  readonly factoryFailure?: Error;
+  readonly executionFailure?: Error;
 }
 
 function bindingInput(fixture: RuntimeFixture): {
@@ -264,6 +361,7 @@ async function runtimeFixture(
   const actualClangWasmSha256 = await sha256Hex(CLANG_WASM_BYTES);
   const expectedClangWasmSha256 = options.expectedWasmSha256 ?? actualClangWasmSha256;
   const actualFrameSha256 = await sha256Hex(INPUT_FRAME_BYTES);
+  const activeProfileAuthority = Object.freeze({ profileHash: PROFILE_HASH });
   const invocation = Object.freeze({
     invocationId: INVOCATION_ID,
     requestId: REQUEST_ID,
@@ -289,6 +387,7 @@ async function runtimeFixture(
   }) as PreparedCppCuteBrowserVfsMount;
   const invocationState: InvocationState = {
     record: {
+      profile: activeProfileAuthority,
       rawWasmConformance: {
         wasmSha256: expectedClangWasmSha256,
         wasmByteLength: CLANG_WASM_BYTES.byteLength,
@@ -314,13 +413,21 @@ async function runtimeFixture(
     importCalls: 0,
     discardCalls: 0,
     discardFailure: options.mountDiscardFailure,
+    factoryFailure: options.factoryFailure,
+    executionFailure: options.executionFailure,
+    factoryPrepareCalls: 0,
+    executionCalls: 0,
+    executionArtifactBytes: undefined,
+    factoryState: undefined,
+    preparedWasmSha256: undefined,
+    preparedWasmByteLength: undefined,
   };
   const transferredClangWasmBytes = new Uint8Array(CLANG_WASM_BYTES);
   const adoptedImports = options.adoptedImportsDiffer
     ? Object.freeze({ ...vfsImports })
     : vfsImports;
   const active: RealmInputRecord = Object.freeze({
-    profile: Object.freeze({}),
+    profile: activeProfileAuthority,
     request: Object.freeze({}),
     vfsInstallation: Object.freeze({}),
     runtimeAbiAsset: Object.freeze({}),
@@ -420,6 +527,8 @@ describe("package-owned C++/CuTe Worker runtime boundary", () => {
       requiredWasmConstructionIntrinsicsAvailable: true,
       networkAuthorityGranted: false,
       factoryInvoked: false,
+      cAbiExecutionObserved: false,
+      artifactVerificationObserved: false,
       workerExecutionObserved: false,
       loweringAuthorityMinted: false,
     });
@@ -440,24 +549,32 @@ describe("package-owned C++/CuTe Worker runtime boundary", () => {
     expect(fixture.realmInputState).toMatchObject({ state: "adopted", takeCalls: 2 });
   });
 
-  it("fails start closed, terminalizes both adopted owners, and never claims execution", async () => {
+  it("executes the pinned C ABI, then fails closed before uninstrumented result control", async () => {
     const fixture = await runtimeFixture();
     const binding = await prepareCppCuteBrowserWorkerRuntimeBinding(bindingInput(fixture));
 
     await expect(startCppCuteBrowserWorkerRuntime(binding)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CAPABILITY",
-      path: "$.bundle",
+      path: "$.resultControl",
     });
-    expect(fixture.mountState).toMatchObject({ state: "discarded", discardCalls: 1 });
+    expect(fixture.mountState).toMatchObject({
+      state: "bound",
+      discardCalls: 0,
+      factoryPrepareCalls: 1,
+      executionCalls: 1,
+    });
     expect(fixture.invocationState).toMatchObject({
       active: false,
       discardCalls: 1,
-      discardReasons: ["worker-unavailable"],
+      discardReasons: ["result-control-unavailable"],
     });
     expect(fixture.transferredClangWasmBytes).toEqual(new Uint8Array(CLANG_WASM_BYTES.byteLength));
+    expect(fixture.mountState.executionArtifactBytes).toEqual(new Uint8Array(4));
     expect(inspectCppCuteBrowserWorkerRuntimeBinding(binding)).toMatchObject({
-      state: "blocked-terminal",
-      factoryInvoked: false,
+      state: "execution-blocked-terminal",
+      factoryInvoked: true,
+      cAbiExecutionObserved: true,
+      artifactVerificationObserved: false,
       workerExecutionObserved: false,
       loweringAuthorityMinted: false,
     });
@@ -467,10 +584,11 @@ describe("package-owned C++/CuTe Worker runtime boundary", () => {
     });
   });
 
-  it("settles both blocked-start owners and aggregates dual cleanup failures", async () => {
+  it("settles both pre-factory owners and aggregates dual cleanup failures", async () => {
     const fixture = await runtimeFixture({
       mountDiscardFailure: new Error("injected VFS mount discard failure"),
       discardFailure: new Error("injected invocation discard failure"),
+      factoryFailure: new Error("injected pre-factory preparation failure"),
     });
     const binding = await prepareCppCuteBrowserWorkerRuntimeBinding(bindingInput(fixture));
 
@@ -484,10 +602,43 @@ describe("package-owned C++/CuTe Worker runtime boundary", () => {
     if (!(observed instanceof Error) || !(observed.cause instanceof AggregateError)) {
       throw new Error("expected aggregate runtime cleanup failure");
     }
-    expect(observed.cause.errors).toHaveLength(2);
+    expect(observed.cause.errors).toHaveLength(3);
     expect(fixture.mountState).toMatchObject({ state: "discarded", discardCalls: 1 });
     expect(fixture.invocationState).toMatchObject({ active: false, discardCalls: 1 });
-    expect(inspectCppCuteBrowserWorkerRuntimeBinding(binding).state).toBe("blocked-terminal");
+    expect(inspectCppCuteBrowserWorkerRuntimeBinding(binding)).toMatchObject({
+      state: "execution-blocked-terminal",
+      factoryInvoked: false,
+      cAbiExecutionObserved: false,
+    });
+  });
+
+  it("records initialized-factory state without claiming a failed C ABI execution", async () => {
+    const fixture = await runtimeFixture({
+      executionFailure: new Error("injected local C ABI failure"),
+    });
+    const binding = await prepareCppCuteBrowserWorkerRuntimeBinding(bindingInput(fixture));
+
+    await expect(startCppCuteBrowserWorkerRuntime(binding)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-EXECUTION",
+      path: "$.runtime.execution",
+      cause: expect.objectContaining({ message: "injected local C ABI failure" }),
+    });
+    expect(fixture.mountState).toMatchObject({
+      state: "bound",
+      factoryPrepareCalls: 1,
+      executionCalls: 1,
+      discardCalls: 0,
+    });
+    expect(fixture.invocationState).toMatchObject({
+      active: false,
+      discardReasons: ["worker-unavailable"],
+    });
+    expect(inspectCppCuteBrowserWorkerRuntimeBinding(binding)).toMatchObject({
+      state: "execution-blocked-terminal",
+      factoryInvoked: true,
+      cAbiExecutionObserved: false,
+      workerExecutionObserved: false,
+    });
   });
 
   it("discards a prepared binding without attempting execution and rejects terminal reuse", async () => {

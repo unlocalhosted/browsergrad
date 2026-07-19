@@ -667,7 +667,7 @@ describe("C++/CuTe browser Worker transfer boundary", () => {
     );
   });
 
-  it("runs canonical transfer through the Worker entry and reports only typed blocked-start failure", async () => {
+  it("runs canonical transfer through the Worker entry and reports only typed package-execution failure", async () => {
     const taken = takeEnvironment();
     const transferredViews = messageByteViews(taken.message);
     const terminalMessages: CppCuteBrowserWorkerControllerInboundMessage[] = [];
@@ -685,8 +685,8 @@ describe("C++/CuTe browser Worker transfer boundary", () => {
       invocationId: INVOCATION_ID,
       invocationNonceSha256: NONCE,
       phase: "runtime-start",
-      failureCode: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CAPABILITY",
-      failurePath: "$.bundle",
+      failureCode: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-EXECUTION",
+      failurePath: "$.runtime.execution",
       workerExecutionObserved: false,
       loweringAuthorityMinted: false,
     }]);
