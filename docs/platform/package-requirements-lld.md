@@ -27,6 +27,19 @@ browser effects at module evaluation, composes only package-owned Worker bytes
 into a one-shot invocation, terminalizes every Worker/Blob/timer/listener
 effect before returning, and still mints no lowering authority.
 
+The header-pack harness now inventories the five complete locked source trees,
+binds them to the exact build lock and notice policy, and retains an opaque
+same-process authority that can reread every source byte immediately before
+materialization. The materializer writes only canonical BrowserGrad VFS packs
+into a private no-clobber tree, rereads and independently inspects the persisted
+bytes, and rejects symlinks, hardlinks, special files, mutations, and incomplete
+trees. All ten distribution notices already approved by the build lock are
+checked in as exact locked bytes and independently rehashed. This is packaging
+capability, not real-pack or license authority: the real upstream header trees
+have not yet been acquired and materialized, CUDA 12.6.3 plus the Linux sysroot
+still need distribution-policy closure, and an externally reviewed per-file
+license map remains mandatory.
+
 The original cold diagnostic run `29658164083` spent 97 minutes 5 seconds in
 isolated execution before failing closed at link. That result exposed two
 different costs that the harness had conflated: reusable LLVM/Clang
@@ -44,10 +57,11 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 381 tests across 34 files covering the build plan, runtime ABI,
+clean, then runs 394 tests across 37 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
-package invocation, Worker entry, and production controller. The current gate
-measured 25.26 seconds end to end on Node 25; its Vitest phase took 17.05
+package invocation, Worker entry, production controller, exact header-tree
+inventory/materialization, and distribution-notice verification. The current
+gate measured 28.36 seconds end to end on Node 25; its Vitest phase took 19.87
 seconds. Clean validation and two-build reproducibility still restore no cache
 and remain intentionally more expensive.
 
@@ -87,7 +101,10 @@ requires its canonical 1,678,025-byte report to match byte for byte before
 exposing a no-clobber factory candidate. The resulting factory SHA-256 is
 `796a548237420df7f5eca0c0260d3cbe752aeca155d9c7182c6ad0f5491dfb12`.
 The two-clean-build reproducibility run `29683677087` has been dispatched at
-`96ad7b16`; while active, it grants no reproducibility or release authority.
+`96ad7b16`. Its second independent job completed in 27 minutes 37 seconds,
+including a 24-minute-51-second locked build, while the first job remains
+active. An incomplete two-build lane grants no reproducibility or release
+authority.
 
 Every admitted build runs the independent production-scale raw-Wasm inspector
 and uploads its exact report. The original 98-function import surface contained
@@ -122,14 +139,16 @@ isolated build. Its 31,641,377-byte module has SHA-256
 `5fc425bbc051a2f5be588c2acbb164efb5e43f949afb48a373f3ed022c3b8758` and
 passes raw review with zero mismatches. The ABI 1.8 local fast gate passes 30
 files/338 tests in 24.7 seconds on Node 25; the later controller-complete gate
-passes 34 files/381 tests in 25.26 seconds.
+passed 34 files/381 tests in 25.26 seconds, and the current header-capable gate
+passes 37 files/394 tests in 28.36 seconds.
 
 The harness audit found strong isolation, exact-input closure, bounded logs,
 independent Wasm parsing, and separate authority tiers. It also records real
 maintenance debt: the JavaScript executor sits close to its line-count ratchet,
 native producer files remain large, and several semantic TypeScript modules are
-5,000 to 8,000 lines. Cold provisioning is still roughly 40 to 46 minutes and the
-cached link loop still spends about 29 seconds regenerating Emscripten system
+5,000 to 8,000 lines. Observed uncached locked builds now range from 24 minutes
+51 seconds to 45 minutes 37 seconds, while the cached link loop still spends
+about 29 seconds regenerating Emscripten system
 libraries. Current diagnostic cache selection excludes extractor CMake and
 final-link changes are reapplied by mandatory exact configuration, every
 BrowserGrad-owned object is invalidated, and generated flags are independently

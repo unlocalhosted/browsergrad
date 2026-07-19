@@ -86,9 +86,10 @@ pnpm --filter @unlocalhosted/browsergrad-compiler run verify:browser-clang-wasm:
 
 It builds once, runs the no-rebuild lock check, and exercises the build-plan,
 runtime-ABI, browser-profile, and browser-asset identity chain sequentially.
-At the current 2026-07-19 checkpoint it passes 381 tests across 34 files in
-25.26 seconds end to end on Node 25. The set includes package invocation,
-Worker entry, and production-controller lifecycle coverage.
+At the current 2026-07-19 checkpoint it passes 394 tests across 37 files in
+28.36 seconds end to end on Node 25. The set includes package invocation,
+Worker entry, production-controller lifecycle, exact header-tree
+inventory/materialization, and distribution-notice verification coverage.
 Use `test:browser-clang-wasm-build-plan` for the broader native/sanitizer
 pre-commit gate; its same-checkpoint run passed 187 tests with 9 intentional
 platform skips in 77.84 seconds. Do not run package entrypoints that clean
