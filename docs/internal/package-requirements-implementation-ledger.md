@@ -78,9 +78,9 @@ browser-local producer evidence or make Docker a product dependency.
 | Gate 2 view-family selection | `verified` | Selected typed JIT `PERMUTE` plus compiler L1 read binding and sibling L2 guarded materializing view copy. The full required matrix and strict exact-source WebGPU proof now pass; broader view families must add typed operation variants rather than reinterpret frozen plans. |
 | Gate 3 legacy CuTe motif freeze | `verified` | Existing transpose, GEMV, GEMM, affine-tile, flash-attention, and WGMMA/TMA source-spelling normalizers are explicitly frozen compatibility debt. Exact exception-file membership and source hashes are architecture-guarded; new motifs, replacement bodies, files, or call sites require an accepted architecture decision. | Delete these adapters after pinned resolved frontend artifacts cover their retained fixtures through shared semantics. | Architecture guard and two mutation tests. |
 | Gate 3 browser-local Clang-WASM producer | `partial` | Closed browser-local profile 2.6, producer-neutral request, Artifact V3, compilation contract 1.2, CUDA-pass authorities, exact ABI/semantic-adapter binding, raw-Wasm inspection, Worker frame/VFS contracts, canonical transfer, one-shot entry, and typed controller terminal protocol share one closed contract. C ABI 1.2 adds exact fail-closed frontend-work accounting. The Worker-local runtime adopts one reconstructed realm input, executes the pinned generated factory and C ABI, verifies runtime/frontend/VFS projections, and emits canonical control plus artifact bytes. The package now owns and verifies one deterministic 572,755-byte self-contained ES-module graph with no static or dynamic imports. | Add the captured production platform adapter and package-owned invocation composition; inspect the current rebuilt Wasm and licensed packs; then execute one unmodified browser-local fixture. | Exact bundle SHA-256 `669f20f8994f96e69c40d1437f5fb15efe5208732b327df4af9a886525b19e78`; fast 30 files/337 tests; real Chromium exact-byte Blob Worker smoke 1 file/2 tests; full compiler 74 files/1,467 tests; typecheck/lint/architecture green. The smoke proves module load and one-shot pre-identity rejection only. Zero valid production Worker launches or browser-local C++ executions. |
-| Gate 3 Clang-WASM build and distribution | `partial` | The lock pins the exact extractor closure, LLVM 22.1.8 archive, Emscripten image, four-step recipe, ABI, and distribution plan. Clean builds seal the exact Node runtime closure; cached diagnostics restore only untrusted content-addressed toolchain directories inside the isolated container and grant no clean/release authority. Every admitted build runs the bounded raw-Wasm reviewer. The two-build comparator now admits and compares that review sidecar instead of rejecting a workflow-produced output it did not know about. | Finish and review the active current-source clean build, then rerun the repaired two-job clean-build lane. Preserve ABI conformance as separate authority before Worker or distribution authority. | Current lock `bg.cpp.browser-build-input-lock.sha256.f0ea777bfa0601e65f5254c7201b208dbb7e33b76472d89fe86bda997d25702e`. Historical clean run `29674887505` succeeded in 39 minutes 29 seconds at `d631cc32`; current run `29678087663` is active. Failed reproducibility run `29676333678` exposed the sidecar allowlist defect fixed by `eda1ad9d`. No current-source clean/reproducibility, licensed distribution, authenticated provenance, Worker execution, or release authority yet. |
+| Gate 3 Clang-WASM build and distribution | `partial` | The lock pins the exact extractor closure, LLVM 22.1.8 archive, Emscripten image, four-step recipe, ABI, and distribution plan. Clean builds seal the exact Node runtime closure; cached diagnostics restore only untrusted content-addressed toolchain directories inside the isolated container and grant no clean/release authority. Every admitted build runs the bounded raw-Wasm reviewer. The configured-target reviewer now requires public source, generated binary, and private AST source include roots before compilation. The two-build comparator admits and compares the ABI review sidecar. | Prove the private-AST include repair in cached validation, then run and independently review one current-source clean build before rerunning the two-job clean-build lane. Preserve ABI conformance as separate authority before Worker or distribution authority. | Current lock `bg.cpp.browser-build-input-lock.sha256.27ee2aa9e9f7c533a61ffa1803f205f0eeda10101f33c008e08fff05507cdd03`. Historical clean run `29674887505` succeeded in 39 minutes 29 seconds at `d631cc32`. Current-source run `29678087663` failed after 46 minutes 25 seconds on missing private `ByteCode/Context.h`; it grants failure observation only. Failed reproducibility run `29676333678` exposed the sidecar allowlist defect fixed by `eda1ad9d`. No current-source clean/reproducibility, licensed distribution, authenticated provenance, Worker execution, or release authority yet. |
 | Gate 3 Worker-owned VFS session | `partial` | One exact unshared Wasm memory serves canonical source snapshots and verified pack ranges through the six runtime-ABI imports. VFS preparation is split into a memory-independent mount and one-time bind. Canonical transfer reconstructs exact manifest/assets/request/runtime-ABI/Wasm/invocation/frame authorities in the receiving realm, creates the mount there, and hands stable pre-bind imports to one runtime adoption. Buffers are uniquely owned, destructively transferred, capped before consumption, and cleared after downstream snapshots. The entry-to-runtime seam consumes this contract in integration tests; the real Chromium exact-bundle test deliberately stops at invalid pre-identity input because current-ABI Wasm/header packs and a production invocation issuer remain unreviewed. | Instantiate the reviewed current-ABI factory, bind only `instance.exports.memory`, and compare artifact `openedFileIds` with terminal VFS observations in a valid real-Worker compile. | Focused entry/transfer/runtime coverage is green; exact package-bundle Chromium smoke passes. No valid Worker compile, C++ execution, or semantic-contribution evidence. |
-| Gate 3 Wasm runtime and frontend-work metrics | `partial` | C ABI 1.2 retains the exact allocator record and adds a 96-byte generation-bound frontend-work record. Native callbacks count maximum include depth, macro expansions, post-expansion tokens, AST nodes, classic-interpreter constexpr steps, template instantiations/depth, and completed CUDA passes. Overflow or any profile ceiling fails closed before artifact readiness. The Worker-local reader admits the record only across exact idle/complete/reset lifecycle states and composes it with runtime/VFS observations into canonical result control. | Compile and inspect the current exact Emscripten output, then observe the records in the authenticated production Worker lifecycle. | Commit `20e851e3`; fast native/TypeScript gate 28 files/332 tests before the comparator regression case was added. Active clean run `29678087663`; no production Worker evidence yet. |
+| Gate 3 Wasm runtime and frontend-work metrics | `partial` | C ABI 1.2 retains the exact allocator record and adds a 96-byte generation-bound frontend-work record. Native callbacks count maximum include depth, macro expansions, post-expansion tokens, AST nodes, classic-interpreter constexpr steps, template instantiations/depth, and completed CUDA passes. Overflow or any profile ceiling fails closed before artifact readiness. The Worker-local reader admits the record only across exact idle/complete/reset lifecycle states and composes it with runtime/VFS observations into canonical result control. | Compile and inspect the current exact Emscripten output, then observe the records in the authenticated production Worker lifecycle. | Commit `20e851e3`; fast native/TypeScript gate 28 files/332 tests before the comparator regression case was added. Clean run `29678087663` failed before output on missing private Clang AST headers; no production Worker evidence yet. |
 | Gate 3 Worker invocation/result protocol | `partial` | Exact profile/asset/VFS/request/ABI/raw-Wasm identities bind one invocation. Host transfer remains single-reservation/single-materialization with no network authority. Worker-local result construction now re-verifies canonical Artifact V3 bytes, request binding, installed and actually opened VFS inputs, runtime memory, exact frontend work, emitted counts, VFS counters, and output length before encoding bounded canonical control. The entry transfers standalone control/artifact buffers. Caller validation remains `caller-frame-consistency-only`; production execution and lowering authority remain false until the host authenticates the exact bundled Worker lifecycle. | Deliberately enable the captured production platform adapter with the internally verified bundle only after current build review. | Commit `be703a05` plus the current exact-bundle slice; Worker controller/runtime/bundle focused 3 files/41 tests and real Chromium bundle smoke pass. No production issuer, valid browser Worker compile, or lowering authority exists. |
 | Gate 3 deterministic header-pack selection and assembly | `partial` | One opaque selection binds the exact prepared build lock and frontend profile to complete compiler-resource, libc++, CUDA, CuTe/CUTLASS, and Linux-sysroot inventories. Selection and content-set hashes use explicit closed canonical limits. Offline assembly rechecks exact unshared bytes immediately before hashing, writes and re-inspects the canonical VFS pack, and enforces aggregate asset ceilings plus a conservative byte-copy projection that includes retained outputs, source/index/canonical buffers, and the inspector's three full-pack copies. Policy is intentionally non-authoritative: exact notice bytes and externally reviewed per-file license mappings remain blockers; output, build, reproducibility, and release facts are false. | Acquire the pinned upstream inputs; verify exact notice bytes and an external file-license map; materialize and independently inspect all real packs; bind their observed output identities into the asset/build-provenance chain; then mount them only inside the package Worker. | Focused header/VFS 2 files/19 tests; strict typecheck/lint/architecture; independent final P0/P1 review; full compiler 59 files/1,316 tests; release package gate 19 Python and 35 Node security tests. No network, build, real pack, Worker, Docker, or browser execution occurred. |
 
@@ -3193,7 +3193,7 @@ whether any files may be left partially changed.
   5,000 to 8,000 lines. These are decomposition/cache tasks, not reasons to
   collapse diagnostic, clean, reproducibility, Worker, or release authority.
 
-### 2026-07-19 — Exact frontend work, canonical Worker results, and current clean proof
+### 2026-07-19 — Exact frontend work, canonical Worker results, and current clean attempt
 
 - `20e851e3` advances C ABI 1.2 with one exact 96-byte frontend-work record.
   The native producer measures include, preprocessing, AST, constexpr,
@@ -3217,8 +3217,12 @@ whether any files may be left partially changed.
   authoring, and architecture checks pass on Node 25.
 - Historical clean run `29674887505` completed in 39 minutes 29 seconds, with a
   36-minute-25-second locked build step, but predates the current ABI.
-  Current-source clean run `29678087663` is active and is not evidence until it
-  terminates successfully.
+  Current-source clean run `29678087663` failed after 46 minutes 25 seconds.
+  CMake generated patched upstream `ExprConstant.cpp` into the binary tree, so
+  its relative private include `ByteCode/Context.h` no longer resolved without
+  an explicit `clang/lib/AST` include. The failure record points to
+  `$.steps[3]`; no factory, Wasm, ABI review, clean, or release authority was
+  produced.
 - Reproducibility run `29676333678` completed both clean builds but failed its
   final exact-tree check because each build correctly contained the new
   `clang-wasm-runtime-abi-review.v1.json` sidecar while the comparator still
@@ -3251,6 +3255,25 @@ whether any files may be left partially changed.
   platform adapter plus package-owned invocation composition; caller-supplied
   profile or module bytes cannot authorize code.
 
+### 2026-07-19 — Private Clang include preflight
+
+- The external extractor target now resolves and attaches the exact
+  `clang/lib/AST` source directory needed by the generated patched
+  `ExprConstant.cpp`. It still retains Clang's public source and generated
+  binary include roots.
+- Configured-target review independently requires all three canonical include
+  roots in generated `CXX_INCLUDES` before the expensive extractor build. Its
+  fixture omits each root in turn, and executor fixtures must model the same
+  generated topology.
+- The reviewed build-input lock advances to
+  `bg.cpp.browser-build-input-lock.sha256.27ee2aa9e9f7c533a61ffa1803f205f0eeda10101f33c008e08fff05507cdd03`.
+  This is input-selection authority only; a cached validation and then a clean
+  build are still required.
+- The canonical Node 25 fast gate passes 30 files/338 tests in 28.86 seconds;
+  full compiler coverage passes 74 files/1,467 tests. Typecheck, source lint,
+  architecture ratchets, exact Worker-bundle authoring, and build-lock
+  authoring are green.
+
 ## Quick Resume Checklist
 
 1. Read this ledger, then the relevant gate and exit criteria in the normative
@@ -3264,13 +3287,15 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Finish clean validation `29678087663` without a restored diagnostic cache and inspect its
-factory, Wasm, link map, allocator call closure, and raw ABI projection. After
-one reviewed clean build succeeds, dispatch the two-clean-build workflow at the
-same exact `main`. Reproducibility applies only to extractor outputs until the
-complete deterministic distribution closure is assembled. External signed
-provenance and exact notice/license review remain separate authorities; cached
-exact ABI conformance does not substitute for clean or reproducibility evidence.
+Run cached validation first to prove the generated private-AST include topology
+and current extractor link without paying another clean-build cycle. If it
+succeeds, run one cache-free clean validation and inspect its factory, Wasm,
+link map, allocator call closure, and raw ABI projection. Only after that review
+should the two-clean-build workflow run at the same exact `main`.
+Reproducibility applies only to extractor outputs until the complete
+deterministic distribution closure is assembled. External signed provenance
+and exact notice/license review remain separate authorities; cached exact ABI
+conformance does not substitute for clean or reproducibility evidence.
 
 Wire the captured production platform adapter and package-owned invocation
 composition to the exact verified Worker bundle. The Worker must instantiate

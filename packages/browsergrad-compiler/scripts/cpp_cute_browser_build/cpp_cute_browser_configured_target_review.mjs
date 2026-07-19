@@ -103,6 +103,11 @@ export async function reviewCppCuteBrowserConfiguredTarget(input) {
     join(wasmBuildRoot, "tools", "clang", "include"),
     "$.compileFlags.CXX_INCLUDES",
   );
+  requireIncludeDirectory(
+    cxxIncludes,
+    join(llvmProjectSourceRoot, "clang", "lib", "AST"),
+    "$.compileFlags.CXX_INCLUDES",
+  );
 
   const linkLine = exactNonemptyLine(linkCommand.text, "$.linkCommand");
   requireFlag(linkLine, REQUIRED_EXCEPTION_FLAG, "$.linkCommand", "-fexceptions");

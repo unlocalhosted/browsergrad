@@ -154,9 +154,13 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect(cmake).toContain('SUFFIX ".mjs"');
     expect(cmake).not.toContain('SUFFIX ".wasm"');
     expect(cmake).toContain('"${LLVM_MAIN_SRC_DIR}/../clang/include"');
+    expect(cmake).toContain('"${LLVM_MAIN_SRC_DIR}/../clang/lib/AST"');
     expect(cmake).toContain('"${LLVM_BINARY_DIR}/tools/clang/include"');
     expect(cmake).toContain(
       'file(REAL_PATH "${BROWSERGRAD_CLANG_SOURCE_INCLUDE_CANDIDATE}"',
+    );
+    expect(cmake).toContain(
+      'file(REAL_PATH "${BROWSERGRAD_CLANG_AST_SOURCE_INCLUDE_CANDIDATE}"',
     );
     expect(cmake).toContain(
       'file(REAL_PATH "${BROWSERGRAD_CLANG_BINARY_INCLUDE_CANDIDATE}"',

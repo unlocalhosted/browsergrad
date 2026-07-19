@@ -176,9 +176,11 @@ vi.mock("./cpp_cute_browser_build_executor_process.mjs", async (importOriginal) 
               join(targetDirectory, "flags.make"),
               [
                 executorProcessState.missingClangInclude
-                  ? `CXX_INCLUDES = -I${join(buildRoot, "tools", "clang", "include")}`
+                  ? `CXX_INCLUDES = -I${join(buildRoot, "tools", "clang", "include")} ` +
+                    `-I${join(llvmProjectSourceRoot, "clang", "lib", "AST")}`
                   : `CXX_INCLUDES = -I${join(buildRoot, "tools", "clang", "include")} ` +
-                    `-I${join(llvmProjectSourceRoot, "clang", "include")}`,
+                    `-I${join(llvmProjectSourceRoot, "clang", "include")} ` +
+                    `-I${join(llvmProjectSourceRoot, "clang", "lib", "AST")}`,
                 executorProcessState.invalidConfiguredTarget
                   ? "CXX_FLAGS = -O3 -fno-exceptions -DNDEBUG"
                   : "CXX_FLAGS = -O3 -fexceptions -DNDEBUG",

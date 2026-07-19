@@ -53,8 +53,14 @@ The first successful uncached clean validation, run `29674887505`, completed in
 Its locked build step took 36 minutes 25 seconds and produced the same
 31,307,826-byte exact-interface-conforming module as the reviewed diagnostic
 lane. This historical clean evidence predates the current ABI 1.2 frontend-work
-record, so run `29678087663` is re-proving current source and is not evidence
-until it completes. Reproducibility run `29676333678` completed both clean
+record. Current-source clean run `29678087663` failed after 46 minutes 25
+seconds because the generated patched `ExprConstant.cpp` retained its upstream
+relative include of `ByteCode/Context.h`, while the external extractor target
+did not include Clang's private `clang/lib/AST` source directory. It produced
+only failure observation at `$.steps[3]` and grants no output, ABI, clean,
+reproducibility, or release authority. The target now attaches the canonical
+private AST directory, and configured-target review requires that exact include
+before compilation. Reproducibility run `29676333678` completed both clean
 builds but its final comparator rejected the newly added per-build ABI-review
 sidecar as undeclared. Commit `eda1ad9d` closes that harness defect by admitting,
 binding, and comparing the canonical sidecar; no reproducibility authority is
@@ -91,7 +97,10 @@ source-only seams MUST avoid unnecessary translation-unit churn. Local
 entrypoints that clean `dist` are not safe to run concurrently in one worktree;
 the canonical sequential fast command avoids that race. The expanded fast gate
 also prevents runtime-ABI/profile/asset fixture drift, while the native gate
-retains platform-libc signature coverage. These are explicit follow-on
+retains platform-libc signature coverage. Generated upstream source compiled
+from a different directory MUST have every private relative-include root
+represented in the CMake target and independently required by configured-target
+review; the `clang/lib/AST` regression is the first enforced instance. These are explicit follow-on
 optimization and decomposition tasks; they do not weaken the current
 fail-closed boundary or turn cached diagnostics into release evidence.
 

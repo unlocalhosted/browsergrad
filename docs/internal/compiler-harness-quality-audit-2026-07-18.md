@@ -39,6 +39,17 @@ is now authored twice, hash-pinned, checked in the fast gate, and loaded from
 verified Blob bytes in Chromium. Production Worker execution, current-ABI clean
 proof, licensed header packs, and two-build reproducibility remain open.
 
+The next current-source clean run exposed one quality hole rather than closing
+that proof. Run `29678087663` failed after 46 minutes 25 seconds because a
+patched upstream Clang source generated into the build tree retained the
+private relative include `ByteCode/Context.h`, but the external target carried
+only Clang's public source and generated include roots. The target now adds the
+canonical private `clang/lib/AST` root, and the generated-flags review requires
+all three roots before compilation. This exact regression is therefore moved
+from a late clean-build failure to the configuration boundary. The failed run
+grants no output, ABI, clean, reproducibility, or release authority.
+The expanded gate now passes 30 files/338 tests in 28.86 seconds on Node 25.
+
 ## Why feedback was slow
 
 The locked recipe originally performed a clean LLVM/Clang 22.1.8 build with
@@ -199,10 +210,11 @@ build to discover.
     architecture checks, ordinary test suites, compiler typecheck and lint, and
     the Node-only Docker-shell contract. Exact Clang and sanitizer semantics
     remain in the separately locked Node 24 lane.
-15. The LLVM external target explicitly binds Clang's source and generated
-    include roots and depends on Clang's generated-header targets. Missing
-    include wiring now fails configured-target review before the expensive Wasm
-    compile instead of after the selected Clang libraries have built.
+15. The LLVM external target explicitly binds Clang's public source, generated
+    binary, and private AST source include roots and depends on Clang's
+    generated-header targets. Missing include wiring now fails
+    configured-target review before the expensive Wasm compile instead of after
+    the selected Clang libraries have built.
 16. The four largest compiler-core modules, build executor, native compile
     session, and artifact writer have exact file-specific line ratchets.
     Duplicate, invalid, or stale ratchet entries fail closed.
