@@ -154,6 +154,17 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(buildJob).not.toContain("needs: verification-boundary");
   });
 
+  it("does not queue fast feedback behind independent clean evidence modes", () => {
+    expect(workflow).toContain(
+      "group: clang-wasm-build-${{ github.ref }}-${{ inputs.mode }}",
+    );
+    expect(workflow).toContain(
+      "cancel-in-progress: ${{ inputs.mode == 'fast-validation' }}",
+    );
+    expect(workflow).not.toContain("group: clang-wasm-build-${{ github.ref }}\n");
+    expect(workflow).not.toContain("cancel-in-progress: false");
+  });
+
   it("pins every third-party workflow action to a full commit", () => {
     const actionLines = workflow.split("\n").filter((line) => line.includes("uses:"));
     expect(actionLines.length).toBeGreaterThan(0);

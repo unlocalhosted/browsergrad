@@ -17,8 +17,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: clang-wasm-build-${{ github.ref }}
-  cancel-in-progress: false
+  group: clang-wasm-build-${{ github.ref }}-${{ inputs.mode }}
+  cancel-in-progress: ${{ inputs.mode == 'fast-validation' }}
 
 jobs:
   verification-boundary:
