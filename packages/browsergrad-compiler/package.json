@@ -108,7 +108,7 @@
     "audit:corpus": "node ../../scripts/run-cuda-lite-tool.mjs audit:corpus",
     "audit:real-world-cuda": "node ../../scripts/run-cuda-lite-tool.mjs audit:real-world-cuda",
     "verify:real-world-cuda": "node ../../scripts/run-cuda-lite-tool.mjs verify:real-world-cuda",
-    "verify:compiler": "pnpm --dir ../.. run architecture:check && pnpm --dir ../.. --filter @unlocalhosted/browsergrad-kernels run build && pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test:aot-docker-shell:run && pnpm run test:browser-clang-wasm-build-plan:run && pnpm run test && pnpm run architecture:check && pnpm run test:synthetic-input:run && pnpm run test:source-normalizer && pnpm run test:webgpu-fixtures && pnpm run test:test-scope && pnpm run test:bugbash-status && pnpm run test:verify-real-world-cli && pnpm run test:tool-lock && pnpm run test:audit-corpus:run",
+    "verify:compiler": "node scripts/verify_compiler.mjs",
     "audit:cuda-120": "node ../../scripts/run-cuda-lite-tool.mjs audit:cuda-120",
     "test:watch": "vitest",
     "test:browser": "vitest run --config vitest.browser.config.ts",
