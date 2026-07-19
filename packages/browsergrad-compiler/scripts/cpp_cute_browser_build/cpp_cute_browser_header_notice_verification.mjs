@@ -20,13 +20,6 @@ const SCRIPT_ROOT = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(SCRIPT_ROOT, "..", "..");
 const DEFAULT_RESOURCE_ROOT = join(PACKAGE_ROOT, "src", "resources", "licenses");
 const MAX_NOTICE_BYTES = 64 * 1024;
-const HEADER_ASSETS = Object.freeze([
-  "compiler-resource-pack",
-  "dependency-header-pack:cuda",
-  "dependency-header-pack:cutlass",
-  "dependency-header-pack:cxx-stdlib",
-  "dependency-header-pack:linux-sysroot",
-]);
 const VERIFIED_NOTICES = new WeakSet();
 
 export class CppCuteBrowserHeaderNoticeVerificationError extends Error {
@@ -39,9 +32,9 @@ export class CppCuteBrowserHeaderNoticeVerificationError extends Error {
 }
 
 /**
- * Verifies package-owned bytes for every currently approved header-pack
- * notice. CUDA and Linux-sysroot review remain explicit unresolved blockers;
- * this authority cannot approve distribution or release.
+ * Verifies package-owned bytes for every approved notice required by the
+ * header-pack distribution closure. CUDA and Linux-sysroot review remain
+ * explicit unresolved blockers; this cannot approve distribution or release.
  */
 export async function verifyCppCuteBrowserHeaderPackNotices(input = {}) {
   const fields = exactObject(input, ["resourceRoot"], "$.input", true);
@@ -55,11 +48,9 @@ export async function verifyCppCuteBrowserHeaderPackNotices(input = {}) {
     cppCuteBrowserBuildInputLockResourceBytes(),
   );
   const body = unwrapPreparedCppCuteBrowserBuildInputLock(buildInputLock).lock.body;
-  const approved = body.notices.approvedComponents
-    .filter((notice) => notice.appliesTo.some((asset) => HEADER_ASSETS.includes(asset)))
+  const approved = [...body.notices.approvedComponents]
     .sort((left, right) => compareUtf8(left.componentId, right.componentId));
-  const unresolved = body.notices.unresolvedComponents
-    .filter((notice) => HEADER_ASSETS.includes(notice.intendedAsset))
+  const unresolved = [...body.notices.unresolvedComponents]
     .sort((left, right) => compareUtf8(left.componentId, right.componentId));
   if (approved.length === 0 || unresolved.length === 0) {
     invalid("$.buildInputLock.notices", "current header notice policy lost approved or unresolved components");
@@ -107,7 +98,7 @@ export async function verifyCppCuteBrowserHeaderPackNotices(input = {}) {
       disposition: notice.disposition,
     }))),
     claims: Object.freeze({
-      exactApprovedHeaderNoticeBytesVerified: true,
+      exactApprovedDistributionNoticeBytesVerified: true,
       unresolvedHeaderNoticeComponentCount: unresolved.length,
       allHeaderNoticesResolved: false,
       externalDistributedFileLicenseMapReviewed: false,

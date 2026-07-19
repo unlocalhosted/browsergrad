@@ -25,7 +25,18 @@ const TEST_ROOTS: string[] = [];
 const SCRIPT_ROOT = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(SCRIPT_ROOT, "..", "..");
 const RESOURCE_ROOT = join(PACKAGE_ROOT, "src", "resources", "licenses");
-const NOTICE_NAMES = ["clang.LICENSE.txt", "cutlass.LICENSE.txt", "libcxx.LICENSE.txt"];
+const NOTICE_NAMES = [
+  "browsergrad-compiler.LICENSE",
+  "clang.LICENSE.txt",
+  "compiler-rt.LICENSE.txt",
+  "cutlass.LICENSE.txt",
+  "emscripten-musl.COPYRIGHT",
+  "emscripten.LICENSE",
+  "libcxx.LICENSE.txt",
+  "libcxxabi.LICENSE.txt",
+  "libunwind.LICENSE.txt",
+  "llvm.LICENSE.txt",
+];
 
 afterEach(async () => {
   await Promise.all(TEST_ROOTS.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -39,7 +50,7 @@ describe("browser header-pack approved notice bytes", () => {
       version: 1,
       authority: "approved-header-notice-byte-verification-only",
       claims: {
-        exactApprovedHeaderNoticeBytesVerified: true,
+        exactApprovedDistributionNoticeBytesVerified: true,
         unresolvedHeaderNoticeComponentCount: 2,
         allHeaderNoticesResolved: false,
         externalDistributedFileLicenseMapReviewed: false,
@@ -48,15 +59,22 @@ describe("browser header-pack approved notice bytes", () => {
         releaseReady: false,
       },
     });
-    expect(evidence.notices.map((notice) => [
-      notice.componentId,
-      notice.noticeSha256,
-      notice.noticeByteLength,
-    ])).toEqual([
-      ["clang", "ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47", "15140"],
-      ["cutlass", "42fec630f410aa308f70a51a89fadcd19586fa620f9831a32bee528a9a10000e", "1547"],
-      ["libcxx", "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b", "16703"],
+    expect(evidence.notices.map((notice) => notice.componentId)).toEqual([
+      "browsergrad-compiler",
+      "clang",
+      "compiler-rt",
+      "cutlass",
+      "emscripten",
+      "emscripten-musl",
+      "libcxx",
+      "libcxxabi",
+      "libunwind",
+      "llvm",
     ]);
+    expect(evidence.notices.find((notice) => notice.componentId === "clang")).toMatchObject({
+      noticeSha256: "ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47",
+      noticeByteLength: "15140",
+    });
     expect(evidence.unresolvedNotices.map((notice) => notice.componentId)).toEqual([
       "cuda-toolkit-12.6.3-headers",
       "linux-sysroot",
@@ -70,7 +88,7 @@ describe("browser header-pack approved notice bytes", () => {
   it("re-verifies an independently copied exact resource set", async () => {
     const root = await resourceFixture("copy");
     const evidence = await verifyCppCuteBrowserHeaderPackNotices({ resourceRoot: root });
-    expect(evidence.notices).toHaveLength(3);
+    expect(evidence.notices).toHaveLength(10);
   });
 
   it("rejects modified, linked, or additional resources", async () => {

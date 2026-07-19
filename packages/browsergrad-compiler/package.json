@@ -63,7 +63,7 @@
     "admit:browser-clang-wasm-clean": "node scripts/cpp_cute_browser_build/cpp_cute_browser_clean_build_admission.mjs",
     "author:browser-header-pack-inventory": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_pack_inventory.mjs",
     "materialize:browser-header-packs": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_pack_materialization.mjs",
-    "verify:browser-header-pack-notices": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_notice_verification.mjs",
+    "verify:browser-distribution-notices": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_notice_verification.mjs",
     "author:browser-clang-wasm-build-lock": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_build_lock_authoring.mjs",
     "check:browser-clang-wasm-build-lock": "pnpm run build && pnpm run check:browser-clang-wasm-build-lock:run",
     "check:browser-clang-wasm-build-lock:run": "node scripts/cpp_cute_browser_build/cpp_cute_browser_build_lock_authoring.mjs --check",

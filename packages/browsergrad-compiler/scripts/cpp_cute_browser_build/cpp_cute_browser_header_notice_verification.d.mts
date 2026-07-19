@@ -33,7 +33,7 @@ export interface CppCuteBrowserHeaderNoticeVerification {
     disposition: "blocks-release";
   }>[];
   readonly claims: Readonly<{
-    exactApprovedHeaderNoticeBytesVerified: true;
+    exactApprovedDistributionNoticeBytesVerified: true;
     unresolvedHeaderNoticeComponentCount: number;
     allHeaderNoticesResolved: false;
     externalDistributedFileLicenseMapReviewed: false;
