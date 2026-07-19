@@ -86,10 +86,12 @@ traced to the generated Emscripten factory's same bounded stack-save,
 table-dispatch, Emscripten-exception-only catch, stack-restore, and `setThrew`
 bridge; none adds ambient authority. Runtime ABI 1.8 now pins all 66 generated
 imports and the exact table projection. Detached local review of the same raw
-Wasm reports zero mismatches and exact interface conformance. Because the
-extractor embeds the ABI resource SHA, one new cached validation must still
-compile the repinned source before a cache-free clean proof can start. The
-repinned 30-file/338-test fast gate completes in 24.7 seconds on Node 25.
+Wasm reports zero mismatches and exact interface conformance. Exact-source run
+`29681607575` then rebuilt the repinned source successfully in 5 minutes: the
+isolated build took 3 minutes 19 seconds, the primary cache hit exactly, and
+raw review reported zero mismatches. It produced a 31,641,377-byte module with
+SHA-256 `5fc425bbc051a2f5be588c2acbb164efb5e43f949afb48a373f3ed022c3b8758`.
+The repinned 30-file/338-test local gate completes in 24.7 seconds on Node 25.
 
 ## Why feedback was slow
 

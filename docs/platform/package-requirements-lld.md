@@ -102,9 +102,12 @@ signatures and table growth from 14,549 to 15,166 entries. Review of the exact
 generated factory confirmed the additions remain bounded exception-control-flow
 bridges without ambient capabilities. Runtime ABI 1.8 now hash-pins the 66
 generated imports and table projection; local detached review of those exact
-Wasm bytes passes with zero mismatches. A new cached build is still required
-because the extractor source embeds the repinned ABI resource SHA. The ABI 1.8
-local fast gate passes 30 files/338 tests in 24.7 seconds on Node 25.
+Wasm bytes passes with zero mismatches. Exact-source run `29681607575` then
+rebuilt the repinned source in 5 minutes, including 3 minutes 19 seconds for the
+isolated build. Its 31,641,377-byte module has SHA-256
+`5fc425bbc051a2f5be588c2acbb164efb5e43f949afb48a373f3ed022c3b8758` and
+passes raw review with zero mismatches. The ABI 1.8 local fast gate passes 30
+files/338 tests in 24.7 seconds on Node 25.
 
 The harness audit found strong isolation, exact-input closure, bounded logs,
 independent Wasm parsing, and separate authority tiers. It also records real
