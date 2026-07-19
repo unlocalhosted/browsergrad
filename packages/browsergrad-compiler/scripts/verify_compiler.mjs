@@ -208,7 +208,11 @@ export async function executeVerifyCompilerPlan(plan, options = {}) {
           });
       options.onEvent?.(Object.freeze({ type: "command-fail", phase, laneId, commandId: command.id }));
       stop(failure);
-      throw failure;
+      // Preserve the first terminal cause. In particular, an external abort can
+      // arrive while an active process is still settling its cancellation; the
+      // process boundary then rejects with its own cancelled-command error.
+      // That settlement error must not replace the signal that initiated it.
+      throw firstFailure ?? failure;
     }
   };
 

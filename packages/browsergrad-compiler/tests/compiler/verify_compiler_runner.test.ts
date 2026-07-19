@@ -1,8 +1,13 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
   VerifyCompilerSignalError,
   createVerifyCompilerPlan,
+  executeVerifyCompilerCommand,
   executeVerifyCompilerPlan,
   validateVerifyCompilerPlan,
 } from "../../scripts/verify_compiler.mjs";
@@ -158,6 +163,94 @@ describe("verify:compiler bounded runner", () => {
     ]);
   });
 
+  it("preserves external termination identity while a serial prerequisite settles", async () => {
+    const controller = new AbortController();
+    const termination = new VerifyCompilerSignalError("SIGTERM");
+    const started: string[] = [];
+    let cancellationSettled = false;
+
+    const execution = executeVerifyCompilerPlan(createVerifyCompilerPlan(), {
+      signal: controller.signal,
+      executeCommand: async (command, { signal }) => {
+        started.push(command.id);
+        await new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            queueMicrotask(() => {
+              cancellationSettled = true;
+              reject(new Error("executor cancellation settled"));
+            });
+          }, { once: true });
+          queueMicrotask(() => controller.abort(termination));
+        });
+      },
+    });
+
+    await expect(execution).rejects.toBe(termination);
+    expect(cancellationSettled).toBe(true);
+    expect(started).toEqual(["root-architecture"]);
+  });
+
+  it("waits for prerequisite process-group settlement before reporting external termination", async () => {
+    const root = await mkdtemp(join(tmpdir(), "browsergrad-verify-prerequisite-"));
+    const readyPath = join(root, "ready");
+    const settledPath = join(root, "settled");
+    const controller = new AbortController();
+    const termination = new VerifyCompilerSignalError("SIGTERM");
+    const plan = mutablePlan();
+    plan.prerequisites[0] = {
+      id: "root-architecture",
+      executable: process.execPath,
+      arguments: [
+        "-e",
+        [
+          "const fs = require('node:fs')",
+          "process.on('SIGTERM', () => {",
+          "  fs.writeFileSync(process.argv[2], 'settled')",
+          "  process.exit(0)",
+          "})",
+          "fs.writeFileSync(process.argv[1], 'ready')",
+          "setInterval(() => {}, 1000)",
+        ].join(";"),
+        readyPath,
+        settledPath,
+      ],
+    };
+
+    const execution = executeVerifyCompilerPlan(plan as unknown as Plan, {
+      signal: controller.signal,
+      executeCommand: executeVerifyCompilerCommand,
+    });
+    try {
+      await waitForFile(readyPath);
+      controller.abort(termination);
+      await expect(execution).rejects.toBe(termination);
+      await expect(readFile(settledPath, "utf8")).resolves.toBe("settled");
+    } finally {
+      if (!controller.signal.aborted) controller.abort(termination);
+      await execution.catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not mask a genuine serial prerequisite failure", async () => {
+    const injected = new Error("injected root architecture failure");
+    const started: string[] = [];
+
+    const execution = executeVerifyCompilerPlan(createVerifyCompilerPlan(), {
+      executeCommand: async (command) => {
+        started.push(command.id);
+        throw injected;
+      },
+    });
+
+    await expect(execution).rejects.toMatchObject({
+      name: "VerifyCompilerCommandError",
+      commandId: "root-architecture",
+      cause: injected,
+    });
+    expect(started).toEqual(["root-architecture"]);
+  });
+
   it("relays external termination to all active command boundaries", async () => {
     const controller = new AbortController();
     const started: string[] = [];
@@ -196,6 +289,20 @@ function allCommands(plan: Plan): Command[] {
 
 function invocation(command: Command): string {
   return ["pnpm", ...command.arguments].join(" ");
+}
+
+async function waitForFile(path: string): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    try {
+      await readFile(path);
+      return;
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for ${path}`);
 }
 
 function mutablePlan(): {
