@@ -3,6 +3,7 @@
 #include "BrowserGradCppCuteArtifactWriter.h"
 #include "BrowserGradCppCuteCompilePlan.h"
 #include "BrowserGradCppCuteCompileSession.h"
+#include "BrowserGradCppCuteMetrics.h"
 #include "BrowserGradCppCuteProducer.h"
 
 namespace browsergrad::cpp_cute {
@@ -111,9 +112,39 @@ ArtifactV3CompileResult build_artifact_v3(
             ReviewOnlyBlocker::kCudaDualPassUnavailable};
   }
 
+  const FrontendWorkLimitsV1 frontend_limits{
+      decoded.session->maximum_include_depth(),
+      decoded.session->maximum_macro_expansions(),
+      decoded.session->maximum_preprocessed_tokens(),
+      decoded.session->maximum_ast_nodes(),
+      decoded.session->maximum_constexpr_steps(),
+      decoded.session->maximum_template_instantiations(),
+      decoded.session->maximum_template_depth(),
+  };
+  if (!begin_frontend_work_invocation(frontend_limits)) {
+    return {WireCompileStatus::kInternalError,
+            ReviewOnlyBlocker::kCudaDualPassUnavailable};
+  }
+
   const ProducerReviewResult producer =
       run_cpp_cute_producer_review(*prepared.plan, *decoded.session);
-  return result_for_producer(producer, *decoded.session, result_sink);
+  if (producer.status == ProducerReviewStatus::kResourceLimit) {
+    fail_frontend_work_invocation();
+    return {WireCompileStatus::kResourceLimit,
+            ReviewOnlyBlocker::kCudaDualPassUnavailable};
+  }
+  if (producer.completed_pass_count == 0U ||
+      !complete_frontend_work_invocation(producer.completed_pass_count)) {
+    fail_frontend_work_invocation();
+    return {WireCompileStatus::kInternalError,
+            ReviewOnlyBlocker::kCudaDualPassUnavailable};
+  }
+  ArtifactV3CompileResult result =
+      result_for_producer(producer, *decoded.session, result_sink);
+  if (result.status != WireCompileStatus::kArtifactReady) {
+    fail_frontend_work_invocation();
+  }
+  return result;
 }
 
 }  // namespace browsergrad::cpp_cute

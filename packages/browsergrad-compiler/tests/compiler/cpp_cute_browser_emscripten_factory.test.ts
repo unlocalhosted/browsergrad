@@ -135,8 +135,9 @@ describe("package-generated Emscripten factory binding", () => {
 
     expect(inspectCppCuteBrowserEmscriptenFactory(prepared)).toMatchObject({
       state: "prepared",
-      cAbiVersion: 65_537,
+      cAbiVersion: 65_538,
       allocatorMetricsPointer: 8,
+      frontendWorkMetricsPointer: 16,
       generatedImportCount: 52,
       vfsImportCount: 6,
       factoryInvoked: true,
@@ -385,7 +386,9 @@ function abiFactoryModule(): Uint8Array {
   const bodies = RUNTIME_ABI.cExports.map((entry) => {
     const result = entry.wasmExportName === "bg_cpp_cute_abi_version"
       ? RUNTIME_ABI.wasm.cAbiVersion
-      : entry.wasmExportName === "bg_cpp_cute_allocator_metrics_pointer" ? 8 : 0;
+      : entry.wasmExportName === "bg_cpp_cute_allocator_metrics_pointer" ? 8
+        : entry.wasmExportName === "bg_cpp_cute_frontend_work_metrics_pointer" ? 16
+          : 0;
     const instructions = entry.wasmResults.length === 0 ? [0x0b] : [0x41, ...u32(result), 0x0b];
     const body = [0x00, ...instructions];
     return [...u32(body.length), ...body];

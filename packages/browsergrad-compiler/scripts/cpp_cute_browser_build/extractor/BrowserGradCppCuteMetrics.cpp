@@ -35,6 +35,26 @@ constinit AllocatorMetricsRecordV1 g_metrics = {
 constinit bool g_metrics_healthy = true;
 constinit bool g_allocator_hook_active = false;
 
+constinit FrontendWorkMetricsRecordV1 g_frontend_work = {
+    {'B', 'G', 'F', 'W', 'K', '0', '0', '1'},
+    1U,
+    96U,
+    static_cast<std::uint32_t>(FrontendWorkPhaseV1::kIdle),
+    kFrontendWorkHealthyFlagV1,
+    0U,
+    0U,
+    0U,
+    0U,
+    0U,
+    0U,
+    0U,
+    0U,
+    0U,
+};
+constinit FrontendWorkLimitsV1 g_frontend_work_limits;
+constinit std::uint64_t g_frontend_work_active_template_depth = 0U;
+constinit bool g_frontend_work_pass_active = false;
+
 struct AllocationEntry {
   void* pointer = nullptr;
   std::size_t requested_byte_length = 0U;
@@ -49,6 +69,33 @@ struct AllocationTable {
 constinit AllocationTable g_allocations;
 
 void poison_metrics() { g_metrics_healthy = false; }
+
+FrontendWorkPhaseV1 frontend_work_phase() noexcept {
+  return static_cast<FrontendWorkPhaseV1>(g_frontend_work.phase);
+}
+
+void fail_frontend_work() noexcept {
+  g_frontend_work.phase =
+      static_cast<std::uint32_t>(FrontendWorkPhaseV1::kFailed);
+  g_frontend_work.flags = 0U;
+  g_frontend_work_pass_active = false;
+}
+
+bool increment_frontend_counter(std::uint64_t& counter,
+                                std::uint64_t maximum) noexcept {
+  if (frontend_work_phase() != FrontendWorkPhaseV1::kCollecting ||
+      !g_frontend_work_pass_active ||
+      counter == std::numeric_limits<std::uint64_t>::max()) {
+    fail_frontend_work();
+    return false;
+  }
+  ++counter;
+  if (counter > maximum) {
+    fail_frontend_work();
+    return false;
+  }
+  return true;
+}
 
 #if defined(BG_CPP_CUTE_METRICS_TESTING)
 struct TestBuiltinAllocator {
@@ -615,6 +662,216 @@ std::uint32_t allocator_metrics_pointer() {
 }
 
 bool allocator_metrics_healthy() { return g_metrics_healthy; }
+
+std::uint32_t frontend_work_metrics_pointer() {
+  const std::uintptr_t pointer =
+      reinterpret_cast<std::uintptr_t>(&g_frontend_work);
+  constexpr std::uintptr_t kMaximumRecordStart =
+      std::numeric_limits<std::uint32_t>::max() -
+      (sizeof(FrontendWorkMetricsRecordV1) - 1U);
+  if (pointer == 0U || pointer > kMaximumRecordStart ||
+      pointer % alignof(FrontendWorkMetricsRecordV1) != 0U) {
+    fail_frontend_work();
+    return 0U;
+  }
+  return static_cast<std::uint32_t>(pointer);
+}
+
+bool begin_frontend_work_invocation(
+    const FrontendWorkLimitsV1 limits) noexcept {
+  if (frontend_work_phase() != FrontendWorkPhaseV1::kIdle ||
+      g_frontend_work_pass_active ||
+      limits.max_include_depth == 0U ||
+      limits.max_macro_expansions == 0U ||
+      limits.max_preprocessed_tokens == 0U || limits.max_ast_nodes == 0U ||
+      limits.max_constexpr_steps == 0U ||
+      limits.max_template_instantiations == 0U ||
+      limits.max_template_depth == 0U ||
+      g_frontend_work.generation ==
+          std::numeric_limits<std::uint64_t>::max()) {
+    fail_frontend_work();
+    return false;
+  }
+  const std::uint64_t next_generation = g_frontend_work.generation + 1U;
+  g_frontend_work = FrontendWorkMetricsRecordV1{
+      {'B', 'G', 'F', 'W', 'K', '0', '0', '1'},
+      1U,
+      96U,
+      static_cast<std::uint32_t>(FrontendWorkPhaseV1::kCollecting),
+      kFrontendWorkHealthyFlagV1,
+      next_generation,
+      0U,
+      0U,
+      0U,
+      0U,
+      0U,
+      0U,
+      0U,
+      0U,
+  };
+  g_frontend_work_limits = limits;
+  g_frontend_work_active_template_depth = 0U;
+  return true;
+}
+
+bool begin_frontend_work_semantic_pass() noexcept {
+  if (frontend_work_phase() != FrontendWorkPhaseV1::kCollecting ||
+      g_frontend_work_pass_active ||
+      g_frontend_work_active_template_depth != 0U) {
+    fail_frontend_work();
+    return false;
+  }
+  g_frontend_work_pass_active = true;
+  return true;
+}
+
+bool record_frontend_include_depth(const std::uint64_t depth) noexcept {
+  if (frontend_work_phase() != FrontendWorkPhaseV1::kCollecting ||
+      !g_frontend_work_pass_active) {
+    fail_frontend_work();
+    return false;
+  }
+  if (depth > g_frontend_work.include_depth) {
+    g_frontend_work.include_depth = depth;
+  }
+  if (g_frontend_work.include_depth >
+      g_frontend_work_limits.max_include_depth) {
+    fail_frontend_work();
+    return false;
+  }
+  return true;
+}
+
+bool record_frontend_macro_expansion() noexcept {
+  return increment_frontend_counter(
+      g_frontend_work.macro_expansions,
+      g_frontend_work_limits.max_macro_expansions);
+}
+
+bool record_frontend_preprocessed_token() noexcept {
+  return increment_frontend_counter(
+      g_frontend_work.preprocessed_tokens,
+      g_frontend_work_limits.max_preprocessed_tokens);
+}
+
+bool record_frontend_ast_node() noexcept {
+  return increment_frontend_counter(g_frontend_work.ast_nodes,
+                                    g_frontend_work_limits.max_ast_nodes);
+}
+
+bool begin_frontend_template_instantiation() noexcept {
+  if (!increment_frontend_counter(
+          g_frontend_work.template_instantiations,
+          g_frontend_work_limits.max_template_instantiations) ||
+      g_frontend_work_active_template_depth ==
+          std::numeric_limits<std::uint64_t>::max()) {
+    fail_frontend_work();
+    return false;
+  }
+  ++g_frontend_work_active_template_depth;
+  if (g_frontend_work_active_template_depth >
+      g_frontend_work.template_depth) {
+    g_frontend_work.template_depth =
+        g_frontend_work_active_template_depth;
+  }
+  if (g_frontend_work.template_depth >
+      g_frontend_work_limits.max_template_depth) {
+    fail_frontend_work();
+    return false;
+  }
+  return true;
+}
+
+bool end_frontend_template_instantiation() noexcept {
+  if (frontend_work_phase() != FrontendWorkPhaseV1::kCollecting ||
+      !g_frontend_work_pass_active ||
+      g_frontend_work_active_template_depth == 0U) {
+    fail_frontend_work();
+    return false;
+  }
+  --g_frontend_work_active_template_depth;
+  return true;
+}
+
+extern "C" bool browsergrad_cpp_cute_constexpr_step_hook() noexcept {
+  if (frontend_work_phase() != FrontendWorkPhaseV1::kCollecting) {
+    return true;
+  }
+  return increment_frontend_counter(g_frontend_work.constexpr_steps,
+                                    g_frontend_work_limits.max_constexpr_steps);
+}
+
+bool complete_frontend_work_semantic_pass() noexcept {
+  if (frontend_work_phase() != FrontendWorkPhaseV1::kCollecting ||
+      !g_frontend_work_pass_active ||
+      g_frontend_work_active_template_depth != 0U ||
+      g_frontend_work.completed_semantic_passes ==
+          std::numeric_limits<std::uint64_t>::max()) {
+    fail_frontend_work();
+    return false;
+  }
+  g_frontend_work_pass_active = false;
+  ++g_frontend_work.completed_semantic_passes;
+  return true;
+}
+
+bool complete_frontend_work_invocation(
+    const std::uint64_t expected_semantic_passes) noexcept {
+  if (frontend_work_phase() != FrontendWorkPhaseV1::kCollecting ||
+      g_frontend_work.flags != kFrontendWorkHealthyFlagV1 ||
+      g_frontend_work_pass_active ||
+      g_frontend_work_active_template_depth != 0U ||
+      expected_semantic_passes == 0U ||
+      g_frontend_work.completed_semantic_passes !=
+          expected_semantic_passes) {
+    fail_frontend_work();
+    return false;
+  }
+  g_frontend_work.phase =
+      static_cast<std::uint32_t>(FrontendWorkPhaseV1::kComplete);
+  return true;
+}
+
+void fail_frontend_work_invocation() noexcept { fail_frontend_work(); }
+
+void reset_frontend_work_metrics() noexcept {
+  const std::uint64_t generation = g_frontend_work.generation;
+  g_frontend_work = FrontendWorkMetricsRecordV1{
+      {'B', 'G', 'F', 'W', 'K', '0', '0', '1'},
+      1U,
+      96U,
+      static_cast<std::uint32_t>(FrontendWorkPhaseV1::kIdle),
+      kFrontendWorkHealthyFlagV1,
+      generation,
+      0U,
+      0U,
+      0U,
+      0U,
+      0U,
+      0U,
+      0U,
+      0U,
+  };
+  g_frontend_work_limits = FrontendWorkLimitsV1{};
+  g_frontend_work_active_template_depth = 0U;
+  g_frontend_work_pass_active = false;
+}
+
+bool frontend_work_metrics_ready() noexcept {
+  return frontend_work_phase() == FrontendWorkPhaseV1::kComplete &&
+         g_frontend_work.flags == kFrontendWorkHealthyFlagV1 &&
+         !g_frontend_work_pass_active &&
+         g_frontend_work_active_template_depth == 0U &&
+         g_frontend_work.completed_semantic_passes >= 1U &&
+         g_frontend_work.completed_semantic_passes <= 2U;
+}
+
+#if defined(BG_CPP_CUTE_METRICS_TESTING)
+const FrontendWorkMetricsRecordV1&
+frontend_work_metrics_record_for_testing() noexcept {
+  return g_frontend_work;
+}
+#endif
 
 }  // namespace browsergrad::cpp_cute
 

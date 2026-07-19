@@ -243,7 +243,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect(source).not.toMatch(/memcpy|memset|fetch|socket|filesystem|system\(|popen\(/u);
   });
 
-  it("keeps the top-level translation unit as exact ABI-1.1 composition only", async () => {
+  it("keeps the top-level translation unit as exact ABI-1.2 composition only", async () => {
     const source = await extractorSource("BrowserGradCppCuteExtractor.cpp");
     expect(source).toContain('#include "BrowserGradCppCuteArtifactV3.h"');
     expect(source).toContain('#include "BrowserGradCppCuteRuntime.h"');
@@ -253,6 +253,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
         "bg_cpp_cute_abi_version",
         "bg_cpp_cute_alloc",
         "bg_cpp_cute_allocator_metrics_pointer",
+        "bg_cpp_cute_frontend_work_metrics_pointer",
         "bg_cpp_cute_compile",
         "bg_cpp_cute_free",
         "bg_cpp_cute_reset",
@@ -265,7 +266,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
   it("owns frame validation and the bounded module-owned result lifecycle", async () => {
     const header = await extractorSource("BrowserGradCppCuteRuntime.h");
     const source = await extractorSource("BrowserGradCppCuteRuntime.cpp");
-    expect(source).toContain("kRuntimeAbiVersion = 0x0001'0001U");
+    expect(source).toContain("kRuntimeAbiVersion = 0x0001'0002U");
     expect(source).toContain("validate_frame_envelope");
     expect(source).toContain("RuntimeState g_runtime");
     expect(source).toContain("ArtifactV3ResultSink::allocate");
@@ -348,6 +349,12 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect(source).toContain("kMaximumRecordStart");
     expect(source).toContain("g_metrics_healthy");
     expect(source).toContain("g_allocator_hook_active");
+    expect(header).toContain("struct alignas(8) FrontendWorkMetricsRecordV1");
+    expect(header).toContain("sizeof(FrontendWorkMetricsRecordV1) == 96U");
+    expect(source).toContain("browsergrad_cpp_cute_constexpr_step_hook");
+    expect(source).toContain("g_frontend_work_limits");
+    expect(source).toContain("complete_frontend_work_invocation");
+    expect(allOtherSource).not.toContain("g_frontend_work");
     expect(source).toContain("ensure_allocation_table_capacity");
     expect(source).toContain("erase_allocation");
     const overrides = [...source.matchAll(
@@ -405,11 +412,24 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect(action).toContain("class LayoutTraceVisitor final");
     expect(action).toContain("class LayoutTraceAction final");
     expect(action).toContain("clang::tooling::ToolInvocation invocation");
+    expect(action).toContain("setTokenWatcher");
+    expect(action).toContain("FrontendWorkTemplateCallbacks");
+    expect(action).toContain("record_frontend_include_depth");
+    expect(action).toContain("record_frontend_ast_node");
     expect(action).toContain("llvm::makeIntrusiveRefCnt<clang::FileManager>");
     expect(action).toContain("imported_closed_vfs(observer)");
     expect(allSource).not.toMatch(
       /getRealFileSystem|createPhysicalFileSystem|std::ifstream|std::filesystem|\bfopen\(|\bfetch\(/u,
     );
+  });
+
+  it("hash-patches only pinned Clang ExprConstant.cpp at the exact constexpr step boundary", async () => {
+    const cmake = await extractorSource("CMakeLists.txt");
+    expect(cmake).toContain("50c474805f9914a2c54d75f2ddd56d82dc20c128069855155f3c37db26e5bcf9");
+    expect(cmake).toContain("0df625b20b3ad1d72fbdfea8c72a2784f22a0387904acd3250b7810e195fa623");
+    expect(cmake).toContain("BrowserGradPatchedExprConstant.cpp");
+    expect(cmake).toContain("browsergrad_cpp_cute_constexpr_step_hook");
+    expect(cmake).toContain("browsergrad_require_unique_literal");
   });
 
   it("writes Artifact V3 only after the complete two-pass review", async () => {

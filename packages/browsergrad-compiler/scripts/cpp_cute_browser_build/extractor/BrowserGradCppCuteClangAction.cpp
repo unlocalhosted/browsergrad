@@ -1,6 +1,7 @@
 #include "BrowserGradCppCuteClangAction.h"
 
 #include "BrowserGradCppCuteImportedVfs.h"
+#include "BrowserGradCppCuteMetrics.h"
 
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/Decl.h"
@@ -19,6 +20,8 @@
 #include "clang/Lex/Lexer.h"
 #include "clang/Lex/PPCallbacks.h"
 #include "clang/Lex/Preprocessor.h"
+#include "clang/Sema/SemaConsumer.h"
+#include "clang/Sema/TemplateInstCallback.h"
 #include "clang/Tooling/Tooling.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
@@ -225,8 +228,17 @@ class LayoutTraceVisitor final
     : public clang::RecursiveASTVisitor<LayoutTraceVisitor> {
  public:
   LayoutTraceVisitor(clang::ASTContext& context, SourceAnchor anchor,
-                     LayoutTrace& trace)
-      : context_(context), anchor_(std::move(anchor)), trace_(trace) {}
+                     LayoutTrace& trace, ClangPassReview& review)
+      : context_(context), anchor_(std::move(anchor)), trace_(trace),
+        review_(review) {}
+
+  bool VisitDecl(clang::Decl* declaration) {
+    return declaration == nullptr || record_ast_node(declaration->getLocation());
+  }
+
+  bool VisitStmt(clang::Stmt* statement) {
+    return statement == nullptr || record_ast_node(statement->getBeginLoc());
+  }
 
   bool VisitVarDecl(clang::VarDecl* declaration) {
     if (trace_.selected || declaration == nullptr ||
@@ -280,20 +292,92 @@ class LayoutTraceVisitor final
   clang::ASTContext& context_;
   SourceAnchor anchor_;
   LayoutTrace& trace_;
+  ClangPassReview& review_;
+
+  bool record_ast_node(const clang::SourceLocation location) {
+    if (record_frontend_ast_node()) return true;
+    report_limit(location);
+    return false;
+  }
+
+  void report_limit(const clang::SourceLocation location) {
+    if (review_.frontend_work_limit_exceeded) return;
+    review_.frontend_work_limit_exceeded = true;
+    clang::DiagnosticsEngine& diagnostics = context_.getDiagnostics();
+    const unsigned id = diagnostics.getCustomDiagID(
+        clang::DiagnosticsEngine::Fatal,
+        "BrowserGrad frontend work limit exceeded");
+    diagnostics.Report(location, id);
+  }
 };
 
-class LayoutTraceConsumer final : public clang::ASTConsumer {
+class FrontendWorkTemplateCallbacks final
+    : public clang::TemplateInstantiationCallback {
+ public:
+  FrontendWorkTemplateCallbacks(clang::DiagnosticsEngine& diagnostics,
+                                ClangPassReview& review)
+      : diagnostics_(diagnostics), review_(review) {}
+
+  void initialize(const clang::Sema&) override {}
+  void finalize(const clang::Sema&) override {}
+
+  void atTemplateBegin(
+      const clang::Sema&,
+      const clang::Sema::CodeSynthesisContext& context) override {
+    if (!context.isInstantiationRecord() ||
+        begin_frontend_template_instantiation()) {
+      return;
+    }
+    report_limit(context.PointOfInstantiation);
+  }
+
+  void atTemplateEnd(
+      const clang::Sema&,
+      const clang::Sema::CodeSynthesisContext& context) override {
+    if (!context.isInstantiationRecord() ||
+        review_.frontend_work_limit_exceeded) {
+      return;
+    }
+    if (!end_frontend_template_instantiation()) {
+      report_limit(context.PointOfInstantiation);
+    }
+  }
+
+ private:
+  clang::DiagnosticsEngine& diagnostics_;
+  ClangPassReview& review_;
+
+  void report_limit(const clang::SourceLocation location) {
+    if (review_.frontend_work_limit_exceeded) return;
+    review_.frontend_work_limit_exceeded = true;
+    const unsigned id = diagnostics_.getCustomDiagID(
+        clang::DiagnosticsEngine::Fatal,
+        "BrowserGrad frontend work limit exceeded");
+    diagnostics_.Report(location, id);
+  }
+};
+
+class LayoutTraceConsumer final : public clang::SemaConsumer {
  public:
   LayoutTraceConsumer(clang::ASTContext& context, SourceAnchor anchor,
-                      LayoutTrace& trace)
-      : visitor_(context, std::move(anchor), trace) {}
+                      LayoutTrace& trace, ClangPassReview& review)
+      : context_(context), visitor_(context, std::move(anchor), trace, review),
+        review_(review) {}
+
+  void InitializeSema(clang::Sema& sema) override {
+    sema.TemplateInstCallbacks.push_back(
+        std::make_unique<FrontendWorkTemplateCallbacks>(
+            context_.getDiagnostics(), review_));
+  }
 
   void HandleTranslationUnit(clang::ASTContext& context) override {
     visitor_.TraverseDecl(context.getTranslationUnitDecl());
   }
 
  private:
+  clang::ASTContext& context_;
   LayoutTraceVisitor visitor_;
+  ClangPassReview& review_;
 };
 
 class IncludeObservationCallbacks final : public clang::PPCallbacks {
@@ -301,9 +385,43 @@ class IncludeObservationCallbacks final : public clang::PPCallbacks {
   IncludeObservationCallbacks(
       clang::SourceManager& source_manager,
       const clang::LangOptions& language_options,
-      std::shared_ptr<ImportedVfsObserver> observer)
+      std::shared_ptr<ImportedVfsObserver> observer,
+      ClangPassReview& review)
       : source_manager_(source_manager), language_options_(language_options),
-        observer_(std::move(observer)) {}
+        observer_(std::move(observer)), review_(review) {}
+
+  void FileChanged(
+      clang::SourceLocation location,
+      clang::PPCallbacks::FileChangeReason reason,
+      clang::SrcMgr::CharacteristicKind,
+      clang::FileID) override {
+    if (reason != clang::PPCallbacks::EnterFile ||
+        review_.frontend_work_limit_exceeded) {
+      return;
+    }
+    clang::SourceLocation current = source_manager_.getExpansionLoc(location);
+    if (current.isInvalid()) return;
+    clang::FileID file = source_manager_.getFileID(current);
+    std::uint64_t depth = 0U;
+    while (file.isValid()) {
+      const clang::SourceLocation include = source_manager_.getIncludeLoc(file);
+      if (include.isInvalid()) break;
+      ++depth;
+      if (depth == std::numeric_limits<std::uint64_t>::max()) break;
+      file = source_manager_.getFileID(source_manager_.getExpansionLoc(include));
+    }
+    if (!record_frontend_include_depth(depth)) report_limit(location);
+  }
+
+  void MacroExpands(const clang::Token& macro_name,
+                    const clang::MacroDefinition&,
+                    clang::SourceRange,
+                    const clang::MacroArgs*) override {
+    if (!review_.frontend_work_limit_exceeded &&
+        !record_frontend_macro_expansion()) {
+      report_limit(macro_name.getLocation());
+    }
+  }
 
   void InclusionDirective(
       clang::SourceLocation hash_location, const clang::Token&,
@@ -346,6 +464,18 @@ class IncludeObservationCallbacks final : public clang::PPCallbacks {
   clang::SourceManager& source_manager_;
   const clang::LangOptions& language_options_;
   std::shared_ptr<ImportedVfsObserver> observer_;
+  ClangPassReview& review_;
+
+  void report_limit(const clang::SourceLocation location) {
+    if (review_.frontend_work_limit_exceeded) return;
+    review_.frontend_work_limit_exceeded = true;
+    clang::DiagnosticsEngine& diagnostics =
+        source_manager_.getDiagnostics();
+    const unsigned id = diagnostics.getCustomDiagID(
+        clang::DiagnosticsEngine::Fatal,
+        "BrowserGrad frontend work limit exceeded");
+    diagnostics.Report(location, id);
+  }
 };
 
 RawDiagnosticSeverity diagnostic_severity(
@@ -507,14 +637,29 @@ class LayoutTraceAction final : public clang::ASTFrontendAction {
     policy_state_ = std::move(policy.state);
     compiler.getPreprocessor().addPPCallbacks(
         std::make_unique<IncludeObservationCallbacks>(
-            compiler.getSourceManager(), compiler.getLangOpts(), observer_));
+            compiler.getSourceManager(), compiler.getLangOpts(), observer_,
+            review_));
+    clang::DiagnosticsEngine& diagnostics = compiler.getDiagnostics();
+    compiler.getPreprocessor().setTokenWatcher(
+        [&review = review_, &diagnostics](const clang::Token& token) {
+          if (token.is(clang::tok::eof) ||
+              review.frontend_work_limit_exceeded ||
+              record_frontend_preprocessed_token()) {
+            return;
+          }
+          review.frontend_work_limit_exceeded = true;
+          const unsigned id = diagnostics.getCustomDiagID(
+              clang::DiagnosticsEngine::Fatal,
+              "BrowserGrad frontend work limit exceeded");
+          diagnostics.Report(token.getLocation(), id);
+        });
     return true;
   }
 
   std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(
       clang::CompilerInstance& compiler, llvm::StringRef) override {
     return std::make_unique<LayoutTraceConsumer>(
-        compiler.getASTContext(), anchor_, review_.layout_trace);
+        compiler.getASTContext(), anchor_, review_.layout_trace, review_);
   }
 
   void EndSourceFileAction() override {
@@ -571,7 +716,15 @@ bool run_cpp_cute_clang_pass_for_review(
       custom_registry,
       review.diagnostics, review.diagnostic_capture_failed);
   invocation.setDiagnosticConsumer(&diagnostic_capture);
+  if (!begin_frontend_work_semantic_pass()) {
+    review.frontend_work_limit_exceeded = true;
+    return false;
+  }
   review.invocation_succeeded = invocation.run();
+  if (!review.frontend_work_limit_exceeded &&
+      !complete_frontend_work_semantic_pass()) {
+    review.frontend_work_limit_exceeded = true;
+  }
   const std::error_code observation_error =
       observer->snapshot(review.vfs_observation);
   review.vfs_failed = static_cast<bool>(observation_error);

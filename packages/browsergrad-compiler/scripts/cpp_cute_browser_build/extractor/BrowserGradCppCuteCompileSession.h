@@ -137,6 +137,13 @@ class DecodedCompileSession final {
   std::uint32_t maximum_diagnostic_count() const noexcept;
   std::uint32_t maximum_source_file_count() const noexcept;
   std::uint32_t maximum_header_file_count() const noexcept;
+  std::uint64_t maximum_include_depth() const noexcept;
+  std::uint64_t maximum_macro_expansions() const noexcept;
+  std::uint64_t maximum_preprocessed_tokens() const noexcept;
+  std::uint64_t maximum_ast_nodes() const noexcept;
+  std::uint64_t maximum_constexpr_steps() const noexcept;
+  std::uint64_t maximum_template_instantiations() const noexcept;
+  std::uint64_t maximum_template_depth() const noexcept;
 
   std::size_t compiler_option_count() const noexcept;
   CompilerOptionView compiler_option(std::size_t index) const noexcept;

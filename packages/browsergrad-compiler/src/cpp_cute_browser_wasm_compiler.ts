@@ -11,6 +11,15 @@ import {
   type TakenCppCuteBrowserEmscriptenFactory,
 } from "./cpp_cute_browser_emscripten_factory.js";
 import {
+  cancelCppCuteBrowserFrontendWorkMetrics,
+  closeCppCuteBrowserFrontendWorkMetrics,
+  completeCppCuteBrowserFrontendWorkMetrics,
+  CppCuteBrowserFrontendWorkMetricsError,
+  prepareCppCuteBrowserFrontendWorkMetrics,
+  type CppCuteBrowserFrontendWorkObservationV1,
+  type PreparedCppCuteBrowserFrontendWorkMetrics,
+} from "./cpp_cute_browser_frontend_work_metrics.js";
+import {
   beginCppCuteBrowserWasmRuntimePhase,
   cancelCppCuteBrowserWasmRuntimeMetrics,
   closeCppCuteBrowserWasmRuntimeMetrics,
@@ -94,6 +103,7 @@ export interface CppCuteBrowserWasmCompilerExecution {
   /** Caller-owned copy; canonical Artifact V3 verification is a later seam. */
   readonly artifactBytes: Uint8Array;
   readonly runtime: CppCuteBrowserWasmRuntimeObservationV1;
+  readonly frontendWork: CppCuteBrowserFrontendWorkObservationV1;
   readonly vfs: CppCuteBrowserVfsSessionObservation;
   readonly cAbiExecutionObserved: true;
   readonly artifactVerificationObserved: false;
@@ -126,6 +136,8 @@ interface ExecutionState {
   readonly frameBytes: Uint8Array;
   metrics: PreparedCppCuteBrowserWasmRuntimeMetrics | undefined;
   metricsClosed: boolean;
+  frontendWork: PreparedCppCuteBrowserFrontendWorkMetrics | undefined;
+  frontendWorkClosed: boolean;
   vfsClosed: boolean;
 }
 
@@ -170,6 +182,8 @@ export function executeCppCuteBrowserWasmCompiler(
     frameBytes,
     metrics: undefined,
     metricsClosed: false,
+    frontendWork: undefined,
+    frontendWorkClosed: false,
     vfsClosed: false,
   };
 
@@ -181,6 +195,11 @@ export function executeCppCuteBrowserWasmCompiler(
       profile,
       memory: taken.memory,
       allocatorRecordPointer: factory.allocatorMetricsPointer,
+    });
+    state.frontendWork = prepareCppCuteBrowserFrontendWorkMetrics({
+      profile,
+      memory: taken.memory,
+      recordPointer: factory.frontendWorkMetricsPointer,
     });
     expectStatus(taken, IDLE_STATUS, "$.runtime.initialStatus");
 
@@ -235,6 +254,7 @@ export function executeCppCuteBrowserWasmCompiler(
     if (rangesOverlap(inputPointer, frame.byteLength, resultPointer, resultByteLength)) {
       mismatch("$.runtime.resultRange", "module result aliases its live input allocation");
     }
+    completeCppCuteBrowserFrontendWorkMetrics(state.frontendWork);
 
     callVoid(
       taken.moduleFacade._bg_cpp_cute_free,
@@ -267,6 +287,8 @@ export function executeCppCuteBrowserWasmCompiler(
     ) !== 0) {
       mismatch("$.runtime.resultAfterReset", "reset did not revoke module-owned result storage");
     }
+    const frontendWork = closeCppCuteBrowserFrontendWorkMetrics(state.frontendWork);
+    state.frontendWorkClosed = true;
     completeCppCuteBrowserWasmRuntimePhase(state.metrics);
     const runtime = closeCppCuteBrowserWasmRuntimeMetrics(state.metrics);
     state.metricsClosed = true;
@@ -295,6 +317,7 @@ export function executeCppCuteBrowserWasmCompiler(
       }),
       artifactBytes,
       runtime,
+      frontendWork,
       vfs: vfsRecord.observation,
       cAbiExecutionObserved: true,
       artifactVerificationObserved: false,
@@ -308,6 +331,16 @@ export function executeCppCuteBrowserWasmCompiler(
 
 function cleanupFailedExecution(state: ExecutionState, primaryCause: unknown): never {
   const cleanupCauses: unknown[] = [];
+  if (state.frontendWork !== undefined && !state.frontendWorkClosed) {
+    try {
+      cancelCppCuteBrowserFrontendWorkMetrics(state.frontendWork);
+    } catch (cause) {
+      if (!(cause instanceof CppCuteBrowserFrontendWorkMetricsError &&
+            cause.code === "BG-COMPILER-CPP-CUTE-BROWSER-FRONTEND-WORK-STATE")) {
+        arrayPush(cleanupCauses, cause);
+      }
+    }
+  }
   if (state.metrics !== undefined && !state.metricsClosed) {
     try {
       cancelCppCuteBrowserWasmRuntimeMetrics(state.metrics);

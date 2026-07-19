@@ -25,6 +25,7 @@ const REQUIRED_FACADE_EXPORTS = Object.freeze([
   "_bg_cpp_cute_abi_version",
   "_bg_cpp_cute_alloc",
   "_bg_cpp_cute_allocator_metrics_pointer",
+  "_bg_cpp_cute_frontend_work_metrics_pointer",
   "_bg_cpp_cute_compile",
   "_bg_cpp_cute_free",
   "_bg_cpp_cute_reset",
@@ -118,6 +119,7 @@ export interface PreparedCppCuteBrowserEmscriptenFactory {
   readonly wasmByteLength: number;
   readonly cAbiVersion: number;
   readonly allocatorMetricsPointer: number;
+  readonly frontendWorkMetricsPointer: number;
   readonly generatedImportCount: number;
   readonly vfsImportCount: number;
   readonly networkAuthorityGranted: false;
@@ -141,6 +143,7 @@ export interface CppCuteBrowserEmscriptenFactoryInspection {
   readonly wasmByteLength: number;
   readonly cAbiVersion: number;
   readonly allocatorMetricsPointer: number;
+  readonly frontendWorkMetricsPointer: number;
   readonly generatedImportCount: number;
   readonly vfsImportCount: number;
   readonly factoryInvoked: true;
@@ -341,6 +344,16 @@ export async function prepareCppCuteBrowserEmscriptenFactory(
     if (allocatorMetricsPointer <= 0 || allocatorMetricsPointer % 8 !== 0) {
       mismatch("$.factory.module._bg_cpp_cute_allocator_metrics_pointer", "allocator metrics pointer must be nonzero and 8-byte aligned");
     }
+    const frontendWorkMetricsPointer = callI32Export(
+      moduleFacade._bg_cpp_cute_frontend_work_metrics_pointer,
+      "$.factory.module._bg_cpp_cute_frontend_work_metrics_pointer",
+    );
+    if (frontendWorkMetricsPointer <= 0 || frontendWorkMetricsPointer % 8 !== 0) {
+      mismatch(
+        "$.factory.module._bg_cpp_cute_frontend_work_metrics_pointer",
+        "frontend-work metrics pointer must be nonzero and 8-byte aligned",
+      );
+    }
     factoryHookOpen = false;
 
     const prepared = NATIVE_OBJECT_FREEZE({
@@ -350,6 +363,7 @@ export async function prepareCppCuteBrowserEmscriptenFactory(
       wasmByteLength: expectedWasmByteLength,
       cAbiVersion,
       allocatorMetricsPointer,
+      frontendWorkMetricsPointer,
       generatedImportCount: REQUIRED_GENERATED_IMPORTS.length,
       vfsImportCount: REQUIRED_VFS_IMPORTS.length,
       networkAuthorityGranted: false,
@@ -371,6 +385,7 @@ export async function prepareCppCuteBrowserEmscriptenFactory(
         wasmByteLength: expectedWasmByteLength,
         cAbiVersion,
         allocatorMetricsPointer,
+        frontendWorkMetricsPointer,
         generatedImportCount: REQUIRED_GENERATED_IMPORTS.length,
         vfsImportCount: REQUIRED_VFS_IMPORTS.length,
         factoryInvoked: true,

@@ -15,6 +15,9 @@
 
 namespace {
 bool g_metrics_healthy = true;
+bool g_frontend_collecting = false;
+bool g_frontend_failed = false;
+std::uint64_t g_frontend_completed_passes = 0U;
 }
 
 #define BG_CPP_CUTE_RUNTIME_TESTING 1
@@ -30,10 +33,69 @@ std::string g_producer_mode = "success";
 
 bool allocator_metrics_healthy() { return g_metrics_healthy; }
 
+bool begin_frontend_work_invocation(FrontendWorkLimitsV1 limits) noexcept {
+  if (g_frontend_collecting || g_frontend_failed ||
+      limits.max_include_depth == 0U || limits.max_macro_expansions == 0U ||
+      limits.max_preprocessed_tokens == 0U || limits.max_ast_nodes == 0U ||
+      limits.max_constexpr_steps == 0U ||
+      limits.max_template_instantiations == 0U ||
+      limits.max_template_depth == 0U) {
+    g_frontend_failed = true;
+    return false;
+  }
+  g_frontend_collecting = true;
+  g_frontend_completed_passes = 0U;
+  return true;
+}
+
+bool begin_frontend_work_semantic_pass() noexcept {
+  return g_frontend_collecting && !g_frontend_failed;
+}
+
+bool complete_frontend_work_semantic_pass() noexcept {
+  if (!g_frontend_collecting || g_frontend_failed) return false;
+  ++g_frontend_completed_passes;
+  return true;
+}
+
+bool complete_frontend_work_invocation(
+    std::uint64_t expected_semantic_passes) noexcept {
+  if (!g_frontend_collecting || g_frontend_failed ||
+      expected_semantic_passes == 0U ||
+      g_frontend_completed_passes != expected_semantic_passes) {
+    g_frontend_failed = true;
+    return false;
+  }
+  g_frontend_collecting = false;
+  return true;
+}
+
+void fail_frontend_work_invocation() noexcept {
+  g_frontend_collecting = false;
+  g_frontend_failed = true;
+}
+
+void reset_frontend_work_metrics() noexcept {
+  g_frontend_collecting = false;
+  g_frontend_failed = false;
+  g_frontend_completed_passes = 0U;
+}
+
+bool frontend_work_metrics_ready() noexcept {
+  return !g_frontend_collecting && !g_frontend_failed &&
+         g_frontend_completed_passes >= 1U &&
+         g_frontend_completed_passes <= 2U;
+}
+
 ProducerReviewResult run_cpp_cute_producer_review(
     const PreparedCppCuteCompilePlan&,
     const DecodedCompileSession& session) noexcept {
   ProducerReviewResult result;
+  if (!begin_frontend_work_semantic_pass() ||
+      !complete_frontend_work_semantic_pass()) {
+    result.status = ProducerReviewStatus::kInternalError;
+    return result;
+  }
   result.status = ProducerReviewStatus::kReviewComplete;
   result.completed_pass_count = 2U;
   result.shared_surface_converged = true;
@@ -137,6 +199,12 @@ ProducerReviewResult run_cpp_cute_producer_review(
     result.blocking_diagnostic_pass_count = 1U;
     result.shared_surface_converged = false;
     result.passes[1].layout.canonical_usr = "c:@other_layout";
+  }
+  if (result.completed_pass_count == 2U &&
+      (!begin_frontend_work_semantic_pass() ||
+       !complete_frontend_work_semantic_pass())) {
+    result.status = ProducerReviewStatus::kInternalError;
+    result.completed_pass_count = 0U;
   }
   return result;
 }
@@ -301,14 +369,30 @@ ArtifactV3CompileResult decode_callback(
           plan.plan->maximum_diagnostic_count() == 100000U &&
           !device.empty() && !host.empty() &&
           device.front() == "clang++" && host.front() == "clang++" &&
-          device.back() == "/workspace/src/main.cu" &&
-          host.back() == "/workspace/src/main.cu" &&
+          std::find(device.begin(), device.end(), "/workspace/src/main.cu") !=
+              device.end() &&
+          std::find(host.begin(), host.end(), "/workspace/src/main.cu") !=
+              host.end() &&
           std::find(device.begin(), device.end(), "--cuda-device-only") !=
               device.end() &&
           std::find(host.begin(), host.end(), "--cuda-host-only") != host.end() &&
           std::find(device.begin(), device.end(), "-ferror-limit=100000") !=
               device.end() &&
           std::find(host.begin(), host.end(), "-ferror-limit=100000") !=
+              host.end() &&
+          std::find(device.begin(), device.end(),
+                    "-fno-experimental-new-constant-interpreter") !=
+              device.end() &&
+          std::find(host.begin(), host.end(),
+                    "-fno-experimental-new-constant-interpreter") !=
+              host.end() &&
+          std::find(device.begin(), device.end(), "-fconstexpr-steps=10000000") !=
+              device.end() &&
+          std::find(host.begin(), host.end(), "-fconstexpr-steps=10000000") !=
+              host.end() &&
+          std::find(device.begin(), device.end(), "-ftemplate-depth=1024") !=
+              device.end() &&
+          std::find(host.begin(), host.end(), "-ftemplate-depth=1024") !=
               host.end();
     }
   }

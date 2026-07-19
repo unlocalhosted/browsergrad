@@ -33,7 +33,7 @@ constexpr std::string_view kContractSchema =
 constexpr std::string_view kRuntimeAbiId =
     "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1";
 constexpr std::string_view kRuntimeAbiManifestSha256 =
-    "ada8e6da61153e3e92f359a5c63bc2ba8926e58362c3f7a9e88f4b3a67f57d15";
+    "b24757f1517fb91474c4e5355bd7ec632baa188a55ec95cd15bb3c05501b3227";
 constexpr std::string_view kSemanticAdapterManifestSha256 =
     "e5aa795c4feebd523ed72b95be03b102d497f2e0313ee9c99fadf1309cde6150";
 constexpr std::string_view kTemporalPolicyId =
@@ -2024,6 +2024,36 @@ std::uint32_t DecodedCompileSession::maximum_source_file_count() const noexcept 
 std::uint32_t DecodedCompileSession::maximum_header_file_count() const noexcept {
   return static_cast<std::uint32_t>(
       implementation_->storage.request_semantic_limits[2U]);
+}
+
+std::uint64_t DecodedCompileSession::maximum_include_depth() const noexcept {
+  return implementation_->storage.request_semantic_limits[4U];
+}
+
+std::uint64_t DecodedCompileSession::maximum_macro_expansions() const noexcept {
+  return implementation_->storage.request_semantic_limits[5U];
+}
+
+std::uint64_t
+DecodedCompileSession::maximum_preprocessed_tokens() const noexcept {
+  return implementation_->storage.request_semantic_limits[6U];
+}
+
+std::uint64_t DecodedCompileSession::maximum_ast_nodes() const noexcept {
+  return implementation_->storage.request_semantic_limits[7U];
+}
+
+std::uint64_t DecodedCompileSession::maximum_constexpr_steps() const noexcept {
+  return implementation_->storage.request_semantic_limits[8U];
+}
+
+std::uint64_t
+DecodedCompileSession::maximum_template_instantiations() const noexcept {
+  return implementation_->storage.request_semantic_limits[9U];
+}
+
+std::uint64_t DecodedCompileSession::maximum_template_depth() const noexcept {
+  return implementation_->storage.request_semantic_limits[10U];
 }
 
 std::size_t DecodedCompileSession::compiler_option_count() const noexcept {

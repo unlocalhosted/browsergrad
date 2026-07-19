@@ -125,6 +125,18 @@ bool translate_pass(const SemanticPassView& pass,
   return true;
 }
 
+void append_frontend_resource_limits(
+    const DecodedCompileSession& session,
+    std::vector<std::string>& arguments) {
+  // Clang's built-in limits bound one evaluation/depth chain. The separately
+  // instrumented record enforces aggregate work across both semantic passes.
+  arguments.push_back("-fno-experimental-new-constant-interpreter");
+  arguments.push_back("-fconstexpr-steps=" +
+                      std::to_string(session.maximum_constexpr_steps()));
+  arguments.push_back("-ftemplate-depth=" +
+                      std::to_string(session.maximum_template_depth()));
+}
+
 }  // namespace
 
 struct PreparedCppCuteCompilePlan::Impl final {
@@ -213,6 +225,7 @@ PrepareCppCuteCompilePlanResult prepare_cpp_cute_compile_plan(
             materialized.error_field, materialized.error_index};
         return result;
       }
+      append_frontend_resource_limits(session, materialized.arguments);
       implementation->arguments[index] = std::move(materialized.arguments);
     }
     std::unique_ptr<const PreparedCppCuteCompilePlan::Impl> immutable(

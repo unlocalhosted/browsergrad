@@ -70,6 +70,7 @@ struct ClangPassReview {
   std::uint32_t policy_violation_count = 0U;
   std::uint32_t clang_error_count = 0U;
   bool diagnostic_capture_failed = false;
+  bool frontend_work_limit_exceeded = false;
   std::vector<ClangDiagnosticObservation> diagnostics;
   ImportedVfsPassObservation vfs_observation;
   LayoutTrace layout_trace;

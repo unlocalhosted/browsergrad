@@ -55,6 +55,25 @@ void reset_state() {
   };
   g_metrics_healthy = true;
   g_allocator_hook_active = false;
+  g_frontend_work = FrontendWorkMetricsRecordV1{
+      {'B', 'G', 'F', 'W', 'K', '0', '0', '1'},
+      1U,
+      96U,
+      static_cast<std::uint32_t>(FrontendWorkPhaseV1::kIdle),
+      kFrontendWorkHealthyFlagV1,
+      0U,
+      0U,
+      0U,
+      0U,
+      0U,
+      0U,
+      0U,
+      0U,
+      0U,
+  };
+  g_frontend_work_limits = FrontendWorkLimitsV1{};
+  g_frontend_work_active_template_depth = 0U;
+  g_frontend_work_pass_active = false;
 }
 
 bool record_invariants_hold() {
@@ -77,6 +96,77 @@ int run_metrics_tests() {
   BG_CHECK(std::memcmp(g_metrics.magic, "BGRTMET1", 8U) == 0);
   BG_CHECK(g_metrics.version == 1U);
   BG_CHECK(g_metrics.byte_length == 72U);
+  BG_CHECK(sizeof(g_frontend_work) == 96U);
+  BG_CHECK(alignof(decltype(g_frontend_work)) == 8U);
+  BG_CHECK(std::memcmp(g_frontend_work.magic, "BGFWK001", 8U) == 0);
+  BG_CHECK(g_frontend_work.version == 1U);
+  BG_CHECK(g_frontend_work.byte_length == 96U);
+  BG_CHECK(g_frontend_work.phase ==
+           static_cast<std::uint32_t>(FrontendWorkPhaseV1::kIdle));
+  BG_CHECK(g_frontend_work.flags == kFrontendWorkHealthyFlagV1);
+  BG_CHECK(browsergrad_cpp_cute_constexpr_step_hook());
+
+  constexpr FrontendWorkLimitsV1 frontend_limits{
+      4U, 8U, 16U, 16U, 8U, 8U, 4U,
+  };
+  BG_CHECK(begin_frontend_work_invocation(frontend_limits));
+  BG_CHECK(g_frontend_work.generation == 1U);
+  BG_CHECK(begin_frontend_work_semantic_pass());
+  BG_CHECK(record_frontend_include_depth(2U));
+  BG_CHECK(record_frontend_include_depth(1U));
+  BG_CHECK(record_frontend_macro_expansion());
+  BG_CHECK(record_frontend_preprocessed_token());
+  BG_CHECK(record_frontend_preprocessed_token());
+  BG_CHECK(record_frontend_ast_node());
+  BG_CHECK(browsergrad_cpp_cute_constexpr_step_hook());
+  BG_CHECK(begin_frontend_template_instantiation());
+  BG_CHECK(begin_frontend_template_instantiation());
+  BG_CHECK(end_frontend_template_instantiation());
+  BG_CHECK(end_frontend_template_instantiation());
+  BG_CHECK(complete_frontend_work_semantic_pass());
+  BG_CHECK(begin_frontend_work_semantic_pass());
+  BG_CHECK(record_frontend_include_depth(3U));
+  BG_CHECK(record_frontend_macro_expansion());
+  BG_CHECK(record_frontend_preprocessed_token());
+  BG_CHECK(record_frontend_ast_node());
+  BG_CHECK(browsergrad_cpp_cute_constexpr_step_hook());
+  BG_CHECK(complete_frontend_work_semantic_pass());
+  BG_CHECK(complete_frontend_work_invocation(2U));
+  BG_CHECK(frontend_work_metrics_ready());
+  BG_CHECK(g_frontend_work.include_depth == 3U);
+  BG_CHECK(g_frontend_work.macro_expansions == 2U);
+  BG_CHECK(g_frontend_work.preprocessed_tokens == 3U);
+  BG_CHECK(g_frontend_work.ast_nodes == 2U);
+  BG_CHECK(g_frontend_work.constexpr_steps == 2U);
+  BG_CHECK(g_frontend_work.template_instantiations == 2U);
+  BG_CHECK(g_frontend_work.template_depth == 2U);
+  BG_CHECK(g_frontend_work.completed_semantic_passes == 2U);
+  reset_frontend_work_metrics();
+  BG_CHECK(g_frontend_work.generation == 1U);
+  BG_CHECK(g_frontend_work.phase ==
+           static_cast<std::uint32_t>(FrontendWorkPhaseV1::kIdle));
+  BG_CHECK(!frontend_work_metrics_ready());
+
+  constexpr FrontendWorkLimitsV1 single_token_limit{
+      1U, 1U, 1U, 1U, 1U, 1U, 1U,
+  };
+  BG_CHECK(begin_frontend_work_invocation(single_token_limit));
+  BG_CHECK(begin_frontend_work_semantic_pass());
+  BG_CHECK(record_frontend_preprocessed_token());
+  BG_CHECK(!record_frontend_preprocessed_token());
+  BG_CHECK(g_frontend_work.phase ==
+           static_cast<std::uint32_t>(FrontendWorkPhaseV1::kFailed));
+  BG_CHECK(g_frontend_work.flags == 0U);
+  BG_CHECK(!frontend_work_metrics_ready());
+  reset_frontend_work_metrics();
+  BG_CHECK(g_frontend_work.generation == 2U);
+
+  BG_CHECK(begin_frontend_work_invocation(single_token_limit));
+  BG_CHECK(begin_frontend_work_semantic_pass());
+  BG_CHECK(begin_frontend_template_instantiation());
+  BG_CHECK(!begin_frontend_template_instantiation());
+  BG_CHECK(!frontend_work_metrics_ready());
+  reset_frontend_work_metrics();
 
   void* pointer = metrics_malloc(32U);
   BG_CHECK(pointer != nullptr);

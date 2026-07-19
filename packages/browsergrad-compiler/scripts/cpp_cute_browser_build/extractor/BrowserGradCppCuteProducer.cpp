@@ -207,6 +207,10 @@ ProducerReviewResult run_cpp_cute_producer_review(
         result.status = ProducerReviewStatus::kResourceLimit;
         return result;
       }
+      if (review.frontend_work_limit_exceeded) {
+        result.status = ProducerReviewStatus::kResourceLimit;
+        return result;
+      }
       if (!review.invocation_succeeded && review.clang_error_count == 0U &&
           !review.policy_failed) {
         result.status = ProducerReviewStatus::kInternalError;

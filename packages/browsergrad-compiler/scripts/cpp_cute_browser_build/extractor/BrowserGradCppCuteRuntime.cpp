@@ -11,7 +11,7 @@
 namespace browsergrad::cpp_cute {
 namespace {
 
-constexpr std::uint32_t kRuntimeAbiVersion = 0x0001'0001U;
+constexpr std::uint32_t kRuntimeAbiVersion = 0x0001'0002U;
 constexpr std::uint32_t kInputFrameMaximumByteLength = 4U * 1024U * 1024U;
 constexpr std::uint32_t kInputFrameHeaderByteLength = 64U;
 constexpr std::uint32_t kInputFrameAlignment = 8U;
@@ -380,6 +380,7 @@ std::int32_t runtime_compile(std::uint32_t input_pointer,
     if (result.blocker.has_value() || result_sink.failed_ ||
         !result_sink.invocation_limit_bound_ || !result_sink.committed_ ||
         result_sink.bytes_ == nullptr || result_sink.byte_length_ == 0U ||
+        !frontend_work_metrics_ready() ||
         ranges_overlap(g_runtime.input_wire_pointer,
                        g_runtime.input_byte_length,
                        result_sink.wire_pointer_,
@@ -467,6 +468,7 @@ void runtime_reset() {
   release_input();
   release_result();
   g_runtime = RuntimeState{};
+  reset_frontend_work_metrics();
   if (!allocator_metrics_healthy()) {
     g_runtime.phase = RuntimePhase::kFailed;
     g_runtime.status = WireCompileStatus::kInternalError;

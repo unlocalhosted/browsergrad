@@ -11,6 +11,8 @@
 namespace {
 
 bool g_allocator_metrics_healthy_for_test = true;
+bool g_frontend_work_metrics_ready_for_test = true;
+std::uint32_t g_frontend_work_reset_count_for_test = 0U;
 
 }  // namespace
 
@@ -21,6 +23,14 @@ namespace browsergrad::cpp_cute {
 
 bool allocator_metrics_healthy() {
   return g_allocator_metrics_healthy_for_test;
+}
+
+bool frontend_work_metrics_ready() noexcept {
+  return g_frontend_work_metrics_ready_for_test;
+}
+
+void reset_frontend_work_metrics() noexcept {
+  ++g_frontend_work_reset_count_for_test;
 }
 
 }  // namespace browsergrad::cpp_cute
@@ -337,8 +347,13 @@ int run_runtime_tests() {
       test_wire_pointer,
   };
 
+  const std::uint32_t resets_before_first_input =
+      g_frontend_work_reset_count_for_test;
+
   std::uint32_t input = prepare_valid_input();
   BG_CHECK(input != 0U);
+  BG_CHECK(g_frontend_work_reset_count_for_test ==
+           resets_before_first_input + 1U);
   g_callback_count = 0U;
   BG_CHECK(runtime_compile(input, kValidFrameByteLength,
                            successful_artifact) == 0);
@@ -362,6 +377,17 @@ int run_runtime_tests() {
   BG_CHECK(runtime_result_pointer() == 0U);
   BG_CHECK(runtime_result_length() == 0U);
   BG_CHECK(live_allocation_count() == 0U);
+
+  input = prepare_valid_input();
+  BG_CHECK(input != 0U);
+  g_frontend_work_metrics_ready_for_test = false;
+  BG_CHECK(runtime_compile(input, kValidFrameByteLength,
+                           successful_artifact) ==
+           static_cast<std::int32_t>(WireCompileStatus::kInternalError));
+  BG_CHECK(runtime_result_pointer() == 0U);
+  BG_CHECK(live_allocation_count() == 1U);
+  g_frontend_work_metrics_ready_for_test = true;
+  runtime_reset();
 
   input = prepare_valid_input();
   BG_CHECK(input != 0U);

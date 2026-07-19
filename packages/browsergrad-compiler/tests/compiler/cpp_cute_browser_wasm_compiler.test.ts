@@ -97,6 +97,11 @@ import {
   CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_MAGIC,
   CPP_CUTE_BROWSER_ALLOCATOR_METRICS_RECORD_VERSION,
 } from "../../src/cpp_cute_browser_wasm_runtime_metrics.js";
+import {
+  CPP_CUTE_BROWSER_FRONTEND_WORK_RECORD_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_FRONTEND_WORK_RECORD_MAGIC,
+  CPP_CUTE_BROWSER_FRONTEND_WORK_RECORD_VERSION,
+} from "../../src/cpp_cute_browser_frontend_work_metrics.js";
 import type { PreparedCppCuteBrowserVfsSession } from "../../src/cpp_cute_browser_vfs_session.js";
 import {
   prepareCppCuteFrontendProfile,
@@ -106,6 +111,7 @@ import {
 import { createCppCuteBrowserProfileInput } from "./support/cpp_cute_frontend_fixtures.js";
 
 const ALLOCATOR_RECORD_POINTER = 64;
+const FRONTEND_WORK_RECORD_POINTER = 256;
 const INPUT_POINTER = 4_096;
 const RESULT_POINTER = 65_536;
 const WASM_SHA256 = "a".repeat(64);
@@ -187,6 +193,21 @@ describe("C++/CuTe local Wasm C ABI compiler execution", () => {
           allocator: {
             values: { currentLiveGlobalRequestedByteLength: "0" },
           },
+        },
+      },
+      frontendWork: {
+        authority: "wasm-frontend-work-local-observation-only",
+        generation: "1",
+        resetConfirmed: true,
+        values: {
+          includeDepth: "1",
+          macroExpansions: "2",
+          preprocessedTokens: "64",
+          astNodes: "32",
+          constexprSteps: "4",
+          templateInstantiations: "8",
+          templateDepth: "2",
+          completedSemanticPasses: "2",
         },
       },
       vfs: { state: "disposed" },
@@ -315,6 +336,7 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
     failed: 0n,
   };
   writeAllocatorRecord(memory, counters);
+  writeFrontendWorkRecord(memory, 0, 1, 0n, zeroFrontendWork());
   const calls = { alloc: 0, compile: 0, free: 0, reset: 0 };
   let status = 1;
   let inputByteLength = 0;
@@ -336,7 +358,7 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
   };
 
   const facade = Object.freeze({
-    _bg_cpp_cute_abi_version: () => 65_537,
+    _bg_cpp_cute_abi_version: () => 65_538,
     _bg_cpp_cute_alloc: (byteLength: number) => {
       calls.alloc += 1;
       inputByteLength = byteLength;
@@ -345,6 +367,7 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
       return INPUT_POINTER;
     },
     _bg_cpp_cute_allocator_metrics_pointer: () => ALLOCATOR_RECORD_POINTER,
+    _bg_cpp_cute_frontend_work_metrics_pointer: () => FRONTEND_WORK_RECORD_POINTER,
     _bg_cpp_cute_compile: (pointer: number, byteLength: number) => {
       calls.compile += 1;
       if (options.trapCompile === true) throw new WebAssembly.RuntimeError("test trap");
@@ -359,6 +382,16 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
         resultByteLength = options.resultByteLength ?? ARTIFACT_BYTES.byteLength;
         allocate(resultByteLength);
         new Uint8Array(memory.buffer, resultPointer, ARTIFACT_BYTES.byteLength).set(ARTIFACT_BYTES);
+        writeFrontendWorkRecord(memory, 2, 1, 1n, {
+          includeDepth: 1n,
+          macroExpansions: 2n,
+          preprocessedTokens: 64n,
+          astNodes: 32n,
+          constexprSteps: 4n,
+          templateInstantiations: 8n,
+          templateDepth: 2n,
+          completedSemanticPasses: 2n,
+        });
       }
       return compileReturn;
     },
@@ -376,6 +409,7 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
       resultByteLength = 0;
       inputByteLength = 0;
       status = 1;
+      writeFrontendWorkRecord(memory, 0, 1, 1n, zeroFrontendWork());
     },
     _bg_cpp_cute_result_length: () => resultByteLength,
     _bg_cpp_cute_result_pointer: () => resultPointer,
@@ -405,8 +439,9 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
     protocol: "browsergrad.compiler.cpp-cute.emscripten-factory-binding@1",
     wasmSha256: WASM_SHA256,
     wasmByteLength: 1024,
-    cAbiVersion: 65_537,
+    cAbiVersion: 65_538,
     allocatorMetricsPointer: ALLOCATOR_RECORD_POINTER,
+    frontendWorkMetricsPointer: FRONTEND_WORK_RECORD_POINTER,
     generatedImportCount: 52,
     vfsImportCount: 6,
     networkAuthorityGranted: false,
@@ -436,6 +471,60 @@ function writeAllocatorRecord(memory: WebAssembly.Memory, counters: AllocatorCou
   view.setBigUint64(48, counters.allocations, true);
   view.setBigUint64(56, counters.frees, true);
   view.setBigUint64(64, counters.failed, true);
+}
+
+interface FrontendWorkCounters {
+  readonly includeDepth: bigint;
+  readonly macroExpansions: bigint;
+  readonly preprocessedTokens: bigint;
+  readonly astNodes: bigint;
+  readonly constexprSteps: bigint;
+  readonly templateInstantiations: bigint;
+  readonly templateDepth: bigint;
+  readonly completedSemanticPasses: bigint;
+}
+
+function zeroFrontendWork(): FrontendWorkCounters {
+  return {
+    includeDepth: 0n,
+    macroExpansions: 0n,
+    preprocessedTokens: 0n,
+    astNodes: 0n,
+    constexprSteps: 0n,
+    templateInstantiations: 0n,
+    templateDepth: 0n,
+    completedSemanticPasses: 0n,
+  };
+}
+
+function writeFrontendWorkRecord(
+  memory: WebAssembly.Memory,
+  phase: number,
+  flags: number,
+  generation: bigint,
+  counters: FrontendWorkCounters,
+): void {
+  const bytes = new Uint8Array(
+    memory.buffer,
+    FRONTEND_WORK_RECORD_POINTER,
+    CPP_CUTE_BROWSER_FRONTEND_WORK_RECORD_BYTE_LENGTH,
+  );
+  bytes.fill(0);
+  bytes.set(new TextEncoder().encode(CPP_CUTE_BROWSER_FRONTEND_WORK_RECORD_MAGIC));
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  view.setUint32(8, CPP_CUTE_BROWSER_FRONTEND_WORK_RECORD_VERSION, true);
+  view.setUint32(12, CPP_CUTE_BROWSER_FRONTEND_WORK_RECORD_BYTE_LENGTH, true);
+  view.setUint32(16, phase, true);
+  view.setUint32(20, flags, true);
+  view.setBigUint64(24, generation, true);
+  view.setBigUint64(32, counters.includeDepth, true);
+  view.setBigUint64(40, counters.macroExpansions, true);
+  view.setBigUint64(48, counters.preprocessedTokens, true);
+  view.setBigUint64(56, counters.astNodes, true);
+  view.setBigUint64(64, counters.constexprSteps, true);
+  view.setBigUint64(72, counters.templateInstantiations, true);
+  view.setBigUint64(80, counters.templateDepth, true);
+  view.setBigUint64(88, counters.completedSemanticPasses, true);
 }
 
 function zeroVfsCounters(): Readonly<Record<string, string>> {

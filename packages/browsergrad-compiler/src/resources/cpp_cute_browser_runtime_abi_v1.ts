@@ -43,8 +43,8 @@ function supportExport(
  */
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
-  version: { major: 1, minor: 7 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.527ed068f0479a087d5198749a1d0103f0c463566bf56af833777268c342a36c",
+  version: { major: 1, minor: 8 },
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.2ad42184a70ae5e2039010868f87dce6273def0affe05f5baa220bd1fc1a23ac",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -56,7 +56,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
     wasm: {
       moduleRole: "compiler-extractor-only-user-programs-never-linked-or-executed",
       addressBits: 32,
-      cAbiVersion: 65_537,
+      cAbiVersion: 65_538,
       cAbiVersionEncoding: "major-shift-left-16-bitwise-or-minor",
       // Browser-visible WebAssembly capabilities required for instantiation.
       requiredFeatures: [
@@ -260,6 +260,15 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
       },
       {
         ordinal: 3,
+        cSymbol: "bg_cpp_cute_frontend_work_metrics_pointer",
+        wasmExportName: "bg_cpp_cute_frontend_work_metrics_pointer",
+        cSignature: "uint32_t bg_cpp_cute_frontend_work_metrics_pointer(void)",
+        wasmParameters: [],
+        wasmResults: ["i32"],
+        resultSemantics: "u32-nonzero-stable-read-only-frontend-work-metrics-record-v1-pointer",
+      },
+      {
+        ordinal: 4,
         cSymbol: "bg_cpp_cute_compile",
         wasmExportName: "bg_cpp_cute_compile",
         cSignature: "int32_t bg_cpp_cute_compile(uint32_t input_pointer, uint32_t input_length)",
@@ -268,7 +277,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         resultSemantics: "typed-compile-status",
       },
       {
-        ordinal: 4,
+        ordinal: 5,
         cSymbol: "bg_cpp_cute_free",
         wasmExportName: "bg_cpp_cute_free",
         cSignature: "void bg_cpp_cute_free(uint32_t pointer, uint32_t byte_length)",
@@ -277,7 +286,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         resultSemantics: "void-status-readable-separately",
       },
       {
-        ordinal: 5,
+        ordinal: 6,
         cSymbol: "bg_cpp_cute_reset",
         wasmExportName: "bg_cpp_cute_reset",
         cSignature: "void bg_cpp_cute_reset(void)",
@@ -286,7 +295,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         resultSemantics: "void-infallible-for-live-instance",
       },
       {
-        ordinal: 6,
+        ordinal: 7,
         cSymbol: "bg_cpp_cute_result_length",
         wasmExportName: "bg_cpp_cute_result_length",
         cSignature: "uint32_t bg_cpp_cute_result_length(void)",
@@ -295,7 +304,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         resultSemantics: "u32-result-length-zero-unless-artifact-ready",
       },
       {
-        ordinal: 7,
+        ordinal: 8,
         cSymbol: "bg_cpp_cute_result_pointer",
         wasmExportName: "bg_cpp_cute_result_pointer",
         cSignature: "uint32_t bg_cpp_cute_result_pointer(void)",
@@ -304,7 +313,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         resultSemantics: "u32-result-pointer-zero-unless-artifact-ready",
       },
       {
-        ordinal: 8,
+        ordinal: 9,
         cSymbol: "bg_cpp_cute_status",
         wasmExportName: "bg_cpp_cute_status",
         cSignature: "int32_t bg_cpp_cute_status(void)",
@@ -490,6 +499,79 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
           encoding: "u64le",
           semantics: "failed-request-event-count",
         },
+      ],
+      authority: {
+        values: "module-self-reported-local-observation-only",
+        producerConformance: "detached-observed-wasm-verification-required",
+        workerExecution: "not-authorized-by-record-values",
+        lowering: "not-authorized-by-record-values",
+      },
+    },
+    frontendWorkMetricsRecord: {
+      schema: "browsergrad.compiler.cpp-cute.frontend-work-metrics-record",
+      version: { major: 1, minor: 0 },
+      magicAscii: "BGFWK001",
+      magicBytes: [66, 71, 70, 87, 75, 48, 48, 49],
+      byteLength: 96,
+      alignmentByteLength: 8,
+      encoding: "little-endian-fixed-width",
+      storage: "module-global-linear-memory-record",
+      pointerExport: "bg_cpp_cute_frontend_work_metrics_pointer",
+      pointerContract: {
+        resultEncoding: "u32-wasm32-linear-memory-offset",
+        zero: "forbidden-for-conforming-live-module-instance",
+        stability: "constant-for-module-instance-lifetime",
+        completeRange: "must-fit-current-exported-memory",
+        mutability: "module-writes-host-read-only",
+      },
+      snapshotContract: {
+        allowedPhases: "between-synchronous-runtime-calls-only",
+        hostRead: "copy-exact-record-before-decoding",
+        memoryGrowthDuringCopy: "forbidden",
+        consistency: "module-calls-are-synchronous-and-memory-is-unshared",
+        readyRead: "after-artifact-ready-compile-before-reset",
+        resetRead: "after-reset-to-confirm-idle-generation-preservation",
+      },
+      lifecycle: {
+        idlePhase: 0,
+        collectingPhase: 1,
+        completePhase: 2,
+        failedPhase: 3,
+        healthyFlag: 1,
+        generationPolicy: "increment-on-admitted-invocation-preserve-across-reset-fail-on-overflow",
+        acceptedArtifactPassCount: 2,
+        rejectedArtifactPassCount: "one-or-two",
+        aggregateScope: "cuda-device-pass-followed-by-cuda-host-pass",
+        limitPolicy: "effective-request-profile-ceilings-fail-before-artifact-ready",
+        overflowPolicy: "counter-overflow-fails-before-wrap-and-forbids-artifact-ready",
+      },
+      instrumentation: {
+        includeDepth: "maximum-source-manager-include-chain-depth-excluding-main-file",
+        macroExpansions: "preprocessor-macro-expands-callback-count",
+        preprocessedTokens: "final-expanded-token-watcher-count-excluding-eof",
+        astNodes: "recursive-ast-visitor-nonnull-declaration-and-statement-count",
+        constexprSteps: "pinned-classic-exprconstant-evalinfo-nextstep-count",
+        templateInstantiations: "sema-template-callback-instantiation-record-begin-count",
+        templateDepth: "maximum-concurrent-sema-template-instantiation-record-depth",
+        constexprInterpreter: "classic-evaluator-required-new-interpreter-disabled",
+        patchedSourceIdentity:
+          "clang-22.1.8-ExprConstant.cpp-sha256-50c474805f9914a2c54d75f2ddd56d82dc20c128069855155f3c37db26e5bcf9",
+      },
+      fields: [
+        { ordinal: 0, name: "magic", offset: 0, byteLength: 8, encoding: "ascii[8]", semantics: "must-equal-BGFWK001" },
+        { ordinal: 1, name: "version", offset: 8, byteLength: 4, encoding: "u32le", semantics: "must-equal-1" },
+        { ordinal: 2, name: "byteLength", offset: 12, byteLength: 4, encoding: "u32le", semantics: "must-equal-96" },
+        { ordinal: 3, name: "phase", offset: 16, byteLength: 4, encoding: "u32le", semantics: "idle-collecting-complete-or-failed" },
+        { ordinal: 4, name: "flags", offset: 20, byteLength: 4, encoding: "u32le", semantics: "one-only-while-record-is-healthy" },
+        { ordinal: 5, name: "generation", offset: 24, byteLength: 8, encoding: "u64le", semantics: "monotonic-admitted-invocation-generation" },
+        { ordinal: 6, name: "includeDepth", offset: 32, byteLength: 8, encoding: "u64le", semantics: "maximum-include-depth" },
+        { ordinal: 7, name: "macroExpansions", offset: 40, byteLength: 8, encoding: "u64le", semantics: "aggregate-macro-expansion-count" },
+        { ordinal: 8, name: "preprocessedTokens", offset: 48, byteLength: 8, encoding: "u64le", semantics: "aggregate-final-preprocessed-token-count" },
+        { ordinal: 9, name: "astNodes", offset: 56, byteLength: 8, encoding: "u64le", semantics: "aggregate-declaration-and-statement-node-count" },
+        { ordinal: 10, name: "constexprSteps", offset: 64, byteLength: 8, encoding: "u64le", semantics: "aggregate-classic-constexpr-evaluator-step-count" },
+        { ordinal: 11, name: "templateInstantiations", offset: 72, byteLength: 8, encoding: "u64le", semantics: "aggregate-template-instantiation-record-count" },
+        { ordinal: 12, name: "templateDepth", offset: 80, byteLength: 8, encoding: "u64le", semantics: "maximum-template-instantiation-record-depth" },
+        { ordinal: 13, name: "completedSemanticPasses", offset: 88, byteLength: 8, encoding: "u64le", semantics: "completed-device-and-host-semantic-pass-count" },
       ],
       authority: {
         values: "module-self-reported-local-observation-only",

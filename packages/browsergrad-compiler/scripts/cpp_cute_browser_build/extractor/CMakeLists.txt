@@ -26,7 +26,72 @@ endif()
 set(LLVM_REQUIRES_EH ON)
 set(LLVM_REQUIRES_RTTI ON)
 
+# Clang 22 exposes exact preprocessing and template callbacks but not the
+# consumed constexpr-step count. Build one hash-verified replacement for the
+# ExprConstant.cpp archive member and inject a single fail-closed hook at its
+# existing step boundary. The upstream source archive remains immutable.
+set(BROWSERGRAD_UPSTREAM_EXPR_CONSTANT_SOURCE
+  "${LLVM_MAIN_SRC_DIR}/../clang/lib/AST/ExprConstant.cpp")
+if(NOT EXISTS "${BROWSERGRAD_UPSTREAM_EXPR_CONSTANT_SOURCE}")
+  message(FATAL_ERROR "the pinned Clang ExprConstant.cpp source is missing")
+endif()
+file(SHA256 "${BROWSERGRAD_UPSTREAM_EXPR_CONSTANT_SOURCE}"
+  BROWSERGRAD_UPSTREAM_EXPR_CONSTANT_SHA256)
+if(NOT BROWSERGRAD_UPSTREAM_EXPR_CONSTANT_SHA256 STREQUAL
+    "50c474805f9914a2c54d75f2ddd56d82dc20c128069855155f3c37db26e5bcf9")
+  message(FATAL_ERROR "the pinned Clang ExprConstant.cpp identity changed")
+endif()
+file(READ "${BROWSERGRAD_UPSTREAM_EXPR_CONSTANT_SOURCE}"
+  BROWSERGRAD_EXPR_CONSTANT_CONTENT)
+set(BROWSERGRAD_EXPR_CONSTANT_DECLARATION_ANCHOR
+  "#define DEBUG_TYPE \"exprconstant\"\n")
+set(BROWSERGRAD_EXPR_CONSTANT_DECLARATION_REPLACEMENT
+  "#define DEBUG_TYPE \"exprconstant\"\n\nextern \"C\" bool browsergrad_cpp_cute_constexpr_step_hook() noexcept;\n")
+set(BROWSERGRAD_EXPR_CONSTANT_STEP_ANCHOR
+  "    bool nextStep(const Stmt *S) {\n      if (Ctx.getLangOpts().ConstexprStepLimit == 0)\n        return true;\n")
+set(BROWSERGRAD_EXPR_CONSTANT_STEP_REPLACEMENT
+  "    bool nextStep(const Stmt *S) {\n      if (!browsergrad_cpp_cute_constexpr_step_hook()) {\n        FFDiag(S->getBeginLoc(), diag::note_constexpr_step_limit_exceeded);\n        return false;\n      }\n      if (Ctx.getLangOpts().ConstexprStepLimit == 0)\n        return true;\n")
+function(browsergrad_require_unique_literal CONTENT_VARIABLE ANCHOR_VARIABLE)
+  string(FIND "${${CONTENT_VARIABLE}}" "${${ANCHOR_VARIABLE}}"
+    BROWSERGRAD_PATCH_FIRST_INDEX)
+  if(BROWSERGRAD_PATCH_FIRST_INDEX EQUAL -1)
+    message(FATAL_ERROR "the pinned Clang constexpr instrumentation anchor changed")
+  endif()
+  string(LENGTH "${${ANCHOR_VARIABLE}}" BROWSERGRAD_PATCH_ANCHOR_LENGTH)
+  math(EXPR BROWSERGRAD_PATCH_REMAINDER_INDEX
+    "${BROWSERGRAD_PATCH_FIRST_INDEX} + ${BROWSERGRAD_PATCH_ANCHOR_LENGTH}")
+  string(SUBSTRING "${${CONTENT_VARIABLE}}"
+    ${BROWSERGRAD_PATCH_REMAINDER_INDEX} -1 BROWSERGRAD_PATCH_REMAINDER)
+  string(FIND "${BROWSERGRAD_PATCH_REMAINDER}" "${${ANCHOR_VARIABLE}}"
+    BROWSERGRAD_PATCH_SECOND_INDEX)
+  if(NOT BROWSERGRAD_PATCH_SECOND_INDEX EQUAL -1)
+    message(FATAL_ERROR "the pinned Clang constexpr instrumentation anchor is not unique")
+  endif()
+endfunction()
+browsergrad_require_unique_literal(BROWSERGRAD_EXPR_CONSTANT_CONTENT
+  BROWSERGRAD_EXPR_CONSTANT_DECLARATION_ANCHOR)
+browsergrad_require_unique_literal(BROWSERGRAD_EXPR_CONSTANT_CONTENT
+  BROWSERGRAD_EXPR_CONSTANT_STEP_ANCHOR)
+string(REPLACE "${BROWSERGRAD_EXPR_CONSTANT_DECLARATION_ANCHOR}"
+  "${BROWSERGRAD_EXPR_CONSTANT_DECLARATION_REPLACEMENT}"
+  BROWSERGRAD_EXPR_CONSTANT_CONTENT "${BROWSERGRAD_EXPR_CONSTANT_CONTENT}")
+string(REPLACE "${BROWSERGRAD_EXPR_CONSTANT_STEP_ANCHOR}"
+  "${BROWSERGRAD_EXPR_CONSTANT_STEP_REPLACEMENT}"
+  BROWSERGRAD_EXPR_CONSTANT_CONTENT "${BROWSERGRAD_EXPR_CONSTANT_CONTENT}")
+set(BROWSERGRAD_PATCHED_EXPR_CONSTANT_SOURCE
+  "${CMAKE_CURRENT_BINARY_DIR}/BrowserGradPatchedExprConstant.cpp")
+file(WRITE "${BROWSERGRAD_PATCHED_EXPR_CONSTANT_SOURCE}"
+  "${BROWSERGRAD_EXPR_CONSTANT_CONTENT}")
+file(SHA256 "${BROWSERGRAD_PATCHED_EXPR_CONSTANT_SOURCE}"
+  BROWSERGRAD_PATCHED_EXPR_CONSTANT_SHA256)
+if(NOT BROWSERGRAD_PATCHED_EXPR_CONSTANT_SHA256 STREQUAL
+    "0df625b20b3ad1d72fbdfea8c72a2784f22a0387904acd3250b7810e195fa623")
+  message(FATAL_ERROR "the generated constexpr instrumentation patch changed")
+endif()
+unset(BROWSERGRAD_EXPR_CONSTANT_CONTENT)
+
 add_llvm_executable(browsergrad-cpp-cute-extractor
+  "${BROWSERGRAD_PATCHED_EXPR_CONSTANT_SOURCE}"
   BrowserGradCppCuteArtifactV3.cpp
   BrowserGradCppCuteArtifactV3.h
   BrowserGradCppCuteArtifactWriter.cpp

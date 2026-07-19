@@ -74,7 +74,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256,
       supportFunctionAllowlistSha256:
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256,
-      resourceByteLength: 33_624,
+      resourceByteLength: 38_269,
       designAuthority: true,
       interfaceReviewReady: false,
       observedWasmVerified: false,
@@ -82,8 +82,8 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     });
     expect(canonicalCppCuteBrowserRuntimeAbiManifestBytes(prepared)).toEqual(resource);
     const record = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(prepared);
-    expect(record.manifest.version).toEqual({ major: 1, minor: 7 });
-    expect(record.manifest.body.wasm.cAbiVersion).toBe(65_537);
+    expect(record.manifest.version).toEqual({ major: 1, minor: 8 });
+    expect(record.manifest.body.wasm.cAbiVersion).toBe(65_538);
     expect(await deriveCppCuteBrowserRuntimeAbiManifestId(record.manifest.body)).toBe(
       CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
     );
@@ -101,7 +101,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     });
   });
 
-  it("pins the nine exported C signatures and no generic execution surface", async () => {
+  it("pins the ten exported C signatures and no generic execution surface", async () => {
     const prepared = await decodeCppCuteBrowserRuntimeAbiManifest(
       cppCuteBrowserRuntimeAbiManifestResourceBytes(),
     );
@@ -121,12 +121,44 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       [0, "bg_cpp_cute_abi_version", "uint32_t bg_cpp_cute_abi_version(void)", [], ["i32"]],
       [1, "bg_cpp_cute_alloc", "uint32_t bg_cpp_cute_alloc(uint32_t byte_length)", ["i32"], ["i32"]],
       [2, "bg_cpp_cute_allocator_metrics_pointer", "uint32_t bg_cpp_cute_allocator_metrics_pointer(void)", [], ["i32"]],
-      [3, "bg_cpp_cute_compile", "int32_t bg_cpp_cute_compile(uint32_t input_pointer, uint32_t input_length)", ["i32", "i32"], ["i32"]],
-      [4, "bg_cpp_cute_free", "void bg_cpp_cute_free(uint32_t pointer, uint32_t byte_length)", ["i32", "i32"], []],
-      [5, "bg_cpp_cute_reset", "void bg_cpp_cute_reset(void)", [], []],
-      [6, "bg_cpp_cute_result_length", "uint32_t bg_cpp_cute_result_length(void)", [], ["i32"]],
-      [7, "bg_cpp_cute_result_pointer", "uint32_t bg_cpp_cute_result_pointer(void)", [], ["i32"]],
-      [8, "bg_cpp_cute_status", "int32_t bg_cpp_cute_status(void)", [], ["i32"]],
+      [3, "bg_cpp_cute_frontend_work_metrics_pointer", "uint32_t bg_cpp_cute_frontend_work_metrics_pointer(void)", [], ["i32"]],
+      [4, "bg_cpp_cute_compile", "int32_t bg_cpp_cute_compile(uint32_t input_pointer, uint32_t input_length)", ["i32", "i32"], ["i32"]],
+      [5, "bg_cpp_cute_free", "void bg_cpp_cute_free(uint32_t pointer, uint32_t byte_length)", ["i32", "i32"], []],
+      [6, "bg_cpp_cute_reset", "void bg_cpp_cute_reset(void)", [], []],
+      [7, "bg_cpp_cute_result_length", "uint32_t bg_cpp_cute_result_length(void)", [], ["i32"]],
+      [8, "bg_cpp_cute_result_pointer", "uint32_t bg_cpp_cute_result_pointer(void)", [], ["i32"]],
+      [9, "bg_cpp_cute_status", "int32_t bg_cpp_cute_status(void)", [], ["i32"]],
+    ]);
+  });
+
+  it("pins one stable exact frontend-work record with Clang-owned counters", async () => {
+    const prepared = await decodeCppCuteBrowserRuntimeAbiManifest(
+      cppCuteBrowserRuntimeAbiManifestResourceBytes(),
+    );
+    const contract = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(prepared)
+      .manifest.body.frontendWorkMetricsRecord;
+
+    expect(contract).toMatchObject({
+      schema: "browsergrad.compiler.cpp-cute.frontend-work-metrics-record",
+      version: { major: 1, minor: 0 },
+      magicAscii: "BGFWK001",
+      byteLength: 96,
+      alignmentByteLength: 8,
+      pointerExport: "bg_cpp_cute_frontend_work_metrics_pointer",
+      lifecycle: {
+        acceptedArtifactPassCount: 2,
+        aggregateScope: "cuda-device-pass-followed-by-cuda-host-pass",
+      },
+      instrumentation: {
+        constexprSteps: "pinned-classic-exprconstant-evalinfo-nextstep-count",
+        constexprInterpreter: "classic-evaluator-required-new-interpreter-disabled",
+      },
+    });
+    expect(contract.fields.map((field) => field.name)).toEqual([
+      "magic", "version", "byteLength", "phase", "flags", "generation",
+      "includeDepth", "macroExpansions", "preprocessedTokens", "astNodes",
+      "constexprSteps", "templateInstantiations", "templateDepth",
+      "completedSemanticPasses",
     ]);
   });
 
@@ -721,7 +753,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
   });
 
   it("rejects unsupported versions before accepting a closed contract", async () => {
-    for (const [field, value] of [["major", 2], ["minor", 8]] as const) {
+    for (const [field, value] of [["major", 2], ["minor", 9]] as const) {
       const resource = mutableResource();
       objectField(resource, "version")[field] = value;
       await expectDecodeError(

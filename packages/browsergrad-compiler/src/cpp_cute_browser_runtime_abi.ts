@@ -21,14 +21,14 @@ import {
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
-export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 7;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 8;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.527ed068f0479a087d5198749a1d0103f0c463566bf56af833777268c342a36c";
+  "bg.cpp.browser-runtime-abi.sha256.2ad42184a70ae5e2039010868f87dce6273def0affe05f5baa220bd1fc1a23ac";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "ada8e6da61153e3e92f359a5c63bc2ba8926e58362c3f7a9e88f4b3a67f57d15";
+  "b24757f1517fb91474c4e5355bd7ec632baa188a55ec95cd15bb3c05501b3227";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "60fb1887eabc14dc77d4c935bd9b4d9f899e981f1b9cfbbab72c3b0dfa83abc4";
+  "2dc43565095554ef460108bf7d5075b0554f5292d6fff1c5bd5e6790866bf5ef";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "8b48a9e038fc9c2b3ed677d6df99e7d0803da9083db19c41a3017f844fa10f48";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 =
@@ -295,7 +295,7 @@ function validateBodyInvariants(value: JsonObject): void {
       invalid("$.body.authority", "manifest must not claim Wasm observation, execution, or release authority");
     }
     if (body.wasm.moduleRole !== "compiler-extractor-only-user-programs-never-linked-or-executed" ||
-        body.wasm.cAbiVersion !== 65_537 ||
+        body.wasm.cAbiVersion !== 65_538 ||
         body.wasm.cAbiVersionEncoding !== "major-shift-left-16-bitwise-or-minor" ||
         body.wasm.startSection !== "forbidden" || body.wasm.unlistedCExports !== "forbidden") {
       invalid("$.body.wasm", "module role, ABI version, start, or export closure differs from runtime v1");
@@ -495,6 +495,7 @@ function validateBodyInvariants(value: JsonObject): void {
       ["bg_cpp_cute_abi_version", "uint32_t bg_cpp_cute_abi_version(void)", 0, 1, "u32-packed-abi-version"],
       ["bg_cpp_cute_alloc", "uint32_t bg_cpp_cute_alloc(uint32_t byte_length)", 1, 1, "u32-input-pointer-zero-on-failure"],
       ["bg_cpp_cute_allocator_metrics_pointer", "uint32_t bg_cpp_cute_allocator_metrics_pointer(void)", 0, 1, "u32-nonzero-stable-read-only-allocator-metrics-record-v1-pointer"],
+      ["bg_cpp_cute_frontend_work_metrics_pointer", "uint32_t bg_cpp_cute_frontend_work_metrics_pointer(void)", 0, 1, "u32-nonzero-stable-read-only-frontend-work-metrics-record-v1-pointer"],
       ["bg_cpp_cute_compile", "int32_t bg_cpp_cute_compile(uint32_t input_pointer, uint32_t input_length)", 2, 1, "typed-compile-status"],
       ["bg_cpp_cute_free", "void bg_cpp_cute_free(uint32_t pointer, uint32_t byte_length)", 2, 0, "void-status-readable-separately"],
       ["bg_cpp_cute_reset", "void bg_cpp_cute_reset(void)", 0, 0, "void-infallible-for-live-instance"],
@@ -502,7 +503,7 @@ function validateBodyInvariants(value: JsonObject): void {
       ["bg_cpp_cute_result_pointer", "uint32_t bg_cpp_cute_result_pointer(void)", 0, 1, "u32-result-pointer-zero-unless-artifact-ready"],
       ["bg_cpp_cute_status", "int32_t bg_cpp_cute_status(void)", 0, 1, "current-typed-status-without-state-mutation"],
     ] as const;
-    if (body.cExports.length !== expectedExports.length) invalid("$.body.cExports", "expected exactly nine C exports");
+    if (body.cExports.length !== expectedExports.length) invalid("$.body.cExports", "expected exactly ten C exports");
     for (const [index, expected] of expectedExports.entries()) {
       const actual = body.cExports[index];
       if (actual?.ordinal !== index || actual.cSymbol !== expected[0] || actual.wasmExportName !== expected[0] ||
@@ -632,6 +633,135 @@ function validateBodyInvariants(value: JsonObject): void {
         metrics.authority.workerExecution !== "not-authorized-by-record-values" ||
         metrics.authority.lowering !== "not-authorized-by-record-values") {
       invalid("$.body.allocatorMetricsRecord.authority", "allocator metrics record must not grant execution or lowering authority");
+    }
+    const frontendWork = body.frontendWorkMetricsRecord;
+    if (frontendWork.schema !==
+          "browsergrad.compiler.cpp-cute.frontend-work-metrics-record" ||
+        frontendWork.version.major !== 1 || frontendWork.version.minor !== 0 ||
+        frontendWork.magicAscii !== "BGFWK001" ||
+        frontendWork.byteLength !== 96 ||
+        frontendWork.alignmentByteLength !== 8 ||
+        frontendWork.encoding !== "little-endian-fixed-width" ||
+        frontendWork.storage !== "module-global-linear-memory-record" ||
+        frontendWork.pointerExport !==
+          "bg_cpp_cute_frontend_work_metrics_pointer") {
+      invalid(
+        "$.body.frontendWorkMetricsRecord",
+        "frontend-work metrics identity or layout differs from runtime v1.2",
+      );
+    }
+    assertExactNumbers(
+      frontendWork.magicBytes,
+      [66, 71, 70, 87, 75, 48, 48, 49],
+      "$.body.frontendWorkMetricsRecord.magicBytes",
+    );
+    if (frontendWork.pointerContract.resultEncoding !==
+          "u32-wasm32-linear-memory-offset" ||
+        frontendWork.pointerContract.zero !==
+          "forbidden-for-conforming-live-module-instance" ||
+        frontendWork.pointerContract.stability !==
+          "constant-for-module-instance-lifetime" ||
+        frontendWork.pointerContract.completeRange !==
+          "must-fit-current-exported-memory" ||
+        frontendWork.pointerContract.mutability !==
+          "module-writes-host-read-only") {
+      invalid(
+        "$.body.frontendWorkMetricsRecord.pointerContract",
+        "frontend-work pointer contract differs from runtime v1.2",
+      );
+    }
+    const frontendSnapshot = frontendWork.snapshotContract;
+    if (frontendSnapshot.allowedPhases !==
+          "between-synchronous-runtime-calls-only" ||
+        frontendSnapshot.hostRead !== "copy-exact-record-before-decoding" ||
+        frontendSnapshot.memoryGrowthDuringCopy !== "forbidden" ||
+        frontendSnapshot.consistency !==
+          "module-calls-are-synchronous-and-memory-is-unshared" ||
+        frontendSnapshot.readyRead !==
+          "after-artifact-ready-compile-before-reset" ||
+        frontendSnapshot.resetRead !==
+          "after-reset-to-confirm-idle-generation-preservation") {
+      invalid(
+        "$.body.frontendWorkMetricsRecord.snapshotContract",
+        "frontend-work snapshot contract differs from runtime v1.2",
+      );
+    }
+    const lifecycle = frontendWork.lifecycle;
+    if (lifecycle.idlePhase !== 0 || lifecycle.collectingPhase !== 1 ||
+        lifecycle.completePhase !== 2 || lifecycle.failedPhase !== 3 ||
+        lifecycle.healthyFlag !== 1 ||
+        lifecycle.generationPolicy !==
+          "increment-on-admitted-invocation-preserve-across-reset-fail-on-overflow" ||
+        lifecycle.acceptedArtifactPassCount !== 2 ||
+        lifecycle.rejectedArtifactPassCount !== "one-or-two" ||
+        lifecycle.aggregateScope !==
+          "cuda-device-pass-followed-by-cuda-host-pass" ||
+        lifecycle.limitPolicy !==
+          "effective-request-profile-ceilings-fail-before-artifact-ready" ||
+        lifecycle.overflowPolicy !==
+          "counter-overflow-fails-before-wrap-and-forbids-artifact-ready") {
+      invalid(
+        "$.body.frontendWorkMetricsRecord.lifecycle",
+        "frontend-work lifecycle differs from runtime v1.2",
+      );
+    }
+    const instrumentation = frontendWork.instrumentation;
+    if (instrumentation.includeDepth !==
+          "maximum-source-manager-include-chain-depth-excluding-main-file" ||
+        instrumentation.macroExpansions !==
+          "preprocessor-macro-expands-callback-count" ||
+        instrumentation.preprocessedTokens !==
+          "final-expanded-token-watcher-count-excluding-eof" ||
+        instrumentation.astNodes !==
+          "recursive-ast-visitor-nonnull-declaration-and-statement-count" ||
+        instrumentation.constexprSteps !==
+          "pinned-classic-exprconstant-evalinfo-nextstep-count" ||
+        instrumentation.templateInstantiations !==
+          "sema-template-callback-instantiation-record-begin-count" ||
+        instrumentation.templateDepth !==
+          "maximum-concurrent-sema-template-instantiation-record-depth" ||
+        instrumentation.constexprInterpreter !==
+          "classic-evaluator-required-new-interpreter-disabled" ||
+        instrumentation.patchedSourceIdentity !==
+          "clang-22.1.8-ExprConstant.cpp-sha256-50c474805f9914a2c54d75f2ddd56d82dc20c128069855155f3c37db26e5bcf9") {
+      invalid(
+        "$.body.frontendWorkMetricsRecord.instrumentation",
+        "frontend-work instrumentation semantics differ from the pinned Clang implementation",
+      );
+    }
+    assertExactNumbers(
+      frontendWork.fields.map((field) => field.ordinal),
+      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+      "$.body.frontendWorkMetricsRecord.fields[*].ordinal",
+    );
+    assertExactStrings(frontendWork.fields.map((field) => field.name), [
+      "magic", "version", "byteLength", "phase", "flags", "generation",
+      "includeDepth", "macroExpansions", "preprocessedTokens", "astNodes",
+      "constexprSteps", "templateInstantiations", "templateDepth",
+      "completedSemanticPasses",
+    ], "$.body.frontendWorkMetricsRecord.fields[*].name");
+    assertExactNumbers(frontendWork.fields.map((field) => field.offset), [
+      0, 8, 12, 16, 20, 24, 32, 40, 48, 56, 64, 72, 80, 88,
+    ], "$.body.frontendWorkMetricsRecord.fields[*].offset");
+    assertExactNumbers(frontendWork.fields.map((field) => field.byteLength), [
+      8, 4, 4, 4, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    ], "$.body.frontendWorkMetricsRecord.fields[*].byteLength");
+    assertExactStrings(frontendWork.fields.map((field) => field.encoding), [
+      "ascii[8]", "u32le", "u32le", "u32le", "u32le", "u64le", "u64le",
+      "u64le", "u64le", "u64le", "u64le", "u64le", "u64le", "u64le",
+    ], "$.body.frontendWorkMetricsRecord.fields[*].encoding");
+    if (frontendWork.authority.values !==
+          "module-self-reported-local-observation-only" ||
+        frontendWork.authority.producerConformance !==
+          "detached-observed-wasm-verification-required" ||
+        frontendWork.authority.workerExecution !==
+          "not-authorized-by-record-values" ||
+        frontendWork.authority.lowering !==
+          "not-authorized-by-record-values") {
+      invalid(
+        "$.body.frontendWorkMetricsRecord.authority",
+        "frontend-work record must not grant execution or lowering authority",
+      );
     }
     const expectedImports = [
       ["bg_vfs_status", "int32_t bg_vfs_status(uint32_t path_pointer, uint32_t path_length, uint32_t metadata_pointer)", 3, "write-one-32-byte-metadata-record-for-an-existing-file-or-directory"],

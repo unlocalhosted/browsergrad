@@ -1,4 +1,5 @@
 #include "extractor/BrowserGradCppCuteClangAction.h"
+#include "extractor/BrowserGradCppCuteMetrics.h"
 
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/VirtualFileSystem.h"
@@ -82,6 +83,16 @@ int main() {
       static_cast<std::uint32_t>(begin),
       static_cast<std::uint32_t>(begin + std::string_view("layout").size()),
   };
+  constexpr FrontendWorkLimitsV1 frontend_limits{
+      64U,
+      1'000'000U,
+      1'000'000U,
+      1'000'000U,
+      1'000'000U,
+      1'000'000U,
+      1'000U,
+  };
+  BG_CHECK(begin_frontend_work_invocation(frontend_limits));
   for (const std::string_view pass : {std::string_view("device"),
                                       std::string_view("host")}) {
     ClangPassReview review;
@@ -108,9 +119,20 @@ int main() {
     BG_CHECK(review.layout_trace.shape.elements[0].value == 4);
     BG_CHECK(review.layout_trace.shape.elements[1].value == 2);
   }
+  BG_CHECK(complete_frontend_work_invocation(2U));
+  BG_CHECK(frontend_work_metrics_ready());
+  const FrontendWorkMetricsRecordV1& accepted_work =
+      frontend_work_metrics_record_for_testing();
+  BG_CHECK(accepted_work.preprocessed_tokens != 0U);
+  BG_CHECK(accepted_work.ast_nodes != 0U);
+  BG_CHECK(accepted_work.template_instantiations != 0U);
+  BG_CHECK(accepted_work.template_depth != 0U);
+  BG_CHECK(accepted_work.completed_semantic_passes == 2U);
 
   constexpr std::string_view rejected_source =
       "const char* temporal = __DATE__;\n";
+  reset_frontend_work_metrics();
+  BG_CHECK(begin_frontend_work_invocation(frontend_limits));
   install_source(rejected_source);
   ClangPassReview rejected;
   const std::vector<std::string> host = arguments("host");
@@ -131,7 +153,13 @@ int main() {
   BG_CHECK(rejected.diagnostics[0].severity ==
            RawDiagnosticSeverity::kError);
   BG_CHECK(rejected.diagnostics[0].virtual_path == "/workspace/main.cu");
+  BG_CHECK(complete_frontend_work_invocation(1U));
+  BG_CHECK(frontend_work_metrics_ready());
+  BG_CHECK(frontend_work_metrics_record_for_testing()
+               .completed_semantic_passes == 1U);
 
+  reset_frontend_work_metrics();
+  BG_CHECK(begin_frontend_work_invocation(frontend_limits));
   install_source(source);
   ClangPassReview clean_after_rejection;
   BG_CHECK(run_cpp_cute_clang_pass_for_review(
@@ -140,5 +168,8 @@ int main() {
       clean_after_rejection));
   BG_CHECK(!clean_after_rejection.policy_failed);
   BG_CHECK(clean_after_rejection.policy_violation_count == 0U);
+  BG_CHECK(complete_frontend_work_invocation(1U));
+  BG_CHECK(frontend_work_metrics_ready());
+  BG_CHECK(frontend_work_metrics_record_for_testing().ast_nodes != 0U);
   return 0;
 }
