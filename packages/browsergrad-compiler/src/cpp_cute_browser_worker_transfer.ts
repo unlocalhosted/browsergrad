@@ -41,6 +41,7 @@ import {
   decodeCppCuteBrowserWorkerInvocation,
   discardCppCuteBrowserWorkerInvocation,
   unwrapPreparedCppCuteBrowserWorkerInvocation,
+  type CppCuteBrowserWorkerInvocationDiscardReason,
   type PreparedCppCuteBrowserWorkerInvocation,
 } from "./cpp_cute_browser_worker_protocol.js";
 import {
@@ -386,6 +387,7 @@ export function takeCppCuteBrowserWorkerTransfer(
 /** Abandons an untaken transfer and terminalizes its host invocation. */
 export function discardCppCuteBrowserWorkerTransfer(
   prepared: PreparedCppCuteBrowserWorkerTransfer,
+  reason: CppCuteBrowserWorkerInvocationDiscardReason = "abandoned",
 ): void {
   const stored = storedPreparedTransfer(prepared);
   if (stored.state !== "prepared" || stored.active === null) {
@@ -395,7 +397,7 @@ export function discardCppCuteBrowserWorkerTransfer(
   stored.state = "discarded";
   stored.active = null;
   try {
-    discardCppCuteBrowserWorkerInvocation(invocation, "abandoned");
+    discardCppCuteBrowserWorkerInvocation(invocation, reason);
   } catch (cause) {
     cleanup("$.cleanup.invocation", "abandoned host transfer cleanup failed", cause);
   }
