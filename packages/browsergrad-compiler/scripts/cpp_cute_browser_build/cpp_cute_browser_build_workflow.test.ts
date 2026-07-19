@@ -80,7 +80,14 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("cpp_cute_browser_build_reproducibility.mjs");
     expect(workflow).toContain("clang-wasm-reproducibility.v2.json");
     expect(workflow).not.toContain("clang-wasm-reproducibility.v1.json");
-    expect(workflow).toContain("cpp_cute_browser_wasm_review.mjs");
+    expect(workflow.match(/cpp_cute_browser_wasm_review\.mjs/gu)).toHaveLength(2);
+    expect(workflow).toContain("Inspect built Wasm against the pinned runtime ABI");
+    expect(workflow).toContain(
+      "--wasm=\"${bg_output_root}/browsergrad-cpp-cute/clang-extractor.wasm\"",
+    );
+    expect(workflow).toContain(
+      "--output=\"${bg_output_root}/clang-wasm-runtime-abi-review.v1.json\"",
+    );
     expect(workflow).toContain("--first-root=\"${BG_CLANG_REPRO_ROOT}/first\"");
     expect(workflow).toContain("--second-root=\"${BG_CLANG_REPRO_ROOT}/second\"");
     expect(workflow).toContain("clang-wasm-runtime-abi-review.v1.json");

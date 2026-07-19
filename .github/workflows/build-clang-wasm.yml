@@ -229,6 +229,16 @@ jobs:
             ${{ runner.temp }}/browsergrad-clang-wasm-cache-v2/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
           key: linux-amd64-${{ steps.toolchain-cache-key.outputs.cache-key }}
 
+      - name: Inspect built Wasm against the pinned runtime ABI
+        if: success()
+        run: |
+          set -euo pipefail
+          bg_output_root="${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/output"
+          node \
+            packages/browsergrad-compiler/scripts/cpp_cute_browser_build/cpp_cute_browser_wasm_review.mjs \
+            --wasm="${bg_output_root}/browsergrad-cpp-cute/clang-extractor.wasm" \
+            --output="${bg_output_root}/clang-wasm-runtime-abi-review.v1.json"
+
       - name: Summarize exact build outputs
         if: success()
         run: |
@@ -240,6 +250,7 @@ jobs:
           fi
           sha256sum \
             "${bg_build_observation}" \
+            "${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/output/clang-wasm-runtime-abi-review.v1.json" \
             "${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/output/browsergrad-cpp-cute/clang-extractor.wasm"
           du --human-readable --summarize \
             "${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/output" \
