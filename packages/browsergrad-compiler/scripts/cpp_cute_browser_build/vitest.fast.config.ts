@@ -27,6 +27,7 @@ export default defineConfig({
       "tests/compiler/cpp_cute_browser_worker_controller_production.test.ts",
       "tests/compiler/cpp_cute_browser_worker_entry.test.ts",
       "tests/compiler/cpp_cute_browser_worker_package_invocation.test.ts",
+      "tests/compiler/cpp_cute_browser_worker_platform.test.ts",
       "tests/compiler/cpp_cute_browser_worker_positive.test.ts",
       "tests/compiler/cpp_cute_browser_worker_protocol.test.ts",
       "tests/compiler/cpp_cute_browser_worker_runtime.test.ts",
