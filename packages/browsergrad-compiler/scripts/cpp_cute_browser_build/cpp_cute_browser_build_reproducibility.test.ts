@@ -15,6 +15,24 @@ import { join } from "node:path";
 import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+const wasmInspection = vi.hoisted(() => ({
+  reportsByWasmSha256: new Map<string, unknown>(),
+}));
+
+vi.mock("../../dist/cpp_cute_browser_wasm_inspection.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../dist/cpp_cute_browser_wasm_inspection.js")>();
+  return {
+    ...actual,
+    inspectCppCuteBrowserWasmAgainstRuntimeAbi: async (bytes: Uint8Array) => {
+      const { createHash: createNodeHash } = await import("node:crypto");
+      const digest = createNodeHash("sha256").update(bytes).digest("hex");
+      const report = wasmInspection.reportsByWasmSha256.get(digest);
+      if (report === undefined) throw new Error(`missing raw-Wasm inspection fixture for ${digest}`);
+      return report;
+    },
+  };
+});
+
 import {
   cppCuteBrowserBuildInputLockResourceBytes,
   decodeCppCuteBrowserBuildInputLock,
@@ -50,6 +68,7 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  wasmInspection.reportsByWasmSha256.clear();
   await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -115,9 +134,9 @@ async function writeBuild(
   ]);
 
   const profiles = [
-    ["native-tablegen-configure", "native-tablegen", "configure", paths.nativeBuildRoot],
+    ["native-tablegen-configure", "native-tablegen", "configure", paths.llvmProjectSourceRoot],
     ["native-tablegen-build", "native-tablegen", "build", paths.nativeBuildRoot],
-    ["clang-extractor-wasm-configure", "clang-extractor-wasm", "configure", paths.wasmBuildRoot],
+    ["clang-extractor-wasm-configure", "clang-extractor-wasm", "configure", paths.llvmProjectSourceRoot],
     ["clang-extractor-wasm-build", "clang-extractor-wasm", "build", paths.wasmBuildRoot],
   ] as const;
   const steps = [];
@@ -213,6 +232,10 @@ async function writeBuild(
     workerExecutionReady: false,
     releaseReady: false,
   };
+  if (options.runtimeAbiReviewTag === undefined &&
+      !wasmInspection.reportsByWasmSha256.has(execution.wasmSha256)) {
+    wasmInspection.reportsByWasmSha256.set(execution.wasmSha256, runtimeAbiReview);
+  }
   await writeFile(
     join(outputRoot, "clang-wasm-runtime-abi-review.v1.json"),
     canonicalJsonBytes(runtimeAbiReview),
@@ -405,7 +428,7 @@ describe("Clang-Wasm clean-build reproducibility authority", () => {
     });
     await expect(verifyCppCuteClangWasmReproducibility({ firstRoot, secondRoot })).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-MISMATCH",
-      path: "$comparison.runtimeAbiReview",
+      path: "$builds[1].runtimeAbiReview",
     });
   });
 

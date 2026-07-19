@@ -16,6 +16,16 @@ import {
   decodeCppCuteBrowserBuildInputLock,
   unwrapPreparedCppCuteBrowserBuildInputLock,
 } from "../../dist/cpp_cute_browser_build_lock.js";
+import {
+  CPP_CUTE_BROWSER_WASM_REPORT_MAX_ARRAY_LENGTH,
+  CPP_CUTE_BROWSER_WASM_REPORT_MAX_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_WASM_REPORT_MAX_NODES,
+  inspectCppCuteBrowserWasmAgainstRuntimeAbi,
+} from "../../dist/cpp_cute_browser_wasm_inspection.js";
+import {
+  cppCuteBrowserRuntimeAbiManifestResourceBytes,
+  decodeCppCuteBrowserRuntimeAbiManifest,
+} from "../../dist/cpp_cute_browser_runtime_abi.js";
 
 const INVALID = "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-INVALID";
 const MISMATCH = "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-MISMATCH";
@@ -29,7 +39,14 @@ const REPRODUCIBILITY_SCHEMA =
 const PORTABLE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._+/-]+$/u;
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const MAX_EVIDENCE_BYTE_LENGTH = 1024 * 1024;
-const MAX_RUNTIME_ABI_REVIEW_BYTE_LENGTH = 1024 * 1024;
+const MAX_RUNTIME_ABI_REVIEW_BYTE_LENGTH = CPP_CUTE_BROWSER_WASM_REPORT_MAX_BYTE_LENGTH;
+const RUNTIME_ABI_REVIEW_CANONICAL_OPTIONS = Object.freeze({
+  limits: Object.freeze({
+    maxArrayLength: CPP_CUTE_BROWSER_WASM_REPORT_MAX_ARRAY_LENGTH,
+    maxDocumentBytes: CPP_CUTE_BROWSER_WASM_REPORT_MAX_BYTE_LENGTH,
+    maxNodes: CPP_CUTE_BROWSER_WASM_REPORT_MAX_NODES,
+  }),
+});
 const MAX_RUNTIME_CLOSURE_OBSERVATION_BYTE_LENGTH = 256 * 1024;
 const MAX_RUNTIME_CLOSURE_FILE_COUNT = 256;
 const MAX_RUNTIME_CLOSURE_FILE_BYTE_LENGTH = 16 * 1024 * 1024;
@@ -441,6 +458,7 @@ async function admitBuild(root, diagnosticPath, lockId, sourceSetSha256, body, l
   await verifyObservedFiles(root, evidence, diagnosticPath);
   const runtimeAbiReview = await admitRuntimeAbiReview(
     join(root, "output", "clang-wasm-runtime-abi-review.v1.json"),
+    join(root, "state", "evidence", "generated", "clang-extractor.wasm"),
     evidence.execution,
     `${diagnosticPath}.runtimeAbiReview`,
   );
@@ -452,7 +470,7 @@ async function admitBuild(root, diagnosticPath, lockId, sourceSetSha256, body, l
   });
 }
 
-async function admitRuntimeAbiReview(path, execution, diagnosticPath) {
+async function admitRuntimeAbiReview(path, wasmPath, execution, diagnosticPath) {
   const snapshot = await readSmallFile(
     path,
     MAX_RUNTIME_ABI_REVIEW_BYTE_LENGTH,
@@ -464,7 +482,7 @@ async function admitRuntimeAbiReview(path, execution, diagnosticPath) {
   } catch (cause) {
     invalid(diagnosticPath, "runtime-ABI review must be strict UTF-8 JSON", { cause });
   }
-  const canonical = canonicalJsonBytes(value);
+  const canonical = canonicalJsonBytes(value, RUNTIME_ABI_REVIEW_CANONICAL_OPTIONS);
   if (!equalBytes(snapshot.bytes, canonical)) {
     invalid(diagnosticPath, "runtime-ABI review must use canonical JSON bytes");
   }
@@ -494,6 +512,37 @@ async function admitRuntimeAbiReview(path, execution, diagnosticPath) {
   if (typeof report.projection !== "object" || report.projection === null ||
       Array.isArray(report.projection)) {
     invalid(`${diagnosticPath}.projection`, "expected a projection object");
+  }
+  const wasmSnapshot = await readSmallFile(
+    wasmPath,
+    MAX_WASM_BYTE_LENGTH,
+    `${diagnosticPath}.wasm`,
+  );
+  if (wasmSnapshot.bytes.byteLength !== execution.wasmByteLength) {
+    mismatch(`${diagnosticPath}.wasm.byteLength`, "raw-Wasm review input length changed after build admission");
+  }
+  if (sha256(wasmSnapshot.bytes) !== execution.wasmSha256) {
+    mismatch(`${diagnosticPath}.wasm.sha256`, "raw-Wasm review input digest changed after build admission");
+  }
+  let independentlyObservedBytes;
+  try {
+    const runtimeAbi = await decodeCppCuteBrowserRuntimeAbiManifest(
+      cppCuteBrowserRuntimeAbiManifestResourceBytes(),
+    );
+    const independentlyObserved = await inspectCppCuteBrowserWasmAgainstRuntimeAbi(
+      wasmSnapshot.bytes,
+      runtimeAbi,
+      { maxModuleByteLength: MAX_WASM_BYTE_LENGTH },
+    );
+    independentlyObservedBytes = canonicalJsonBytes(
+      independentlyObserved,
+      RUNTIME_ABI_REVIEW_CANONICAL_OPTIONS,
+    );
+  } catch (cause) {
+    mismatch(diagnosticPath, "independent raw-Wasm review failed", { cause });
+  }
+  if (!equalBytes(snapshot.bytes, independentlyObservedBytes)) {
+    mismatch(diagnosticPath, "uploaded runtime-ABI review differs from independent raw-Wasm review");
   }
   return Object.freeze({
     sha256: sha256(snapshot.bytes),
@@ -830,7 +879,11 @@ function validateSteps(value, path, paths) {
     const executable = portableAbsolutePath(exactString(object.executable, `${stepPath}.executable`), `${stepPath}.executable`);
     const arguments_ = exactStringArray(object.arguments, `${stepPath}.arguments`, 256, 16_384);
     const cwd = portableAbsolutePath(exactString(object.cwd, `${stepPath}.cwd`), `${stepPath}.cwd`);
-    const expectedCwd = profile.stageId === "native-tablegen" ? paths.nativeBuildRoot : paths.wasmBuildRoot;
+    const expectedCwd = profile.kind === "configure"
+      ? paths.llvmProjectSourceRoot
+      : profile.stageId === "native-tablegen"
+        ? paths.nativeBuildRoot
+        : paths.wasmBuildRoot;
     exactValue(cwd, expectedCwd, `${stepPath}.cwd`);
     const environment = exactStringRecord(object.environment, `${stepPath}.environment`, 64, 32_768);
     exactValue(object.exitCode, 0, `${stepPath}.exitCode`);

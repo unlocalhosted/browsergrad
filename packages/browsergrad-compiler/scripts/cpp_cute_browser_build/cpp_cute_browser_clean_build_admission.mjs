@@ -29,7 +29,11 @@ async function main() {
     process.stdout.write(`${JSON.stringify(observation)}\n`);
   } catch (cause) {
     const error = cause instanceof Error ? cause : new Error("unknown clean-build admission failure");
-    process.stderr.write(`${error.name}: ${error.message}\n`);
+    const path = typeof cause === "object" && cause !== null && "path" in cause &&
+      typeof cause.path === "string"
+      ? ` at ${cause.path}`
+      : "";
+    process.stderr.write(`${error.name}${path}: ${error.message}\n`);
     process.exitCode = 1;
   }
 }
