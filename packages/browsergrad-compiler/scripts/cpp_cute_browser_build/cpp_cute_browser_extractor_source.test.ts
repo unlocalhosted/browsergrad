@@ -190,7 +190,8 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
   });
 
   it("preserves raw Wasm import and export names for the pinned runtime ABI", () => {
-    expect(wasmLinkerFlags).toContain("-sMINIFY_WASM_EXPORT_NAMES=0");
+    expect(wasmLinkerFlags[0]).toBe("-O2");
+    expect(wasmLinkerFlags).not.toContain("-sMINIFY_WASM_EXPORT_NAMES=0");
   });
 
   it("closes unsupported browser host services inside the Wasm module", async () => {
