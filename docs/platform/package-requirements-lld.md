@@ -44,24 +44,27 @@ cannot collapse distinct Linux virtual paths such as `xt_CONNMARK.h` and
 
 One same-process opaque pipeline rereads all 5,769 selected files and their
 67,092,008 content bytes, detects conflicting overlays, and materializes the
-five canonical BrowserGrad VFS packs. The observed packs total 67,495,319 bytes
-and cover Clang source resource templates, libc++, CUDA, CUTLASS, and the Linux
-sysroot. The full exact-source pipeline completed locally in 16.97 seconds;
-repeating it through the composed entrypoint produced the same five pack
-identities. All ten distribution notices approved by the build lock remain
-exact checked-in resources. These are real source-derived, independently
-inspected non-release pack observations. They do not establish complete
-generated Clang resource headers, an independently attested/package-pinned
-normalizer implementation, external per-file license approval, full
-distribution reproducibility, Worker execution, or release authority.
+five canonical BrowserGrad VFS packs. The locked WebAssembly-only Clang stage
+activates none of LLVM 22.1.8's ARM/AArch64/RISC-V TableGen resource-header
+rules. The pipeline verifies the exact 25,049-byte upstream CMake manifest,
+records an empty generated-file set, and omits that build-only manifest from
+the distributed pack. The resulting 5,768 files occupy 67,470,214 pack bytes
+and cover the complete configured Clang resource output, libc++, CUDA, CUTLASS,
+and the Linux sysroot. The current exact-source command completed locally in
+22.51 seconds including its package build. All ten distribution notices
+approved by the build lock remain exact checked-in resources. These are real
+source-derived, independently inspected non-release pack observations. They do
+not establish an independently attested/package-pinned normalizer
+implementation, external per-file license approval, full distribution
+reproducibility, Worker execution, or release authority.
 
 The exact source plan is
-`bg.cpp.browser-header-source-plan.sha256.360bfef6bc046ebbed5cc51b3a585a10ad0189b107d92f14df89772b265c1162`;
+`bg.cpp.browser-header-source-plan.sha256.f4c97df4ad6e8413bf8c66d488bd12c3f175778054e5ed80e6c124e8790ceb4f`;
 the seven-archive admission is
-`bg.cpp.browser-header-source-archive-admission.sha256.b365f8f65931a94728775dc56b173ac7673a2a528f1e5fe12de7451e76881d20`;
+`bg.cpp.browser-header-source-archive-admission.sha256.1b42a2b4c2729facb403195d85aab884a5640cc43de10e00143c4c0d58216392`;
 and the composed observation is
-`bg.cpp.browser-header-pack-pipeline.sha256.431f8b7c20bfdb4b6f129a04fb22ee24c5bcdd53cf29f2dd3b953abf007d39e2`.
-The five output SHA-256 identities are `1d05ba63...` (Clang resource source),
+`bg.cpp.browser-header-pack-pipeline.sha256.15540563830401f2f2822bdd1ed745a177e8943ccbf090e61bd6ea6549584a8c`.
+The five output SHA-256 identities are `fd7fb977...` (configured Clang resource),
 `f795494a...` (CUDA), `4f1c39b7...` (CUTLASS), `f66f1284...` (libc++), and
 `d04a460d...` (Linux sysroot); the implementation ledger retains the complete
 hashes and byte counts.
@@ -83,12 +86,12 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 425 tests across 45 files covering the build plan, runtime ABI,
+clean, then runs 426 tests across 45 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
 package invocation, Worker entry, production controller, exact header-tree
 inventory/materialization, seven-archive admission, strict archive
 normalization/extraction, and distribution-notice verification. The current
-gate measured 29.86 seconds end to end on Node 25; its Vitest phase took 21.24
+gate measured 28.60 seconds end to end on Node 25; its Vitest phase took 20.17
 seconds. Clean validation and two-build
 reproducibility still restore no cache and remain intentionally more expensive.
 
@@ -178,8 +181,8 @@ isolated build. Its 31,641,377-byte module has SHA-256
 passes raw review with zero mismatches. The ABI 1.8 local fast gate passes 30
 files/338 tests in 24.7 seconds on Node 25; the later controller-complete gate
 passed 34 files/381 tests in 25.26 seconds, and the current reproducibility-,
-archive-, extraction-, and header-capable gate passes 45 files/425 tests in
-29.86 seconds.
+archive-, extraction-, and header-capable gate passes 45 files/426 tests in
+28.60 seconds.
 
 The harness audit found strong isolation, exact-input closure, bounded logs,
 independent Wasm parsing, and separate authority tiers. It also records real

@@ -86,8 +86,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler run verify:browser-clang-wasm:
 
 It builds once, runs the no-rebuild lock check, and exercises the build-plan,
 runtime-ABI, browser-profile, and browser-asset identity chain sequentially.
-At the current 2026-07-19 checkpoint it passes 425 tests across 45 files in
-29.86 seconds end to end on Node 25. The set includes package invocation,
+At the current 2026-07-19 checkpoint it passes 426 tests across 45 files in
+28.60 seconds end to end on Node 25. The set includes package invocation,
 Worker entry, production-controller lifecycle, seven-archive admission, strict
 tar/Debian normalization, collision-free source extraction, exact header-tree
 inventory/materialization, distribution-notice verification, and
@@ -119,9 +119,11 @@ pnpm --filter @unlocalhosted/browsergrad-compiler run materialize:browser-header
   --pack-output-root=/absolute/private-pack-output
 ```
 
-The current exact local pipeline completes in about 17 seconds. Its outputs are
-non-release observations until generated Clang resource headers, normalizer
-attestation, and external file-level licensing are closed.
+The current exact local command completes in about 23 seconds including the
+package build. It verifies the locked WebAssembly-only Clang configuration has
+an empty generated-header set and excludes the upstream build manifest from
+the distributed pack. Outputs remain non-release observations until normalizer
+attestation and external file-level licensing are closed.
 
 Use the smallest WebGPU loop that covers the suspected bug class:
 
