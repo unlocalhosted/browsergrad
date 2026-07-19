@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const executorFsFaults = vi.hoisted(() => ({
@@ -577,6 +578,7 @@ describe("exact Clang-Wasm build executor", () => {
       releaseReady: false,
       factoryModuleDistributed: false,
     });
+    expect(() => canonicalJsonBytes(executed)).not.toThrow();
     expect(executorProcessState.calls).toHaveLength(4);
     expect(executorProcessState.calls.map((call) => ({
       executable: call.executable,
