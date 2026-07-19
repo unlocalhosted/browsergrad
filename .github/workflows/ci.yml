@@ -1,12 +1,14 @@
 # CI — build + test on every push and pull request.
 #
-# Four job families, run in parallel:
+# Five job families, run in parallel:
 #   1. surface — fast `vitest run` on each package (~5s wall-clock each)
-#   2. integration — Pyodide-in-node integration suites (~30s wall-clock each)
-#   3. browser — real Chromium + WebGPU via Playwright. Linux only; macOS
+#   2. compiler-native — the required LLVM/Clang harness, isolated from the
+#      ordinary Node-24 surface so neither lane queues behind the other.
+#   3. integration — Pyodide-in-node integration suites (~30s wall-clock each)
+#   4. browser — real Chromium + WebGPU via Playwright. Linux only; macOS
 #      headed Metal cannot run on hosted runners. Set BG_BROWSER_HEADLESS=1
 #      and pass the WebGPU flags the config already declares.
-#   4. browser-real-world — source and dist bundle CUDA gates on separate
+#   5. browser-real-world — source and dist bundle CUDA gates on separate
 #      runners. Each shard still audits every corpus and runs the full smoke set.
 #
 # Build matrix:
@@ -51,8 +53,36 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
 
+      - name: Verify compiler Node-only Docker shell
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler test:aot-docker-shell:run
+
+      - run: pnpm architecture:check
+      - run: pnpm -r test
+
+      - name: Run compiler typecheck
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler typecheck
+
+      - name: Run compiler lint
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler lint
+
+  compiler-native:
+    name: Compiler required-native harness (Node 24)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+
       - name: Install required native Clang integration toolchain
-        if: matrix.node == 24
         run: |
           set -euo pipefail
           bg_llvm_key="$(mktemp)"
@@ -78,25 +108,11 @@ jobs:
           echo "BROWSERGRAD_LLVM_CONFIG=${bg_llvm_config}" >> "${GITHUB_ENV}"
           echo "BROWSERGRAD_NATIVE_CXX=/usr/lib/llvm-22/bin/clang++" >> "${GITHUB_ENV}"
 
-      - name: Verify compiler Node-only Docker shell
-        run: pnpm --filter @unlocalhosted/browsergrad-compiler test:aot-docker-shell:run
-
       - name: Verify compiler Clang-Wasm build plan and native primitives
-        if: matrix.node == 24
         run: pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:required-native
 
       - name: Verify compiler source, build-harness, and native architecture
-        if: matrix.node == 24
         run: pnpm --filter @unlocalhosted/browsergrad-compiler architecture:check
-
-      - run: pnpm architecture:check
-      - run: pnpm -r test
-
-      - name: Run compiler typecheck
-        run: pnpm --filter @unlocalhosted/browsergrad-compiler typecheck
-
-      - name: Run compiler lint
-        run: pnpm --filter @unlocalhosted/browsergrad-compiler lint
 
   integration:
     name: Pyodide integration tests

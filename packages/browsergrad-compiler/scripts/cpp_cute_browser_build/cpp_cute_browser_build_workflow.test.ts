@@ -250,8 +250,21 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(ciWorkflow).not.toMatch(/--(?:only|corpus)(?:=|\s)/u);
   });
 
-  it("keeps oldest, LTS native-harness, and Node 25 default compatibility lanes", () => {
+  it("keeps compatibility lanes independent from the required-native harness", () => {
     expect(ciWorkflow).toContain("node: [20, 24, 25]");
-    expect(ciWorkflow).toContain("if: matrix.node == 24");
+    const surfaceStart = ciWorkflow.indexOf("\n  surface:\n");
+    const nativeStart = ciWorkflow.indexOf("\n  compiler-native:\n");
+    const integrationStart = ciWorkflow.indexOf("\n  integration:\n");
+    expect(surfaceStart).toBeGreaterThan(0);
+    expect(nativeStart).toBeGreaterThan(surfaceStart);
+    expect(integrationStart).toBeGreaterThan(nativeStart);
+    const surfaceJob = ciWorkflow.slice(surfaceStart, nativeStart);
+    const nativeJob = ciWorkflow.slice(nativeStart, integrationStart);
+    expect(surfaceJob).not.toContain("llvm-toolchain-noble-22");
+    expect(surfaceJob).not.toContain("test:browser-clang-wasm-build-plan:required-native");
+    expect(nativeJob).toContain("node-version: 24");
+    expect(nativeJob).toContain("llvm-toolchain-noble-22");
+    expect(nativeJob).toContain("test:browser-clang-wasm-build-plan:required-native");
+    expect(nativeJob).toContain("architecture:check");
   });
 });
