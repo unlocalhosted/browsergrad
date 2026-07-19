@@ -67,6 +67,8 @@ export interface CppCuteClangWasmReproducibilityBuildIdentity {
   readonly runtimeAbiReviewExactInterfaceConformance: boolean;
   readonly linkMapSha256: string;
   readonly linkMapByteLength: number;
+  readonly linkMapCanonicalSha256: string;
+  readonly linkMapCanonicalByteLength: number;
 }
 
 declare const cppCuteClangWasmReproducibilityBrand: unique symbol;
@@ -79,7 +81,7 @@ declare const cppCuteClangWasmReproducibilityBrand: unique symbol;
 export interface VerifiedCppCuteClangWasmReproducibility {
   readonly [cppCuteClangWasmReproducibilityBrand]: true;
   readonly schema: "browsergrad.compiler.cpp-cute.clang-wasm-reproducibility";
-  readonly version: 2;
+  readonly version: 3;
   readonly authority: "clang-wasm-extractor-reproducibility-observation-only";
   readonly lockId: string;
   readonly sourceSetSha256: string;
@@ -96,7 +98,7 @@ export interface VerifiedCppCuteClangWasmReproducibility {
     readonly factoryModuleBytesMatched: true;
     readonly wasmBytesMatched: true;
     readonly runtimeAbiReviewBytesMatched: true;
-    readonly linkMapBytesMatched: true;
+    readonly linkMapCanonicalProjectionMatched: true;
   }>;
   readonly claims: Readonly<{
     readonly extractorOutputsReproducible: true;

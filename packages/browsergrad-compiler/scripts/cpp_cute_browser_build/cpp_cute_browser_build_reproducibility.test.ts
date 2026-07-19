@@ -55,7 +55,6 @@ const factoryBytes = new TextEncoder().encode(
   "const createBrowserGradCppCuteExtractor = () => {}; export default createBrowserGradCppCuteExtractor;\n",
 );
 const wasmBytes = Uint8Array.of(0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00);
-const linkMapBytes = new TextEncoder().encode("browsergrad deterministic link map\n");
 const clangTablegenBytes = new TextEncoder().encode("native clang tablegen\n");
 const llvmTablegenBytes = new TextEncoder().encode("native llvm tablegen\n");
 
@@ -81,6 +80,9 @@ interface BuildFixtureOptions {
   readonly exactRuntimeAbiConformance?: boolean;
   readonly extraEvidenceField?: boolean;
   readonly nonCanonicalEvidence?: boolean;
+  readonly linkMapSuffix?: string;
+  readonly linkMapRecordedOrdinal?: 1 | 2;
+  readonly linkMapText?: string;
 }
 
 async function fixture(options: Readonly<{
@@ -126,6 +128,11 @@ async function writeBuild(
   ]);
   const evidenceWasm = options.evidenceWasmBytes ?? wasmBytes;
   const observedWasm = options.observedWasmBytes ?? evidenceWasm;
+  const linkMapRecordedOrdinal = options.linkMapRecordedOrdinal ?? ordinal;
+  const linkMapBytes = new TextEncoder().encode(options.linkMapText ?? (
+    `/browsergrad/work/build-${linkMapRecordedOrdinal}/state/em-cache/lib.a(member.o):` +
+      `${options.linkMapSuffix ?? "symbol"}\n`
+  ));
   await Promise.all([
     writeFile(join(generatedRoot, "clang-extractor.mjs"), factoryBytes),
     writeFile(join(generatedRoot, "clang-extractor.wasm"), observedWasm),
@@ -350,7 +357,7 @@ describe("Clang-Wasm clean-build reproducibility authority", () => {
 
     expect(evidence).toMatchObject({
       schema: "browsergrad.compiler.cpp-cute.clang-wasm-reproducibility",
-      version: 2,
+      version: 3,
       authority: "clang-wasm-extractor-reproducibility-observation-only",
       lockId: lock.lockId,
       cleanBuildCount: 2,
@@ -362,7 +369,7 @@ describe("Clang-Wasm clean-build reproducibility authority", () => {
         factoryModuleBytesMatched: true,
         wasmBytesMatched: true,
         runtimeAbiReviewBytesMatched: true,
-        linkMapBytesMatched: true,
+        linkMapCanonicalProjectionMatched: true,
       },
       claims: {
         extractorOutputsReproducible: true,
@@ -377,6 +384,10 @@ describe("Clang-Wasm clean-build reproducibility authority", () => {
     expect(evidence.builds[0]?.wasmSha256).toBe(evidence.builds[1]?.wasmSha256);
     expect(evidence.builds[0]?.runtimeAbiReviewSha256).toBe(
       evidence.builds[1]?.runtimeAbiReviewSha256,
+    );
+    expect(evidence.builds[0]?.linkMapSha256).not.toBe(evidence.builds[1]?.linkMapSha256);
+    expect(evidence.builds[0]?.linkMapCanonicalSha256).toBe(
+      evidence.builds[1]?.linkMapCanonicalSha256,
     );
   });
 
@@ -440,6 +451,32 @@ describe("Clang-Wasm clean-build reproducibility authority", () => {
     });
   });
 
+  it("rejects semantic link-map drift after canonical path substitution", async () => {
+    const { firstRoot, secondRoot } = await fixture({ second: { linkMapSuffix: "different" } });
+    await expect(verifyCppCuteClangWasmReproducibility({ firstRoot, secondRoot })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-MISMATCH",
+      path: "$comparison.linkMap",
+    });
+  });
+
+  it("rejects a link map that references the other clean-build path closure", async () => {
+    const { firstRoot, secondRoot } = await fixture({ second: { linkMapRecordedOrdinal: 1 } });
+    await expect(verifyCppCuteClangWasmReproducibility({ firstRoot, secondRoot })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-MISMATCH",
+      path: "$builds[1].linkMap",
+    });
+  });
+
+  it("rejects reserved canonical placeholders in raw link maps", async () => {
+    const { firstRoot, secondRoot } = await fixture({
+      second: { linkMapText: "@STATE@/em-cache/lib.a(member.o):symbol\n" },
+    });
+    await expect(verifyCppCuteClangWasmReproducibility({ firstRoot, secondRoot })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-INVALID",
+      path: "$builds[1].linkMap",
+    });
+  });
+
   it.each([
     ["noncanonical JSON", { nonCanonicalEvidence: true }],
     ["unknown evidence fields", { extraEvidenceField: true }],
@@ -453,7 +490,7 @@ describe("Clang-Wasm clean-build reproducibility authority", () => {
   it("writes canonical no-clobber read-only evidence", async () => {
     const { root, firstRoot, secondRoot } = await fixture();
     const evidence = await verifyCppCuteClangWasmReproducibility({ firstRoot, secondRoot });
-    const outputPath = join(root, "reproducibility.v2.json");
+    const outputPath = join(root, "reproducibility.v3.json");
     const result = await writeCppCuteClangWasmReproducibilityEvidence(outputPath, evidence);
 
     const bytes = await readFile(outputPath);

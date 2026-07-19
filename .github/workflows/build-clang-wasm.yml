@@ -328,8 +328,8 @@ jobs:
             packages/browsergrad-compiler/scripts/cpp_cute_browser_build/cpp_cute_browser_build_reproducibility.mjs \
             --first-root="${BG_CLANG_REPRO_ROOT}/first" \
             --second-root="${BG_CLANG_REPRO_ROOT}/second" \
-            --output="${BG_CLANG_REPRO_ROOT}/clang-wasm-reproducibility.v2.json"
-          sha256sum "${BG_CLANG_REPRO_ROOT}/clang-wasm-reproducibility.v2.json"
+            --output="${BG_CLANG_REPRO_ROOT}/clang-wasm-reproducibility.v3.json"
+          sha256sum "${BG_CLANG_REPRO_ROOT}/clang-wasm-reproducibility.v3.json"
 
       - name: Inspect reproducible Wasm against the pinned runtime ABI
         run: |
@@ -346,7 +346,7 @@ jobs:
         with:
           name: clang-wasm-reproducibility-${{ github.run_id }}
           path: |
-            ${{ env.BG_CLANG_REPRO_ROOT }}/clang-wasm-reproducibility.v2.json
+            ${{ env.BG_CLANG_REPRO_ROOT }}/clang-wasm-reproducibility.v3.json
             ${{ env.BG_CLANG_REPRO_ROOT }}/clang-wasm-runtime-abi-review.v1.json
           if-no-files-found: warn
           retention-days: 7

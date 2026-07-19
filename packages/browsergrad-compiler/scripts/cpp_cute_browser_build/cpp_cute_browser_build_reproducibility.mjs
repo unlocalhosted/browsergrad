@@ -36,6 +36,15 @@ const BUILD_EXECUTION_SCHEMA =
 const RUNTIME_CLOSURE_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.build-runtime-closure.v1";
 const REPRODUCIBILITY_SCHEMA =
   "browsergrad.compiler.cpp-cute.clang-wasm-reproducibility";
+const LINK_MAP_PATH_TOKEN_CHARACTER = /[A-Za-z0-9._+/-]/u;
+const LINK_MAP_ROOT_PLACEHOLDERS = Object.freeze({
+  llvmProjectSourceRoot: "@LLVM_SOURCE@",
+  extractorSourceRoot: "@EXTRACTOR_SOURCE@",
+  nativeBuildRoot: "@NATIVE_BUILD@",
+  wasmBuildRoot: "@WASM_BUILD@",
+  outputRoot: "@OUTPUT@",
+  stateRoot: "@STATE@",
+});
 const PORTABLE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._+/-]+$/u;
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const MAX_EVIDENCE_BYTE_LENGTH = 1024 * 1024;
@@ -149,17 +158,33 @@ export async function verifyCppCuteClangWasmReproducibility(input) {
   assertDistinctBuildPaths(first.execution.paths, second.execution.paths);
   assertCanonicalCommandParity(first, second);
   assertIdentityParity(first, second);
+  const firstLinkMapProjection = await canonicalLinkMapIdentity(
+    firstRealRoot,
+    first,
+    second,
+    "$builds[0].linkMap",
+  );
+  const secondLinkMapProjection = await canonicalLinkMapIdentity(
+    secondRealRoot,
+    second,
+    first,
+    "$builds[1].linkMap",
+  );
+  if (firstLinkMapProjection.sha256 !== secondLinkMapProjection.sha256 ||
+      firstLinkMapProjection.byteLength !== secondLinkMapProjection.byteLength) {
+    mismatch("$comparison.linkMap", "canonical link-map projections differ");
+  }
 
   const evidence = Object.freeze({
     schema: REPRODUCIBILITY_SCHEMA,
-    version: 2,
+    version: 3,
     authority: "clang-wasm-extractor-reproducibility-observation-only",
     lockId: lock.lockId,
     sourceSetSha256: lock.extractorSourceSetSha256,
     cleanBuildCount: 2,
     builds: Object.freeze([
-      buildIdentity(1, first),
-      buildIdentity(2, second),
+      buildIdentity(1, first, firstLinkMapProjection),
+      buildIdentity(2, second, secondLinkMapProjection),
     ]),
     comparison: Object.freeze({
       sourceAndBuildPathsDistinct: true,
@@ -169,7 +194,7 @@ export async function verifyCppCuteClangWasmReproducibility(input) {
       factoryModuleBytesMatched: true,
       wasmBytesMatched: true,
       runtimeAbiReviewBytesMatched: true,
-      linkMapBytesMatched: true,
+      linkMapCanonicalProjectionMatched: true,
     }),
     claims: Object.freeze({
       extractorOutputsReproducible: true,
@@ -991,17 +1016,9 @@ function assertCanonicalCommandParity(first, second) {
 }
 
 function normalizedCommandRecords(build) {
-  const replacements = Object.entries({
-    llvmProjectSourceRoot: "@LLVM_SOURCE@",
-    extractorSourceRoot: "@EXTRACTOR_SOURCE@",
-    nativeBuildRoot: "@NATIVE_BUILD@",
-    wasmBuildRoot: "@WASM_BUILD@",
-    outputRoot: "@OUTPUT@",
-    stateRoot: "@STATE@",
-  }).map(([name, replacement]) => [build.execution.paths[name], replacement])
-    .sort((left, right) => right[0].length - left[0].length);
+  const replacements = buildPathReplacements(build);
   const replace = (value) => replacements.reduce(
-    (result, [path, replacement]) => result.split(path).join(replacement),
+    (result, [path, replacement]) => replaceRecordedPath(result, path, replacement),
     value,
   );
   return build.execution.steps.map((step) => ({
@@ -1033,7 +1050,6 @@ function assertIdentityParity(first, second) {
     [identity(first.execution, "factoryModule"), identity(second.execution, "factoryModule"), "$comparison.factoryModule"],
     [identity(first.execution, "wasm"), identity(second.execution, "wasm"), "$comparison.wasm"],
     [first.runtimeAbiReview, second.runtimeAbiReview, "$comparison.runtimeAbiReview"],
-    [identity(first.execution, "linkMap"), identity(second.execution, "linkMap"), "$comparison.linkMap"],
   ];
   for (const [left, right, path] of pairs) {
     if (left.sha256 !== right.sha256 || left.byteLength !== right.byteLength) {
@@ -1049,7 +1065,7 @@ function identity(execution, prefix) {
   };
 }
 
-function buildIdentity(ordinal, build) {
+function buildIdentity(ordinal, build, linkMapProjection) {
   return Object.freeze({
     ordinal,
     buildExecutionEvidenceSha256: build.evidenceSha256,
@@ -1073,7 +1089,95 @@ function buildIdentity(ordinal, build) {
       build.runtimeAbiReview.exactInterfaceConformance,
     linkMapSha256: build.execution.linkMapSha256,
     linkMapByteLength: build.execution.linkMapByteLength,
+    linkMapCanonicalSha256: linkMapProjection.sha256,
+    linkMapCanonicalByteLength: linkMapProjection.byteLength,
   });
+}
+
+function buildPathReplacements(build) {
+  return Object.entries(LINK_MAP_ROOT_PLACEHOLDERS)
+    .map(([name, replacement]) => [build.execution.paths[name], replacement])
+    .sort((left, right) => right[0].length - left[0].length);
+}
+
+async function canonicalLinkMapIdentity(localRoot, build, otherBuild, diagnosticPath) {
+  const snapshot = await readSmallFile(
+    join(localRoot, "state", "evidence", "clang-extractor.link.map"),
+    MAX_LINK_MAP_BYTE_LENGTH,
+    diagnosticPath,
+  );
+  if (snapshot.bytes.byteLength !== build.execution.linkMapByteLength) {
+    mismatch(`${diagnosticPath}.byteLength`, "link map length changed after build admission");
+  }
+  if (sha256(snapshot.bytes) !== build.execution.linkMapSha256) {
+    mismatch(`${diagnosticPath}.sha256`, "link map digest changed after build admission");
+  }
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(snapshot.bytes);
+  } catch (cause) {
+    invalid(diagnosticPath, "link map must be strict UTF-8 text", { cause });
+  }
+  if (text.includes("\0")) invalid(diagnosticPath, "link map must not contain NUL bytes");
+  for (const placeholder of Object.values(LINK_MAP_ROOT_PLACEHOLDERS)) {
+    if (text.includes(placeholder)) {
+      invalid(diagnosticPath, "raw link map contains a reserved path placeholder");
+    }
+  }
+  for (const foreignPath of Object.values(otherBuild.execution.paths)) {
+    if (containsRecordedPath(text, foreignPath)) {
+      mismatch(diagnosticPath, "link map references the other clean-build path closure");
+    }
+  }
+  const canonicalText = buildPathReplacements(build).reduce(
+    (result, [path, replacement]) => replaceRecordedPath(result, path, replacement),
+    text,
+  );
+  for (const ownPath of Object.values(build.execution.paths)) {
+    if (containsRecordedPath(canonicalText, ownPath)) {
+      invalid(diagnosticPath, "link-map path canonicalization left a recorded build path");
+    }
+  }
+  const canonicalBytes = new TextEncoder().encode(canonicalText);
+  return Object.freeze({
+    sha256: sha256(canonicalBytes),
+    byteLength: canonicalBytes.byteLength,
+  });
+}
+
+function containsRecordedPath(text, path) {
+  return findRecordedPath(text, path, 0) !== -1;
+}
+
+function replaceRecordedPath(text, path, replacement) {
+  const chunks = [];
+  let cursor = 0;
+  while (true) {
+    const index = findRecordedPath(text, path, cursor);
+    if (index === -1) break;
+    chunks.push(text.slice(cursor, index), replacement);
+    cursor = index + path.length;
+  }
+  if (chunks.length === 0) return text;
+  chunks.push(text.slice(cursor));
+  return chunks.join("");
+}
+
+function findRecordedPath(text, path, start) {
+  let cursor = start;
+  while (cursor <= text.length - path.length) {
+    const index = text.indexOf(path, cursor);
+    if (index === -1) return -1;
+    const before = index === 0 ? undefined : text[index - 1];
+    const afterIndex = index + path.length;
+    const after = afterIndex === text.length ? undefined : text[afterIndex];
+    const beforeBounded = before === undefined || !LINK_MAP_PATH_TOKEN_CHARACTER.test(before);
+    const afterBounded = after === undefined || after === "/" ||
+      !LINK_MAP_PATH_TOKEN_CHARACTER.test(after);
+    if (beforeBounded && afterBounded) return index;
+    cursor = index + path.length;
+  }
+  return -1;
 }
 
 async function admitBuildRoot(path, diagnosticPath) {

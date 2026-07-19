@@ -78,7 +78,7 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("needs: build");
     expect(workflow).toContain("if: ${{ inputs.mode == 'reproducibility' }}");
     expect(workflow).toContain("cpp_cute_browser_build_reproducibility.mjs");
-    expect(workflow).toContain("clang-wasm-reproducibility.v2.json");
+    expect(workflow).toContain("clang-wasm-reproducibility.v3.json");
     expect(workflow).not.toContain("clang-wasm-reproducibility.v1.json");
     expect(workflow.match(/cpp_cute_browser_wasm_review\.mjs/gu)).toHaveLength(2);
     expect(workflow).toContain("Inspect built Wasm against the pinned runtime ABI");
