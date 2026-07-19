@@ -8,11 +8,6 @@ export interface CppCuteBrowserToolchainCacheInputs {
   readonly llvmSource: Readonly<Record<string, unknown>>;
   readonly builder: Readonly<Record<string, unknown>>;
   readonly recipe: Readonly<Record<string, unknown>>;
-  readonly extractorConfiguration: Readonly<{
-    path: string;
-    sha256: string;
-    byteLength: string;
-  }>;
   readonly selectedClangLibraries: readonly string[];
 }
 
@@ -21,6 +16,7 @@ export interface CppCuteBrowserToolchainCacheProjection {
   readonly version: 1;
   readonly authority: "untrusted-diagnostic-cache-selection-only";
   readonly cacheKey: string;
+  readonly compatibleLegacyCacheKey: string;
   readonly inputs: CppCuteBrowserToolchainCacheInputs;
   readonly claims: Readonly<{
     cacheContentsTrusted: false;

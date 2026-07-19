@@ -92,8 +92,12 @@ maintenance debt: the JavaScript executor sits close to its line-count ratchet,
 native producer files remain large, and several semantic TypeScript modules are
 5,000 to 8,000 lines. Cold provisioning is still roughly 40 minutes and the
 cached link loop still spends about 29 seconds regenerating Emscripten system
-libraries. Extractor CMake source-list edits also change the toolchain key, so
-source-only seams MUST avoid unnecessary translation-unit churn. Local
+libraries. Current diagnostic cache selection excludes extractor CMake and
+final-link changes are reapplied by mandatory exact configuration, every
+BrowserGrad-owned object is invalidated, and generated flags are independently
+reviewed before compilation. They therefore do not invalidate reusable
+LLVM/Clang objects; upstream, builder, recipe compiler inputs, platform, and
+selected Clang libraries still do. Local
 entrypoints that clean `dist` are not safe to run concurrently in one worktree;
 the canonical sequential fast command avoids that race. The expanded fast gate
 also prevents runtime-ABI/profile/asset fixture drift, while the native gate

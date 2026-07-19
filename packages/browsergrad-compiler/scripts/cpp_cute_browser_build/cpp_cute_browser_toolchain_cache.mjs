@@ -14,14 +14,21 @@ import {
 const CACHE_KEY_DOMAIN =
   "browsergrad.compiler.cpp-cute.clang-wasm-toolchain-cache-key.v1";
 const CACHE_KEY_PREFIX = "bg.cpp.clang-wasm-toolchain-cache.sha256.";
+const COMPATIBLE_LEGACY_EXTRACTOR_CONFIGURATION = Object.freeze({
+  path: "CMakeLists.txt",
+  sha256: "8e68e5347dac776bb4a83aec73adc4d5c5dd83d7bc69faf88e12085aa41f8ecc",
+  byteLength: "4645",
+});
 
 /**
  * Selects only inputs that can change the reusable LLVM/Clang build layer.
  * Ordinary extractor implementation files are deliberately excluded; the
- * external project's CMake configuration remains included because it selects
- * libraries, compile flags, and the final target graph. Final-executable
- * linker flags are excluded: CMake reapplies them during the mandatory exact
- * reconfiguration, while they cannot change reusable static-library objects.
+ * external project's CMake configuration and final-executable linker flags are
+ * also excluded. CMake reapplies both during mandatory exact reconfiguration,
+ * the configured-target reviewer checks the resulting flags before compile,
+ * and cached BrowserGrad objects are invalidated. The independently selected
+ * Clang libraries and recipe compile inputs remain key-bound because they can
+ * change reusable static-library objects.
  *
  * The resulting cache is an untrusted diagnostic accelerator. It is never
  * build, reproducibility, provenance, distribution, or release evidence.
@@ -31,12 +38,6 @@ const CACHE_KEY_PREFIX = "bg.cpp.clang-wasm-toolchain-cache.sha256.";
 export function selectCppCuteBrowserToolchainCacheInputs(body) {
   const llvmSource = body.sources.find((source) => source.sourceId === "llvm-project");
   if (llvmSource === undefined) throw new Error("locked LLVM source selection is missing");
-  const cmake = body.recipe.extractorSource.files.filter(
-    (file) => file.path === "CMakeLists.txt",
-  );
-  if (cmake.length !== 1 || cmake[0] === undefined) {
-    throw new Error("locked extractor CMake configuration must be unique");
-  }
   return Object.freeze({
     schema: "browsergrad.compiler.cpp-cute.clang-wasm-toolchain-cache-inputs",
     version: 1,
@@ -55,7 +56,6 @@ export function selectCppCuteBrowserToolchainCacheInputs(body) {
       prefixMapKinds: body.recipe.prefixMapKinds,
       stages: body.recipe.stages.map(selectReusableStageInputs),
     }),
-    extractorConfiguration: Object.freeze({ ...cmake[0] }),
     selectedClangLibraries: body.recipe.extractorLinkPolicy.selectedClangLibraries,
   });
 }
@@ -87,11 +87,18 @@ export async function projectCppCuteBrowserToolchainCache() {
   );
   const body = unwrapPreparedCppCuteBrowserBuildInputLock(lock).lock.body;
   const inputs = selectCppCuteBrowserToolchainCacheInputs(body);
+  const compatibleLegacyCacheKey = await deriveCppCuteBrowserToolchainCacheKey(
+    Object.freeze({
+      ...inputs,
+      extractorConfiguration: COMPATIBLE_LEGACY_EXTRACTOR_CONFIGURATION,
+    }),
+  );
   return Object.freeze({
     schema: "browsergrad.compiler.cpp-cute.clang-wasm-toolchain-cache-projection",
     version: 1,
     authority: "untrusted-diagnostic-cache-selection-only",
     cacheKey: await deriveCppCuteBrowserToolchainCacheKey(inputs),
+    compatibleLegacyCacheKey,
     inputs,
     claims: Object.freeze({
       cacheContentsTrusted: false,
@@ -108,6 +115,7 @@ async function main() {
   const report = await projectCppCuteBrowserToolchainCache();
   if (arguments_.length === 1 && arguments_[0] === "--github-output") {
     process.stdout.write(`cache-key=${report.cacheKey}\n`);
+    process.stdout.write(`compatible-legacy-cache-key=${report.compatibleLegacyCacheKey}\n`);
     return;
   }
   if (arguments_.length !== 0) {

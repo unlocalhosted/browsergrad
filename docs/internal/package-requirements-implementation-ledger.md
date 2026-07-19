@@ -3111,9 +3111,10 @@ whether any files may be left partially changed.
   admitted only inside the networkless, capability-free build container. Clean
   validation and two-build reproducibility never restore that cache, and the
   ordinary CI/clean lanes retain the full Clang sanitizer harness. The narrowed
-  toolchain key still binds LLVM, Emscripten, recipe, compiler flags, selected
-  libraries, extractor CMake, and platform identity; only final link flags are
-  allowed to iterate independently.
+  toolchain key at that checkpoint bound LLVM, Emscripten, recipe, compiler
+  flags, selected libraries, extractor CMake, and platform identity; only final
+  link flags iterated independently. The later CMake-stable cache checkpoint
+  below narrows this further without granting cache authority.
 - Commit `70af1732` made the independent inspector scale to the real production
   module without weakening its structural budgets. Commit `f801bff8` runs that
   review after every successful fast, clean, or reproducibility build and
@@ -3168,9 +3169,9 @@ whether any files may be left partially changed.
 - The warm diagnostic lane remained stable across the capability series:
   production runs completed in 4 minutes 45 seconds, 4 minutes 30 seconds, 4
   minutes 59 seconds, and 4 minutes 27 seconds without changing the toolchain
-  cache key. Source-only syscall seams use an included implementation fragment;
-  adding a CMake translation unit was rejected because CMake source-list drift
-  correctly changes the expensive toolchain key.
+  cache key. Source-only syscall seams used an included implementation fragment;
+  at that checkpoint, adding a CMake translation unit was rejected because
+  CMake source-list drift changed the expensive toolchain key.
 - The audit also found that independently invoking a build-lock check and the
   fast suite concurrently can race because both touch package `dist`. The
   canonical `verify:browser-clang-wasm:fast` command now builds once, runs the
@@ -3273,6 +3274,29 @@ whether any files may be left partially changed.
   full compiler coverage passes 74 files/1,467 tests. Typecheck, source lint,
   architecture ratchets, exact Worker-bundle authoring, and build-lock
   authoring are green.
+
+### 2026-07-19 — CMake-stable diagnostic toolchain cache
+
+- Fast-validation run `29679722745` was deliberately cancelled after its cache
+  projection changed from the populated key solely because the private-include
+  CMake edit changed `CMakeLists.txt`. Continuing would have converted a
+  diagnostic run into another cold LLVM/Clang build.
+- Diagnostic cache selection now binds only inputs capable of changing the
+  reusable LLVM/Clang layer: exact upstream and builder identities, recipe
+  compiler inputs, platform, and the independently selected Clang libraries.
+  Extractor CMake and final-link flags are excluded because every admitted cache
+  is mandatorily reconfigured, all BrowserGrad target objects are invalidated,
+  and generated target flags are independently reviewed before compilation.
+- One exact legacy key is derived from the same current reusable inputs plus the
+  last populated CMake identity. The workflow may restore only that compatible
+  full key, then saves the successful reconfigured tree under the new primary
+  key. There is no broad or trust-granting fallback.
+- The new primary key is
+  `bg.cpp.clang-wasm-toolchain-cache.sha256.eb130b274f93b28885dcecd1147c69763630b900c9178a6fc056c54b4f7a42f3`;
+  its exact compatible legacy key is
+  `bg.cpp.clang-wasm-toolchain-cache.sha256.ba2867dd05bdc99485e0de219510c5f87ec5c5a459d2ee607bca40be549de41a`.
+  The canonical Node 25 fast gate remains 30 files/338 tests and passes in
+  29.17 seconds.
 
 ## Quick Resume Checklist
 

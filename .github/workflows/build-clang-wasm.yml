@@ -88,6 +88,8 @@ jobs:
             ${{ runner.temp }}/browsergrad-clang-wasm-cache-v2/build-${{ matrix.buildOrdinal }}/native-tablegen
             ${{ runner.temp }}/browsergrad-clang-wasm-cache-v2/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
           key: linux-amd64-${{ steps.toolchain-cache-key.outputs.cache-key }}
+          restore-keys: |
+            linux-amd64-${{ steps.toolchain-cache-key.outputs.compatible-legacy-cache-key }}
 
       - name: Admit the restored diagnostic cache into the private build root
         if: ${{ inputs.mode == 'fast-validation' }}

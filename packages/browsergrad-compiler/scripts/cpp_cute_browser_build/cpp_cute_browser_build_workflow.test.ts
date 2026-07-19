@@ -120,7 +120,10 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("fast-validation-observation.v1.json");
     expect(workflow).toContain("test:browser-clang-wasm-build-plan:fast");
     expect(workflow).toContain("test:browser-clang-wasm-build-plan:run");
-    expect(workflow).not.toContain("restore-keys:");
+    expect(workflow.match(/restore-keys:/gu)).toHaveLength(1);
+    expect(workflow).toContain(
+      "linux-amd64-${{ steps.toolchain-cache-key.outputs.compatible-legacy-cache-key }}",
+    );
   });
 
   it("pins every third-party workflow action to a full commit", () => {

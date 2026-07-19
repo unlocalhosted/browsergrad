@@ -50,6 +50,17 @@ from a late clean-build failure to the configuration boundary. The failed run
 grants no output, ABI, clean, reproducibility, or release authority.
 The expanded gate now passes 30 files/338 tests in 28.86 seconds on Node 25.
 
+The first attempted cached validation of that repair exposed a separate speed
+policy defect: hashing the entire extractor CMake file into the reusable
+toolchain key converted any target-wiring edit into a cold LLVM/Clang build.
+Run `29679722745` was cancelled rather than allowed to continue cold. The key
+now binds only true reusable-layer inputs. Exact CMake is always reapplied,
+BrowserGrad target objects are invalidated, and generated flags are reviewed
+before compile. One exact compatible legacy key migrates the already populated
+untrusted cache to the CMake-stable primary key; no broad fallback or clean
+authority was added. The expanded local gate remains green at 30 files/338
+tests in 29.17 seconds.
+
 ## Why feedback was slow
 
 The locked recipe originally performed a clean LLVM/Clang 22.1.8 build with

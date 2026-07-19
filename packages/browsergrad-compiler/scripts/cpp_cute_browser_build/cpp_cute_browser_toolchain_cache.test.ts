@@ -19,7 +19,7 @@ async function body() {
 }
 
 describe("Clang-Wasm diagnostic toolchain cache projection", () => {
-  it("binds upstream, builder, recipe, and CMake inputs without granting authority", async () => {
+  it("binds reusable toolchain inputs without granting authority", async () => {
     const report = await projectCppCuteBrowserToolchainCache();
     expect(report).toMatchObject({
       schema: "browsergrad.compiler.cpp-cute.clang-wasm-toolchain-cache-projection",
@@ -36,10 +36,14 @@ describe("Clang-Wasm diagnostic toolchain cache projection", () => {
     expect(report.cacheKey).toMatch(
       /^bg\.cpp\.clang-wasm-toolchain-cache\.sha256\.[0-9a-f]{64}$/u,
     );
-    expect(report.inputs.extractorConfiguration.path).toBe("CMakeLists.txt");
+    expect(report.compatibleLegacyCacheKey).toBe(
+      "bg.cpp.clang-wasm-toolchain-cache.sha256.ba2867dd05bdc99485e0de219510c5f87ec5c5a459d2ee607bca40be549de41a",
+    );
+    expect(report.compatibleLegacyCacheKey).not.toBe(report.cacheKey);
+    expect(report.inputs).not.toHaveProperty("extractorConfiguration");
   });
 
-  it("survives extractor and final-link edits but changes with reusable build inputs", async () => {
+  it("survives extractor, CMake, and final-link edits but changes with reusable inputs", async () => {
     const original = await body();
     const sourceEdit = structuredClone(original);
     const ordinarySource = sourceEdit.recipe.extractorSource.files.find(
@@ -97,7 +101,7 @@ describe("Clang-Wasm diagnostic toolchain cache projection", () => {
     await expect(deriveCppCuteBrowserToolchainCacheKey(linkerEditInputs)).resolves.toBe(
       await deriveCppCuteBrowserToolchainCacheKey(originalInputs),
     );
-    await expect(deriveCppCuteBrowserToolchainCacheKey(cmakeEditInputs)).resolves.not.toBe(
+    await expect(deriveCppCuteBrowserToolchainCacheKey(cmakeEditInputs)).resolves.toBe(
       await deriveCppCuteBrowserToolchainCacheKey(originalInputs),
     );
     await expect(deriveCppCuteBrowserToolchainCacheKey(compilerEditInputs)).resolves.not.toBe(
