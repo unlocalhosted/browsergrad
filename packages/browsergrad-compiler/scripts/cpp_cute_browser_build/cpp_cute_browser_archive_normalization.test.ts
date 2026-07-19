@@ -1,13 +1,16 @@
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { lstat, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { zstdCompressSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   CppCuteBrowserArchiveNormalizationError,
   admitCppCuteBrowserBsdtarTool,
+  admitPinnedCppCuteBrowserArchiveNormalizationEnvironment,
   copyCppCuteBrowserArchiveNormalizationFile,
   cppCuteBrowserArchiveNormalizationRoots,
   materializeCppCuteBrowserNormalizedArchive,
@@ -31,6 +34,7 @@ describe("host archive normalization", () => {
     const tool = await admitCppCuteBrowserBsdtarTool({ executablePath: toolPath });
 
     expect(tool.observedVersion).toBe("bsdtar 3.5.3 - libarchive 3.5.3");
+    expect(tool.claims.packageToolIdentityPinned).toBe(false);
     expect(tool.executableSha256).toBe(createHash("sha256").update(await readFile(toolPath)).digest("hex"));
     expect(() => requireCppCuteBrowserBsdtarToolAuthority({ ...tool } as never))
       .toThrow(CppCuteBrowserArchiveNormalizationError);
@@ -82,7 +86,45 @@ describe("host archive normalization", () => {
     });
     expect(() => requireCppCuteBrowserArchiveNormalizationAuthority({ ...direct } as never))
       .toThrow(CppCuteBrowserArchiveNormalizationError);
+    await expect(admitPinnedCppCuteBrowserArchiveNormalizationEnvironment({ executablePath: toolPath }))
+      .rejects.toThrow(CppCuteBrowserArchiveNormalizationError);
   });
+
+  it.runIf(process.platform === "darwin" && process.arch === "arm64" && process.version === "v25.9.0")(
+    "pins the reviewed Darwin bsdtar and Node/Zstd builder closure",
+    async () => {
+      const child = spawnSync(process.execPath, [
+        fileURLToPath(new URL("./cpp_cute_browser_archive_normalization.mjs", import.meta.url)),
+        "--verify-pinned=/usr/bin/bsdtar",
+      ], {
+        encoding: "utf8",
+        env: { LANG: "C", LC_ALL: "C", TZ: "UTC" },
+        shell: false,
+      });
+      expect({ status: child.status, signal: child.signal, stderr: child.stderr }).toEqual({
+        status: 0,
+        signal: null,
+        stderr: "",
+      });
+      const environment = JSON.parse(child.stdout) as Record<string, unknown>;
+
+      expect(environment).toMatchObject({
+        authority: "package-pinned-archive-normalization-environment",
+        executableSha256: "2806c6e01f077f360f4046e597ef1a62d96c772eb937b5c35852ad97c9d0a625",
+        nodeZstdRuntime: {
+          runtimeVersion: "v25.9.0",
+          executableSha256: "4b3fe8b384e30ee917e28a9f5b79a3ca64b72b13b70d9ab2273e6e9a823f4cbf",
+          zstdVersion: "1.5.7",
+        },
+        claims: {
+          packageToolIdentityPinned: true,
+          nodeZstdRuntimeIdentityPinned: true,
+          toolImplementationAttested: false,
+          releaseReady: false,
+        },
+      });
+    },
+  );
 
   it("fails closed on nonzero tool execution and removes parser-owned output", async () => {
     const root = await fixtureRoot("failure");

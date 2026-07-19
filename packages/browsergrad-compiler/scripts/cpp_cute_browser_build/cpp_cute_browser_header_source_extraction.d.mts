@@ -52,6 +52,8 @@ export interface CppCuteBrowserHeaderSourceExtraction {
     executableSha256: string;
     executableByteLength: string;
     observedVersion: string;
+    packageToolIdentityPinned: boolean;
+    nodeZstdRuntime?: NonNullable<CppCuteBrowserBsdtarToolAdmission["nodeZstdRuntime"]>;
   }>;
   readonly archives: readonly CppCuteBrowserExtractedHeaderSourceArchive[];
   readonly totals: Readonly<{
@@ -66,15 +68,17 @@ export interface CppCuteBrowserHeaderSourceExtraction {
     exactBuildInputLockBound: true;
     exactHeaderSourcePlanBound: true;
     sourceSubtreeMaterializationsObserved: true;
-    exactSelectedSourceSubtreesComplete: false;
+    exactSelectedSourceSubtreesComplete: boolean;
     collisionFreePortableStorageMaterialized: true;
     allFiveIncludeRootsRepresented: true;
     copiedSourceArchivesRemoved: true;
     hostToolImplementationAttested: false;
+    hostToolPackageIdentityPinned: boolean;
+    nodeZstdDecompressorPackageIdentityPinned: boolean;
     generatedClangResourceHeadersComplete: true;
     externalDistributedFileLicenseMapReviewed: false;
     licenseReviewComplete: false;
-    headerUniverseComplete: false;
+    headerUniverseComplete: boolean;
     headerPacksAssembled: false;
     buildExecuted: false;
     releaseReady: false;

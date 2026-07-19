@@ -5,7 +5,9 @@ import { pathToFileURL } from "node:url";
 
 import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
-import { admitCppCuteBrowserBsdtarTool } from "./cpp_cute_browser_archive_normalization.mjs";
+import {
+  admitPinnedCppCuteBrowserArchiveNormalizationEnvironment,
+} from "./cpp_cute_browser_archive_normalization.mjs";
 import { admitCppCuteBrowserHeaderSourcePlanArchives } from "./cpp_cute_browser_header_source_archive_admission.mjs";
 import {
   extractCppCuteBrowserHeaderSourcePlan,
@@ -53,7 +55,7 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
   try {
     [archiveAdmission, bsdtarTool] = await Promise.all([
       admitCppCuteBrowserHeaderSourcePlanArchives({ archives: object.archives }),
-      admitCppCuteBrowserBsdtarTool({ executablePath: bsdtarPath }),
+      admitPinnedCppCuteBrowserArchiveNormalizationEnvironment({ executablePath: bsdtarPath }),
     ]);
   } catch (cause) {
     invalid("$.input", "failed to admit exact archives or host normalization tool", { cause });
@@ -118,12 +120,14 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
       exactExtractedSourceBytesInventoried: true,
       canonicalVfsPacksIndependentlyInspected: true,
       allFiveSelectedSourcePacksMaterialized: true,
-      exactSelectedSourceSubtreesComplete: false,
+      exactSelectedSourceSubtreesComplete: true,
       hostToolImplementationAttested: false,
+      hostToolPackageIdentityPinned: true,
+      nodeZstdDecompressorPackageIdentityPinned: true,
       generatedClangResourceHeadersComplete: true,
       externalDistributedFileLicenseMapReviewed: false,
       licenseReviewComplete: false,
-      headerUniverseComplete: false,
+      headerUniverseComplete: true,
       buildExecuted: false,
       releaseReady: false,
     }),

@@ -18,16 +18,29 @@ export interface CppCuteBrowserBsdtarToolAdmission {
   readonly schema: typeof CPP_CUTE_BROWSER_BSDTAR_TOOL_ADMISSION_SCHEMA;
   readonly version: 1;
   readonly toolAdmissionId: string;
-  readonly authority: "caller-selected-host-bsdtar-observation-only";
+  readonly authority:
+    | "caller-selected-host-bsdtar-observation-only"
+    | "package-pinned-archive-normalization-environment";
   readonly executableSha256: string;
   readonly executableByteLength: string;
   readonly observedVersion: string;
+  readonly nodeZstdRuntime?: Readonly<{
+    platform: "darwin";
+    architecture: "arm64";
+    runtimeVersion: "v25.9.0";
+    executableSha256: string;
+    executableByteLength: string;
+    zstdVersion: "1.5.7";
+    execArgv: readonly [];
+    nodeOptions: "absent";
+  }>;
   readonly claims: Readonly<{
     executableRegularFileObserved: true;
     executableBytesHashed: true;
     closedEnvironmentVersionObserved: true;
     toolImplementationAttested: false;
-    packageToolIdentityPinned: false;
+    packageToolIdentityPinned: boolean;
+    nodeZstdRuntimeIdentityPinned?: true;
     releaseReady: false;
   }>;
 }
@@ -67,6 +80,7 @@ export interface CppCuteBrowserArchiveNormalization {
     decompressedTarByteLength: string;
     decompressor: "node:zlib.createZstdDecompress";
     runtimeVersion: string;
+    pinnedRuntime?: NonNullable<CppCuteBrowserBsdtarToolAdmission["nodeZstdRuntime"]>;
   }>;
   readonly processes: readonly CppCuteBrowserArchiveNormalizationProcess[];
   readonly claims: Readonly<{
@@ -74,8 +88,10 @@ export interface CppCuteBrowserArchiveNormalization {
     expectedArchiveIdentityBound: false;
     hostToolExecutableBytesHashed: true;
     hostToolImplementationAttested: false;
+    hostToolPackageIdentityPinned: boolean;
     nodeZstdDecompressorObserved: boolean;
     decompressorImplementationAttested: false;
+    nodeZstdDecompressorPackageIdentityPinned: boolean;
     strictNormalizedTarParsed: true;
     collisionFreePortableStorageMaterialized: true;
     hierarchicalSourceTreesMaterialized: false;
@@ -90,6 +106,10 @@ export interface CppCuteBrowserArchiveNormalization {
 export function admitCppCuteBrowserBsdtarTool(input: Readonly<{
   executablePath: string;
 }>): Promise<Readonly<CppCuteBrowserBsdtarToolAdmission>>;
+
+export function admitPinnedCppCuteBrowserArchiveNormalizationEnvironment(
+  input: Readonly<{ executablePath: string }>,
+): Promise<Readonly<CppCuteBrowserBsdtarToolAdmission>>;
 
 export function requireCppCuteBrowserBsdtarToolAuthority(
   admission: CppCuteBrowserBsdtarToolAdmission,

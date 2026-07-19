@@ -193,6 +193,10 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
         executableSha256: object.bsdtarTool.executableSha256,
         executableByteLength: object.bsdtarTool.executableByteLength,
         observedVersion: object.bsdtarTool.observedVersion,
+        packageToolIdentityPinned: object.bsdtarTool.claims.packageToolIdentityPinned,
+        ...(object.bsdtarTool.nodeZstdRuntime === undefined
+          ? {}
+          : { nodeZstdRuntime: object.bsdtarTool.nodeZstdRuntime }),
       }),
       archives: Object.freeze(archives),
       totals: Object.freeze({
@@ -207,15 +211,22 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
         exactBuildInputLockBound: true,
         exactHeaderSourcePlanBound: true,
         sourceSubtreeMaterializationsObserved: true,
-        exactSelectedSourceSubtreesComplete: false,
+        exactSelectedSourceSubtreesComplete:
+          object.bsdtarTool.claims.packageToolIdentityPinned &&
+          object.bsdtarTool.nodeZstdRuntime !== undefined,
         collisionFreePortableStorageMaterialized: true,
         allFiveIncludeRootsRepresented: true,
         copiedSourceArchivesRemoved: true,
         hostToolImplementationAttested: false,
+        hostToolPackageIdentityPinned: object.bsdtarTool.claims.packageToolIdentityPinned,
+        nodeZstdDecompressorPackageIdentityPinned:
+          object.bsdtarTool.nodeZstdRuntime !== undefined,
         generatedClangResourceHeadersComplete: true,
         externalDistributedFileLicenseMapReviewed: false,
         licenseReviewComplete: false,
-        headerUniverseComplete: false,
+        headerUniverseComplete:
+          object.bsdtarTool.claims.packageToolIdentityPinned &&
+          object.bsdtarTool.nodeZstdRuntime !== undefined,
         headerPacksAssembled: false,
         buildExecuted: false,
         releaseReady: false,

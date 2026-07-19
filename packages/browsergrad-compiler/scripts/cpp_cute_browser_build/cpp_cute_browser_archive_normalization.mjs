@@ -4,6 +4,7 @@ import { constants } from "node:fs";
 import { lstat, mkdtemp, open, realpath, rm, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path/posix";
 import { pipeline } from "node:stream/promises";
+import { pathToFileURL } from "node:url";
 import { createZstdDecompress } from "node:zlib";
 
 import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
@@ -21,6 +22,8 @@ export const CPP_CUTE_BROWSER_ARCHIVE_NORMALIZATION_SCHEMA =
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-ARCHIVE-NORMALIZATION";
 const TOOL_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.bsdtar-tool-admission.v1";
+const PINNED_TOOL_HASH_DOMAIN =
+  "browsergrad.compiler.cpp-cute.pinned-archive-normalization-environment.v1";
 const NORMALIZATION_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.archive-normalization.v1";
 const ARCHIVE_FORMATS = new Set(["deb-data-tar-zstd", "tar.gz", "tar.xz"]);
 const PORTABLE_PATH = /^[A-Za-z0-9._+@=-]+(?:\/[A-Za-z0-9._+@=-]+)*$/u;
@@ -39,6 +42,24 @@ const CLOSED_ENVIRONMENT = Object.freeze({ LC_ALL: "C", LANG: "C", TZ: "UTC" });
 const TOOL_AUTHORITIES = new WeakMap();
 const NORMALIZATION_AUTHORITIES = new WeakMap();
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
+const PINNED_BSDTAR = Object.freeze({
+  platform: "darwin",
+  architecture: "arm64",
+  executablePath: "/usr/bin/bsdtar",
+  executableSha256: "2806c6e01f077f360f4046e597ef1a62d96c772eb937b5c35852ad97c9d0a625",
+  executableByteLength: "195680",
+  observedVersion: "bsdtar 3.5.3 - libarchive 3.5.3 zlib/1.2.12 liblzma/5.4.3 bz2lib/1.0.8",
+});
+const PINNED_NODE_ZSTD_RUNTIME = Object.freeze({
+  platform: "darwin",
+  architecture: "arm64",
+  runtimeVersion: "v25.9.0",
+  executableSha256: "4b3fe8b384e30ee917e28a9f5b79a3ca64b72b13b70d9ab2273e6e9a823f4cbf",
+  executableByteLength: "133274256",
+  zstdVersion: "1.5.7",
+  execArgv: Object.freeze([]),
+  nodeOptions: "absent",
+});
 
 export class CppCuteBrowserArchiveNormalizationError extends Error {
   constructor(path, message, options) {
@@ -93,6 +114,56 @@ export async function admitCppCuteBrowserBsdtarTool(input) {
   });
   TOOL_AUTHORITIES.set(admission, binding);
   return admission;
+}
+
+/**
+ * Narrows the generic observed-tool seam to the exact package-reviewed Darwin
+ * archive-normalization environment used by the current header-pack builder.
+ * Other platforms may add an independently reviewed identity; they must not
+ * inherit authority from version strings alone.
+ */
+export async function admitPinnedCppCuteBrowserArchiveNormalizationEnvironment(input) {
+  const object = exactObject(input, ["executablePath"], "$.input");
+  const executablePath = absolutePath(object.executablePath, "$.input.executablePath");
+  const observed = await admitCppCuteBrowserBsdtarTool({ executablePath });
+  if (process.platform !== PINNED_BSDTAR.platform || process.arch !== PINNED_BSDTAR.architecture ||
+      executablePath !== PINNED_BSDTAR.executablePath ||
+      observed.executableSha256 !== PINNED_BSDTAR.executableSha256 ||
+      observed.executableByteLength !== PINNED_BSDTAR.executableByteLength ||
+      observed.observedVersion !== PINNED_BSDTAR.observedVersion) {
+    invalid("$.input.executablePath", "bsdtar differs from the package-reviewed builder identity");
+  }
+  const nodeRuntime = await inspectPinnedNodeZstdRuntime();
+  const pinnedHash = sha256(canonicalJsonBytes({
+    domain: PINNED_TOOL_HASH_DOMAIN,
+    bsdtar: PINNED_BSDTAR,
+    nodeZstdRuntime: nodeRuntime,
+  }));
+  const pinned = Object.freeze({
+    schema: CPP_CUTE_BROWSER_BSDTAR_TOOL_ADMISSION_SCHEMA,
+    version: 1,
+    toolAdmissionId: `bg.cpp.pinned-archive-normalization-environment.sha256.${pinnedHash}`,
+    authority: "package-pinned-archive-normalization-environment",
+    executableSha256: observed.executableSha256,
+    executableByteLength: observed.executableByteLength,
+    observedVersion: observed.observedVersion,
+    nodeZstdRuntime: nodeRuntime,
+    claims: Object.freeze({
+      executableRegularFileObserved: true,
+      executableBytesHashed: true,
+      closedEnvironmentVersionObserved: true,
+      toolImplementationAttested: false,
+      packageToolIdentityPinned: true,
+      nodeZstdRuntimeIdentityPinned: true,
+      releaseReady: false,
+    }),
+  });
+  const authority = TOOL_AUTHORITIES.get(observed);
+  if (authority === undefined) {
+    invalid("$.input.executablePath", "observed normalization-tool authority was lost");
+  }
+  TOOL_AUTHORITIES.set(pinned, authority);
+  return pinned;
 }
 
 export function requireCppCuteBrowserBsdtarToolAuthority(admission) {
@@ -160,6 +231,9 @@ export async function materializeCppCuteBrowserNormalizedArchive(input) {
         decompressedTarByteLength: decompressed.byteLength,
         decompressor: "node:zlib.createZstdDecompress",
         runtimeVersion: process.version,
+        ...(object.tool.nodeZstdRuntime === undefined
+          ? {}
+          : { pinnedRuntime: object.tool.nodeZstdRuntime }),
       });
       processReports.push(processReport("deb-data-member-read", innerRun));
     }
@@ -221,8 +295,11 @@ export async function materializeCppCuteBrowserNormalizedArchive(input) {
         expectedArchiveIdentityBound: false,
         hostToolExecutableBytesHashed: true,
         hostToolImplementationAttested: false,
+        hostToolPackageIdentityPinned: object.tool.claims.packageToolIdentityPinned,
         nodeZstdDecompressorObserved: archiveFormat === "deb-data-tar-zstd",
         decompressorImplementationAttested: false,
+        nodeZstdDecompressorPackageIdentityPinned:
+          archiveFormat === "deb-data-tar-zstd" && object.tool.nodeZstdRuntime !== undefined,
         strictNormalizedTarParsed: true,
         collisionFreePortableStorageMaterialized: true,
         hierarchicalSourceTreesMaterialized: false,
@@ -244,6 +321,30 @@ export async function materializeCppCuteBrowserNormalizedArchive(input) {
       await removeOwnedRoot(scratchRoot, scratchIdentity);
     }
   }
+}
+
+async function inspectPinnedNodeZstdRuntime() {
+  if (process.platform !== PINNED_NODE_ZSTD_RUNTIME.platform ||
+      process.arch !== PINNED_NODE_ZSTD_RUNTIME.architecture ||
+      process.version !== PINNED_NODE_ZSTD_RUNTIME.runtimeVersion ||
+      process.versions.zstd !== PINNED_NODE_ZSTD_RUNTIME.zstdVersion ||
+      process.execArgv.length !== 0 || process.env.NODE_OPTIONS !== undefined) {
+    invalid(
+      "$.runtime",
+      `Node/Zstd runtime differs from the package-reviewed builder identity; execArgv=${JSON.stringify(process.execArgv).slice(0, 512)}`,
+    );
+  }
+  const binding = await inspectExecutable(
+    process.execPath,
+    "$.runtime.executablePath",
+    "Node runtime",
+    256 * 1024 * 1024,
+  );
+  if (binding.sha256 !== PINNED_NODE_ZSTD_RUNTIME.executableSha256 ||
+      String(binding.snapshot.size) !== PINNED_NODE_ZSTD_RUNTIME.executableByteLength) {
+    invalid("$.runtime.executablePath", "Node executable differs from the package-reviewed builder identity");
+  }
+  return Object.freeze({ ...PINNED_NODE_ZSTD_RUNTIME });
 }
 
 export function requireCppCuteBrowserArchiveNormalizationAuthority(normalization) {
@@ -274,23 +375,27 @@ export async function copyCppCuteBrowserArchiveNormalizationFile(
 }
 
 async function inspectTool(path, diagnosticPath) {
+  return inspectExecutable(path, diagnosticPath, "bsdtar", MAX_TOOL_BYTES);
+}
+
+async function inspectExecutable(path, diagnosticPath, label, maximumBytes) {
   if (await realpath(path).catch(() => undefined) !== path) {
-    invalid(diagnosticPath, "bsdtar executable path must be canonical and non-symlinked");
+    invalid(diagnosticPath, `${label} executable path must be canonical and non-symlinked`);
   }
-  await admitTrustedToolDirectory(dirname(path), diagnosticPath);
+  await admitTrustedToolDirectory(dirname(path), diagnosticPath, label);
   let handle;
   try {
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const before = await handle.stat({ bigint: true });
-    requireToolStat(before, diagnosticPath);
-    if (before.size > BigInt(MAX_TOOL_BYTES)) resource(diagnosticPath, "bsdtar executable exceeds byte ceiling");
+    requireToolStat(before, diagnosticPath, label);
+    if (before.size > BigInt(maximumBytes)) resource(diagnosticPath, `${label} executable exceeds byte ceiling`);
     const sha = await hashOpenFile(handle, Number(before.size), diagnosticPath);
     const after = await handle.stat({ bigint: true });
     if (!sameSnapshot(before, after)) invalid(diagnosticPath, "bsdtar executable changed while hashed");
     return Object.freeze({ path, sha256: sha, snapshot: fileSnapshot(after) });
   } catch (cause) {
     if (cause instanceof CppCuteBrowserArchiveNormalizationError) throw cause;
-    invalid(diagnosticPath, "failed to inspect bsdtar executable", { cause });
+    invalid(diagnosticPath, `failed to inspect ${label} executable`, { cause });
   } finally {
     await handle?.close();
   }
@@ -331,12 +436,12 @@ async function verifyTool(binding, diagnosticPath) {
   if (!sameFileSnapshot(binding.snapshot, current)) invalid(diagnosticPath, "bsdtar executable changed during execution");
 }
 
-function requireToolStat(stat, diagnosticPath) {
+function requireToolStat(stat, diagnosticPath, label = "bsdtar") {
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0n || stat.nlink < 1n) {
-    invalid(diagnosticPath, "expected one nonempty regular bsdtar executable");
+    invalid(diagnosticPath, `expected one nonempty regular ${label} executable`);
   }
   if ((stat.mode & 0o111n) === 0n || (stat.mode & 0o6022n) !== 0n) {
-    invalid(diagnosticPath, "bsdtar must be executable, non-setid, and not group/other writable");
+    invalid(diagnosticPath, `${label} must be executable, non-setid, and not group/other writable`);
   }
 }
 
@@ -350,15 +455,15 @@ function requirePrivateArchiveStat(stat, diagnosticPath) {
   }
 }
 
-async function admitTrustedToolDirectory(path, diagnosticPath) {
+async function admitTrustedToolDirectory(path, diagnosticPath, label = "bsdtar") {
   const canonical = await realpath(path).catch(() => undefined);
-  if (canonical !== path) invalid(diagnosticPath, "bsdtar parent must be canonical");
+  if (canonical !== path) invalid(diagnosticPath, `${label} parent must be canonical`);
   const stat = await lstat(path, { bigint: true });
   if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o022n) !== 0n) {
-    invalid(diagnosticPath, "bsdtar parent must be a non-writable trusted directory");
+    invalid(diagnosticPath, `${label} parent must be a non-writable trusted directory`);
   }
   if (typeof process.getuid !== "function" || (stat.uid !== 0n && stat.uid !== BigInt(process.getuid()))) {
-    invalid(diagnosticPath, "bsdtar parent must be owned by root or the current user");
+    invalid(diagnosticPath, `${label} parent must be owned by root or the current user`);
   }
 }
 
@@ -753,6 +858,30 @@ function sha256(bytes) {
 
 function invalid(path, message, options) {
   throw new CppCuteBrowserArchiveNormalizationError(path, message, options);
+}
+
+async function main() {
+  try {
+    const argument = process.argv[2];
+    const match = typeof argument === "string" ? /^--verify-pinned=(.+)$/u.exec(argument) : null;
+    if (process.argv.length !== 3 || match === null) {
+      invalid("$arguments", "expected exactly --verify-pinned=/absolute/bsdtar/path");
+    }
+    const environment = await admitPinnedCppCuteBrowserArchiveNormalizationEnvironment({
+      executablePath: match[1],
+    });
+    process.stdout.write(`${JSON.stringify(environment)}\n`);
+  } catch (cause) {
+    const error = cause instanceof Error ? cause : new Error("unknown normalization pin failure");
+    const path = typeof cause === "object" && cause !== null && "path" in cause &&
+      typeof cause.path === "string" ? ` at ${cause.path}` : "";
+    process.stderr.write(`${error.name}${path}: ${error.message.replace(/[\r\n]+/gu, " ").slice(0, 2_048)}\n`);
+    process.exitCode = 1;
+  }
+}
+
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
 }
 
 function resource(path, message) {

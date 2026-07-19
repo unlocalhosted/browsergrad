@@ -2,6 +2,9 @@ import type {
   CppCuteBrowserHeaderSourceBlocker,
 } from "./cpp_cute_browser_header_source_plan.mjs";
 import type {
+  CppCuteBrowserBsdtarToolAdmission,
+} from "./cpp_cute_browser_archive_normalization.mjs";
+import type {
   CppCuteBrowserHeaderPackMaterializationOutput,
 } from "./cpp_cute_browser_header_pack_materialization.mjs";
 import type {
@@ -39,6 +42,8 @@ export interface CppCuteBrowserHeaderPackPipeline {
     executableSha256: string;
     executableByteLength: string;
     observedVersion: string;
+    packageToolIdentityPinned: true;
+    nodeZstdRuntime: NonNullable<CppCuteBrowserBsdtarToolAdmission["nodeZstdRuntime"]>;
   }>;
   readonly sourceTotals: Readonly<{
     archiveCount: number;
@@ -61,12 +66,14 @@ export interface CppCuteBrowserHeaderPackPipeline {
     exactExtractedSourceBytesInventoried: true;
     canonicalVfsPacksIndependentlyInspected: true;
     allFiveSelectedSourcePacksMaterialized: true;
-    exactSelectedSourceSubtreesComplete: false;
+    exactSelectedSourceSubtreesComplete: true;
     hostToolImplementationAttested: false;
+    hostToolPackageIdentityPinned: true;
+    nodeZstdDecompressorPackageIdentityPinned: true;
     generatedClangResourceHeadersComplete: true;
     externalDistributedFileLicenseMapReviewed: false;
     licenseReviewComplete: false;
-    headerUniverseComplete: false;
+    headerUniverseComplete: true;
     buildExecuted: false;
     releaseReady: false;
   }>;
