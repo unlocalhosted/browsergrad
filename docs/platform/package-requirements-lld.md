@@ -18,7 +18,7 @@ general emphasis.
 Gates 0 through 2 remain verified; Gate 3 is active; Gates 4 through 7 have not
 started. The strict native producer, pinned no-shell Clang-Wasm executor,
 isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
-are implemented on `main` through `056aaf02`.
+are implemented on `main` through `6999f9c8`.
 
 The original cold diagnostic run `29658164083` spent 97 minutes 5 seconds in
 isolated execution before failing closed at link. That result exposed two
@@ -31,23 +31,33 @@ clean-build, reproducibility, provenance, or release authority. Run
 `29668822793` at `056aaf02` then completed in 4 minutes 39 seconds: the
 JavaScript boundary took 27 seconds, cache restoration took 2 seconds, the
 isolated compile/link executor took 3 minutes 14 seconds, and ABI review took 3
-seconds. Link policy no longer invalidates the expensive toolchain cache, and
-all temporary cache-migration shims have been removed. Clean validation and
-two-build reproducibility still restore no cache and remain intentionally more
-expensive. Exact-source CI `29668819938` is green at the same revision.
+seconds. Subsequent source-only production validations remained stable from 4
+minutes 27 seconds through 5 minutes 4 seconds. Link policy and extractor
+source identities no longer invalidate the expensive toolchain cache, and all
+temporary cache-migration shims have been removed. The canonical local command
+`pnpm --filter @unlocalhosted/browsergrad-compiler run
+verify:browser-clang-wasm:fast` builds once, checks the lock without a second
+clean, and runs all 164 fast harness tests; the measured end-to-end loop is
+20 to 24 seconds across repeated runs. Clean validation and two-build
+reproducibility still restore no cache and remain intentionally more expensive.
 
-Every admitted build now runs the independent production-scale raw-Wasm
-inspector and uploads its exact report. The first ABI-preserving artifact is a
-31,327,956-byte module. Inspection completes in about 3 seconds and reports ten
-real mismatches rather than granting conformance. Its six explicit
-`browsergrad_vfs_v1` imports are correct, but 92 generated Emscripten imports
-remain, including clock, random, process, environment, and ambient-filesystem
-services forbidden by the browser runtime contract. Memory naming is now
-correct; table/support exports and target-feature declarations also require
-explicit review. The runtime ABI MUST NOT be repinned to authorize these
-ambient capabilities. Production Worker construction remains blocked until
-the generated import surface is closed, a clean build and two-build
-reproducibility pass, and the independently reviewed projection conforms.
+Every admitted build runs the independent production-scale raw-Wasm inspector
+and uploads its exact report. The original 98-function import surface contained
+92 generated Emscripten imports, including forbidden clock, random, process,
+environment, and ambient-filesystem services. Those capabilities were closed
+inside the module before review. The current 58-function surface is exactly six
+`browsergrad_vfs_v1` functions plus 52 hash-pinned generated functions: 48
+JavaScript-exception/control-flow shims, two bounded memory-growth helpers, one
+stack-overflow trap, and output-only `fd_write`. The 29 worker-internal support
+functions and one fixed `funcref` dispatch table are separately pinned; absent
+`target_features` metadata is advisory because static opcode/section inspection
+remains authoritative. Production run `29673488166` at `6999f9c8` built and
+reviewed a 31,307,834-byte module with SHA-256
+`8477239254b6dea90be961cc7823dfd787a3dcdbe3b2a043415b6187f092a1a5`, zero
+ABI mismatches, raw-Wasm verification, and exact interface conformance. This
+does not grant Worker or release authority: clean-build, reproducibility,
+factory-bundle, header-license, and Worker-instantiation evidence remain
+separate gates.
 
 The harness audit found strong isolation, exact-input closure, bounded logs,
 independent Wasm parsing, and separate authority tiers. It also records real
@@ -55,9 +65,12 @@ maintenance debt: the JavaScript executor sits close to its line-count ratchet,
 native producer files remain large, and several semantic TypeScript modules are
 5,000 to 8,000 lines. Cold provisioning is still roughly 40 minutes and the
 cached link loop still spends about 29 seconds regenerating Emscripten system
-libraries. These are explicit follow-on optimization and decomposition tasks;
-they do not weaken the current fail-closed boundary or turn cached diagnostics
-into release evidence.
+libraries. Extractor CMake source-list edits also change the toolchain key, so
+source-only seams MUST avoid unnecessary translation-unit churn. Local
+entrypoints that clean `dist` are not safe to run concurrently in one worktree;
+the canonical sequential fast command avoids that race. These are explicit
+follow-on optimization and decomposition tasks; they do not weaken the current
+fail-closed boundary or turn cached diagnostics into release evidence.
 
 An active or failed run is not build, ABI, reproducibility, Worker, browser, or
 release evidence. The package Worker remains capability-blocked until real
