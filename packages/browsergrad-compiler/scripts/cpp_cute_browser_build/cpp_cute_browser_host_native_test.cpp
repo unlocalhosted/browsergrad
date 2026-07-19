@@ -167,6 +167,13 @@ int run_browser_host_tests() {
   BG_CHECK(std::memcmp(&filesystem_status, &original_filesystem_status,
                        sizeof(filesystem_status)) == 0);
 
+  errno = 0;
+  BG_CHECK(mmap(nullptr, 4096, PROT_READ, MAP_PRIVATE, -1, 0) == MAP_FAILED);
+  BG_CHECK(errno == ENOSYS);
+  errno = 0;
+  BG_CHECK(munmap(path_output, sizeof(path_output)) == -1);
+  BG_CHECK(errno == ENOSYS);
+
   unsigned char entropy[16];
   std::memset(entropy, 0x5a, sizeof(entropy));
   unsigned char original_entropy[sizeof(entropy)];

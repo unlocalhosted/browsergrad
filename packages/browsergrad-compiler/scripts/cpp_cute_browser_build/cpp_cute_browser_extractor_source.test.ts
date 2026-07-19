@@ -208,6 +208,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
       "mkdir", "mkdirat", "open", "openat", "opendir", "readdir", "closedir",
       "readlink", "readlinkat", "unlink", "unlinkat", "rmdir", "rename",
       "renameat", "symlink", "symlinkat", "statvfs", "fstatvfs",
+      "mmap", "munmap",
       "getpwnam_r", "getpwuid_r", "getuid", "getrlimit", "setrlimit",
       "getrusage", "posix_madvise", "uname", "getsid", "setsid", "fork",
       "execve", "posix_spawn", "wait4", "waitpid", "sigaltstack",

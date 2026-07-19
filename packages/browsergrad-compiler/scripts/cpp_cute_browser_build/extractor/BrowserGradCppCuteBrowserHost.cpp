@@ -280,6 +280,15 @@ int fstatvfs(int, struct statvfs*) {
   return fail_with_enosys();
 }
 
+void* mmap(void*, std::size_t, int, int, int, off_t) {
+  errno = ENOSYS;
+  return MAP_FAILED;
+}
+
+int munmap(void*, std::size_t) {
+  return fail_with_enosys();
+}
+
 int getpwnam_r(const char*, struct passwd* password, char*, std::size_t,
                struct passwd** result) {
   std::memset(password, 0, sizeof(*password));
