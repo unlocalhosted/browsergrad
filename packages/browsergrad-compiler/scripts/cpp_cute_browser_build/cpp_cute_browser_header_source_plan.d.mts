@@ -14,7 +14,19 @@ export interface CppCuteBrowserHeaderSourceSelection {
   readonly licenseComponentIds: readonly string[];
   readonly contribution:
     | "complete-selected-header-subtree"
-    | "source-templates-requires-generated-resource-headers";
+    | "complete-configured-resource-header-output";
+  readonly configuredResourceOutput?: Readonly<{
+    upstreamBuildManifest: Readonly<{
+      virtualPath: "CMakeLists.txt";
+      sha256: string;
+      byteLength: string;
+    }>;
+    buildStageId: "clang-extractor-wasm";
+    llvmTargetsToBuild: "WebAssembly";
+    clangEnableHlsl: "OFF";
+    generatedVirtualPaths: readonly [];
+    omittedSourceVirtualPaths: readonly ["CMakeLists.txt"];
+  }>;
 }
 
 export interface CppCuteBrowserHeaderSourceArchive {

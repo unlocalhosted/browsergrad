@@ -1,9 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { chmod, lstat, mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   CppCuteBrowserHeaderPackPipelineError,
+  createCppCuteBrowserPrivatePackOutputRoot,
   parseCppCuteBrowserHeaderPackPipelineArguments,
 } from "./cpp_cute_browser_header_pack_pipeline.mjs";
+
+const TEST_ROOTS: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(TEST_ROOTS.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
 
 describe("exact header-pack pipeline", () => {
   it("parses one no-serialization pipeline invocation", () => {
@@ -32,7 +42,30 @@ describe("exact header-pack pipeline", () => {
       "--pack-output-root=/private/tmp/two",
     ])).toThrow(CppCuteBrowserHeaderPackPipelineError);
   });
+
+  it("creates one private no-clobber pack root and rejects unsafe parents", async () => {
+    const parent = await fixtureRoot("output");
+    const outputRoot = join(parent, "packs");
+    const identity = await createCppCuteBrowserPrivatePackOutputRoot(outputRoot);
+    const created = await lstat(outputRoot, { bigint: true });
+
+    expect({ dev: created.dev, ino: created.ino }).toEqual(identity);
+    expect(Number(created.mode & 0o077n)).toBe(0);
+    await expect(createCppCuteBrowserPrivatePackOutputRoot(outputRoot))
+      .rejects.toThrow(CppCuteBrowserHeaderPackPipelineError);
+
+    const permissiveParent = await fixtureRoot("permissive");
+    await chmod(permissiveParent, 0o755);
+    await expect(createCppCuteBrowserPrivatePackOutputRoot(join(permissiveParent, "packs")))
+      .rejects.toThrow(CppCuteBrowserHeaderPackPipelineError);
+  });
 });
+
+async function fixtureRoot(name: string): Promise<string> {
+  const root = await realpath(await mkdtemp(join(tmpdir(), `browsergrad-pack-pipeline-${name}-`)));
+  TEST_ROOTS.push(root);
+  return root;
+}
 
 function archiveArguments(): string[] {
   return [

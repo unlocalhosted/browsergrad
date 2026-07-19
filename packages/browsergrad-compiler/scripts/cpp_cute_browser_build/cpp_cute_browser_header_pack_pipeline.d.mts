@@ -63,7 +63,7 @@ export interface CppCuteBrowserHeaderPackPipeline {
     allFiveSelectedSourcePacksMaterialized: true;
     exactSelectedSourceSubtreesComplete: false;
     hostToolImplementationAttested: false;
-    generatedClangResourceHeadersComplete: false;
+    generatedClangResourceHeadersComplete: true;
     externalDistributedFileLicenseMapReviewed: false;
     licenseReviewComplete: false;
     headerUniverseComplete: false;
@@ -79,3 +79,7 @@ export function materializeCppCuteBrowserHeaderPacksFromSourceArchives(
 export function parseCppCuteBrowserHeaderPackPipelineArguments(
   argv: readonly string[],
 ): Readonly<CppCuteBrowserHeaderPackPipelineInput>;
+
+export function createCppCuteBrowserPrivatePackOutputRoot(
+  outputRoot: string,
+): Promise<Readonly<{ dev: bigint; ino: bigint }>>;

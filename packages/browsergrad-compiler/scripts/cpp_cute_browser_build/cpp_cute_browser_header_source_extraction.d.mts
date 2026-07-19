@@ -71,7 +71,7 @@ export interface CppCuteBrowserHeaderSourceExtraction {
     allFiveIncludeRootsRepresented: true;
     copiedSourceArchivesRemoved: true;
     hostToolImplementationAttested: false;
-    generatedClangResourceHeadersComplete: false;
+    generatedClangResourceHeadersComplete: true;
     externalDistributedFileLicenseMapReviewed: false;
     licenseReviewComplete: false;
     headerUniverseComplete: false;

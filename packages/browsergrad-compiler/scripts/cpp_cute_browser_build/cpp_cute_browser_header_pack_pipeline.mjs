@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { isAbsolute } from "node:path/posix";
+import { lstat, mkdir, realpath, rm } from "node:fs/promises";
+import { dirname, isAbsolute } from "node:path/posix";
 import { pathToFileURL } from "node:url";
 
 import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
@@ -60,7 +61,9 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
   let extraction;
   let inventory;
   let materialization;
+  let packOutputIdentity;
   try {
+    packOutputIdentity = await createCppCuteBrowserPrivatePackOutputRoot(packOutputRoot);
     extraction = await extractCppCuteBrowserHeaderSourcePlan({
       archiveAdmission,
       bsdtarTool,
@@ -72,6 +75,17 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
       outputRoot: packOutputRoot,
     });
   } catch (cause) {
+    if (packOutputIdentity !== undefined) {
+      try {
+        await removeCppCuteBrowserOwnedPackOutputRoot(packOutputRoot, packOutputIdentity);
+      } catch (cleanupCause) {
+        invalid(
+          "$.pipeline.cleanup",
+          "pipeline failed and its owned pack-output root could not be removed",
+          { cause: cleanupCause },
+        );
+      }
+    }
     invalid("$.pipeline", "exact header-pack pipeline failed", { cause });
   }
   const pipelineHash = sha256(canonicalJsonBytes({
@@ -106,7 +120,7 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
       allFiveSelectedSourcePacksMaterialized: true,
       exactSelectedSourceSubtreesComplete: false,
       hostToolImplementationAttested: false,
-      generatedClangResourceHeadersComplete: false,
+      generatedClangResourceHeadersComplete: true,
       externalDistributedFileLicenseMapReviewed: false,
       licenseReviewComplete: false,
       headerUniverseComplete: false,
@@ -114,6 +128,43 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
       releaseReady: false,
     }),
   });
+}
+
+export async function createCppCuteBrowserPrivatePackOutputRoot(outputRoot) {
+  absolutePath(outputRoot, "$.input.packOutputRoot");
+  const parent = dirname(outputRoot);
+  let resolvedParent;
+  let parentStat;
+  try {
+    resolvedParent = await realpath(parent);
+    parentStat = await lstat(parent, { bigint: true });
+  } catch (cause) {
+    invalid("$.input.packOutputRoot.parent", "parent is unavailable", { cause });
+  }
+  if (resolvedParent !== parent) invalid("$.input.packOutputRoot.parent", "parent must be canonical");
+  if (!parentStat.isDirectory() || parentStat.isSymbolicLink() ||
+      Number(parentStat.mode & 0o077n) !== 0) {
+    invalid("$.input.packOutputRoot.parent", "parent must be one private directory");
+  }
+  let root;
+  try {
+    await mkdir(outputRoot, { mode: 0o700 });
+    root = await lstat(outputRoot, { bigint: true });
+  } catch (cause) {
+    invalid("$.input.packOutputRoot", "pack output root must not already exist", { cause });
+  }
+  if (!root.isDirectory() || root.isSymbolicLink() || Number(root.mode & 0o077n) !== 0) {
+    invalid("$.input.packOutputRoot", "created pack output root is not private");
+  }
+  return Object.freeze({ dev: root.dev, ino: root.ino });
+}
+
+async function removeCppCuteBrowserOwnedPackOutputRoot(outputRoot, identity) {
+  const root = await lstat(outputRoot, { bigint: true });
+  if (!root.isDirectory() || root.dev !== identity.dev || root.ino !== identity.ino) {
+    invalid("$.input.packOutputRoot", "refusing to remove a replaced pack output root");
+  }
+  await rm(outputRoot, { recursive: true, force: false, maxRetries: 0 });
 }
 
 export function parseCppCuteBrowserHeaderPackPipelineArguments(argv) {
@@ -193,9 +244,25 @@ async function main() {
     })}\n`);
   } catch (cause) {
     const error = cause instanceof Error ? cause : new Error("unknown header-pack pipeline failure");
-    process.stderr.write(`${error.name}: ${error.message}\n`);
+    process.stderr.write(`${formatBoundedErrorChain(error)}\n`);
     process.exitCode = 1;
   }
+}
+
+function formatBoundedErrorChain(error) {
+  const messages = [];
+  const seen = new Set();
+  let current = error;
+  while (current instanceof Error && messages.length < 6 && !seen.has(current)) {
+    seen.add(current);
+    const path = typeof current.path === "string" ? ` at ${current.path}` : "";
+    const message = `${current.name}${path}: ${current.message}`
+      .replace(/[\r\n\u2028\u2029]+/gu, " ")
+      .slice(0, 2_048);
+    messages.push(message);
+    current = current.cause;
+  }
+  return messages.join(" <- caused by ");
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {

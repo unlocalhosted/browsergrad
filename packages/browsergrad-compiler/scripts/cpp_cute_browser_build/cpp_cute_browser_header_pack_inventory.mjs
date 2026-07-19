@@ -268,6 +268,13 @@ export async function inventoryCppCuteBrowserExtractedHeaderSources(extraction) 
         if (observed.files > MAX_FILES || observed.bytes > MAX_TOTAL_FILE_BYTES) {
           resource("$.extraction", "extracted source files exceed inventory ceilings");
         }
+        if (isConfiguredResourceOutputOmission(
+          selection.configuredResourceOutput,
+          file,
+          `$.extraction.archives.${source.sourceId}.${selection.includeRootId}`,
+        )) {
+          continue;
+        }
         const expected = Object.freeze({
           virtualPath,
           contentSha256: file.contentSha256,
@@ -385,6 +392,7 @@ function finalizeInventory(input) {
       buildInputLockBound: true,
       networkAccessed: false,
       archiveProvenanceVerified: false,
+      generatedClangResourceHeadersComplete: input.headerSourceExtractionId !== undefined,
       licenseReviewComplete: false,
       headerPackSelectionPrepared: false,
       headerPacksAssembled: false,
@@ -400,6 +408,19 @@ function finalizeInventory(input) {
     sourceFilesByIncludeRootId: input.sourceFilesByIncludeRootId,
   }));
   return manifest;
+}
+
+function isConfiguredResourceOutputOmission(policy, file, diagnosticPath) {
+  if (policy === undefined || !policy.omittedSourceVirtualPaths.includes(file.relativePath)) {
+    return false;
+  }
+  const manifest = policy.upstreamBuildManifest;
+  if (file.relativePath !== manifest.virtualPath || file.contentSha256 !== manifest.sha256 ||
+      file.byteLength !== manifest.byteLength || policy.generatedVirtualPaths.length !== 0 ||
+      policy.llvmTargetsToBuild !== "WebAssembly" || policy.clangEnableHlsl !== "OFF") {
+    invalid(diagnosticPath, "configured Clang resource output omission is not exact");
+  }
+  return true;
 }
 
 async function deriveContentSet(files, diagnosticPath) {

@@ -123,6 +123,11 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
           if (observed === undefined) {
             invalid(`$.archives.${source.sourceId}`, "normalizer omitted a selected source subtree");
           }
+          verifyConfiguredResourceOutput(
+            selection.configuredResourceOutput,
+            observed,
+            `$.archives.${source.sourceId}.${selection.includeRootId}`,
+          );
           return Object.freeze({
             includeRootId: selection.includeRootId,
             archiveSubtree: selection.archiveSubtree,
@@ -130,6 +135,9 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
             intendedAsset: selection.intendedAsset,
             licenseComponentIds: selection.licenseComponentIds,
             contribution: selection.contribution,
+            ...(selection.configuredResourceOutput === undefined
+              ? {}
+              : { configuredResourceOutput: selection.configuredResourceOutput }),
             sourceTreeId: observed.sourceTreeId,
             fileCount: observed.fileCount,
             fileContentByteLength: observed.fileContentByteLength,
@@ -156,6 +164,9 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
         }
       }
     }
+    const unresolvedBlockers = Object.freeze(plan.body.unresolvedBlockers.filter(
+      ({ blockerId }) => blockerId !== "clang-resource-generated-headers",
+    ));
     if (!await removeOwnedRoot(stagingRoot, stagingIdentity)) {
       invalid("$.output.staging", "failed to remove the owned archive staging directory");
     }
@@ -166,7 +177,7 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
       headerSourcePlanId: plan.planId,
       bsdtarToolAdmissionId: object.bsdtarTool.toolAdmissionId,
       archives,
-      unresolvedBlockers: plan.body.unresolvedBlockers,
+      unresolvedBlockers,
     }));
     const extraction = Object.freeze({
       schema: CPP_CUTE_BROWSER_HEADER_SOURCE_EXTRACTION_SCHEMA,
@@ -190,7 +201,7 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
         fileCount,
         fileContentByteLength: String(fileContentBytes),
       }),
-      unresolvedBlockers: plan.body.unresolvedBlockers,
+      unresolvedBlockers,
       claims: Object.freeze({
         exactCurrentHeaderSourcePlanArchiveBytesVerified: true,
         exactBuildInputLockBound: true,
@@ -201,7 +212,7 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
         allFiveIncludeRootsRepresented: true,
         copiedSourceArchivesRemoved: true,
         hostToolImplementationAttested: false,
-        generatedClangResourceHeadersComplete: false,
+        generatedClangResourceHeadersComplete: true,
         externalDistributedFileLicenseMapReviewed: false,
         licenseReviewComplete: false,
         headerUniverseComplete: false,
@@ -216,6 +227,26 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
     if (rootIdentity !== undefined) await removeOwnedRoot(outputRoot, rootIdentity);
     if (cause instanceof CppCuteBrowserHeaderSourceExtractionError) throw cause;
     invalid("$.input", "failed to extract exact header-source plan", { cause });
+  }
+}
+
+function verifyConfiguredResourceOutput(policy, observed, diagnosticPath) {
+  if (policy === undefined) return;
+  if (policy.buildStageId !== "clang-extractor-wasm" ||
+      policy.llvmTargetsToBuild !== "WebAssembly" || policy.clangEnableHlsl !== "OFF" ||
+      !Array.isArray(policy.generatedVirtualPaths) || policy.generatedVirtualPaths.length !== 0 ||
+      !Array.isArray(policy.omittedSourceVirtualPaths) ||
+      policy.omittedSourceVirtualPaths.length !== 1) {
+    invalid(diagnosticPath, "configured Clang resource-output policy is malformed");
+  }
+  const manifest = observed.files.find(
+    ({ relativePath }) => relativePath === policy.upstreamBuildManifest.virtualPath,
+  );
+  if (manifest === undefined ||
+      manifest.contentSha256 !== policy.upstreamBuildManifest.sha256 ||
+      manifest.byteLength !== policy.upstreamBuildManifest.byteLength ||
+      policy.omittedSourceVirtualPaths[0] !== manifest.relativePath) {
+    invalid(diagnosticPath, "configured Clang resource build manifest differs from the exact plan");
   }
 }
 

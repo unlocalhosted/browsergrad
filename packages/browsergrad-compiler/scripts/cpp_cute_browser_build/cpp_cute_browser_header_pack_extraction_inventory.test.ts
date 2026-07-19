@@ -50,6 +50,9 @@ describe("extracted header-source inventory", () => {
     });
     expect(inventory.packs.find(({ includeRootId }) => includeRootId === "cuda"))
       .toMatchObject({ fileCount: 1, fileContentByteLength: "12" });
+    expect(inventory.packs.find(({ includeRootId }) => includeRootId === "clang-resource"))
+      .toMatchObject({ fileCount: 1, files: [expect.objectContaining({ virtualPath: "stddef.h" })] });
+    expect(inventory.claims.generatedClangResourceHeadersComplete).toBe(true);
     expect(Buffer.from(await copyCppCuteBrowserHeaderPackInventorySourceFile(
       inventory,
       "cuda",
@@ -94,6 +97,14 @@ interface FixtureExtraction {
       virtualPrefix: "";
       intendedAsset: string;
       licenseComponentIds: readonly string[];
+      configuredResourceOutput?: {
+        upstreamBuildManifest: { virtualPath: string; sha256: string; byteLength: string };
+        buildStageId: string;
+        llvmTargetsToBuild: string;
+        clangEnableHlsl: string;
+        generatedVirtualPaths: readonly string[];
+        omittedSourceVirtualPaths: readonly string[];
+      };
     }>;
   }>;
   totals: { selectedSubtreeCount: number };
@@ -133,6 +144,7 @@ async function fixtureExtraction(): Promise<FixtureExtraction> {
     setFile(extraction, sourceId, "cuda", "cuda.h", "cuda-header\n");
   }
   setFile(extraction, "cutlass", "cutlass", "cute/tensor.hpp", "cute-header\n");
+  setFile(extraction, "llvm-project", "clang-resource", "CMakeLists.txt", "fixture-cmake\n");
   setFile(extraction, "llvm-project", "clang-resource", "stddef.h", "clang-header\n");
   setFile(extraction, "llvm-project", "cxx-stdlib", "vector", "libcxx-header\n");
   setFile(
@@ -165,10 +177,15 @@ function source(sourceId: string, licenseComponentId: string, includeRootIds: st
 }
 
 function selectionPolicy(includeRootId: string) {
-  const policies: Record<string, { intendedAsset: string; licenseComponentIds: readonly string[] }> = {
+  const policies: Record<string, {
+    intendedAsset: string;
+    licenseComponentIds: readonly string[];
+    configuredResourceOutput?: ReturnType<typeof configuredResourceOutput>;
+  }> = {
     "clang-resource": {
       intendedAsset: "compiler-resource-pack",
       licenseComponentIds: ["clang"],
+      configuredResourceOutput: configuredResourceOutput("fixture-cmake\n"),
     },
     cuda: {
       intendedAsset: "dependency-header-pack:cuda",
@@ -192,6 +209,22 @@ function selectionPolicy(includeRootId: string) {
   return policy;
 }
 
+function configuredResourceOutput(value: string) {
+  const bytes = Buffer.from(value, "utf8");
+  return {
+    upstreamBuildManifest: {
+      virtualPath: "CMakeLists.txt",
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      byteLength: String(bytes.byteLength),
+    },
+    buildStageId: "clang-extractor-wasm",
+    llvmTargetsToBuild: "WebAssembly",
+    clangEnableHlsl: "OFF",
+    generatedVirtualPaths: [] as const,
+    omittedSourceVirtualPaths: ["CMakeLists.txt"] as const,
+  };
+}
+
 function setFile(
   extraction: FixtureExtraction,
   sourceId: string,
@@ -200,11 +233,16 @@ function setFile(
   value: string,
 ): void {
   const bytes = Buffer.from(value, "utf8");
-  extraction.fixtureFiles.set(key(sourceId, includeRootId), [{
+  const files = extraction.fixtureFiles.get(key(sourceId, includeRootId)) ?? [];
+  const evidence = {
     relativePath,
     contentSha256: createHash("sha256").update(bytes).digest("hex"),
     byteLength: String(bytes.byteLength),
-  }]);
+  };
+  const existingIndex = files.findIndex((file) => file.relativePath === relativePath);
+  if (existingIndex === -1) files.push(evidence);
+  else files[existingIndex] = evidence;
+  extraction.fixtureFiles.set(key(sourceId, includeRootId), files);
   extraction.fixtureContents.set(key(sourceId, includeRootId, relativePath), bytes);
 }
 

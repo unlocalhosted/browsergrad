@@ -30,6 +30,11 @@ const INCLUDE_ROOT_ASSETS = Object.freeze(new Map([
   ["cxx-stdlib", "dependency-header-pack:cxx-stdlib"],
   ["linux-sysroot", "dependency-header-pack:linux-sysroot"],
 ]));
+const CLANG_RESOURCE_CMAKE_MANIFEST = Object.freeze({
+  virtualPath: "CMakeLists.txt",
+  sha256: "6fbe03bc7a1ae8309451851c666a76fe0929d12a9e140be18b53428574cdbd35",
+  byteLength: "25049",
+});
 const PLAN_AUTHORITIES = new WeakSet();
 
 const SUPPLEMENTAL_ARCHIVES = Object.freeze([
@@ -192,7 +197,7 @@ export async function prepareCppCuteBrowserHeaderSourcePlan() {
   const body = unwrapPreparedCppCuteBrowserBuildInputLock(buildInputLock).lock.body;
   const gitArchives = currentGitSourceArchives(body.sources);
   const archives = bindSelectionLicensePolicies(
-    [...gitArchives, ...SUPPLEMENTAL_ARCHIVES],
+    bindConfiguredResourceOutputPolicy([...gitArchives, ...SUPPLEMENTAL_ARCHIVES], body),
     body,
   ).sort((left, right) => compareUtf8(left.sourceId, right.sourceId));
   validateArchiveSet(archives);
@@ -260,6 +265,36 @@ export async function prepareCppCuteBrowserHeaderSourcePlan() {
   });
   PLAN_AUTHORITIES.add(plan);
   return plan;
+}
+
+function bindConfiguredResourceOutputPolicy(archives, buildLockBody) {
+  const stage = buildLockBody.recipe.stages.find(
+    ({ stageId }) => stageId === "clang-extractor-wasm",
+  );
+  if (stage === undefined) invalid("$.buildLock.recipe.stages", "missing Clang-Wasm build stage");
+  const definitions = new Map(stage.definitions.map(({ name, value }) => [name, value]));
+  if (definitions.get("LLVM_TARGETS_TO_BUILD") !== "WebAssembly" ||
+      definitions.get("CLANG_ENABLE_HLSL") !== "OFF") {
+    invalid(
+      "$.buildLock.recipe.stages.clang-extractor-wasm.definitions",
+      "Clang resource-output policy requires the exact WebAssembly-only non-HLSL build",
+    );
+  }
+  const configuredResourceOutput = Object.freeze({
+    upstreamBuildManifest: CLANG_RESOURCE_CMAKE_MANIFEST,
+    buildStageId: stage.stageId,
+    llvmTargetsToBuild: "WebAssembly",
+    clangEnableHlsl: "OFF",
+    generatedVirtualPaths: Object.freeze([]),
+    omittedSourceVirtualPaths: Object.freeze([CLANG_RESOURCE_CMAKE_MANIFEST.virtualPath]),
+  });
+  return archives.map((archive) => Object.freeze({
+    ...archive,
+    selections: Object.freeze(archive.selections.map((selection) => Object.freeze({
+      ...selection,
+      ...(selection.includeRootId === "clang-resource" ? { configuredResourceOutput } : {}),
+    }))),
+  }));
 }
 
 function bindSelectionLicensePolicies(archives, buildLockBody) {
@@ -354,12 +389,12 @@ function currentGitSourceArchives(sources) {
       licenseComponentId: "clang-and-libcxx",
       licensePolicy: "current-build-lock-approved-notices-plus-external-file-map-required",
       selections: Object.freeze([
-        Object.freeze({
-          includeRootId: "clang-resource",
-          archiveSubtree: "llvm-project-22.1.8.src/clang/lib/Headers",
-          virtualPrefix: "",
-          contribution: "source-templates-requires-generated-resource-headers",
-        }),
+      Object.freeze({
+        includeRootId: "clang-resource",
+        archiveSubtree: "llvm-project-22.1.8.src/clang/lib/Headers",
+        virtualPrefix: "",
+        contribution: "complete-configured-resource-header-output",
+      }),
         Object.freeze({
           includeRootId: "cxx-stdlib",
           archiveSubtree: "llvm-project-22.1.8.src/libcxx/include",
@@ -392,7 +427,25 @@ function validateArchiveSet(archives) {
           selection.virtualPrefix !== "") {
         invalid(path, "archive selection is outside the closed subtree contract");
       }
+      if (selection.includeRootId === "clang-resource") {
+        validateConfiguredResourceOutput(selection.configuredResourceOutput, path);
+      } else if (selection.configuredResourceOutput !== undefined) {
+        invalid(path, "only the Clang resource selection may define configured output policy");
+      }
     }
+  }
+}
+
+function validateConfiguredResourceOutput(value, diagnosticPath) {
+  if (typeof value !== "object" || value === null ||
+      value.upstreamBuildManifest !== CLANG_RESOURCE_CMAKE_MANIFEST ||
+      value.buildStageId !== "clang-extractor-wasm" ||
+      value.llvmTargetsToBuild !== "WebAssembly" || value.clangEnableHlsl !== "OFF" ||
+      !Array.isArray(value.generatedVirtualPaths) || value.generatedVirtualPaths.length !== 0 ||
+      !Array.isArray(value.omittedSourceVirtualPaths) ||
+      value.omittedSourceVirtualPaths.length !== 1 ||
+      value.omittedSourceVirtualPaths[0] !== CLANG_RESOURCE_CMAKE_MANIFEST.virtualPath) {
+    invalid(diagnosticPath, "Clang resource configured-output policy is not exact");
   }
 }
 

@@ -44,6 +44,24 @@ describe("browser header-source plan", () => {
       includeRootCount: 5,
       selectedSubtreeCount: 8,
     });
+    const clangSelection = plan.body.archives
+      .find(({ sourceId }) => sourceId === "llvm-project")?.selections
+      .find(({ includeRootId }) => includeRootId === "clang-resource");
+    expect(clangSelection).toMatchObject({
+      contribution: "complete-configured-resource-header-output",
+      configuredResourceOutput: {
+        upstreamBuildManifest: {
+          virtualPath: "CMakeLists.txt",
+          sha256: "6fbe03bc7a1ae8309451851c666a76fe0929d12a9e140be18b53428574cdbd35",
+          byteLength: "25049",
+        },
+        buildStageId: "clang-extractor-wasm",
+        llvmTargetsToBuild: "WebAssembly",
+        clangEnableHlsl: "OFF",
+        generatedVirtualPaths: [],
+        omittedSourceVirtualPaths: ["CMakeLists.txt"],
+      },
+    });
   });
 
   it("binds official CUDA component identities and Ubuntu cross sysroot packages", async () => {
