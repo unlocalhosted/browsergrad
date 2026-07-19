@@ -21,14 +21,14 @@ import {
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
-export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 4;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 5;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.84e8320ae85e3f49dba5adc729fe07544aa7fcb9d0f72f18c604fc5d840d0bf2";
+  "bg.cpp.browser-runtime-abi.sha256.0eb0fe895342f4a1ed2ab0ba765108aaf5e8133b1f0ad03110c722d58e0d68b7";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "4d6de469eb287dabfdc8ed4d1c057c5aef2af915a651a8d9c6eee2e9e9c57c69";
+  "c71da30edc856f417bf01f3e2e84860af96d8bc2366a11ee285c01a6f25474a6";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "34173da34810c0f0cb80af84b36bb800007c05bb3f9f759943e2c6d10e5d2226";
+  "658f6ae6c7c7302b1510f0491c63e730a0b539f5d6e22dd7b125d149341f5808";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "8b48a9e038fc9c2b3ed677d6df99e7d0803da9083db19c41a3017f844fa10f48";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 =
@@ -382,10 +382,10 @@ function validateBodyInvariants(value: JsonObject): void {
       );
     }
     const structural = body.wasm.structuralPolicy;
-    if (structural.status !== "table-and-global-projections-reviewed-target-features-pending" ||
+    if (structural.status !== "independently-reviewed-hash-pinned" ||
         structural.releaseConformance !==
-          "forbidden-until-exact-first-build-projection-is-reviewed-and-repinned") {
-      invalid("$.body.wasm.structuralPolicy", "Wasm structural projection must remain release-blocked pending review");
+          "allowed-only-for-exact-reviewed-structural-projection") {
+      invalid("$.body.wasm.structuralPolicy", "Wasm structural projection must equal the reviewed closed policy");
     }
     if (structural.tables.maximumCount !== 1 ||
         structural.tables.imported !== "forbidden" ||
@@ -425,15 +425,19 @@ function validateBodyInvariants(value: JsonObject): void {
       "dylink.0", "producers", "sourceMappingURL",
     ], "$.body.wasm.structuralPolicy.customSections.explicitlyForbiddenNames");
     if (customSections.targetFeatures.sectionName !== "target_features" ||
-        customSections.targetFeatures.status !== "unresolved-first-build-review-required" ||
+        customSections.targetFeatures.status !== "independently-reviewed-absent" ||
+        customSections.targetFeatures.authority !==
+          "advisory-only-static-opcode-and-section-inspection-is-authoritative" ||
         customSections.targetFeatures.exactRawSectionProjection.length !== 0) {
-      invalid("$.body.wasm.structuralPolicy.customSections.targetFeatures", "target_features review remains unresolved");
+      invalid("$.body.wasm.structuralPolicy.customSections.targetFeatures", "target_features must equal the reviewed absent advisory projection");
     }
     // Tool-conventions names are wire vocabulary, not BrowserGrad feature
     // vocabulary (`sign-ext`/`multimemory` differ intentionally).
-    assertExactStrings(customSections.targetFeatures.requiredDeclarations, [
-      "bulk-memory", "mutable-globals", "nontrapping-fptoint", "sign-ext",
-    ], "$.body.wasm.structuralPolicy.customSections.targetFeatures.requiredDeclarations");
+    assertExactStrings(
+      customSections.targetFeatures.requiredDeclarations,
+      [],
+      "$.body.wasm.structuralPolicy.customSections.targetFeatures.requiredDeclarations",
+    );
     assertExactStrings(customSections.targetFeatures.forbiddenDeclarations, [
       "atomics", "exception-handling", "memory64", "multimemory", "simd128",
     ], "$.body.wasm.structuralPolicy.customSections.targetFeatures.forbiddenDeclarations");
@@ -447,7 +451,7 @@ function validateBodyInvariants(value: JsonObject): void {
     if (featurePolicy.instructionSetBaseline !== "webassembly-mvp" ||
         featurePolicy.unlistedExtensions !== "forbidden" ||
         featurePolicy.staticOpcodeAndSectionInspection !== "required" ||
-        featurePolicy.targetFeaturesCrossCheck !== "required-but-not-authoritative") {
+        featurePolicy.targetFeaturesCrossCheck !== "optional-advisory-when-present") {
       invalid("$.body.wasm.featurePolicy", "Wasm extension policy must reject every undeclared extension");
     }
     assertExactStrings(

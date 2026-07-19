@@ -74,7 +74,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256,
       supportFunctionAllowlistSha256:
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256,
-      resourceByteLength: 33_457,
+      resourceByteLength: 33_423,
       designAuthority: true,
       interfaceReviewReady: false,
       observedWasmVerified: false,
@@ -82,7 +82,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     });
     expect(canonicalCppCuteBrowserRuntimeAbiManifestBytes(prepared)).toEqual(resource);
     const record = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(prepared);
-    expect(record.manifest.version).toEqual({ major: 1, minor: 4 });
+    expect(record.manifest.version).toEqual({ major: 1, minor: 5 });
     expect(record.manifest.body.wasm.cAbiVersion).toBe(65_537);
     expect(await deriveCppCuteBrowserRuntimeAbiManifestId(record.manifest.body)).toBe(
       CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
@@ -245,7 +245,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       allowedExtensions: wasm.requiredFeatures,
       unlistedExtensions: "forbidden",
       staticOpcodeAndSectionInspection: "required",
-      targetFeaturesCrossCheck: "required-but-not-authoritative",
+      targetFeaturesCrossCheck: "optional-advisory-when-present",
     });
   });
 
@@ -385,7 +385,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     });
   });
 
-  it("pins table/global projections while bounding unresolved target features", async () => {
+  it("pins table/global projections and treats absent target metadata as advisory", async () => {
     const prepared = await decodeCppCuteBrowserRuntimeAbiManifest(
       cppCuteBrowserRuntimeAbiManifestResourceBytes(),
     );
@@ -393,8 +393,8 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       .manifest.body.wasm.structuralPolicy;
 
     expect(policy).toMatchObject({
-      status: "table-and-global-projections-reviewed-target-features-pending",
-      releaseConformance: "forbidden-until-exact-first-build-projection-is-reviewed-and-repinned",
+      status: "independently-reviewed-hash-pinned",
+      releaseConformance: "allowed-only-for-exact-reviewed-structural-projection",
       tables: {
         maximumCount: 1,
         allowedElementTypes: ["funcref"],
@@ -422,10 +422,9 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
         explicitlyForbiddenNames: ["dylink.0", "producers", "sourceMappingURL"],
         targetFeatures: {
           sectionName: "target_features",
-          status: "unresolved-first-build-review-required",
-          requiredDeclarations: [
-            "bulk-memory", "mutable-globals", "nontrapping-fptoint", "sign-ext",
-          ],
+          status: "independently-reviewed-absent",
+          authority: "advisory-only-static-opcode-and-section-inspection-is-authoritative",
+          requiredDeclarations: [],
           forbiddenDeclarations: [
             "atomics", "exception-handling", "memory64", "multimemory", "simd128",
           ],
@@ -703,7 +702,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
   });
 
   it("rejects unsupported versions before accepting a closed contract", async () => {
-    for (const [field, value] of [["major", 2], ["minor", 5]] as const) {
+    for (const [field, value] of [["major", 2], ["minor", 6]] as const) {
       const resource = mutableResource();
       objectField(resource, "version")[field] = value;
       await expectDecodeError(

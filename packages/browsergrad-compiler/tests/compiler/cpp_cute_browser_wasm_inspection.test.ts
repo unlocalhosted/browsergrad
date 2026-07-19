@@ -241,7 +241,7 @@ describe("bounded raw-Wasm inspection", () => {
       parameters: ["i32", "i32"], results: [],
     });
     expect(report.projection.memories).toEqual([{ addressType: "i32", shared: false, minimumPages: 4_096, maximumPages: 16_384 }]);
-    expect(report.mismatches).toContain("required target feature +sign-ext is missing");
+    expect(report.mismatches.some((entry) => entry.startsWith("required target feature +"))).toBe(false);
     expect(Object.isFrozen(report.projection.imports)).toBe(true);
     expect(report.wasmSha256).toMatch(/^[0-9a-f]{64}$/u);
     expect(report.observedProjectionSha256).toMatch(/^[0-9a-f]{64}$/u);
@@ -393,13 +393,13 @@ describe("bounded raw-Wasm inspection", () => {
     )).resolves.toMatchObject({ rawWasmVerified: true });
   });
 
-  it("reports absent target metadata as ABI drift while trusting decoded features", async () => {
+  it("trusts decoded features without requiring advisory target metadata", async () => {
     const report = await inspectCppCuteBrowserWasmAgainstRuntimeAbi(
       oneFunctionModule([0x41, 0x00, 0xc0], { result: true }),
       await runtimeAbi(),
     );
     expect(report.projection.staticallyUsedExtensions).toContain("sign-extension");
-    expect(report.mismatches).toContain("required target feature +sign-ext is missing");
+    expect(report.mismatches).not.toContain("required target feature +sign-ext is missing");
   });
 
   it("rejects subclass, proxy, and shared byte views before parsing", async () => {

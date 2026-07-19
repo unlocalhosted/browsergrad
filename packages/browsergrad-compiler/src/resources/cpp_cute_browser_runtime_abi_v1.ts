@@ -43,8 +43,8 @@ function supportExport(
  */
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
-  version: { major: 1, minor: 4 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.84e8320ae85e3f49dba5adc729fe07544aa7fcb9d0f72f18c604fc5d840d0bf2",
+  version: { major: 1, minor: 5 },
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.0eb0fe895342f4a1ed2ab0ba765108aaf5e8133b1f0ad03110c722d58e0d68b7",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -82,7 +82,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         ],
         unlistedExtensions: "forbidden",
         staticOpcodeAndSectionInspection: "required",
-        targetFeaturesCrossCheck: "required-but-not-authoritative",
+        targetFeaturesCrossCheck: "optional-advisory-when-present",
       },
       startSection: "forbidden",
       unlistedCExports: "forbidden",
@@ -151,8 +151,8 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         releaseConformance: "allowed-only-for-exact-reviewed-support-exports",
       },
       structuralPolicy: {
-        status: "table-and-global-projections-reviewed-target-features-pending",
-        releaseConformance: "forbidden-until-exact-first-build-projection-is-reviewed-and-repinned",
+        status: "independently-reviewed-hash-pinned",
+        releaseConformance: "allowed-only-for-exact-reviewed-structural-projection",
         tables: {
           maximumCount: 1,
           allowedElementTypes: ["funcref"],
@@ -184,13 +184,9 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
           explicitlyForbiddenNames: ["dylink.0", "producers", "sourceMappingURL"],
           targetFeatures: {
             sectionName: "target_features",
-            status: "unresolved-first-build-review-required",
-            requiredDeclarations: [
-              "bulk-memory",
-              "mutable-globals",
-              "nontrapping-fptoint",
-              "sign-ext",
-            ],
+            status: "independently-reviewed-absent",
+            authority: "advisory-only-static-opcode-and-section-inspection-is-authoritative",
+            requiredDeclarations: [],
             forbiddenDeclarations: [
               "atomics",
               "exception-handling",
