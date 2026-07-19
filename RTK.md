@@ -77,6 +77,27 @@ Track active bugbash state in `docs/internal/compiler-bugbash-progress.md`.
 It should show the latest green gates, remaining probes, and exact next command
 before claiming progress.
 
+For browser-local Clang-Wasm build, ABI, profile, or asset-harness edits, use
+the package-owned fast gate as the ordinary edit loop:
+
+```sh
+pnpm --filter @unlocalhosted/browsergrad-compiler run verify:browser-clang-wasm:fast
+```
+
+It builds once, runs the no-rebuild lock check, and exercises the build-plan,
+runtime-ABI, browser-profile, and browser-asset identity chain sequentially.
+At the 2026-07-19 checkpoint it passed 266 tests in 21.74 to 26.37 seconds on
+Node 25.
+Use `test:browser-clang-wasm-build-plan` for the broader native/sanitizer
+pre-commit gate; its same-checkpoint run passed 170 tests with 9 intentional
+platform skips in 91.91 seconds. Do not run package entrypoints that clean
+`dist` concurrently in one worktree.
+
+Remote cached validation is diagnostic and ordinarily takes four to five
+minutes. Uncached clean and two-build reproducibility modes remain deliberately
+separate release-evidence authorities; their provisioning cost is not an edit
+loop and must not be placed on routine source iteration.
+
 Use the smallest WebGPU loop that covers the suspected bug class:
 
 ```sh
