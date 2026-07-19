@@ -77,6 +77,23 @@ int run_browser_host_tests() {
   BG_CHECK(errno == ENOSYS);
   BG_CHECK(std::memcmp(&timer, &original_timer, sizeof(timer)) == 0);
 
+  struct timespec sleep_request {1, 0};
+  struct timespec sleep_remainder;
+  std::memset(&sleep_remainder, 0x5a, sizeof(sleep_remainder));
+  const struct timespec original_sleep_remainder = sleep_remainder;
+  errno = 0;
+  BG_CHECK(nanosleep(&sleep_request, &sleep_remainder) == -1);
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(std::memcmp(&sleep_remainder, &original_sleep_remainder,
+                       sizeof(sleep_remainder)) == 0);
+  BG_CHECK(__clock_nanosleep(CLOCK_REALTIME, 0, &sleep_request,
+                             &sleep_remainder) == ENOSYS);
+  BG_CHECK(std::memcmp(&sleep_remainder, &original_sleep_remainder,
+                       sizeof(sleep_remainder)) == 0);
+  errno = 0;
+  BG_CHECK(alarm(1) == 0);
+  BG_CHECK(errno == ENOSYS);
+
   unsigned char entropy[16];
   std::memset(entropy, 0x5a, sizeof(entropy));
   unsigned char original_entropy[sizeof(entropy)];

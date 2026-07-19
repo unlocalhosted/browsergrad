@@ -113,11 +113,24 @@ int getentropy(void*, std::size_t) {
   return fail_with_enosys();
 }
 
-#if defined(__EMSCRIPTEN__)
-int clock_nanosleep(clockid_t, int, const struct timespec*, struct timespec*) {
+int __clock_nanosleep(clockid_t, int, const struct timespec*,
+                      struct timespec*) {
   return ENOSYS;
 }
-#endif
+
+int clock_nanosleep(clockid_t clock, int flags, const struct timespec* request,
+                    struct timespec* remainder) {
+  return __clock_nanosleep(clock, flags, request, remainder);
+}
+
+int nanosleep(const struct timespec*, struct timespec*) {
+  return fail_with_enosys();
+}
+
+unsigned alarm(unsigned) {
+  errno = ENOSYS;
+  return 0;
+}
 
 int getpwnam_r(const char*, struct passwd* password, char*, std::size_t,
                struct passwd** result) {
