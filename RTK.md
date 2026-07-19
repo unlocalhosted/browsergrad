@@ -86,8 +86,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler run verify:browser-clang-wasm:
 
 It builds once, runs the no-rebuild lock check, and exercises the build-plan,
 runtime-ABI, browser-profile, and browser-asset identity chain sequentially.
-At the current 2026-07-19 checkpoint it passes 426 tests across 45 files in
-28.60 seconds end to end on Node 25. The set includes package invocation,
+At the current 2026-07-19 checkpoint it passes 427 tests across 45 files in
+about 28 seconds end to end on Node 25. The set includes package invocation,
 Worker entry, production-controller lifecycle, seven-archive admission, strict
 tar/Debian normalization, collision-free source extraction, exact header-tree
 inventory/materialization, distribution-notice verification, and
@@ -122,8 +122,18 @@ pnpm --filter @unlocalhosted/browsergrad-compiler run materialize:browser-header
 The current exact local command completes in about 23 seconds including the
 package build. It verifies the locked WebAssembly-only Clang configuration has
 an empty generated-header set and excludes the upstream build manifest from
-the distributed pack. Outputs remain non-release observations until normalizer
-attestation and external file-level licensing are closed.
+the distributed pack. The exact Darwin arm64 builder is package-pinned to
+Node 25.9.0, Node's Zstandard 1.5.7 closure, and `/usr/bin/bsdtar` 3.5.3. Check
+that identity before materialization with:
+
+```sh
+pnpm --filter @unlocalhosted/browsergrad-compiler run verify:browser-header-normalization-environment
+```
+
+An unreviewed host or runtime fails closed instead of inheriting authority from
+a version string. Outputs remain non-release observations until external
+file-level licensing, distribution approval, signed provenance, approved asset
+binding, and browser execution are closed.
 
 Use the smallest WebGPU loop that covers the suspected bug class:
 
