@@ -14,6 +14,11 @@ import {
   decodeCppCuteBrowserBuildInputLock,
   unwrapPreparedCppCuteBrowserBuildInputLock,
 } from "../../dist/cpp_cute_browser_build_lock.js";
+import {
+  copyCppCuteBrowserExtractedHeaderSourceFile,
+  cppCuteBrowserExtractedHeaderSourceFiles,
+  requireCppCuteBrowserHeaderSourceExtractionAuthority,
+} from "./cpp_cute_browser_header_source_extraction.mjs";
 
 export const CPP_CUTE_BROWSER_HEADER_PACK_INVENTORY_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-header-pack-source-inventory";
@@ -23,6 +28,7 @@ const INVENTORY_HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.browser-header-pack-source-inventory.v1";
 const PORTABLE_SEGMENT = /^[A-Za-z0-9._+@=-]+$/u;
 const IDENTIFIER = /^[a-z][a-z0-9._-]*$/u;
+const SHA256 = /^[0-9a-f]{64}$/u;
 const MAX_INPUT_BYTES = 256 * 1024;
 const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 const MAX_SOURCES = 256;
@@ -175,25 +181,204 @@ export async function inventoryCppCuteBrowserHeaderPackSources(input) {
     sourceFilesByIncludeRootId.set(pack.includeRootId, sourceFilesByPath);
   }
 
+  return finalizeInventory({
+    authority: "local-source-tree-inventory-only",
+    buildInputLock,
+    packs,
+    sourceCount,
+    fileCount: budget.files,
+    fileContentByteLength: String(budget.bytes),
+    sourceFilesByIncludeRootId,
+  });
+}
+
+/**
+ * Inventories the collision-free virtual source stores produced from the exact
+ * seven-archive header plan. Every file is reread through the extraction's
+ * opaque authority, so no host path or case-folding behavior enters VFS paths.
+ */
+export async function inventoryCppCuteBrowserExtractedHeaderSources(extraction) {
+  try {
+    requireCppCuteBrowserHeaderSourceExtractionAuthority(extraction);
+  } catch (cause) {
+    invalid("$.extraction", "expected one live exact header-source extraction", { cause });
+  }
+  const buildInputLock = await decodeCppCuteBrowserBuildInputLock(
+    cppCuteBrowserBuildInputLockResourceBytes(),
+  );
+  if (extraction.buildInputLockId !== buildInputLock.lockId ||
+      extraction.buildInputLockResourceSha256 !== buildInputLock.resourceSha256) {
+    invalid("$.extraction", "header-source extraction differs from the current build lock");
+  }
+  const lockBody = unwrapPreparedCppCuteBrowserBuildInputLock(buildInputLock).lock.body;
+  const packPolicies = bindPackPoliciesToBuildLock(lockBody);
+  const groups = new Map(packPolicies.map((policy) => [policy.includeRootId, {
+    policy,
+    filesByPath: new Map(),
+    sourceFilesByPath: new Map(),
+    sourceCount: 0,
+  }]));
+  const observed = { files: 0, bytes: 0 };
+  for (const source of extraction.archives) {
+    identifier(
+      source.licenseComponentId,
+      `$.extraction.archives.${source.sourceId}.licenseComponentId`,
+    );
+    for (const selection of source.selections) {
+      const group = groups.get(selection.includeRootId);
+      if (group === undefined) {
+        invalid("$.extraction.archives", "extraction contains an unknown include root");
+      }
+      if (!sameStrings(selection.licenseComponentIds, group.policy.licenseComponentIds) ||
+          selection.intendedAsset !== group.policy.intendedAsset) {
+        invalid(
+          `$.extraction.archives.${source.sourceId}.selections`,
+          "extracted selection license policy differs from build-lock pack policy",
+        );
+      }
+      group.sourceCount += 1;
+      const files = cppCuteBrowserExtractedHeaderSourceFiles(
+        extraction,
+        source.sourceId,
+        selection.includeRootId,
+      );
+      for (const file of files) {
+        const virtualPath = selection.virtualPrefix === ""
+          ? file.relativePath
+          : `${selection.virtualPrefix}/${file.relativePath}`;
+        portableRelativePath(virtualPath, "$.extraction.files.virtualPath", false);
+        if (!SHA256.test(file.contentSha256) || !/^(0|[1-9][0-9]*)$/u.test(file.byteLength)) {
+          invalid("$.extraction.files", "extracted file evidence is malformed");
+        }
+        const byteLength = Number(file.byteLength);
+        if (!Number.isSafeInteger(byteLength) || byteLength > MAX_FILE_BYTES) {
+          resource("$.extraction.files", `source file exceeds ${MAX_FILE_BYTES} bytes`);
+        }
+        const bytes = await copyCppCuteBrowserExtractedHeaderSourceFile(
+          extraction,
+          source.sourceId,
+          selection.includeRootId,
+          file.relativePath,
+        );
+        if (bytes.byteLength !== byteLength || sha256(bytes) !== file.contentSha256) {
+          invalid("$.extraction.files", "extracted file bytes differ from source-tree evidence");
+        }
+        observed.files += 1;
+        observed.bytes += byteLength;
+        if (observed.files > MAX_FILES || observed.bytes > MAX_TOTAL_FILE_BYTES) {
+          resource("$.extraction", "extracted source files exceed inventory ceilings");
+        }
+        const expected = Object.freeze({
+          virtualPath,
+          contentSha256: file.contentSha256,
+          byteLength: file.byteLength,
+          licenseComponentIds: Object.freeze([...selection.licenseComponentIds]),
+        });
+        const prior = group.filesByPath.get(virtualPath);
+        if (prior !== undefined) {
+          if (prior.contentSha256 !== expected.contentSha256 ||
+              prior.byteLength !== expected.byteLength) {
+            invalid(
+              "$.extraction.files",
+              `conflicting extracted overlay for ${JSON.stringify(virtualPath)}`,
+            );
+          }
+          const mergedLicenses = [...new Set([
+            ...prior.licenseComponentIds,
+            ...expected.licenseComponentIds,
+          ])].sort(compareUtf8);
+          group.filesByPath.set(virtualPath, Object.freeze({
+            ...prior,
+            licenseComponentIds: Object.freeze(mergedLicenses),
+          }));
+          continue;
+        }
+        group.filesByPath.set(virtualPath, expected);
+        group.sourceFilesByPath.set(virtualPath, Object.freeze({
+          extraction,
+          sourceId: source.sourceId,
+          includeRootId: selection.includeRootId,
+          relativePath: file.relativePath,
+          expected,
+        }));
+      }
+    }
+  }
+
+  const packs = [];
+  const sourceFilesByIncludeRootId = new Map();
+  let uniqueFileCount = 0;
+  let uniqueFileContentBytes = 0n;
+  let sourceCount = 0;
+  for (const policy of packPolicies) {
+    const group = groups.get(policy.includeRootId);
+    if (group === undefined || group.sourceCount === 0) {
+      invalid("$.extraction", `extraction omitted ${JSON.stringify(policy.includeRootId)}`);
+    }
+    const files = [...group.filesByPath.values()].sort((left, right) =>
+      compareUtf8(left.virtualPath, right.virtualPath));
+    rejectFileDirectoryCollisions(files, `$.extraction.${policy.includeRootId}`);
+    const contentSetSha256 = await deriveContentSet(files, `$.extraction.${policy.includeRootId}`);
+    const fileContentByteLength = files.reduce(
+      (total, file) => total + BigInt(file.byteLength),
+      0n,
+    ).toString();
+    packs.push(Object.freeze({
+      includeRootId: policy.includeRootId,
+      intendedAsset: policy.intendedAsset,
+      outputRole: policy.outputRole,
+      outputPath: policy.outputPath,
+      contentSetSha256,
+      fileCount: files.length,
+      fileContentByteLength,
+      files: Object.freeze(files),
+    }));
+    sourceFilesByIncludeRootId.set(policy.includeRootId, group.sourceFilesByPath);
+    sourceCount += group.sourceCount;
+    uniqueFileCount += files.length;
+    uniqueFileContentBytes += BigInt(fileContentByteLength);
+  }
+  if (sourceCount !== extraction.totals.selectedSubtreeCount) {
+    invalid("$.extraction", "not every extracted source subtree entered the pack inventory");
+  }
+  return finalizeInventory({
+    authority: "exact-extraction-source-inventory-only",
+    buildInputLock,
+    headerSourceExtractionId: extraction.extractionId,
+    packs,
+    sourceCount,
+    fileCount: uniqueFileCount,
+    fileContentByteLength: String(uniqueFileContentBytes),
+    sourceFilesByIncludeRootId,
+  });
+}
+
+function finalizeInventory(input) {
   const inventoryHash = sha256(canonicalJsonBytes({
     domain: INVENTORY_HASH_DOMAIN,
-    buildInputLockId: buildInputLock.lockId,
-    buildInputLockResourceSha256: buildInputLock.resourceSha256,
-    packs,
+    buildInputLockId: input.buildInputLock.lockId,
+    buildInputLockResourceSha256: input.buildInputLock.resourceSha256,
+    ...(input.headerSourceExtractionId === undefined
+      ? {}
+      : { headerSourceExtractionId: input.headerSourceExtractionId }),
+    packs: input.packs,
   }));
   const manifest = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_PACK_INVENTORY_SCHEMA,
     version: 1,
     inventoryId: `bg.cpp.browser-header-pack-source-inventory.sha256.${inventoryHash}`,
-    authority: "local-source-tree-inventory-only",
-    buildInputLockId: buildInputLock.lockId,
-    buildInputLockResourceSha256: buildInputLock.resourceSha256,
-    packs: Object.freeze(packs),
+    authority: input.authority,
+    buildInputLockId: input.buildInputLock.lockId,
+    buildInputLockResourceSha256: input.buildInputLock.resourceSha256,
+    ...(input.headerSourceExtractionId === undefined
+      ? {}
+      : { headerSourceExtractionId: input.headerSourceExtractionId }),
+    packs: Object.freeze(input.packs),
     totals: Object.freeze({
-      packCount: packs.length,
-      sourceCount,
-      fileCount: budget.files,
-      fileContentByteLength: String(budget.bytes),
+      packCount: input.packs.length,
+      sourceCount: input.sourceCount,
+      fileCount: input.fileCount,
+      fileContentByteLength: input.fileContentByteLength,
     }),
     claims: Object.freeze({
       exactReadableSourceTreesVerified: true,
@@ -211,8 +396,19 @@ export async function inventoryCppCuteBrowserHeaderPackSources(input) {
   if (bytes.byteLength > MAX_OUTPUT_BYTES) {
     resource("$.inventory", `canonical inventory exceeds ${MAX_OUTPUT_BYTES} bytes`);
   }
-  INVENTORY_SOURCE_FILES.set(manifest, Object.freeze({ sourceFilesByIncludeRootId }));
+  INVENTORY_SOURCE_FILES.set(manifest, Object.freeze({
+    sourceFilesByIncludeRootId: input.sourceFilesByIncludeRootId,
+  }));
   return manifest;
+}
+
+async function deriveContentSet(files, diagnosticPath) {
+  if (files.length === 0) invalid(diagnosticPath, "header-pack inventory must contain at least one file");
+  try {
+    return await deriveCppCuteBrowserVfsContentSetSha256(files);
+  } catch (cause) {
+    invalid(diagnosticPath, "inventory is outside the closed VFS content-set contract", { cause });
+  }
 }
 
 /**
@@ -231,6 +427,24 @@ export async function copyCppCuteBrowserHeaderPackInventorySourceFile(
   portableRelativePath(virtualPath, "$.virtualPath", false);
   const source = stored.sourceFilesByIncludeRootId.get(includeRootId)?.get(virtualPath);
   if (source === undefined) invalid("$.virtualPath", "file is absent from the exact inventory");
+  if (source.extraction !== undefined) {
+    let bytes;
+    try {
+      bytes = await copyCppCuteBrowserExtractedHeaderSourceFile(
+        source.extraction,
+        source.sourceId,
+        source.includeRootId,
+        source.relativePath,
+      );
+    } catch (cause) {
+      invalid("$.virtualPath", "failed to reread extracted inventory source", { cause });
+    }
+    if (bytes.byteLength !== Number(source.expected.byteLength) ||
+        sha256(bytes) !== source.expected.contentSha256) {
+      invalid("$.virtualPath", "extracted inventory source bytes changed");
+    }
+    return bytes;
+  }
   return readExactInventorySourceFile(source.sourcePath, source.expected, "$.virtualPath");
 }
 

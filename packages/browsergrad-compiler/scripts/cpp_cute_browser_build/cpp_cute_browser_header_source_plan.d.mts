@@ -10,6 +10,8 @@ export interface CppCuteBrowserHeaderSourceSelection {
   readonly includeRootId: string;
   readonly archiveSubtree: string;
   readonly virtualPrefix: "";
+  readonly intendedAsset: string;
+  readonly licenseComponentIds: readonly string[];
   readonly contribution:
     | "complete-selected-header-subtree"
     | "source-templates-requires-generated-resource-headers";
@@ -79,6 +81,7 @@ export interface CppCuteBrowserHeaderSourcePlan {
     exactBuildInputLockBound: true;
     exactArchiveSelectionPinned: true;
     exactSourceSubtreesPinned: true;
+    exactHeaderPackLicensePolicyBound: true;
     allFiveIncludeRootsSelected: true;
     archiveBytesVerified: false;
     archiveAttestationsVerified: false;

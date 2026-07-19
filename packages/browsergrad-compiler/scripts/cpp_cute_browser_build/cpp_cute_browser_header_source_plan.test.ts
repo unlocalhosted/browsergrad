@@ -86,6 +86,7 @@ describe("browser header-source plan", () => {
       exactBuildInputLockBound: true,
       exactArchiveSelectionPinned: true,
       exactSourceSubtreesPinned: true,
+      exactHeaderPackLicensePolicyBound: true,
       allFiveIncludeRootsSelected: true,
       archiveBytesVerified: false,
       archiveAttestationsVerified: false,

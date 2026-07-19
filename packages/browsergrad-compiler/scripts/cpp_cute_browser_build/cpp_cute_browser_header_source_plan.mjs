@@ -23,6 +23,13 @@ const INCLUDE_ROOT_IDS = Object.freeze([
   "cxx-stdlib",
   "linux-sysroot",
 ]);
+const INCLUDE_ROOT_ASSETS = Object.freeze(new Map([
+  ["clang-resource", "compiler-resource-pack"],
+  ["cuda", "dependency-header-pack:cuda"],
+  ["cutlass", "dependency-header-pack:cutlass"],
+  ["cxx-stdlib", "dependency-header-pack:cxx-stdlib"],
+  ["linux-sysroot", "dependency-header-pack:linux-sysroot"],
+]));
 const PLAN_AUTHORITIES = new WeakSet();
 
 const SUPPLEMENTAL_ARCHIVES = Object.freeze([
@@ -184,8 +191,10 @@ export async function prepareCppCuteBrowserHeaderSourcePlan() {
   );
   const body = unwrapPreparedCppCuteBrowserBuildInputLock(buildInputLock).lock.body;
   const gitArchives = currentGitSourceArchives(body.sources);
-  const archives = [...gitArchives, ...SUPPLEMENTAL_ARCHIVES]
-    .sort((left, right) => compareUtf8(left.sourceId, right.sourceId));
+  const archives = bindSelectionLicensePolicies(
+    [...gitArchives, ...SUPPLEMENTAL_ARCHIVES],
+    body,
+  ).sort((left, right) => compareUtf8(left.sourceId, right.sourceId));
   validateArchiveSet(archives);
   const includeRoots = summarizeIncludeRoots(archives);
   const planBody = Object.freeze({
@@ -235,6 +244,7 @@ export async function prepareCppCuteBrowserHeaderSourcePlan() {
       exactBuildInputLockBound: true,
       exactArchiveSelectionPinned: true,
       exactSourceSubtreesPinned: true,
+      exactHeaderPackLicensePolicyBound: true,
       allFiveIncludeRootsSelected: true,
       archiveBytesVerified: false,
       archiveAttestationsVerified: false,
@@ -250,6 +260,35 @@ export async function prepareCppCuteBrowserHeaderSourcePlan() {
   });
   PLAN_AUTHORITIES.add(plan);
   return plan;
+}
+
+function bindSelectionLicensePolicies(archives, buildLockBody) {
+  const approved = buildLockBody.notices.approvedComponents;
+  const unresolved = buildLockBody.notices.unresolvedComponents;
+  return archives.map((archive) => Object.freeze({
+    ...archive,
+    selections: Object.freeze(archive.selections.map((selection) => {
+      const intendedAsset = INCLUDE_ROOT_ASSETS.get(selection.includeRootId);
+      if (intendedAsset === undefined) {
+        invalid("$.archives.selections", "selection has no header-pack asset policy");
+      }
+      const licenseComponentIds = [
+        ...approved.filter((notice) => notice.appliesTo.includes(intendedAsset))
+          .map((notice) => notice.componentId),
+        ...unresolved.filter((notice) => notice.intendedAsset === intendedAsset)
+          .map((notice) => notice.componentId),
+      ].sort(compareUtf8);
+      if (licenseComponentIds.length === 0 ||
+          new Set(licenseComponentIds).size !== licenseComponentIds.length) {
+        invalid("$.buildInputLock.notices", "header selection license policy is incomplete");
+      }
+      return Object.freeze({
+        ...selection,
+        intendedAsset,
+        licenseComponentIds: Object.freeze(licenseComponentIds),
+      });
+    })),
+  }));
 }
 
 export function requireCppCuteBrowserHeaderSourcePlanAuthority(plan) {

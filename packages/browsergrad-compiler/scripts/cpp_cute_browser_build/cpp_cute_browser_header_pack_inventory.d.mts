@@ -1,3 +1,7 @@
+import type {
+  CppCuteBrowserHeaderSourceExtraction,
+} from "./cpp_cute_browser_header_source_extraction.mjs";
+
 export const CPP_CUTE_BROWSER_HEADER_PACK_INVENTORY_SCHEMA:
 "browsergrad.compiler.cpp-cute.browser-header-pack-source-inventory";
 
@@ -43,9 +47,12 @@ export interface CppCuteBrowserHeaderPackInventory {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_PACK_INVENTORY_SCHEMA;
   readonly version: 1;
   readonly inventoryId: string;
-  readonly authority: "local-source-tree-inventory-only";
+  readonly authority:
+    | "local-source-tree-inventory-only"
+    | "exact-extraction-source-inventory-only";
   readonly buildInputLockId: string;
   readonly buildInputLockResourceSha256: string;
+  readonly headerSourceExtractionId?: string;
   readonly packs: readonly CppCuteBrowserHeaderPackInventoryPack[];
   readonly totals: Readonly<{
     packCount: number;
@@ -83,6 +90,10 @@ export interface CppCuteBrowserHeaderPackInventoryAuthoringReport {
 
 export function inventoryCppCuteBrowserHeaderPackSources(
   input: CppCuteBrowserHeaderPackInventoryInput,
+): Promise<Readonly<CppCuteBrowserHeaderPackInventory>>;
+
+export function inventoryCppCuteBrowserExtractedHeaderSources(
+  extraction: CppCuteBrowserHeaderSourceExtraction,
 ): Promise<Readonly<CppCuteBrowserHeaderPackInventory>>;
 
 export function canonicalCppCuteBrowserHeaderPackInventoryBytes(

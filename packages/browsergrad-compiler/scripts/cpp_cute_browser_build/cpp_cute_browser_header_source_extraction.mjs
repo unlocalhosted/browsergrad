@@ -127,6 +127,8 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
             includeRootId: selection.includeRootId,
             archiveSubtree: selection.archiveSubtree,
             virtualPrefix: selection.virtualPrefix,
+            intendedAsset: selection.intendedAsset,
+            licenseComponentIds: selection.licenseComponentIds,
             contribution: selection.contribution,
             sourceTreeId: observed.sourceTreeId,
             fileCount: observed.fileCount,
@@ -140,6 +142,8 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
           archiveFormat: source.archiveFormat,
           archiveSha256: source.archiveSha256,
           archiveByteLength: source.archiveByteLength,
+          licenseComponentId: source.licenseComponentId,
+          licensePolicy: source.licensePolicy,
           normalizationId: normalization.normalizationId,
           selections: Object.freeze(selections),
         }));
@@ -271,6 +275,20 @@ export async function copyCppCuteBrowserExtractedHeaderSourceFile(
   } catch (cause) {
     invalid("$.relativePath", "failed to copy exact extracted header source", { cause });
   }
+}
+
+export function cppCuteBrowserExtractedHeaderSourceFiles(
+  extraction,
+  sourceId,
+  includeRootId,
+) {
+  const stored = SOURCE_EXTRACTIONS.get(extraction);
+  if (stored === undefined) invalid("$.extraction", "expected extractor-issued header-source authority");
+  const normalization = stored.normalizations.get(sourceId);
+  if (normalization === undefined) invalid("$.sourceId", "source is absent from the extraction");
+  const selection = normalization.selections.find(({ selectionId }) => selectionId === includeRootId);
+  if (selection === undefined) invalid("$.includeRootId", "include root is absent from the source");
+  return selection.files;
 }
 
 export function parseCppCuteBrowserHeaderSourceExtractionArguments(argv) {

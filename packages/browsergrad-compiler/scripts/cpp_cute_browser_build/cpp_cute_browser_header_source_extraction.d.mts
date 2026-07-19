@@ -32,6 +32,8 @@ export interface CppCuteBrowserExtractedHeaderSourceArchive {
   readonly archiveFormat: "tar.gz" | "tar.xz" | "deb-data-tar-zstd";
   readonly archiveSha256: string;
   readonly archiveByteLength: string;
+  readonly licenseComponentId: string;
+  readonly licensePolicy: string;
   readonly normalizationId: string;
   readonly selections: readonly CppCuteBrowserExtractedHeaderSourceSelection[];
 }
@@ -116,6 +118,16 @@ export function copyCppCuteBrowserExtractedHeaderSourceFile(
   includeRootId: string,
   relativePath: string,
 ): Promise<Uint8Array>;
+
+export function cppCuteBrowserExtractedHeaderSourceFiles(
+  extraction: CppCuteBrowserHeaderSourceExtraction,
+  sourceId: string,
+  includeRootId: string,
+): readonly Readonly<{
+  relativePath: string;
+  contentSha256: string;
+  byteLength: string;
+}>[];
 
 export function parseCppCuteBrowserHeaderSourceExtractionArguments(
   argv: readonly string[],
