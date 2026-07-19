@@ -21,14 +21,30 @@ isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
 are implemented on `main`. The current source additionally owns exact
 frontend-work instrumentation, the local Wasm C-ABI runner, and a canonical
 Worker result-control encoder. It now pins the current clean-built 27,125-byte
-generated factory inside one exact 577,876-byte package-owned Worker module
+generated factory inside one exact 584,954-byte package-owned Worker module
 with zero static or dynamic imports. The production controller captures its
 browser effects at module evaluation, composes only package-owned Worker bytes
 into a one-shot invocation, terminalizes every Worker/Blob/timer/listener
-effect before returning, and still mints no lowering authority. Two distinct
+effect before returning, and still mints no lowering authority. Validated
+terminal frames retain the exact observed-execution, invocation, request,
+profile, asset-manifest, VFS, runtime-ABI, and package-Worker authority chain;
+hostile view-copy graphs are checked with non-recursive, target-intrinsic cycle
+detection before any semantic authority can be minted. Two distinct
 cache-free builds now prove exact extractor Wasm/factory reproducibility; the
 package binds their canonical v3 evidence without claiming reproducibility of
 the still-incomplete distributed asset set.
+
+Browser asset manifest v1.4 now binds one build-signature predicate, exact
+trust-store digest, and canonical builder allowlist into the profile-pinned
+asset-set identity. One strict DSSE/in-toto verifier rebinds a valid P-256
+signature to the exact profile/compilation contract, manifest, build-input
+lock and recipe, package Worker/factory, and cycle-free build subject. This is
+only a manifest-policy signature binding: the opaque result explicitly keeps
+`producerTrusted`, exact-asset verification, complete reproducibility, legal
+approval, distribution, Worker execution, and release readiness false. The
+tests use ephemeral synthetic keys. An independent package-owned trust-root
+authority and a real externally issued exact-build statement remain required
+before producer trust can be claimed.
 
 The header-pack harness now binds seven exact source archives to the build lock:
 LLVM 22.1.8, CUTLASS 3.7.0, CUDA 12.6.3 CCCL/cudart/nvcc, and Ubuntu Noble
@@ -73,7 +89,8 @@ establish the complete configured header universe under one package-reviewed
 builder identity and the complete engineering input for external header-file
 license review. They do not establish independent third-party implementation
 attestation, external review or approval, full distribution
-reproducibility, signed provenance, Worker execution, or release authority.
+reproducibility, independently trusted signed provenance, Worker execution, or
+release authority.
 
 The two-root reproducibility command now runs that exact pipeline twice from
 one common archive/index/tool closure under four distinct non-overlapping source
@@ -140,16 +157,18 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 444 tests across 51 files covering the build plan, runtime ABI,
+clean, then runs 509 tests across 56 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
 package invocation, Worker entry, production controller, exact header-tree
 inventory/materialization, seven-archive admission, strict archive
 normalization/extraction, the reviewed builder identity, CUDA-index admission,
 the complete header distribution review input, distribution-notice
 verification, exact notice-output materialization, two-root distribution
-reproducibility, and exact package admission of that evidence. The current
-Node 25 gate passes 444 tests across the same 51 files; its focused Vitest
-phase is 26.97 seconds, so the local feedback loop remains measured in tens of
+reproducibility, exact package admission of that evidence, browser build-subject
+syntax, and signature/build-subject binding. The current Node 25 focused Vitest
+phase passes 509 tests across the same 56 files in 11.39 seconds. The complete
+local compiler suite passes 80 files and 1,500 tests in 11.27 seconds when run
+after the package build. The local feedback loop remains measured in tens of
 seconds.
 Clean validation and two-build
 reproducibility still restore no cache and remain intentionally more expensive.
@@ -168,6 +187,22 @@ Workflow concurrency is now mode-scoped: fast feedback no longer queues behind
 clean or reproducibility evidence, and a newer fast request cancels only an
 older fast request. Clean validation and reproducibility never cancel one
 another and retain separate isolated runners and roots.
+
+The comprehensive compiler command now keeps its three true prerequisites
+serial, then feeds the exact remaining 14 commands into four bounded,
+fail-fast lanes with process-group cancellation and per-lane serialization.
+The complete local command passed in 2 minutes 6.39 seconds. CI additionally
+separates source/dist real-world corpus shards, the required-native harness,
+Node 20/24/25 surface checks, and required WebGPU. Exact-source run `29697264202`
+completed all of those lanes successfully in about 4 minutes 15 seconds,
+compared with about 6 minutes 14 seconds for pre-sharding run `29695555899`.
+Commands that clean or rewrite the same package build output remain mutually
+exclusive; parallelism is applied only where ownership and dependency edges
+are independent.
+
+Exact-source signature-binding run `29698350889` then passed the same complete
+graph in about 4 minutes 12 seconds, including Node 20/24/25, required-native,
+source/dist corpus, real Chromium/WebGPU, and Pyodide integration lanes.
 
 Exact-source remote run `29695343749` proves the revised graph on Linux/Node
 24. The JavaScript branch passed in 56 seconds while the cached compiler branch
@@ -310,7 +345,7 @@ An active or failed run is not build, ABI, reproducibility, Worker, browser, or
 release evidence. The Worker-local runtime now executes the pinned generated
 factory and C ABI, verifies exact frontend-work/VFS/runtime observations, and
 emits canonical control plus artifact bytes. The package-owned Worker graph is
-pinned at SHA-256 `652356abb90ad3ac80f2751e9db774185a3be529a93be597b3fe54921de910cf`.
+pinned at SHA-256 `d9bd0eea4b9084eb7dd0768b35fadd0f14667b3a09dd4662a3bc052fb331c4e9`.
 The production host path now consumes those bytes through the captured platform
 and package invocation. It remains evidence-blocked from lowering until a valid
 real Worker compile authenticates the exact terminal frame, Artifact V3,
@@ -964,6 +999,9 @@ the browser-local frontend mode.
 A content hash proves artifact identity and integrity relative to expected
 content; it does not establish producer trust. Profiles that require trusted
 provenance MUST verify a signature or an equivalent allowlisted attestation.
+The trust root and signer policy MUST be admitted independently of the
+manifest or statement being authenticated; a manifest-selected key can prove
+only cryptographic consistency, never producer trust by itself.
 
 The compiler service or WASM frontend MUST treat input as untrusted. It MUST
 use an allowlisted virtual filesystem, bounded preprocessing/template work,
