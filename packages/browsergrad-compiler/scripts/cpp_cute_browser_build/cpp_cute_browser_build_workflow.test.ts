@@ -9,6 +9,7 @@ import {
   decodeCppCuteBrowserBuildInputLock,
   unwrapPreparedCppCuteBrowserBuildInputLock,
 } from "../../dist/cpp_cute_browser_build_lock.js";
+import comprehensiveVitestConfig from "./vitest.config.js";
 
 let workflow: string;
 let existingArtifactsWorkflow: string;
@@ -36,6 +37,15 @@ beforeAll(async () => {
 });
 
 describe("Clang-Wasm evidence workflow", () => {
+  it("bounds comprehensive build-plan test parallelism to two files", () => {
+    expect(comprehensiveVitestConfig).toMatchObject({
+      test: {
+        fileParallelism: true,
+        maxWorkers: 2,
+      },
+    });
+  });
+
   it("binds acquisition and builder bytes to the checked-in build lock", () => {
     const llvm = body.sources.find((source) => source.sourceId === "llvm-project");
     expect(llvm).toBeDefined();

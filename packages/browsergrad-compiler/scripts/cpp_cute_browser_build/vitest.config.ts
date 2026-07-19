@@ -5,6 +5,7 @@ export default defineConfig({
     environment: "node",
     globals: false,
     include: ["scripts/cpp_cute_browser_build/*.test.ts"],
-    fileParallelism: false,
+    fileParallelism: true,
+    maxWorkers: 2,
   },
 });
