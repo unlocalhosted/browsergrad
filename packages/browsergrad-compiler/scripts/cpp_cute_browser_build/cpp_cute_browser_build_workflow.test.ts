@@ -11,6 +11,7 @@ import {
 } from "../../dist/cpp_cute_browser_build_lock.js";
 
 let workflow: string;
+let existingArtifactsWorkflow: string;
 let ciWorkflow: string;
 let body: ReturnType<typeof unwrapPreparedCppCuteBrowserBuildInputLock>["lock"]["body"];
 
@@ -18,6 +19,10 @@ beforeAll(async () => {
   const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
   workflow = await readFile(
     join(repositoryRoot, ".github", "workflows", "build-clang-wasm.yml"),
+    "utf8",
+  );
+  existingArtifactsWorkflow = await readFile(
+    join(repositoryRoot, ".github", "workflows", "verify-clang-wasm-reproducibility.yml"),
     "utf8",
   );
   ciWorkflow = await readFile(
@@ -149,6 +154,32 @@ describe("Clang-Wasm evidence workflow", () => {
     );
     expect(workflow).not.toContain("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02");
     expect(workflow).not.toContain("actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093");
+  });
+
+  it("can reverify existing exact artifacts without rebuilding Clang", () => {
+    expect(existingArtifactsWorkflow).toContain("workflow_dispatch:");
+    expect(existingArtifactsWorkflow).toContain("actions: read");
+    expect(existingArtifactsWorkflow).toContain("contents: read");
+    expect(existingArtifactsWorkflow).toContain(".path == \".github/workflows/build-clang-wasm.yml\"");
+    expect(existingArtifactsWorkflow).toContain(".event == \"workflow_dispatch\"");
+    expect(existingArtifactsWorkflow).toContain("Locked Linux amd64 build 1");
+    expect(existingArtifactsWorkflow).toContain("Locked Linux amd64 build 2");
+    expect(existingArtifactsWorkflow).toContain("run-id: ${{ inputs.source_run_id }}");
+    expect(existingArtifactsWorkflow).toContain("clang-wasm-reproducibility.v3.json");
+    expect(existingArtifactsWorkflow).toContain("cpp_cute_browser_wasm_review.mjs");
+    expect(existingArtifactsWorkflow).not.toContain("cpp_cute_browser_build_runner.mjs");
+    expect(existingArtifactsWorkflow).not.toContain("docker run");
+  });
+
+  it("pins every existing-artifact verifier action to a full commit", () => {
+    const actionLines = existingArtifactsWorkflow.split("\n")
+      .filter((line) => line.includes("uses:"));
+    expect(actionLines.length).toBeGreaterThan(0);
+    for (const line of actionLines) {
+      expect(line).toMatch(
+        /uses:\s+[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*@[0-9a-f]{40}(?:\s+#.*)?$/u,
+      );
+    }
   });
 
   it("requires the exact native Clang version used by the locked source", () => {
