@@ -62,6 +62,7 @@
     "build:browser-clang-wasm:execute": "node scripts/cpp_cute_browser_build/cpp_cute_browser_build_runner.mjs",
     "admit:browser-clang-wasm-clean": "node scripts/cpp_cute_browser_build/cpp_cute_browser_clean_build_admission.mjs",
     "admit:browser-source-archives": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_source_archive_admission.mjs",
+    "admit:browser-header-source-archives": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_source_archive_admission.mjs",
     "verify:browser-header-source-plan": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_source_plan.mjs",
     "author:browser-header-pack-inventory": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_pack_inventory.mjs",
     "materialize:browser-header-packs": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_pack_materialization.mjs",

@@ -14,6 +14,8 @@ import {
 
 export const CPP_CUTE_BROWSER_SOURCE_ARCHIVE_INSPECTION_SCHEMA =
   "browsergrad.compiler.cpp-cute.source-archive-inspection";
+export const CPP_CUTE_BROWSER_REGULAR_ARCHIVE_INSPECTION_SCHEMA =
+  "browsergrad.compiler.cpp-cute.regular-archive-inspection";
 export const CPP_CUTE_BROWSER_SOURCE_ARCHIVE_ADMISSION_SCHEMA =
   "browsergrad.compiler.cpp-cute.current-source-archive-admission";
 
@@ -24,6 +26,8 @@ const ADMISSION_HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.current-source-archive-admission.v1";
 const SOURCE_SET_HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.source-archive-expectations.v1";
+const REGULAR_ARCHIVE_SET_HASH_DOMAIN =
+  "browsergrad.compiler.cpp-cute.regular-archive-expectations.v1";
 const SOURCE_ID = /^[a-z][a-z0-9-]*$/u;
 const SHA1 = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -31,6 +35,7 @@ const MAX_ARCHIVE_BYTES = 512n * 1024n * 1024n;
 const MAX_TOTAL_ARCHIVE_BYTES = 1024n * 1024n * 1024n;
 const READ_BUFFER_BYTES = 1024 * 1024;
 const EXPECTED_CURRENT_SOURCE_IDS = Object.freeze(["cutlass", "llvm-project"]);
+const INSPECTED_REGULAR_ARCHIVE_FILES = new WeakMap();
 const INSPECTED_ARCHIVE_FILES = new WeakMap();
 const CURRENT_ARCHIVE_FILES = new WeakMap();
 
@@ -74,39 +79,31 @@ export async function inspectCppCuteBrowserSourceArchives(input) {
   const expectedSources = parseExpectedSources(object.expectedSources, "$.input.expectedSources");
   const archives = parseArchiveInputs(object.archives, "$.input.archives", expectedSources.length);
   bindArchiveInputs(archives, expectedSources, "$.input.archives");
+  const regularInspection = await inspectCppCuteBrowserRegularArchiveFiles({
+    archives: archives.map(({ sourceId, archivePath }) => ({ sourceId, archivePath })),
+    expectedArchives: expectedSources.map(({ sourceId, archiveSha256, archiveByteLength }) => ({
+      sourceId,
+      archiveSha256,
+      archiveByteLength,
+    })),
+  });
+  const regularStored = INSPECTED_REGULAR_ARCHIVE_FILES.get(regularInspection);
+  if (regularStored === undefined) invalid("$.inspection", "regular archive inspection lost live authority");
   const sourceSetSha256 = sha256(canonicalJsonBytes({
     domain: SOURCE_SET_HASH_DOMAIN,
     sources: expectedSources,
   }));
-  const observed = [];
-  const sourceFiles = new Map();
-  let totalBytes = 0n;
-  for (const [index, source] of expectedSources.entries()) {
-    const archive = archives[index];
-    if (archive === undefined || archive.sourceId !== source.sourceId) {
-      invalid("$.input.archives", "archive set differs from expected source set");
+  const observed = expectedSources.map((source, index) => {
+    const regular = regularInspection.archives[index];
+    if (regular === undefined || regular.sourceId !== source.sourceId) {
+      invalid("$.inspection", "regular archive observation differs from source expectations");
     }
-    const admitted = await inspectExactArchiveFile(
-      archive.archivePath,
-      source,
-      `$.input.archives[${archive.inputIndex}].archivePath`,
-    );
-    totalBytes += BigInt(admitted.archiveByteLength);
-    if (totalBytes > MAX_TOTAL_ARCHIVE_BYTES) {
-      resource("$.input.archives", "archive set exceeds the fixed total-byte ceiling");
-    }
-    for (const prior of sourceFiles.values()) {
-      if (prior.identity.dev === admitted.identity.dev && prior.identity.ino === admitted.identity.ino) {
-        invalid("$.input.archives", "distinct sources must use distinct archive inodes");
-      }
-    }
-    observed.push(Object.freeze({
+    return Object.freeze({
       ...source,
-      observedArchiveSha256: admitted.archiveSha256,
-      observedArchiveByteLength: admitted.archiveByteLength,
-    }));
-    sourceFiles.set(source.sourceId, admitted);
-  }
+      observedArchiveSha256: regular.observedArchiveSha256,
+      observedArchiveByteLength: regular.observedArchiveByteLength,
+    });
+  });
   const inspectionHash = sha256(canonicalJsonBytes({
     domain: INSPECTION_HASH_DOMAIN,
     sourceSetSha256,
@@ -121,7 +118,7 @@ export async function inspectCppCuteBrowserSourceArchives(input) {
     archives: Object.freeze(observed),
     totals: Object.freeze({
       archiveCount: observed.length,
-      archiveByteLength: String(totalBytes),
+      archiveByteLength: regularInspection.totals.archiveByteLength,
     }),
     claims: Object.freeze({
       exactCallerExpectedArchiveBytesVerified: true,
@@ -135,8 +132,97 @@ export async function inspectCppCuteBrowserSourceArchives(input) {
       releaseReady: false,
     }),
   });
-  INSPECTED_ARCHIVE_FILES.set(inspection, Object.freeze({ sourceFiles }));
+  INSPECTED_ARCHIVE_FILES.set(inspection, regularStored);
   return inspection;
+}
+
+/**
+ * Verifies an arbitrary bounded set of regular archive files against minimal
+ * caller-supplied byte identities. This grants no package-lock or source-plan
+ * authority; higher-level wrappers must bind their own exact policy.
+ */
+export async function inspectCppCuteBrowserRegularArchiveFiles(input) {
+  const object = exactObject(input, ["archives", "expectedArchives"], "$.input");
+  const expectedArchives = parseArchiveExpectations(
+    object.expectedArchives,
+    "$.input.expectedArchives",
+  );
+  const archives = parseArchiveInputs(
+    object.archives,
+    "$.input.archives",
+    expectedArchives.length,
+  );
+  bindArchiveInputs(archives, expectedArchives, "$.input.archives");
+  const observations = [];
+  const sourceFiles = new Map();
+  let totalBytes = 0n;
+  for (const [index, expected] of expectedArchives.entries()) {
+    const archive = archives[index];
+    if (archive === undefined || archive.sourceId !== expected.sourceId) {
+      invalid("$.input.archives", "archive set differs from expected archive set");
+    }
+    const admitted = await inspectExactArchiveFile(
+      archive.archivePath,
+      expected,
+      `$.input.archives[${archive.inputIndex}].archivePath`,
+    );
+    totalBytes += BigInt(admitted.archiveByteLength);
+    if (totalBytes > MAX_TOTAL_ARCHIVE_BYTES) {
+      resource("$.input.archives", "archive set exceeds the fixed total-byte ceiling");
+    }
+    for (const prior of sourceFiles.values()) {
+      if (prior.identity.dev === admitted.identity.dev && prior.identity.ino === admitted.identity.ino) {
+        invalid("$.input.archives", "distinct sources must use distinct archive inodes");
+      }
+    }
+    observations.push(Object.freeze({
+      ...expected,
+      observedArchiveSha256: admitted.archiveSha256,
+      observedArchiveByteLength: admitted.archiveByteLength,
+    }));
+    sourceFiles.set(expected.sourceId, admitted);
+  }
+  const expectedArchiveSetSha256 = sha256(canonicalJsonBytes({
+    domain: REGULAR_ARCHIVE_SET_HASH_DOMAIN,
+    archives: expectedArchives,
+  }));
+  const inspectionHash = sha256(canonicalJsonBytes({
+    domain: `${REGULAR_ARCHIVE_SET_HASH_DOMAIN}.inspection`,
+    expectedArchiveSetSha256,
+    archives: observations,
+  }));
+  const inspection = Object.freeze({
+    schema: CPP_CUTE_BROWSER_REGULAR_ARCHIVE_INSPECTION_SCHEMA,
+    version: 1,
+    inspectionId: `bg.cpp.regular-archive-inspection.sha256.${inspectionHash}`,
+    authority: "caller-supplied-regular-archive-byte-expectations-only",
+    expectedArchiveSetSha256,
+    archives: Object.freeze(observations),
+    totals: Object.freeze({
+      archiveCount: observations.length,
+      archiveByteLength: String(totalBytes),
+    }),
+    claims: Object.freeze({
+      exactCallerExpectedArchiveBytesVerified: true,
+      packagePolicyBound: false,
+      networkAccessed: false,
+      archivesExtracted: false,
+      distributionAuthorized: false,
+      releaseReady: false,
+    }),
+  });
+  INSPECTED_REGULAR_ARCHIVE_FILES.set(inspection, Object.freeze({ sourceFiles }));
+  return inspection;
+}
+
+export async function copyCppCuteBrowserInspectedRegularArchive(
+  inspection,
+  sourceId,
+  outputPath,
+) {
+  const stored = INSPECTED_REGULAR_ARCHIVE_FILES.get(inspection);
+  if (stored === undefined) invalid("$.inspection", "expected verifier-issued regular-archive authority");
+  return copyStoredArchive(stored, sourceId, outputPath, "$.inspection");
 }
 
 /**
@@ -211,13 +297,17 @@ export async function copyCppCuteBrowserCurrentSourceArchive(
 ) {
   const stored = CURRENT_ARCHIVE_FILES.get(admission);
   if (stored === undefined) invalid("$.admission", "expected verifier-issued current source-archive authority");
+  return copyStoredArchive(stored, sourceId, outputPath, "$.admission");
+}
+
+async function copyStoredArchive(stored, sourceId, outputPath, authorityPath) {
   const id = sourceIdentifier(sourceId, "$.sourceId");
   const source = stored.sourceFiles.get(id);
-  if (source === undefined) invalid("$.sourceId", "source is absent from the admitted archive set");
+  if (source === undefined) invalid("$.sourceId", "source is absent from the inspected archive set");
   const destination = absolutePath(outputPath, "$.outputPath");
   if (destination === source.archivePath) invalid("$.outputPath", "source and output paths must differ");
   await admitPrivateCanonicalDirectory(dirname(destination), "$.outputPath.parent");
-  await copyExactArchiveToExclusiveFile(source, destination, "$.outputPath");
+  await copyExactArchiveToExclusiveFile(source, destination, "$.outputPath", authorityPath);
   return Object.freeze({
     sourceId: id,
     outputPath: destination,
@@ -311,6 +401,29 @@ function parseExpectedSources(value, diagnosticPath) {
   return Object.freeze(sources);
 }
 
+function parseArchiveExpectations(value, diagnosticPath) {
+  const expected = denseArray(value, diagnosticPath, 1, 16).map((entry, index) => {
+    const path = `${diagnosticPath}[${index}]`;
+    const object = exactObject(
+      entry,
+      ["sourceId", "archiveSha256", "archiveByteLength"],
+      path,
+    );
+    return Object.freeze({
+      sourceId: sourceIdentifier(object.sourceId, `${path}.sourceId`),
+      archiveSha256: patternString(object.archiveSha256, `${path}.archiveSha256`, SHA256),
+      archiveByteLength: positiveBoundedU64(
+        object.archiveByteLength,
+        `${path}.archiveByteLength`,
+        MAX_ARCHIVE_BYTES,
+      ),
+    });
+  });
+  expected.sort((left, right) => compareUtf8(left.sourceId, right.sourceId));
+  rejectDuplicateIds(expected, diagnosticPath);
+  return Object.freeze(expected);
+}
+
 function parseArchiveInputs(value, diagnosticPath, expectedLength) {
   const archives = denseArray(value, diagnosticPath, expectedLength, expectedLength)
     .map((entry, index) => {
@@ -393,15 +506,15 @@ async function inspectExactArchiveFile(archivePath, expected, diagnosticPath) {
   }
 }
 
-async function copyExactArchiveToExclusiveFile(source, outputPath, diagnosticPath) {
+async function copyExactArchiveToExclusiveFile(source, outputPath, diagnosticPath, authorityPath) {
   let sourceDiscovered;
   try {
     sourceDiscovered = await lstat(source.archivePath, { bigint: true });
   } catch (cause) {
-    invalid("$.admission", "admitted source archive is unavailable before copy", { cause });
+    invalid(authorityPath, "inspected source archive is unavailable before copy", { cause });
   }
   if (!sameFileIdentity(source.identity, sourceDiscovered)) {
-    invalid("$.admission", "admitted source archive identity changed before copy");
+    invalid(authorityPath, "inspected source archive identity changed before copy");
   }
   let input;
   let output;
@@ -410,7 +523,7 @@ async function copyExactArchiveToExclusiveFile(source, outputPath, diagnosticPat
     input = await open(source.archivePath, constants.O_RDONLY | constants.O_NOFOLLOW);
     const inputBefore = await input.stat({ bigint: true });
     if (!sameFileIdentity(source.identity, inputBefore)) {
-      invalid("$.admission", "admitted source archive identity changed before copy");
+      invalid(authorityPath, "inspected source archive identity changed before copy");
     }
     output = await open(
       outputPath,
@@ -429,7 +542,7 @@ async function copyExactArchiveToExclusiveFile(source, outputPath, diagnosticPat
     while (offset < expectedBytes) {
       const length = Math.min(buffer.byteLength, expectedBytes - offset);
       const { bytesRead } = await input.read(buffer, 0, length, offset);
-      if (bytesRead <= 0) invalid("$.admission", "admitted source archive changed while copied");
+      if (bytesRead <= 0) invalid(authorityPath, "inspected source archive changed while copied");
       digest.update(buffer.subarray(0, bytesRead));
       await writeAll(output, buffer, bytesRead, offset, diagnosticPath);
       offset += bytesRead;
@@ -441,7 +554,7 @@ async function copyExactArchiveToExclusiveFile(source, outputPath, diagnosticPat
     ]);
     const copiedSha256 = digest.digest("hex");
     if (!sameFileIdentity(inputBefore, inputAfter) || copiedSha256 !== source.archiveSha256) {
-      invalid("$.admission", "admitted source archive changed while copied");
+      invalid(authorityPath, "inspected source archive changed while copied");
     }
     if (outputAfter.dev !== outputBefore.dev || outputAfter.ino !== outputBefore.ino ||
         outputAfter.nlink !== 1n || outputAfter.size !== inputBefore.size) {

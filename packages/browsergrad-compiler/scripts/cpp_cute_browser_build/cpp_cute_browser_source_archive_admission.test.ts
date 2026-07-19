@@ -18,7 +18,9 @@ import {
   CppCuteBrowserSourceArchiveAdmissionError,
   admitCppCuteBrowserCurrentSourceArchives,
   canonicalCppCuteBrowserCurrentSourceArchiveAdmissionBytes,
+  copyCppCuteBrowserInspectedRegularArchive,
   cppCuteBrowserCurrentSourceArchiveExpectations,
+  inspectCppCuteBrowserRegularArchiveFiles,
   inspectCppCuteBrowserSourceArchives,
   parseCppCuteBrowserSourceArchiveArguments,
   requireCppCuteBrowserCurrentSourceArchiveAuthority,
@@ -32,6 +34,48 @@ afterEach(async () => {
 });
 
 describe("browser source-archive admission", () => {
+  it("provides a minimal reusable byte-identity seam with no-clobber exact copy", async () => {
+    const source = await fixture("regular", [["source", "archive-bytes"]]);
+    const expected = source.expectations.map(({ sourceId, archiveSha256, archiveByteLength }) => ({
+      sourceId,
+      archiveSha256,
+      archiveByteLength,
+    }));
+    const inspection = await inspectCppCuteBrowserRegularArchiveFiles({
+      archives: source.archives,
+      expectedArchives: expected,
+    });
+    const outputPath = join(source.root, "copy.archive");
+    const report = await copyCppCuteBrowserInspectedRegularArchive(
+      inspection,
+      "source",
+      outputPath,
+    );
+
+    expect(inspection).toMatchObject({
+      authority: "caller-supplied-regular-archive-byte-expectations-only",
+      totals: { archiveCount: 1, archiveByteLength: "13" },
+      claims: { packagePolicyBound: false, archivesExtracted: false, releaseReady: false },
+    });
+    expect(report).toMatchObject({
+      sourceId: "source",
+      outputPath,
+      archiveByteLength: "13",
+      releaseReady: false,
+    });
+    expect(await readFile(outputPath, "utf8")).toBe("archive-bytes");
+    await expect(copyCppCuteBrowserInspectedRegularArchive(
+      inspection,
+      "source",
+      outputPath,
+    )).rejects.toSatisfy(expectPath("$.outputPath"));
+    await expect(copyCppCuteBrowserInspectedRegularArchive(
+      { ...inspection } as never,
+      "source",
+      join(source.root, "forged.archive"),
+    )).rejects.toSatisfy(expectPath("$.inspection"));
+  });
+
   it("inspects caller-expected archives without claiming the current build lock", async () => {
     const first = await fixture("first", [
       ["z-source", "archive-z"],
