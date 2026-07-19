@@ -18,6 +18,7 @@ export default defineConfig({
       "tests/compiler/cpp_cute_browser_header_distribution_reproducibility.test.ts",
       "tests/compiler/cpp_cute_browser_wasm_compiler.test.ts",
       "tests/compiler/cpp_cute_browser_wasm_inspection.test.ts",
+      "tests/compiler/cpp_cute_browser_wasm_verifier_bundle.test.ts",
       "tests/compiler/cpp_cute_browser_wasm_verifier_controller.test.ts",
       "tests/compiler/cpp_cute_browser_wasm_verifier_entry.test.ts",
       "tests/compiler/cpp_cute_browser_wasm_verifier_entry_success.test.ts",
