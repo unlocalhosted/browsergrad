@@ -28,7 +28,7 @@ export interface CppCuteBrowserHeaderPackPipelineInput {
 
 export interface CppCuteBrowserHeaderPackPipeline {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA;
-  readonly version: 1;
+  readonly version: 2;
   readonly pipelineId: string;
   readonly authority: "exact-source-host-tool-vfs-pack-pipeline-observation-only";
   readonly buildInputLockId: string;
@@ -50,7 +50,19 @@ export interface CppCuteBrowserHeaderPackPipeline {
     selectedSubtreeCount: number;
     fileCount: number;
     fileContentByteLength: string;
+    licenseEvidenceFileCount: number;
+    licenseEvidenceByteLength: string;
   }>;
+  readonly licenseEvidence: readonly Readonly<{
+    sourceId: string;
+    evidenceId: string;
+    archivePath: string;
+    componentId: string;
+    evidenceRole: "upstream-license-text" | "source-package-copyright";
+    sha256: string;
+    byteLength: string;
+    sourceTreeId: string;
+  }>[];
   readonly inventoryTotals: Readonly<{
     packCount: number;
     sourceCount: number;
@@ -71,6 +83,7 @@ export interface CppCuteBrowserHeaderPackPipeline {
     hostToolPackageIdentityPinned: true;
     nodeZstdDecompressorPackageIdentityPinned: true;
     generatedClangResourceHeadersComplete: true;
+    exactUpstreamLicenseEvidenceExtracted: true;
     externalDistributedFileLicenseMapReviewed: false;
     licenseReviewComplete: false;
     headerUniverseComplete: true;

@@ -58,7 +58,7 @@ describe("host archive normalization", () => {
       observedArchiveBytesHashed: true,
       expectedArchiveIdentityBound: false,
       strictNormalizedTarParsed: true,
-      callerSelectedSubtreesComplete: false,
+      callerSelectedPathsComplete: false,
     });
     expect(direct.normalizationId).not.toBe(deb.normalizationId);
     expect(deb.intermediate).toMatchObject({
@@ -177,7 +177,12 @@ function shellBytes(value: Uint8Array): string {
 }
 
 function selection() {
-  return [{ selectionId: "headers", archiveSubtree: "pkg/include", outputSubdirectory: "headers" }];
+  return [{
+    selectionId: "headers",
+    selectionKind: "subtree" as const,
+    archiveSubtree: "pkg/include",
+    outputSubdirectory: "headers",
+  }];
 }
 
 type TarEntry = Readonly<{ path: string; bytes: Uint8Array }>;

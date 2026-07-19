@@ -43,6 +43,8 @@ describe("browser header-source plan", () => {
       archiveByteLength: "252406685",
       includeRootCount: 5,
       selectedSubtreeCount: 8,
+      licenseEvidenceFileCount: 8,
+      licenseEvidenceByteLength: "250207",
     });
     const clangSelection = plan.body.archives
       .find(({ sourceId }) => sourceId === "llvm-project")?.selections
@@ -77,6 +79,12 @@ describe("browser header-source plan", () => {
         sha256: "9c598598457a6463eb92889080c16b2b9dc04150e501b8bfc1536d403ba70aaf",
       },
       licensePolicy: "external-exact-file-redistribution-review-required",
+      licenseEvidence: [{
+        evidenceId: "cuda-license",
+        archivePath: "cuda_cudart-linux-x86_64-12.6.77-archive/LICENSE",
+        sha256: "e2c71babfd18a8e69542dd7e9ca018f9caa438094001a58e6bc4d8c999bf0d07",
+        byteLength: "63021",
+      }],
     });
     expect(byId.get("cuda-nvcc-linux-x86-64")?.selections).toEqual([
       expect.objectContaining({
@@ -89,6 +97,11 @@ describe("browser header-source plan", () => {
       archiveSha256: "ceec73b7dbee49022fa52b8ce21961a118902f3ad1ff51e8f83d9dfc0270962d",
       archiveByteLength: "2158644",
       licensePolicy: "external-source-package-license-map-review-required",
+      licenseEvidence: [{
+        archivePath: "data.tar.zst:./usr/share/doc/libc6-dev-amd64-cross/copyright",
+        sha256: "d3c95b56fa33e28b57860580f0baf4e4f4de2a268a2b80f1d031a5191bade265",
+        byteLength: "26462",
+      }],
     });
     expect(byId.get("ubuntu-noble-linux-libc-dev-amd64-cross")).toMatchObject({
       version: "6.8.0-25.25cross1",
@@ -105,6 +118,7 @@ describe("browser header-source plan", () => {
       exactArchiveSelectionPinned: true,
       exactSourceSubtreesPinned: true,
       exactHeaderPackLicensePolicyBound: true,
+      exactUpstreamLicenseEvidencePinned: true,
       allFiveIncludeRootsSelected: true,
       archiveBytesVerified: false,
       archiveAttestationsVerified: false,

@@ -8,6 +8,7 @@ export class CppCuteBrowserSelectedTarStreamError extends Error {
 
 export interface CppCuteBrowserSelectedTarSelection {
   readonly selectionId: string;
+  readonly selectionKind: "subtree" | "file";
   readonly archiveSubtree: string;
   readonly outputSubdirectory: string;
 }
@@ -28,7 +29,7 @@ export interface CppCuteBrowserSelectedTarSelectionResult
 
 export interface CppCuteBrowserSelectedTarMaterialization {
   readonly schema: typeof CPP_CUTE_BROWSER_SELECTED_TAR_MATERIALIZATION_SCHEMA;
-  readonly version: 1;
+  readonly version: 2;
   readonly materializationId: string;
   readonly authority: "caller-selected-normalized-tar-materialization-only";
   readonly selections: readonly CppCuteBrowserSelectedTarSelectionResult[];
@@ -44,7 +45,7 @@ export interface CppCuteBrowserSelectedTarMaterialization {
     collisionFreePortableStorageMaterialized: true;
     hierarchicalSourceTreesMaterialized: false;
     allSelectedStreamFilesMaterialized: true;
-    callerSelectedSubtreesComplete: false;
+    callerSelectedPathsComplete: false;
     archiveIdentityVerified: false;
     decompressorVerified: false;
     headerSourcePlanBound: false;

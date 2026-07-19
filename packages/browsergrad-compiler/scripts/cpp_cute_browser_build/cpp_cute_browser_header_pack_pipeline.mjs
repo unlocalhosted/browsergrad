@@ -22,7 +22,7 @@ export const CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline";
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-PACK-PIPELINE";
-const PIPELINE_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline.v1";
+const PIPELINE_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline.v2";
 
 export class CppCuteBrowserHeaderPackPipelineError extends Error {
   constructor(path, message, options) {
@@ -99,7 +99,7 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
   }));
   return Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA,
-    version: 1,
+    version: 2,
     pipelineId: `bg.cpp.browser-header-pack-pipeline.sha256.${pipelineHash}`,
     authority: "exact-source-host-tool-vfs-pack-pipeline-observation-only",
     buildInputLockId: extraction.buildInputLockId,
@@ -110,6 +110,11 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
     inventoryId: inventory.inventoryId,
     bsdtarTool: extraction.bsdtarTool,
     sourceTotals: extraction.totals,
+    licenseEvidence: Object.freeze(extraction.archives.flatMap((source) =>
+      source.licenseEvidence.map((evidence) => Object.freeze({
+        sourceId: source.sourceId,
+        ...evidence,
+      })))),
     inventoryTotals: inventory.totals,
     outputs: materialization.outputs,
     totalPackByteLength: materialization.totalPackByteLength,
@@ -125,6 +130,7 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
       hostToolPackageIdentityPinned: true,
       nodeZstdDecompressorPackageIdentityPinned: true,
       generatedClangResourceHeadersComplete: true,
+      exactUpstreamLicenseEvidenceExtracted: true,
       externalDistributedFileLicenseMapReviewed: false,
       licenseReviewComplete: false,
       headerUniverseComplete: true,

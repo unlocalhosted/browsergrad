@@ -13,9 +13,11 @@ export const CPP_CUTE_BROWSER_HEADER_SOURCE_PLAN_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-header-source-plan";
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-SOURCE-PLAN";
-const PLAN_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-source-plan.v1";
+const PLAN_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-source-plan.v2";
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SOURCE_ID = /^[a-z][a-z0-9-]*$/u;
+const LICENSE_COMPONENT_ID = /^[a-z][a-z0-9._-]*$/u;
+const ARCHIVE_SEGMENT = /^[A-Za-z0-9._+@=-]+$/u;
 const INCLUDE_ROOT_IDS = Object.freeze([
   "clang-resource",
   "cuda",
@@ -56,6 +58,16 @@ const SUPPLEMENTAL_ARCHIVES = Object.freeze([
     }),
     licenseComponentId: "cuda-toolkit-12.6.3-headers",
     licensePolicy: "external-exact-file-redistribution-review-required",
+    licenseEvidence: Object.freeze([
+      Object.freeze({
+        evidenceId: "cuda-license",
+        archivePath: "cuda_cccl-linux-x86_64-12.6.77-archive/LICENSE",
+        componentId: "cuda-toolkit-12.6.3-headers",
+        evidenceRole: "upstream-license-text",
+        sha256: "e2c71babfd18a8e69542dd7e9ca018f9caa438094001a58e6bc4d8c999bf0d07",
+        byteLength: "63021",
+      }),
+    ]),
     selections: Object.freeze([
       Object.freeze({
         includeRootId: "cuda",
@@ -83,6 +95,16 @@ const SUPPLEMENTAL_ARCHIVES = Object.freeze([
     }),
     licenseComponentId: "cuda-toolkit-12.6.3-headers",
     licensePolicy: "external-exact-file-redistribution-review-required",
+    licenseEvidence: Object.freeze([
+      Object.freeze({
+        evidenceId: "cuda-license",
+        archivePath: "cuda_cudart-linux-x86_64-12.6.77-archive/LICENSE",
+        componentId: "cuda-toolkit-12.6.3-headers",
+        evidenceRole: "upstream-license-text",
+        sha256: "e2c71babfd18a8e69542dd7e9ca018f9caa438094001a58e6bc4d8c999bf0d07",
+        byteLength: "63021",
+      }),
+    ]),
     selections: Object.freeze([
       Object.freeze({
         includeRootId: "cuda",
@@ -110,6 +132,16 @@ const SUPPLEMENTAL_ARCHIVES = Object.freeze([
     }),
     licenseComponentId: "cuda-toolkit-12.6.3-headers",
     licensePolicy: "external-exact-file-redistribution-review-required",
+    licenseEvidence: Object.freeze([
+      Object.freeze({
+        evidenceId: "cuda-license",
+        archivePath: "cuda_nvcc-linux-x86_64-12.6.85-archive/LICENSE",
+        componentId: "cuda-toolkit-12.6.3-headers",
+        evidenceRole: "upstream-license-text",
+        sha256: "e2c71babfd18a8e69542dd7e9ca018f9caa438094001a58e6bc4d8c999bf0d07",
+        byteLength: "63021",
+      }),
+    ]),
     selections: Object.freeze([
       Object.freeze({
         includeRootId: "cuda",
@@ -137,6 +169,16 @@ const SUPPLEMENTAL_ARCHIVES = Object.freeze([
     }),
     licenseComponentId: "linux-sysroot",
     licensePolicy: "external-source-package-license-map-review-required",
+    licenseEvidence: Object.freeze([
+      Object.freeze({
+        evidenceId: "source-package-copyright",
+        archivePath: "data.tar.zst:./usr/share/doc/libc6-dev-amd64-cross/copyright",
+        componentId: "linux-sysroot",
+        evidenceRole: "source-package-copyright",
+        sha256: "d3c95b56fa33e28b57860580f0baf4e4f4de2a268a2b80f1d031a5191bade265",
+        byteLength: "26462",
+      }),
+    ]),
     selections: Object.freeze([
       Object.freeze({
         includeRootId: "linux-sysroot",
@@ -164,6 +206,16 @@ const SUPPLEMENTAL_ARCHIVES = Object.freeze([
     }),
     licenseComponentId: "linux-sysroot",
     licensePolicy: "external-source-package-license-map-review-required",
+    licenseEvidence: Object.freeze([
+      Object.freeze({
+        evidenceId: "source-package-copyright",
+        archivePath: "data.tar.zst:./usr/share/doc/linux-libc-dev-amd64-cross/copyright",
+        componentId: "linux-sysroot",
+        evidenceRole: "source-package-copyright",
+        sha256: "4ab34baa23c94237ffef144c80348b982d2d8e814c46b3a6a3538a706ef26114",
+        byteLength: "1292",
+      }),
+    ]),
     selections: Object.freeze([
       Object.freeze({
         includeRootId: "linux-sysroot",
@@ -187,15 +239,16 @@ export class CppCuteBrowserHeaderSourcePlanError extends Error {
 /**
  * Selects the exact upstream archives and complete archive subtrees intended
  * to feed all five browser header packs. This is source-selection policy only:
- * it reads no archive, does no extraction, and deliberately leaves generated
- * Clang resource headers and external license review unresolved.
+ * it reads no archive, does no extraction, and deliberately leaves external
+ * license review unresolved. Exact in-archive license/copyright bytes are
+ * pinned as review inputs rather than treated as review conclusions.
  */
 export async function prepareCppCuteBrowserHeaderSourcePlan() {
   const buildInputLock = await decodeCppCuteBrowserBuildInputLock(
     cppCuteBrowserBuildInputLockResourceBytes(),
   );
   const body = unwrapPreparedCppCuteBrowserBuildInputLock(buildInputLock).lock.body;
-  const gitArchives = currentGitSourceArchives(body.sources);
+  const gitArchives = currentGitSourceArchives(body.sources, body.notices);
   const archives = bindSelectionLicensePolicies(
     bindConfiguredResourceOutputPolicy([...gitArchives, ...SUPPLEMENTAL_ARCHIVES], body),
     body,
@@ -229,7 +282,7 @@ export async function prepareCppCuteBrowserHeaderSourcePlan() {
   const planHash = sha256(canonicalJsonBytes({ domain: PLAN_HASH_DOMAIN, body: planBody }));
   const plan = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_SOURCE_PLAN_SCHEMA,
-    version: 1,
+    version: 2,
     planId: `bg.cpp.browser-header-source-plan.sha256.${planHash}`,
     authority: "exact-header-source-selection-policy-only",
     body: planBody,
@@ -244,12 +297,24 @@ export async function prepareCppCuteBrowserHeaderSourcePlan() {
         (total, archive) => total + archive.selections.length,
         0,
       ),
+      licenseEvidenceFileCount: archives.reduce(
+        (total, archive) => total + archive.licenseEvidence.length,
+        0,
+      ),
+      licenseEvidenceByteLength: archives.reduce(
+        (total, archive) => total + archive.licenseEvidence.reduce(
+          (archiveTotal, evidence) => archiveTotal + BigInt(evidence.byteLength),
+          0n,
+        ),
+        0n,
+      ).toString(),
     }),
     claims: Object.freeze({
       exactBuildInputLockBound: true,
       exactArchiveSelectionPinned: true,
       exactSourceSubtreesPinned: true,
       exactHeaderPackLicensePolicyBound: true,
+      exactUpstreamLicenseEvidencePinned: true,
       allFiveIncludeRootsSelected: true,
       archiveBytesVerified: false,
       archiveAttestationsVerified: false,
@@ -337,7 +402,7 @@ export function canonicalCppCuteBrowserHeaderSourcePlanBytes(plan) {
   return canonicalJsonBytes(plan);
 }
 
-function currentGitSourceArchives(sources) {
+function currentGitSourceArchives(sources, notices) {
   if (!Array.isArray(sources) || sources.length !== 2) {
     invalid("$.buildInputLock.body.sources", "current build lock lost its exact Git source set");
   }
@@ -362,6 +427,12 @@ function currentGitSourceArchives(sources) {
       treeSha1: cutlass.treeSha1,
       licenseComponentId: "cutlass",
       licensePolicy: "current-build-lock-approved-notice-plus-external-file-map-required",
+      licenseEvidence: approvedLicenseEvidence(
+        notices,
+        "cutlass",
+        "cutlass-license",
+        "cutlass-3.7.0/LICENSE.txt",
+      ),
       selections: Object.freeze([
         Object.freeze({
           includeRootId: "cutlass",
@@ -388,6 +459,20 @@ function currentGitSourceArchives(sources) {
       attestationByteLength: llvm.attestationByteLength,
       licenseComponentId: "clang-and-libcxx",
       licensePolicy: "current-build-lock-approved-notices-plus-external-file-map-required",
+      licenseEvidence: Object.freeze([
+        ...approvedLicenseEvidence(
+          notices,
+          "clang",
+          "clang-license",
+          "llvm-project-22.1.8.src/clang/LICENSE.TXT",
+        ),
+        ...approvedLicenseEvidence(
+          notices,
+          "libcxx",
+          "libcxx-license",
+          "llvm-project-22.1.8.src/libcxx/LICENSE.TXT",
+        ),
+      ]),
       selections: Object.freeze([
       Object.freeze({
         includeRootId: "clang-resource",
@@ -406,6 +491,24 @@ function currentGitSourceArchives(sources) {
   ]);
 }
 
+function approvedLicenseEvidence(notices, componentId, evidenceId, archivePath) {
+  const approved = notices.approvedComponents.filter(
+    (component) => component.componentId === componentId,
+  );
+  if (approved.length !== 1) {
+    invalid("$.buildInputLock.notices", `expected one approved notice for ${JSON.stringify(componentId)}`);
+  }
+  const component = approved[0];
+  return Object.freeze([Object.freeze({
+    evidenceId,
+    archivePath,
+    componentId,
+    evidenceRole: "upstream-license-text",
+    sha256: component.noticeSha256,
+    byteLength: component.noticeByteLength,
+  })]);
+}
+
 function validateArchiveSet(archives) {
   if (archives.length !== 7) invalid("$.archives", "header source plan must select exactly seven archives");
   for (const [index, archive] of archives.entries()) {
@@ -413,7 +516,8 @@ function validateArchiveSet(archives) {
     if (!SOURCE_ID.test(archive.sourceId) || !SHA256.test(archive.archiveSha256) ||
         !/^[1-9][0-9]*$/u.test(archive.archiveByteLength) ||
         BigInt(archive.archiveByteLength) > 512n * 1024n * 1024n ||
-        !archive.acquisitionUrl.startsWith("https://") || archive.selections.length === 0) {
+        !archive.acquisitionUrl.startsWith("https://") || archive.selections.length === 0 ||
+        !Array.isArray(archive.licenseEvidence) || archive.licenseEvidence.length === 0) {
       invalid(path, "archive record is outside the exact source-plan contract");
     }
     if (index > 0 && archives[index - 1].sourceId === archive.sourceId) {
@@ -433,7 +537,50 @@ function validateArchiveSet(archives) {
         invalid(path, "only the Clang resource selection may define configured output policy");
       }
     }
+    const evidenceIds = new Set();
+    const evidencePaths = new Set();
+    for (const [evidenceIndex, evidence] of archive.licenseEvidence.entries()) {
+      const evidencePath = `${path}.licenseEvidence[${evidenceIndex}]`;
+      const archivePath = normalizedReviewEvidencePath(archive.archiveFormat, evidence.archivePath);
+      if (!SOURCE_ID.test(evidence.evidenceId) ||
+          !LICENSE_COMPONENT_ID.test(evidence.componentId) ||
+          (evidence.evidenceRole !== "upstream-license-text" &&
+            evidence.evidenceRole !== "source-package-copyright") ||
+          !SHA256.test(evidence.sha256) || !/^[1-9][0-9]*$/u.test(evidence.byteLength) ||
+          BigInt(evidence.byteLength) > 1024n * 1024n) {
+        invalid(evidencePath, "license evidence is outside the exact review-input contract");
+      }
+      if (evidenceIds.has(evidence.evidenceId) || evidencePaths.has(archivePath)) {
+        invalid(evidencePath, "license evidence IDs and archive paths must be unique per source");
+      }
+      evidenceIds.add(evidence.evidenceId);
+      evidencePaths.add(archivePath);
+      for (const selection of archive.selections) {
+        const selectionPath = normalizedReviewEvidencePath(
+          archive.archiveFormat,
+          selection.archiveSubtree,
+        );
+        if (archivePath === selectionPath || archivePath.startsWith(`${selectionPath}/`)) {
+          invalid(evidencePath, "license evidence must be disjoint from distributed header subtrees");
+        }
+      }
+    }
   }
+}
+
+function normalizedReviewEvidencePath(archiveFormat, value) {
+  let path = value;
+  if (archiveFormat === "deb-data-tar-zstd") {
+    const match = /^data\.tar\.zst:\.\/(.+)$/u.exec(value);
+    if (match === null) invalid("$.archives.licenseEvidence.archivePath", "Debian path must name data.tar.zst");
+    path = match[1];
+  }
+  if (typeof path !== "string" || path === "" || path.startsWith("/") ||
+      path.includes("\\") || path.includes("\0") ||
+      path.split("/").some((segment) => !ARCHIVE_SEGMENT.test(segment) || segment === "." || segment === "..")) {
+    invalid("$.archives.licenseEvidence.archivePath", "expected one portable archive member path");
+  }
+  return path;
 }
 
 function validateConfiguredResourceOutput(value, diagnosticPath) {

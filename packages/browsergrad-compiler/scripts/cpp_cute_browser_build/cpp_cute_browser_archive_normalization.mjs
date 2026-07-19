@@ -24,7 +24,7 @@ const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-ARCHIVE-NORMALIZATION";
 const TOOL_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.bsdtar-tool-admission.v1";
 const PINNED_TOOL_HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.pinned-archive-normalization-environment.v1";
-const NORMALIZATION_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.archive-normalization.v1";
+const NORMALIZATION_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.archive-normalization.v2";
 const ARCHIVE_FORMATS = new Set(["deb-data-tar-zstd", "tar.gz", "tar.xz"]);
 const PORTABLE_PATH = /^[A-Za-z0-9._+@=-]+(?:\/[A-Za-z0-9._+@=-]+)*$/u;
 const SELECTION_ID = /^[a-z][a-z0-9-]*$/u;
@@ -174,7 +174,8 @@ export function requireCppCuteBrowserBsdtarToolAuthority(admission) {
 }
 
 /**
- * Repackages caller-selected subtrees into a normalized pax stream, then
+ * Repackages caller-selected subtrees and exact files into a normalized pax
+ * stream, then
  * delegates all path and file materialization to the strict streaming parser.
  * The input archive must already live in a private current-user directory.
  */
@@ -242,7 +243,9 @@ export async function materializeCppCuteBrowserNormalizedArchive(input) {
         "-cf",
         "-",
         "--format=pax",
-        ...selections.map((selection) => `--include=${selection.archiveSubtree}/*`),
+        ...selections.map((selection) => selection.selectionKind === "file"
+          ? `--include=${selection.archiveSubtree}`
+          : `--include=${selection.archiveSubtree}/*`),
         `@${normalizedArchivePath}`,
       ],
       binding,
@@ -274,7 +277,7 @@ export async function materializeCppCuteBrowserNormalizedArchive(input) {
     }));
     const result = Object.freeze({
       schema: CPP_CUTE_BROWSER_ARCHIVE_NORMALIZATION_SCHEMA,
-      version: 1,
+      version: 2,
       normalizationId: `bg.cpp.archive-normalization.sha256.${normalizationHash}`,
       authority: "caller-expected-host-tool-archive-normalization-only",
       archiveFormat,
@@ -304,7 +307,7 @@ export async function materializeCppCuteBrowserNormalizedArchive(input) {
         collisionFreePortableStorageMaterialized: true,
         hierarchicalSourceTreesMaterialized: false,
         allSelectedStreamFilesMaterialized: true,
-        callerSelectedSubtreesComplete: false,
+        callerSelectedPathsComplete: false,
         headerSourcePlanBound: false,
         licenseReviewComplete: false,
         releaseReady: false,
@@ -315,7 +318,7 @@ export async function materializeCppCuteBrowserNormalizedArchive(input) {
   } catch (cause) {
     if (outputIdentity !== undefined) await removeOwnedRoot(outputRoot, outputIdentity);
     if (cause instanceof CppCuteBrowserArchiveNormalizationError) throw cause;
-    invalid("$.input", "failed to normalize selected archive subtrees", { cause });
+    invalid("$.input", "failed to normalize selected archive paths", { cause });
   } finally {
     if (scratchRoot !== undefined && scratchIdentity !== undefined) {
       await removeOwnedRoot(scratchRoot, scratchIdentity);
@@ -720,7 +723,7 @@ function parseSelections(value, diagnosticPath) {
     const path = `${diagnosticPath}[${index}]`;
     const selection = exactObject(
       value[index],
-      ["archiveSubtree", "outputSubdirectory", "selectionId"],
+      ["archiveSubtree", "outputSubdirectory", "selectionId", "selectionKind"],
       path,
     );
     if (typeof selection.selectionId !== "string" || !SELECTION_ID.test(selection.selectionId)) {
@@ -730,12 +733,16 @@ function parseSelections(value, diagnosticPath) {
         !PORTABLE_PATH.test(selection.archiveSubtree)) {
       invalid(`${path}.archiveSubtree`, "expected one portable non-glob archive subtree");
     }
+    if (selection.selectionKind !== "subtree" && selection.selectionKind !== "file") {
+      invalid(`${path}.selectionKind`, "expected subtree or file");
+    }
     if (typeof selection.outputSubdirectory !== "string" ||
         !/^[A-Za-z0-9._+@=-]+$/u.test(selection.outputSubdirectory)) {
       invalid(`${path}.outputSubdirectory`, "expected one portable output directory");
     }
     parsed.push(Object.freeze({
       selectionId: selection.selectionId,
+      selectionKind: selection.selectionKind,
       archiveSubtree: selection.archiveSubtree,
       outputSubdirectory: selection.outputSubdirectory,
     }));
@@ -748,9 +755,11 @@ function parseSelections(value, diagnosticPath) {
   }
   for (const [index, left] of parsed.entries()) {
     for (const right of parsed.slice(index + 1)) {
-      if (left.archiveSubtree.startsWith(`${right.archiveSubtree}/`) ||
-          right.archiveSubtree.startsWith(`${left.archiveSubtree}/`)) {
-        invalid(diagnosticPath, "archive selection subtrees must not overlap");
+      if ((left.selectionKind === "subtree" &&
+            right.archiveSubtree.startsWith(`${left.archiveSubtree}/`)) ||
+          (right.selectionKind === "subtree" &&
+            left.archiveSubtree.startsWith(`${right.archiveSubtree}/`))) {
+        invalid(diagnosticPath, "archive selection paths must not overlap");
       }
     }
   }

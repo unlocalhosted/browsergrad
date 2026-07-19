@@ -33,8 +33,8 @@ describe("selected normalized tar stream", () => {
       file("pkg/libcxx/vector", "vector\n"),
     ]);
     const selections = [
-      { selectionId: "cutlass", archiveSubtree: "pkg/include", outputSubdirectory: "cutlass" },
-      { selectionId: "libcxx", archiveSubtree: "pkg/libcxx", outputSubdirectory: "libcxx" },
+      { selectionId: "cutlass", selectionKind: "subtree", archiveSubtree: "pkg/include", outputSubdirectory: "cutlass" },
+      { selectionId: "libcxx", selectionKind: "subtree", archiveSubtree: "pkg/libcxx", outputSubdirectory: "libcxx" },
     ] as const;
     const first = await materializeCppCuteBrowserSelectedTarStream({
       chunks: chunks(archive, [1, 509, 7, 1024, 3]),
@@ -84,6 +84,42 @@ describe("selected normalized tar stream", () => {
       .toThrow(CppCuteBrowserSelectedTarStreamError);
   });
 
+  it("materializes one exact review file without widening its selected subtree", async () => {
+    const root = await fixtureRoot("exact-file");
+    const archive = tar([
+      file("pkg/LICENSE", "license-text\n"),
+      file("pkg/secret.bin", "must-not-enter\n"),
+    ]);
+    const manifest = await materializeCppCuteBrowserSelectedTarStream({
+      chunks: [tar([file("pkg/LICENSE", "license-text\n")])],
+      outputRoot: join(root, "out"),
+      selections: [{
+        selectionId: "license",
+        selectionKind: "file",
+        archiveSubtree: "pkg/LICENSE",
+        outputSubdirectory: "license",
+      }],
+    });
+
+    expect(manifest.selections[0]).toMatchObject({
+      selectionId: "license",
+      selectionKind: "file",
+      fileCount: 1,
+      fileContentByteLength: "13",
+    });
+    expect(await selectedUtf8(manifest, "license", "LICENSE")).toBe("license-text\n");
+    await expect(materializeCppCuteBrowserSelectedTarStream({
+      chunks: [archive],
+      outputRoot: join(root, "rejected"),
+      selections: [{
+        selectionId: "license",
+        selectionKind: "file",
+        archiveSubtree: "pkg/LICENSE",
+        outputSubdirectory: "license",
+      }],
+    })).rejects.toSatisfy(expectMessage("outside selected paths"));
+  });
+
   it("accepts a strict PAX path override without accepting PAX size or link overrides", async () => {
     const root = await fixtureRoot("pax");
     const relative = `${"segment/".repeat(14)}header.hpp`;
@@ -96,7 +132,7 @@ describe("selected normalized tar stream", () => {
       chunks: chunks(archive, [13, 511, 29]),
       outputRoot: join(root, "out"),
       selections: [
-        { selectionId: "headers", archiveSubtree: "pkg/include", outputSubdirectory: "headers" },
+        { selectionId: "headers", selectionKind: "subtree", archiveSubtree: "pkg/include", outputSubdirectory: "headers" },
       ],
     });
 
@@ -112,7 +148,7 @@ describe("selected normalized tar stream", () => {
       chunks: [tar([pax({ size: "1" }), file("pkg/include/header.hpp", "value")])],
       outputRoot: join(forbiddenRoot, "out"),
       selections: [
-        { selectionId: "headers", archiveSubtree: "pkg/include", outputSubdirectory: "headers" },
+        { selectionId: "headers", selectionKind: "subtree", archiveSubtree: "pkg/include", outputSubdirectory: "headers" },
       ],
     })).rejects.toSatisfy(expectMessage("PAX key size is forbidden"));
 
@@ -156,7 +192,7 @@ describe("selected normalized tar stream", () => {
       chunks: [tar([file("pkg/other/file.hpp", "outside")])],
       outputRoot: join(outsideRoot, "out"),
       selections: selection(),
-    })).rejects.toSatisfy(expectMessage("outside selected subtrees"));
+    })).rejects.toSatisfy(expectMessage("outside selected paths"));
 
     const duplicateRoot = await fixtureRoot("duplicate");
     await expect(materializeCppCuteBrowserSelectedTarStream({
@@ -293,7 +329,12 @@ function chunks(bytes: Uint8Array, sizes: readonly number[]): readonly Uint8Arra
 }
 
 function selection() {
-  return [{ selectionId: "headers", archiveSubtree: "pkg/include", outputSubdirectory: "headers" }];
+  return [{
+    selectionId: "headers",
+    selectionKind: "subtree" as const,
+    archiveSubtree: "pkg/include",
+    outputSubdirectory: "headers",
+  }];
 }
 
 async function fixtureRoot(name: string): Promise<string> {

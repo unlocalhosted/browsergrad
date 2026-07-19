@@ -53,7 +53,7 @@ export interface CppCuteBrowserArchiveNormalizationProcess {
 
 export interface CppCuteBrowserArchiveNormalization {
   readonly schema: typeof CPP_CUTE_BROWSER_ARCHIVE_NORMALIZATION_SCHEMA;
-  readonly version: 1;
+  readonly version: 2;
   readonly normalizationId: string;
   readonly authority: "caller-expected-host-tool-archive-normalization-only";
   readonly archiveFormat: "tar.gz" | "tar.xz" | "deb-data-tar-zstd";
@@ -96,7 +96,7 @@ export interface CppCuteBrowserArchiveNormalization {
     collisionFreePortableStorageMaterialized: true;
     hierarchicalSourceTreesMaterialized: false;
     allSelectedStreamFilesMaterialized: true;
-    callerSelectedSubtreesComplete: false;
+    callerSelectedPathsComplete: false;
     headerSourcePlanBound: false;
     licenseReviewComplete: false;
     releaseReady: false;

@@ -36,11 +36,20 @@ export interface CppCuteBrowserExtractedHeaderSourceArchive {
   readonly licensePolicy: string;
   readonly normalizationId: string;
   readonly selections: readonly CppCuteBrowserExtractedHeaderSourceSelection[];
+  readonly licenseEvidence: readonly Readonly<{
+    evidenceId: string;
+    archivePath: string;
+    componentId: string;
+    evidenceRole: "upstream-license-text" | "source-package-copyright";
+    sha256: string;
+    byteLength: string;
+    sourceTreeId: string;
+  }>[];
 }
 
 export interface CppCuteBrowserHeaderSourceExtraction {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_SOURCE_EXTRACTION_SCHEMA;
-  readonly version: 1;
+  readonly version: 2;
   readonly extractionId: string;
   readonly authority: "exact-plan-host-tool-source-materialization-observation-only";
   readonly buildInputLockId: string;
@@ -61,6 +70,8 @@ export interface CppCuteBrowserHeaderSourceExtraction {
     selectedSubtreeCount: number;
     fileCount: number;
     fileContentByteLength: string;
+    licenseEvidenceFileCount: number;
+    licenseEvidenceByteLength: string;
   }>;
   readonly unresolvedBlockers: readonly CppCuteBrowserHeaderSourceBlocker[];
   readonly claims: Readonly<{
@@ -76,6 +87,7 @@ export interface CppCuteBrowserHeaderSourceExtraction {
     hostToolPackageIdentityPinned: boolean;
     nodeZstdDecompressorPackageIdentityPinned: boolean;
     generatedClangResourceHeadersComplete: true;
+    exactUpstreamLicenseEvidenceExtracted: true;
     externalDistributedFileLicenseMapReviewed: false;
     licenseReviewComplete: false;
     headerUniverseComplete: boolean;
@@ -121,6 +133,12 @@ export function copyCppCuteBrowserExtractedHeaderSourceFile(
   sourceId: string,
   includeRootId: string,
   relativePath: string,
+): Promise<Uint8Array>;
+
+export function copyCppCuteBrowserExtractedHeaderLicenseEvidence(
+  extraction: CppCuteBrowserHeaderSourceExtraction,
+  sourceId: string,
+  evidenceId: string,
 ): Promise<Uint8Array>;
 
 export function cppCuteBrowserExtractedHeaderSourceFiles(

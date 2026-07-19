@@ -10,7 +10,7 @@ export const CPP_CUTE_BROWSER_SELECTED_TAR_MATERIALIZATION_SCHEMA =
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-SELECTED-TAR-STREAM";
 const MATERIALIZATION_HASH_DOMAIN =
-  "browsergrad.compiler.cpp-cute.selected-tar-materialization.v1";
+  "browsergrad.compiler.cpp-cute.selected-tar-materialization.v2";
 const BLOCK_BYTES = 512;
 const MAX_PAX_BYTES = 256 * 1024;
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
@@ -42,7 +42,8 @@ export class CppCuteBrowserSelectedTarStreamError extends Error {
 
 /**
  * Parses one normalized uncompressed POSIX pax/ustar stream and writes only
- * complete caller-selected subtrees into a new private output root. This seam
+ * complete caller-selected subtrees or exact files into a new private output
+ * root. This seam
  * grants no archive identity, decompressor, package-plan, license, or release
  * authority; those remain responsibilities of a higher-level wrapper.
  */
@@ -75,7 +76,7 @@ export async function materializeCppCuteBrowserSelectedTarStream(input) {
     const selectionResults = selections.map((selection) => {
       const stored = parser.results.get(selection.selectionId);
       if (stored === undefined || stored.files.length === 0) {
-        invalid("$.input.selections", `selected subtree ${JSON.stringify(selection.selectionId)} has no files`);
+        invalid("$.input.selections", `selected path ${JSON.stringify(selection.selectionId)} has no files`);
       }
       const files = [...stored.files].sort((left, right) => compareUtf8(left.relativePath, right.relativePath));
       const contentHash = sha256(canonicalJsonBytes({
@@ -84,6 +85,7 @@ export async function materializeCppCuteBrowserSelectedTarStream(input) {
       }));
       return Object.freeze({
         selectionId: selection.selectionId,
+        selectionKind: selection.selectionKind,
         archiveSubtree: selection.archiveSubtree,
         outputSubdirectory: selection.outputSubdirectory,
         sourceTreeId: `bg.cpp.selected-source-tree.sha256.${contentHash}`,
@@ -101,7 +103,7 @@ export async function materializeCppCuteBrowserSelectedTarStream(input) {
     }));
     const manifest = Object.freeze({
       schema: CPP_CUTE_BROWSER_SELECTED_TAR_MATERIALIZATION_SCHEMA,
-      version: 1,
+      version: 2,
       materializationId: `bg.cpp.selected-tar-materialization.sha256.${manifestHash}`,
       authority: "caller-selected-normalized-tar-materialization-only",
       selections: Object.freeze(selectionResults),
@@ -117,7 +119,7 @@ export async function materializeCppCuteBrowserSelectedTarStream(input) {
         collisionFreePortableStorageMaterialized: true,
         hierarchicalSourceTreesMaterialized: false,
         allSelectedStreamFilesMaterialized: true,
-        callerSelectedSubtreesComplete: false,
+        callerSelectedPathsComplete: false,
         archiveIdentityVerified: false,
         decompressorVerified: false,
         headerSourcePlanBound: false,
@@ -288,7 +290,7 @@ async function prepareEntry(state) {
   if (current.type === "directory") return;
   const selected = selectArchivePath(state.selections, current.path);
   if (selected === undefined) {
-    invalid(current.path, "normalized tar contains a regular file outside selected subtrees");
+    invalid(current.path, "normalized tar contains a regular file outside selected paths");
   }
   portableRelativePath(selected.relativePath, current.path);
   const result = state.results.get(selected.selection.selectionId);
@@ -522,19 +524,23 @@ function parseSelections(value, diagnosticPath) {
     const path = `${diagnosticPath}[${index}]`;
     const object = exactObject(
       value[index],
-      ["selectionId", "archiveSubtree", "outputSubdirectory"],
+      ["selectionId", "selectionKind", "archiveSubtree", "outputSubdirectory"],
       path,
     );
     if (typeof object.selectionId !== "string" || !SELECTION_ID.test(object.selectionId)) {
       invalid(`${path}.selectionId`, "expected one portable selection ID");
     }
     const archiveSubtree = canonicalArchivePath(object.archiveSubtree, `${path}.archiveSubtree`, false);
+    if (object.selectionKind !== "subtree" && object.selectionKind !== "file") {
+      invalid(`${path}.selectionKind`, "expected subtree or file");
+    }
     const outputSubdirectory = portableSingleSegment(
       object.outputSubdirectory,
       `${path}.outputSubdirectory`,
     );
     selections.push(Object.freeze({
       selectionId: object.selectionId,
+      selectionKind: object.selectionKind,
       archiveSubtree,
       outputSubdirectory,
     }));
@@ -547,9 +553,11 @@ function parseSelections(value, diagnosticPath) {
   }
   for (const [index, left] of selections.entries()) {
     for (const right of selections.slice(index + 1)) {
-      if (left.archiveSubtree.startsWith(`${right.archiveSubtree}/`) ||
-          right.archiveSubtree.startsWith(`${left.archiveSubtree}/`)) {
-        invalid(diagnosticPath, "selected archive subtrees must not overlap");
+      if ((left.selectionKind === "subtree" &&
+            right.archiveSubtree.startsWith(`${left.archiveSubtree}/`)) ||
+          (right.selectionKind === "subtree" &&
+            left.archiveSubtree.startsWith(`${right.archiveSubtree}/`))) {
+        invalid(diagnosticPath, "selected archive paths must not overlap");
       }
     }
   }
@@ -558,7 +566,13 @@ function parseSelections(value, diagnosticPath) {
 
 function selectArchivePath(selections, path) {
   for (const selection of selections) {
-    if (path.startsWith(`${selection.archiveSubtree}/`)) {
+    if (selection.selectionKind === "file" && path === selection.archiveSubtree) {
+      return Object.freeze({
+        selection,
+        relativePath: selection.archiveSubtree.slice(selection.archiveSubtree.lastIndexOf("/") + 1),
+      });
+    }
+    if (selection.selectionKind === "subtree" && path.startsWith(`${selection.archiveSubtree}/`)) {
       return Object.freeze({
         selection,
         relativePath: path.slice(selection.archiveSubtree.length + 1),

@@ -50,6 +50,14 @@ export interface CppCuteBrowserHeaderSourceArchive {
   readonly index?: Readonly<Record<string, string>>;
   readonly licenseComponentId: string;
   readonly licensePolicy: string;
+  readonly licenseEvidence: readonly Readonly<{
+    evidenceId: string;
+    archivePath: string;
+    componentId: string;
+    evidenceRole: "upstream-license-text" | "source-package-copyright";
+    sha256: string;
+    byteLength: string;
+  }>[];
   readonly selections: readonly CppCuteBrowserHeaderSourceSelection[];
 }
 
@@ -73,7 +81,7 @@ export interface CppCuteBrowserHeaderSourceBlocker {
 
 export interface CppCuteBrowserHeaderSourcePlan {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_SOURCE_PLAN_SCHEMA;
-  readonly version: 1;
+  readonly version: 2;
   readonly planId: string;
   readonly authority: "exact-header-source-selection-policy-only";
   readonly body: Readonly<{
@@ -88,12 +96,15 @@ export interface CppCuteBrowserHeaderSourcePlan {
     archiveByteLength: string;
     includeRootCount: number;
     selectedSubtreeCount: number;
+    licenseEvidenceFileCount: number;
+    licenseEvidenceByteLength: string;
   }>;
   readonly claims: Readonly<{
     exactBuildInputLockBound: true;
     exactArchiveSelectionPinned: true;
     exactSourceSubtreesPinned: true;
     exactHeaderPackLicensePolicyBound: true;
+    exactUpstreamLicenseEvidencePinned: true;
     allFiveIncludeRootsSelected: true;
     archiveBytesVerified: false;
     archiveAttestationsVerified: false;
