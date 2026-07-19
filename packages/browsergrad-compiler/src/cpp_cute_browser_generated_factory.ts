@@ -19,7 +19,16 @@ export const CPP_CUTE_BROWSER_GENERATED_FACTORY_AUTHORITY = Object.freeze({
   cleanValidationWasmByteLength: 31_641_377,
   exactCleanFactoryMatch: true,
   cleanBuildVerified: true,
-  reproducibilityVerified: false,
+  reproducibilityBuildRunId: "29683677087",
+  reproducibilityBuildSourceRevision:
+    "96ad7b16ec57b3634f14c3eaff45da4d959fc117",
+  reproducibilityVerifierRunId: "29685632925",
+  reproducibilityVerifierSourceRevision:
+    "c1a79c0dc487a50787d0a16377d18c910b7b950b",
+  reproducibilityEvidenceSha256:
+    "6c7aebe1376edf0f9a526b55bacd930e7e9e0fd454a95213d97931117548f31a",
+  reproducibilityEvidenceByteLength: 3_470,
+  reproducibilityVerified: true,
   workerBundleVerified: false,
   workerExecutionObserved: false,
   releaseReady: false,
