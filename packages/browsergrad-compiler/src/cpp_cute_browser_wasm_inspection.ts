@@ -16,7 +16,11 @@ import {
 
 /** Matches the closed browser profile's per-asset compressed-byte ceiling. */
 export const CPP_CUTE_BROWSER_WASM_MAX_BYTE_LENGTH = 256 * 1024 * 1024;
-export const CPP_CUTE_BROWSER_WASM_MAX_OPERATIONS = 8_000_000;
+export const CPP_CUTE_BROWSER_WASM_BASE_OPERATIONS = 8_000_000;
+export const CPP_CUTE_BROWSER_WASM_MAX_OPERATIONS = CPP_CUTE_BROWSER_WASM_MAX_BYTE_LENGTH * 2;
+export const CPP_CUTE_BROWSER_WASM_REPORT_MAX_ARRAY_LENGTH = 250_000;
+export const CPP_CUTE_BROWSER_WASM_REPORT_MAX_BYTE_LENGTH = 64 * 1024 * 1024;
+export const CPP_CUTE_BROWSER_WASM_REPORT_MAX_NODES = 1_000_000;
 
 const MAX_SECTIONS = 32;
 const MAX_CUSTOM_SECTIONS = 4;
@@ -32,7 +36,9 @@ const MAX_PARAMETERS = 64;
 const MAX_RESULTS = 1;
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const MAX_LOCALS = 50_000;
-const MAX_CONTROL_DEPTH = 1_024;
+// Emscripten's structured CFG output can exceed 1,024 nested controls. The
+// parser is iterative, and this independent ceiling bounds its control array.
+const MAX_CONTROL_DEPTH = 8_192;
 const MAX_NAME_BYTES = 1_024;
 const MAX_TOTAL_NAME_BYTES = 256 * 1024;
 
@@ -239,6 +245,10 @@ interface StoredConformance {
 interface NormalizedOptions {
   readonly signal: AbortSignal | undefined;
   readonly maxModuleByteLength: number;
+  readonly maxOperations: number | undefined;
+}
+
+interface ParserOptions extends NormalizedOptions {
   readonly maxOperations: number;
 }
 
@@ -291,7 +301,7 @@ interface ParsedModule {
 interface ParserState {
   operations: number;
   totalNameBytes: number;
-  readonly options: NormalizedOptions;
+  readonly options: ParserOptions;
 }
 
 class Cursor {
@@ -356,7 +366,7 @@ export async function inspectCppCuteBrowserWasmAgainstRuntimeAbi(
   throwIfAborted(normalized.signal);
   const snapshot = snapshotBytes(bytes, normalized.maxModuleByteLength);
   throwIfAborted(normalized.signal);
-  const parsed = parseModule(snapshot, normalized);
+  const parsed = parseModule(snapshot, resolveParserOptions(normalized, snapshot.byteLength));
   validateWasmSemantics(snapshot);
   throwIfAborted(normalized.signal);
   const customSections = await Promise.all(parsed.customSections.map(async (section) => ({
@@ -438,7 +448,7 @@ export function unwrapPreparedCppCuteBrowserWasmConformance(
   return Object.freeze({ summary: cloneFrozen(stored.summary) });
 }
 
-function parseModule(bytes: Uint8Array, options: NormalizedOptions): ParsedModule {
+function parseModule(bytes: Uint8Array, options: ParserOptions): ParsedModule {
   const state: ParserState = { operations: 0, totalNameBytes: 0, options };
   const cursor = new Cursor(bytes, "$bytes", state);
   const magic = cursor.readBytes(4, "$bytes.magic");
@@ -901,12 +911,10 @@ function finishModule(parsed: ParsedModule): void {
   for (const segment of parsed.dataSegments) if (segment.memoryIndex !== null) requireIndex(segment.memoryIndex, importedMemories + parsed.memories.length, "$bytes.sections.data.memoryIndex", "memory");
 
   const target = parsed.customSections.find((section) => section.name === "target_features")?.targetFeatures ?? [];
-  const declarations = new Map(target.map((entry) => [entry.normalizedName, entry.prefix]));
   for (const feature of parsed.features) {
     if (feature === "atomics" || feature === "exception-handling" || feature === "memory64" || feature === "multi-memory" || feature === "simd128" || feature === "threads") {
       invalid("$bytes.features", `forbidden feature ${feature} is present in decoded structure or opcodes`);
     }
-    if (declarations.get(feature) !== "+") invalid("$bytes.sections.custom.target_features", `decoded feature ${feature} is not positively declared`);
   }
   for (const entry of target) {
     if (!isKnownFeature(entry.normalizedName)) invalid("$bytes.sections.custom.target_features", `unlisted target feature ${entry.wireName}`);
@@ -1349,9 +1357,21 @@ function normalizeOptions(options: InspectCppCuteBrowserWasmOptions): Normalized
     ? CPP_CUTE_BROWSER_WASM_MAX_BYTE_LENGTH
     : narrowLimit(moduleLimitValue as number, CPP_CUTE_BROWSER_WASM_MAX_BYTE_LENGTH, "$options.maxModuleByteLength");
   const maxOperations = operationLimitValue === undefined
-    ? CPP_CUTE_BROWSER_WASM_MAX_OPERATIONS
+    ? undefined
     : narrowLimit(operationLimitValue as number, CPP_CUTE_BROWSER_WASM_MAX_OPERATIONS, "$options.maxOperations");
   return { signal, maxModuleByteLength, maxOperations };
+}
+
+function resolveParserOptions(options: NormalizedOptions, byteLength: number): ParserOptions {
+  // Every tick either consumes bytes or advances one bounded structural item.
+  // Two operations per admitted byte is a conservative parser ceiling, while
+  // the fixed floor keeps small structurally dense modules inexpensive to
+  // configure. The caller may still narrow this budget explicitly.
+  const maxOperations = options.maxOperations ?? Math.min(
+    CPP_CUTE_BROWSER_WASM_MAX_OPERATIONS,
+    Math.max(CPP_CUTE_BROWSER_WASM_BASE_OPERATIONS, byteLength * 2),
+  );
+  return { ...options, maxOperations };
 }
 
 function narrowLimit(value: number, ceiling: number, path: string): number {
@@ -1433,7 +1453,13 @@ async function hashProjection(projection: CppCuteBrowserWasmInspectionProjection
     return await hashCanonicalJson({
       domain: "browsergrad.compiler.cpp-cute.browser-wasm-observed-projection.v1",
       projection: projection as unknown as JsonValue,
-    } as JsonObject);
+    } as JsonObject, {
+      limits: {
+        maxArrayLength: CPP_CUTE_BROWSER_WASM_REPORT_MAX_ARRAY_LENGTH,
+        maxDocumentBytes: CPP_CUTE_BROWSER_WASM_REPORT_MAX_BYTE_LENGTH,
+        maxNodes: CPP_CUTE_BROWSER_WASM_REPORT_MAX_NODES,
+      },
+    });
   } catch (cause) {
     fail("BG-COMPILER-CPP-CUTE-BROWSER-WASM-HASH-UNAVAILABLE", "$.projection", "projection SHA-256 is unavailable", { cause });
   }

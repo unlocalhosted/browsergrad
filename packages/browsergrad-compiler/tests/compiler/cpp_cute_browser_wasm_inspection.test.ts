@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CPP_CUTE_BROWSER_WASM_BASE_OPERATIONS,
   CppCuteBrowserWasmInspectionError,
   inspectCppCuteBrowserWasmAgainstRuntimeAbi,
   unwrapPreparedCppCuteBrowserWasmConformance,
@@ -140,6 +141,56 @@ function oneFunctionModule(
     ...(options.extraSections ?? []).flat(),
     ...section(10, vector([[...u32(body.length), ...body]])),
   ]);
+}
+
+function concatenateBytes(chunks: readonly Uint8Array[]): Uint8Array {
+  const result = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
+function operationBudgetRegressionModule(): Uint8Array {
+  const nopCount = Math.floor(CPP_CUTE_BROWSER_WASM_BASE_OPERATIONS / 2) + 1;
+  const body = new Uint8Array(nopCount + 2);
+  body[0] = 0x00;
+  body.fill(0x01, 1, body.byteLength - 1);
+  body[body.byteLength - 1] = 0x0b;
+  const typeSection = new Uint8Array(section(1, vector([functionType([], [])])));
+  const functionSection = new Uint8Array(section(3, vector([[0x00], [0x00]])));
+  const bodyLength = new Uint8Array(u32(body.byteLength));
+  const codePayloadByteLength = 1 + (bodyLength.byteLength + body.byteLength) * 2;
+  const codeSectionHeader = new Uint8Array([0x0a, ...u32(codePayloadByteLength)]);
+  const chunks = [
+    new Uint8Array(HEADER), typeSection, functionSection, codeSectionHeader,
+    new Uint8Array([0x02]), bodyLength, body, bodyLength, body,
+  ];
+  return concatenateBytes(chunks);
+}
+
+function projectionBudgetRegressionModule(): Uint8Array {
+  const functionCount = 30_000;
+  const typeSection = new Uint8Array(section(1, vector([functionType([], [])])));
+  const functionCountBytes = new Uint8Array(u32(functionCount));
+  const functionPayload = new Uint8Array(functionCountBytes.byteLength + functionCount);
+  functionPayload.set(functionCountBytes);
+  const functionSection = concatenateBytes([
+    new Uint8Array([0x03, ...u32(functionPayload.byteLength)]),
+    functionPayload,
+  ]);
+  const codePayload = new Uint8Array(functionCountBytes.byteLength + functionCount * 3);
+  codePayload.set(functionCountBytes);
+  for (let offset = functionCountBytes.byteLength; offset < codePayload.byteLength; offset += 3) {
+    codePayload.set([0x02, 0x00, 0x0b], offset);
+  }
+  const codeSection = concatenateBytes([
+    new Uint8Array([0x0a, ...u32(codePayload.byteLength)]),
+    codePayload,
+  ]);
+  return concatenateBytes([new Uint8Array(HEADER), typeSection, functionSection, codeSection]);
 }
 
 function structurallyRichModule(): Uint8Array {
@@ -311,6 +362,44 @@ describe("bounded raw-Wasm inspection", () => {
     await expect(inspectCppCuteBrowserWasmAgainstRuntimeAbi(
       abiShapedModule(), abi, { signal: controller.signal },
     )).rejects.toSatisfy(expectCode("BG-COMPILER-CPP-CUTE-BROWSER-WASM-CANCELLED"));
+  });
+
+  it("scales the default operation budget to an admitted module snapshot", async () => {
+    await expect(inspectCppCuteBrowserWasmAgainstRuntimeAbi(
+      operationBudgetRegressionModule(),
+      await runtimeAbi(),
+    )).resolves.toMatchObject({ rawWasmVerified: true });
+  });
+
+  it("hashes a bounded production-scale structural projection", async () => {
+    await expect(inspectCppCuteBrowserWasmAgainstRuntimeAbi(
+      projectionBudgetRegressionModule(),
+      await runtimeAbi(),
+    )).resolves.toMatchObject({
+      rawWasmVerified: true,
+      observedProjectionSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+    });
+  });
+
+  it("admits valid generated control nesting beyond the old diagnostic ceiling", async () => {
+    const depth = 1_025;
+    const instructions = [
+      ...Array.from({ length: depth }, () => [0x02, 0x40]).flat(),
+      ...Array.from({ length: depth }, () => 0x0b),
+    ];
+    await expect(inspectCppCuteBrowserWasmAgainstRuntimeAbi(
+      oneFunctionModule(instructions),
+      await runtimeAbi(),
+    )).resolves.toMatchObject({ rawWasmVerified: true });
+  });
+
+  it("reports absent target metadata as ABI drift while trusting decoded features", async () => {
+    const report = await inspectCppCuteBrowserWasmAgainstRuntimeAbi(
+      oneFunctionModule([0x41, 0x00, 0xc0], { result: true }),
+      await runtimeAbi(),
+    );
+    expect(report.projection.staticallyUsedExtensions).toContain("sign-extension");
+    expect(report.mismatches).toContain("required target feature +sign-ext is missing");
   });
 
   it("rejects subclass, proxy, and shared byte views before parsing", async () => {

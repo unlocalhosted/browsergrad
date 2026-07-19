@@ -12,6 +12,9 @@ import {
 } from "../../dist/cpp_cute_browser_runtime_abi.js";
 import {
   CPP_CUTE_BROWSER_WASM_MAX_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_WASM_REPORT_MAX_ARRAY_LENGTH,
+  CPP_CUTE_BROWSER_WASM_REPORT_MAX_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_WASM_REPORT_MAX_NODES,
   inspectCppCuteBrowserWasmAgainstRuntimeAbi,
 } from "../../dist/cpp_cute_browser_wasm_inspection.js";
 
@@ -80,7 +83,13 @@ export async function writeCppCuteBrowserWasmReviewReport(outputPath, report) {
   }
   const path = portableAbsolutePath(outputPath, "$outputPath");
   await admitPrivateDirectory(dirname(path), "$outputPath.parent");
-  const bytes = canonicalJsonBytes(report);
+  const bytes = canonicalJsonBytes(report, {
+    limits: {
+      maxArrayLength: CPP_CUTE_BROWSER_WASM_REPORT_MAX_ARRAY_LENGTH,
+      maxDocumentBytes: CPP_CUTE_BROWSER_WASM_REPORT_MAX_BYTE_LENGTH,
+      maxNodes: CPP_CUTE_BROWSER_WASM_REPORT_MAX_NODES,
+    },
+  });
   let handle;
   try {
     handle = await open(
