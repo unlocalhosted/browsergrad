@@ -197,7 +197,8 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
   it("closes unsupported browser host services inside the Wasm module", async () => {
     const source = await extractorSource("BrowserGradCppCuteBrowserHost.cpp");
     for (const symbol of [
-      "getenv", "__clock_gettime", "clock_gettime", "time", "__gmtime_r",
+      "getenv", "__wasi_environ_sizes_get", "__wasi_environ_get", "_tzset_js",
+      "__clock_gettime", "clock_gettime", "time", "__gmtime_r",
       "gmtime_r", "gmtime", "__localtime_r", "localtime_r", "localtime",
       "__tzset", "tzset", "setitimer", "getentropy", "clock_nanosleep",
       "getpwnam_r", "getpwuid_r", "getuid", "getrlimit", "setrlimit",

@@ -4,6 +4,7 @@
 
 #include <cerrno>
 #include <csignal>
+#include <cstdint>
 #include <ctime>
 #include <cstdlib>
 #include <cstring>
@@ -38,6 +39,17 @@ extern "C" {
 
 char* getenv(const char*) {
   return nullptr;
+}
+
+std::uint16_t __wasi_environ_sizes_get(std::size_t* count,
+                                       std::size_t* byte_length) {
+  *count = 0;
+  *byte_length = 0;
+  return 0;
+}
+
+std::uint16_t __wasi_environ_get(std::uint8_t**, std::uint8_t*) {
+  return 0;
 }
 
 int __clock_gettime(clockid_t, struct timespec*) {
@@ -79,6 +91,14 @@ struct tm* localtime_r(const time_t* input, struct tm* output) {
 struct tm* localtime(const time_t*) {
   errno = ENOSYS;
   return nullptr;
+}
+
+void _tzset_js(long* seconds_west_of_utc, int* observes_daylight_time,
+               char* standard_name, char* daylight_name) {
+  *seconds_west_of_utc = 0;
+  *observes_daylight_time = 0;
+  std::memcpy(standard_name, "UTC", sizeof("UTC"));
+  std::memcpy(daylight_name, "UTC", sizeof("UTC"));
 }
 
 void __tzset() {}

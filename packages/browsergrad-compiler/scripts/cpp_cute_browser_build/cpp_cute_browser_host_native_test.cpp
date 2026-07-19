@@ -17,6 +17,31 @@ namespace {
 int run_browser_host_tests() {
   BG_CHECK(getenv("BROWSERGRAD_FORBIDDEN") == nullptr);
 
+  std::size_t environment_count = 7;
+  std::size_t environment_byte_length = 11;
+  BG_CHECK(__wasi_environ_sizes_get(&environment_count,
+                                    &environment_byte_length) == 0);
+  BG_CHECK(environment_count == 0);
+  BG_CHECK(environment_byte_length == 0);
+  std::uint8_t* environment_entry = reinterpret_cast<std::uint8_t*>(1);
+  std::uint8_t environment_byte = 0x5a;
+  BG_CHECK(__wasi_environ_get(&environment_entry, &environment_byte) == 0);
+  BG_CHECK(environment_entry == reinterpret_cast<std::uint8_t*>(1));
+  BG_CHECK(environment_byte == 0x5a);
+
+  long seconds_west_of_utc = 7;
+  int observes_daylight_time = 1;
+  char standard_name[17];
+  char daylight_name[17];
+  std::memset(standard_name, 0x5a, sizeof(standard_name));
+  std::memset(daylight_name, 0x5a, sizeof(daylight_name));
+  _tzset_js(&seconds_west_of_utc, &observes_daylight_time, standard_name,
+            daylight_name);
+  BG_CHECK(seconds_west_of_utc == 0);
+  BG_CHECK(observes_daylight_time == 0);
+  BG_CHECK(std::strcmp(standard_name, "UTC") == 0);
+  BG_CHECK(std::strcmp(daylight_name, "UTC") == 0);
+
   struct timespec observed_time;
   std::memset(&observed_time, 0x5a, sizeof(observed_time));
   const struct timespec original_time = observed_time;
