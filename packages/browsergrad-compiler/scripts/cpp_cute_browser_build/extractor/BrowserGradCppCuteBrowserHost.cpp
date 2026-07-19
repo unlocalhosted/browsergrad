@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <csignal>
 #include <cstdint>
+#include <cstdio>
 #include <ctime>
 #include <cstdlib>
 #include <dirent.h>
@@ -283,11 +284,15 @@ int rmdir(const char*) {
   return fail_with_enosys();
 }
 
-int rename(const char*, const char*) {
+int rename(const char* old_path, const char* new_path)
+    noexcept(noexcept(::rename(old_path, new_path))) {
   return fail_with_enosys();
 }
 
-int renameat(int, const char*, int, const char*) {
+int renameat(int old_directory, const char* old_path, int new_directory,
+             const char* new_path)
+    noexcept(noexcept(::renameat(old_directory, old_path, new_directory,
+                                 new_path))) {
   return fail_with_enosys();
 }
 
