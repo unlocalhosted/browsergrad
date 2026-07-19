@@ -13,18 +13,18 @@ it("pins the exact package-owned generated factory without widening its authorit
     `bg.cpp.browser-emscripten-factory.sha256.${CPP_CUTE_BROWSER_GENERATED_FACTORY_SHA256}`,
   );
   expect(CPP_CUTE_BROWSER_GENERATED_FACTORY_SHA256)
-    .toBe("ef6b757b053fe6ce232b7f32bb6d7e747211ad65102940607e8346fd027f63c3");
-  expect(CPP_CUTE_BROWSER_GENERATED_FACTORY_BYTE_LENGTH).toBe(23_916);
+    .toBe("796a548237420df7f5eca0c0260d3cbe752aeca155d9c7182c6ad0f5491dfb12");
+  expect(CPP_CUTE_BROWSER_GENERATED_FACTORY_BYTE_LENGTH).toBe(27_125);
   expect(CPP_CUTE_BROWSER_GENERATED_FACTORY.constructor.name).toBe("AsyncFunction");
   expect(CPP_CUTE_BROWSER_GENERATED_FACTORY_AUTHORITY).toEqual({
     source: "reviewed-clean-validation-build-output",
     packageOwned: true,
     exactSourcePinned: true,
-    cleanValidationRunId: "29674887505",
-    cleanValidationSourceRevision: "d631cc3223777cada1284cf5284b1a0efdcb36c4",
+    cleanValidationRunId: "29681845216",
+    cleanValidationSourceRevision: "aca7ee4ea799357b2c0ee3a57f6687e2139e7b7b",
     cleanValidationWasmSha256:
-      "b7a5daf6d121c306a2d07b5d3c14c00a664aaa2ff4ae3357a8b389326eeeb06f",
-    cleanValidationWasmByteLength: 31_307_826,
+      "5fc425bbc051a2f5be588c2acbb164efb5e43f949afb48a373f3ed022c3b8758",
+    cleanValidationWasmByteLength: 31_641_377,
     exactCleanFactoryMatch: true,
     cleanBuildVerified: true,
     reproducibilityVerified: false,

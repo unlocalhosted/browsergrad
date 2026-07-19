@@ -19,12 +19,12 @@ describe("C++/CuTe package Worker bundle authoring", () => {
       authority: "package-worker-bundle-authoring-projection-only",
       entryPath: "src/cpp_cute_browser_worker_module.ts",
       outputFileName: "browsergrad-cpp-cute-worker.mjs",
-      sha256: "4b1565e4ca8df2332cc6faabb6643226aa5cb26bcd5d9a8ac6d97d94972797a5",
-      byteLength: 574_770,
+      sha256: "db0b0fd8f622d8c5febf7dc2c4daa75d68bf8be879f2d4f3d3670b56836f71d7",
+      byteLength: 577_480,
       staticImportCount: 0,
       dynamicImportCount: 0,
-      factorySha256: "ef6b757b053fe6ce232b7f32bb6d7e747211ad65102940607e8346fd027f63c3",
-      factoryByteLength: 23_916,
+      factorySha256: "796a548237420df7f5eca0c0260d3cbe752aeca155d9c7182c6ad0f5491dfb12",
+      factoryByteLength: 27_125,
     });
     expect(projection.source).not.toContain("sourceMappingURL=");
     expect(renderCppCuteBrowserWorkerBundleResource(projection)).toBe(

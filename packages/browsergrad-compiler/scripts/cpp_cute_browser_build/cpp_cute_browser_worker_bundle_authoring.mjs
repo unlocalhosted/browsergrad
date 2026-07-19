@@ -15,7 +15,7 @@ const RESOURCE_PATH = resolve(
   "src/resources/cpp_cute_browser_worker_bundle_v1.ts",
 );
 const FACTORY_SHA256 =
-  "ef6b757b053fe6ce232b7f32bb6d7e747211ad65102940607e8346fd027f63c3";
+  "796a548237420df7f5eca0c0260d3cbe752aeca155d9c7182c6ad0f5491dfb12";
 const RESOURCE_SCHEMA = "browsergrad.compiler.cpp-cute.package-worker-bundle-resource";
 const BASE64_CHUNK_LENGTH = 4_096;
 const ARGUMENTS = new Set(["--check"]);

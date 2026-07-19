@@ -4,19 +4,19 @@ import type {
 } from "./cpp_cute_browser_emscripten_factory.js";
 
 export const CPP_CUTE_BROWSER_GENERATED_FACTORY_SHA256 =
-  "ef6b757b053fe6ce232b7f32bb6d7e747211ad65102940607e8346fd027f63c3";
-export const CPP_CUTE_BROWSER_GENERATED_FACTORY_BYTE_LENGTH = 23_916;
+  "796a548237420df7f5eca0c0260d3cbe752aeca155d9c7182c6ad0f5491dfb12";
+export const CPP_CUTE_BROWSER_GENERATED_FACTORY_BYTE_LENGTH = 27_125;
 export const CPP_CUTE_BROWSER_GENERATED_FACTORY_ID =
   `bg.cpp.browser-emscripten-factory.sha256.${CPP_CUTE_BROWSER_GENERATED_FACTORY_SHA256}`;
 export const CPP_CUTE_BROWSER_GENERATED_FACTORY_AUTHORITY = Object.freeze({
   source: "reviewed-clean-validation-build-output",
   packageOwned: true,
   exactSourcePinned: true,
-  cleanValidationRunId: "29674887505",
-  cleanValidationSourceRevision: "d631cc3223777cada1284cf5284b1a0efdcb36c4",
+  cleanValidationRunId: "29681845216",
+  cleanValidationSourceRevision: "aca7ee4ea799357b2c0ee3a57f6687e2139e7b7b",
   cleanValidationWasmSha256:
-    "b7a5daf6d121c306a2d07b5d3c14c00a664aaa2ff4ae3357a8b389326eeeb06f",
-  cleanValidationWasmByteLength: 31_307_826,
+    "5fc425bbc051a2f5be588c2acbb164efb5e43f949afb48a373f3ed022c3b8758",
+  cleanValidationWasmByteLength: 31_641_377,
   exactCleanFactoryMatch: true,
   cleanBuildVerified: true,
   reproducibilityVerified: false,
