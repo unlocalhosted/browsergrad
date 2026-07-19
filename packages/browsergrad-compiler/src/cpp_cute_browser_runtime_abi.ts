@@ -21,16 +21,16 @@ import {
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
-export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 1;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 2;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.146ef5a52df89b88d8845f3c0c4ff149c8baaa7a77c05705b65087254e2291a8";
+  "bg.cpp.browser-runtime-abi.sha256.0f80448a33bbf0e08a5d1091b0f14148d5cafa52f10644330e2bfc2818a12eaa";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "73d4fdea7530053c0b308ff50684980ca48ec23f538b768c32c935e22a567f4f";
+  "23a312642150954b20a206e3ecd9ce03524f9cb0345690cfea444bc644385b82";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "c7b0aad19e5a76b481927f77e4ff3c0319398d2a13fa9d19e48baf608e0192da";
+  "5d8d33cc9590d6ecbbe460b01619b1bd606ad702226cf6b675e6e869ae6a5ea1";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
-  "ee4936a35d73df799e5d6f2c4eaad86d3cb8ba10d1dfd1e53da9f9e7f32e0075";
+  "8b48a9e038fc9c2b3ed677d6df99e7d0803da9083db19c41a3017f844fa10f48";
 
 const MANIFEST_ID = /^bg\.cpp\.browser-runtime-abi\.sha256\.[0-9a-f]{64}$/u;
 const PREPARED_MANIFESTS = new WeakMap<object, StoredCppCuteBrowserRuntimeAbiManifest>();
@@ -534,19 +534,84 @@ function validateBodyInvariants(value: JsonObject): void {
     }
     const generatedImports = body.hostImports.generatedImportAllowlist;
     if (generatedImports.policyId !== "browsergrad.compiler.cpp-cute.emscripten-generated-imports@1" ||
-        generatedImports.status !== "unresolved-first-build-review-required" ||
+        generatedImports.status !== "independently-reviewed-hash-pinned" ||
         generatedImports.allowlistSha256 !==
           CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 ||
-        generatedImports.exactFunctions.length !== 0 ||
+        generatedImports.exactFunctions.length !== 52 ||
         generatedImports.unlistedGeneratedImports !== "forbidden" ||
         generatedImports.observedModuleCannotExtendAllowlist !== true ||
         generatedImports.capabilityCeiling !==
           "no-clock-random-network-process-or-ambient-filesystem" ||
         generatedImports.releaseConformance !==
-          "forbidden-until-independent-review-and-manifest-repin") {
+          "allowed-only-for-exact-hash-pinned-signatures") {
       invalid(
         "$.body.hostImports.generatedImportAllowlist",
-        "generated imports must remain an empty hash-pinned release blocker pending independent review",
+        "generated imports must equal the independently reviewed closed runtime policy",
+      );
+    }
+    const generatedReview = generatedImports.independentReview;
+    if (generatedReview.basis !== "pinned-emscripten-runtime-sources-and-locked-link-flags" ||
+        generatedReview.emscriptenVersion !== "6.0.3" ||
+        generatedReview.emscriptenCommit !== "283e2d130132859fde6a4e4c87fd254b38127651") {
+      invalid(
+        "$.body.hostImports.generatedImportAllowlist.independentReview",
+        "generated-import review must bind the exact selected Emscripten runtime",
+      );
+    }
+    assertExactStrings(generatedReview.lockedFlags, [
+      "-fexceptions",
+      "-sSTACK_OVERFLOW_CHECK=2",
+      "-sALLOW_MEMORY_GROWTH=1",
+      "-sFILESYSTEM=0",
+      "-sINCOMING_MODULE_JS_API=['instantiateWasm','onAbort','print','printErr']",
+    ], "$.body.hostImports.generatedImportAllowlist.independentReview.lockedFlags");
+    const expectedGeneratedRoles = [
+      ["javascript-exception-control-flow", 48, "none"],
+      ["bounded-memory-growth", 2, "none"],
+      ["stack-overflow-trap", 1, "none"],
+      ["stdout-stderr-only", 1, "caller-provided-output-hooks-only"],
+    ] as const;
+    if (generatedReview.runtimeRoles.length !== expectedGeneratedRoles.length ||
+        generatedReview.runtimeRoles.some((role, index) => {
+          const expected = expectedGeneratedRoles[index];
+          return expected === undefined || role.name !== expected[0] ||
+            role.exactFunctionCount !== expected[1] || role.ambientCapability !== expected[2];
+        })) {
+      invalid(
+        "$.body.hostImports.generatedImportAllowlist.independentReview.runtimeRoles",
+        "generated-import runtime-role inventory differs from the independent review",
+      );
+    }
+    const generatedRoleCounts = new Map<string, number>();
+    for (const [index, entry] of generatedImports.exactFunctions.entries()) {
+      if ((entry.moduleName !== "env" && entry.moduleName !== "wasi_snapshot_preview1") ||
+          entry.fieldName.length === 0 || entry.wasmResults.length > 1 ||
+          [...entry.wasmParameters, ...entry.wasmResults].some((value) =>
+            value !== "f32" && value !== "f64" && value !== "i32" && value !== "i64")) {
+        invalid(
+          `$.body.hostImports.generatedImportAllowlist.exactFunctions[${index}]`,
+          "generated import has an invalid module, name, or core Wasm signature",
+        );
+      }
+      generatedRoleCounts.set(entry.runtimeRole, (generatedRoleCounts.get(entry.runtimeRole) ?? 0) + 1);
+    }
+    for (const [name, count] of expectedGeneratedRoles.map((entry) => [entry[0], entry[1]] as const)) {
+      if (generatedRoleCounts.get(name) !== count) {
+        invalid(
+          "$.body.hostImports.generatedImportAllowlist.exactFunctions",
+          `generated import runtime role ${name} must contain exactly ${count} functions`,
+        );
+      }
+    }
+    const outputImports = generatedImports.exactFunctions.filter((entry) =>
+      entry.runtimeRole === "stdout-stderr-only");
+    if (outputImports.length !== 1 || outputImports[0]?.moduleName !== "wasi_snapshot_preview1" ||
+        outputImports[0].fieldName !== "fd_write" ||
+        outputImports[0].wasmParameters.join(",") !== "i32,i32,i32,i32" ||
+        outputImports[0].wasmResults.join(",") !== "i32") {
+      invalid(
+        "$.body.hostImports.generatedImportAllowlist.exactFunctions",
+        "the only reviewed output import must be the exact WASI fd_write signature",
       );
     }
     const memoryAccess = body.hostImports.memoryAccess;

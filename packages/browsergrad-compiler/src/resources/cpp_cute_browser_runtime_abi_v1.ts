@@ -3,6 +3,23 @@ import {
   type JsonObject,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
+type WasmValueType = "f32" | "f64" | "i32" | "i64";
+type GeneratedImportRuntimeRole =
+  | "bounded-memory-growth"
+  | "javascript-exception-control-flow"
+  | "stack-overflow-trap"
+  | "stdout-stderr-only";
+
+function generatedImport(
+  moduleName: "env" | "wasi_snapshot_preview1",
+  fieldName: string,
+  wasmParameters: readonly WasmValueType[],
+  wasmResults: readonly WasmValueType[],
+  runtimeRole: GeneratedImportRuntimeRole,
+) {
+  return { moduleName, fieldName, wasmParameters, wasmResults, runtimeRole } as const;
+}
+
 /**
  * Canonical design contract for the browser-local Clang-WASM extractor.
  *
@@ -12,8 +29,8 @@ import {
  */
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
-  version: { major: 1, minor: 1 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.146ef5a52df89b88d8845f3c0c4ff149c8baaa7a77c05705b65087254e2291a8",
+  version: { major: 1, minor: 2 },
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.0f80448a33bbf0e08a5d1091b0f14148d5cafa52f10644330e2bfc2818a12eaa",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -408,13 +425,84 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
       unlistedApplicationImports: "forbidden",
       generatedImportAllowlist: {
         policyId: "browsergrad.compiler.cpp-cute.emscripten-generated-imports@1",
-        status: "unresolved-first-build-review-required",
-        allowlistSha256: "ee4936a35d73df799e5d6f2c4eaad86d3cb8ba10d1dfd1e53da9f9e7f32e0075",
-        exactFunctions: [],
+        status: "independently-reviewed-hash-pinned",
+        allowlistSha256: "8b48a9e038fc9c2b3ed677d6df99e7d0803da9083db19c41a3017f844fa10f48",
+        independentReview: {
+          basis: "pinned-emscripten-runtime-sources-and-locked-link-flags",
+          emscriptenVersion: "6.0.3",
+          emscriptenCommit: "283e2d130132859fde6a4e4c87fd254b38127651",
+          lockedFlags: [
+            "-fexceptions",
+            "-sSTACK_OVERFLOW_CHECK=2",
+            "-sALLOW_MEMORY_GROWTH=1",
+            "-sFILESYSTEM=0",
+            "-sINCOMING_MODULE_JS_API=['instantiateWasm','onAbort','print','printErr']",
+          ],
+          runtimeRoles: [
+            { name: "javascript-exception-control-flow", exactFunctionCount: 48, ambientCapability: "none" },
+            { name: "bounded-memory-growth", exactFunctionCount: 2, ambientCapability: "none" },
+            { name: "stack-overflow-trap", exactFunctionCount: 1, ambientCapability: "none" },
+            { name: "stdout-stderr-only", exactFunctionCount: 1, ambientCapability: "caller-provided-output-hooks-only" },
+          ],
+        },
+        exactFunctions: [
+          generatedImport("env", "invoke_iii", ["i32", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "__cxa_find_matching_catch_2", [], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "__resumeException", ["i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "__cxa_find_matching_catch_6", ["i32", "i32", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_viiii", ["i32", "i32", "i32", "i32", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_ii", ["i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_vii", ["i32", "i32", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_viii", ["i32", "i32", "i32", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiii", ["i32", "i32", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "__cxa_find_matching_catch_3", ["i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "__cxa_throw", ["i32", "i32", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "llvm_eh_typeid_for", ["i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "__cxa_begin_catch", ["i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "__cxa_end_catch", [], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_v", ["i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_vijjj", ["i32", "i32", "i64", "i64", "i64"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_vij", ["i32", "i32", "i64"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_viiiii", ["i32", "i32", "i32", "i32", "i32", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_vi", ["i32", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_viiiiiiii", ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_viiiiii", ["i32", "i32", "i32", "i32", "i32", "i32", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiiiii", ["i32", "i32", "i32", "i32", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiiii", ["i32", "i32", "i32", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_viiiiiii", ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_viiji", ["i32", "i32", "i32", "i64", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "__cxa_find_matching_catch_4", ["i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "__cxa_find_matching_catch_5", ["i32", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_viiijji", ["i32", "i32", "i32", "i32", "i64", "i64", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_vijji", ["i32", "i32", "i64", "i64", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiiijiijii", ["i32", "i32", "i32", "i32", "i64", "i32", "i32", "i64", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_viiiij", ["i32", "i32", "i32", "i32", "i32", "i64"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiiiiii", ["i32", "i32", "i32", "i32", "i32", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_viijj", ["i32", "i32", "i32", "i64", "i64"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiiiiiii", ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_i", ["i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("wasi_snapshot_preview1", "fd_write", ["i32", "i32", "i32", "i32"], ["i32"], "stdout-stderr-only"),
+          generatedImport("env", "emscripten_get_heap_max", [], ["i32"], "bounded-memory-growth"),
+          generatedImport("env", "emscripten_resize_heap", ["i32"], ["i32"], "bounded-memory-growth"),
+          generatedImport("env", "_emscripten_throw_longjmp", [], [], "javascript-exception-control-flow"),
+          generatedImport("env", "__cxa_rethrow", [], [], "javascript-exception-control-flow"),
+          generatedImport("env", "__cxa_uncaught_exceptions", [], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiiiij", ["i32", "i32", "i32", "i32", "i32", "i64"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiiiid", ["i32", "i32", "i32", "i32", "i32", "f64"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiiiiiiiiii", ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_jiiii", ["i32", "i32", "i32", "i32", "i32"], ["i64"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiiiiiiiiiiii", ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_fiii", ["i32", "i32", "i32", "i32"], ["f32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_diii", ["i32", "i32", "i32", "i32"], ["f64"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiiiiiiiiiii", ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_viiiiiiiiii", ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_viiiiiiiiiiiiiii", ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "__handle_stack_overflow", ["i32"], [], "stack-overflow-trap"),
+        ],
         unlistedGeneratedImports: "forbidden",
         observedModuleCannotExtendAllowlist: true,
         capabilityCeiling: "no-clock-random-network-process-or-ambient-filesystem",
-        releaseConformance: "forbidden-until-independent-review-and-manifest-repin",
+        releaseConformance: "allowed-only-for-exact-hash-pinned-signatures",
       },
       memoryAccess: {
         rangeArithmetic: "checked-u32-no-wrap",
