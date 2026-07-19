@@ -138,19 +138,19 @@ unsigned alarm(unsigned) {
 }
 
 #if defined(__EMSCRIPTEN__)
-[[noreturn]] void abort() noexcept {
+void abort() {
   __builtin_trap();
 }
 
-[[noreturn]] void exit(int) {
+void exit(int) {
   __builtin_trap();
 }
 
-[[noreturn]] void _Exit(int) {
+void _Exit(int) {
   __builtin_trap();
 }
 
-[[noreturn]] void _exit(int) {
+void _exit(int) {
   __builtin_trap();
 }
 #endif
