@@ -21,14 +21,14 @@ import {
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
-export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 3;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 4;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.e74ecc5e8942a8f1acc2c8892ab20a3e61b8c1c69cfd5922857a4b5199b43283";
+  "bg.cpp.browser-runtime-abi.sha256.84e8320ae85e3f49dba5adc729fe07544aa7fcb9d0f72f18c604fc5d840d0bf2";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "e9678bd9df9f0904a804055a12ab1625b420b866a8e24b2f2530f349f59ebe04";
+  "4d6de469eb287dabfdc8ed4d1c057c5aef2af915a651a8d9c6eee2e9e9c57c69";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "77a14c6d8f0b613db6193ba45548c450cf8cdb37646beb465128c80420cbb3ed";
+  "34173da34810c0f0cb80af84b36bb800007c05bb3f9f759943e2c6d10e5d2226";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "8b48a9e038fc9c2b3ed677d6df99e7d0803da9083db19c41a3017f844fa10f48";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 =
@@ -301,19 +301,19 @@ function validateBodyInvariants(value: JsonObject): void {
       invalid("$.body.wasm", "module role, ABI version, start, or export closure differs from runtime v1");
     }
     const supportExports = body.wasm.supportExports;
-    if (supportExports.status !== "function-exports-reviewed-structure-pending" ||
+    if (supportExports.status !== "independently-reviewed-hash-pinned" ||
         supportExports.functionAllowlistSha256 !==
           CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 ||
         supportExports.exactFunctionAllowlist.length !== 29 ||
         supportExports.exactGlobalAllowlist.length !== 0 ||
-        supportExports.exactTableAllowlist.length !== 0 ||
+        supportExports.exactTableAllowlist.length !== 1 ||
         supportExports.unlistedExports !== "forbidden" ||
         supportExports.observedModuleCannotExtendAllowlist !== true ||
         supportExports.releaseConformance !==
-          "forbidden-until-table-and-global-structure-review") {
+          "allowed-only-for-exact-reviewed-support-exports") {
       invalid(
         "$.body.wasm.supportExports",
-        "support-function exports must equal the reviewed policy while structural exports remain blocked",
+        "support exports must equal the independently reviewed closed policy",
       );
     }
     const supportReview = supportExports.functionReview;
@@ -367,8 +367,22 @@ function validateBodyInvariants(value: JsonObject): void {
         );
       }
     }
+    const tableReview = supportExports.tableReview;
+    const tableExport = supportExports.exactTableAllowlist[0];
+    if (tableReview.basis !==
+          "detached-raw-wasm-inspection-and-javascript-exception-dispatch-requirement" ||
+        tableReview.visibility !== "worker-internal-not-browsergrad-c-api" ||
+        tableReview.exactExportCount !== 1 ||
+        tableReview.runtimeRole !== "javascript-exception-dispatch-table" ||
+        tableExport?.name !== "__indirect_function_table" || tableExport.index !== 0 ||
+        tableExport.runtimeRole !== "javascript-exception-dispatch-table") {
+      invalid(
+        "$.body.wasm.supportExports.tableReview",
+        "support table must be the single worker-internal JavaScript exception dispatch table",
+      );
+    }
     const structural = body.wasm.structuralPolicy;
-    if (structural.status !== "unresolved-first-build-review-required" ||
+    if (structural.status !== "table-and-global-projections-reviewed-target-features-pending" ||
         structural.releaseConformance !==
           "forbidden-until-exact-first-build-projection-is-reviewed-and-repinned") {
       invalid("$.body.wasm.structuralPolicy", "Wasm structural projection must remain release-blocked pending review");
@@ -377,8 +391,11 @@ function validateBodyInvariants(value: JsonObject): void {
         structural.tables.imported !== "forbidden" ||
         structural.tables.declaredMaximumRequired !== true ||
         structural.tables.maximumElementsCeiling !== 65_536 ||
-        structural.tables.exactReviewedProjection.length !== 0) {
-      invalid("$.body.wasm.structuralPolicy.tables", "table policy differs from the bounded unresolved v1 policy");
+        structural.tables.exactReviewedProjection.length !== 1 ||
+        structural.tables.exactReviewedProjection[0]?.elementType !== "funcref" ||
+        structural.tables.exactReviewedProjection[0].minimum !== 14_549 ||
+        structural.tables.exactReviewedProjection[0].maximum !== 14_549) {
+      invalid("$.body.wasm.structuralPolicy.tables", "table policy differs from the exact reviewed v1 projection");
     }
     assertExactStrings(
       structural.tables.allowedElementTypes,

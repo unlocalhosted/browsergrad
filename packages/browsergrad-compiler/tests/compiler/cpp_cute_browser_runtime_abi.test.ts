@@ -74,7 +74,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256,
       supportFunctionAllowlistSha256:
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256,
-      resourceByteLength: 33_063,
+      resourceByteLength: 33_457,
       designAuthority: true,
       interfaceReviewReady: false,
       observedWasmVerified: false,
@@ -82,7 +82,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     });
     expect(canonicalCppCuteBrowserRuntimeAbiManifestBytes(prepared)).toEqual(resource);
     const record = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(prepared);
-    expect(record.manifest.version).toEqual({ major: 1, minor: 3 });
+    expect(record.manifest.version).toEqual({ major: 1, minor: 4 });
     expect(record.manifest.body.wasm.cAbiVersion).toBe(65_537);
     expect(await deriveCppCuteBrowserRuntimeAbiManifestId(record.manifest.body)).toBe(
       CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
@@ -350,14 +350,18 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
         wasmResults: ["i32"],
       })]);
     expect(wasm.supportExports).toMatchObject({
-      status: "function-exports-reviewed-structure-pending",
+      status: "independently-reviewed-hash-pinned",
       functionAllowlistSha256:
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256,
       exactGlobalAllowlist: [],
-      exactTableAllowlist: [],
+      exactTableAllowlist: [{
+        name: "__indirect_function_table",
+        index: 0,
+        runtimeRole: "javascript-exception-dispatch-table",
+      }],
       unlistedExports: "forbidden",
       observedModuleCannotExtendAllowlist: true,
-      releaseConformance: "forbidden-until-table-and-global-structure-review",
+      releaseConformance: "allowed-only-for-exact-reviewed-support-exports",
     });
     expect(wasm.supportExports.exactFunctionAllowlist).toHaveLength(29);
     expect(wasm.supportExports.functionReview).toMatchObject({
@@ -373,9 +377,15 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     });
     expect(wasm.supportExports.exactFunctionAllowlist.some((entry) =>
       entry.name.startsWith("bg_cpp_cute_"))).toBe(false);
+    expect(wasm.supportExports.tableReview).toEqual({
+      basis: "detached-raw-wasm-inspection-and-javascript-exception-dispatch-requirement",
+      visibility: "worker-internal-not-browsergrad-c-api",
+      exactExportCount: 1,
+      runtimeRole: "javascript-exception-dispatch-table",
+    });
   });
 
-  it("bounds unresolved table, global, tag, and custom-section projections", async () => {
+  it("pins table/global projections while bounding unresolved target features", async () => {
     const prepared = await decodeCppCuteBrowserRuntimeAbiManifest(
       cppCuteBrowserRuntimeAbiManifestResourceBytes(),
     );
@@ -383,7 +393,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       .manifest.body.wasm.structuralPolicy;
 
     expect(policy).toMatchObject({
-      status: "unresolved-first-build-review-required",
+      status: "table-and-global-projections-reviewed-target-features-pending",
       releaseConformance: "forbidden-until-exact-first-build-projection-is-reviewed-and-repinned",
       tables: {
         maximumCount: 1,
@@ -391,7 +401,9 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
         imported: "forbidden",
         declaredMaximumRequired: true,
         maximumElementsCeiling: 65_536,
-        exactReviewedProjection: [],
+        exactReviewedProjection: [
+          { elementType: "funcref", minimum: 14_549, maximum: 14_549 },
+        ],
       },
       globals: {
         maximumCount: 4_096,
@@ -691,7 +703,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
   });
 
   it("rejects unsupported versions before accepting a closed contract", async () => {
-    for (const [field, value] of [["major", 2], ["minor", 4]] as const) {
+    for (const [field, value] of [["major", 2], ["minor", 5]] as const) {
       const resource = mutableResource();
       objectField(resource, "version")[field] = value;
       await expectDecodeError(

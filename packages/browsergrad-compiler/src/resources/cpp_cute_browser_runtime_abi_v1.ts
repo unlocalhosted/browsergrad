@@ -43,8 +43,8 @@ function supportExport(
  */
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
-  version: { major: 1, minor: 3 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.e74ecc5e8942a8f1acc2c8892ab20a3e61b8c1c69cfd5922857a4b5199b43283",
+  version: { major: 1, minor: 4 },
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.84e8320ae85e3f49dba5adc729fe07544aa7fcb9d0f72f18c604fc5d840d0bf2",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -87,7 +87,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
       startSection: "forbidden",
       unlistedCExports: "forbidden",
       supportExports: {
-        status: "function-exports-reviewed-structure-pending",
+        status: "independently-reviewed-hash-pinned",
         functionAllowlistSha256: "54fcf849f006f656162394c9feaeec801af059cbc7b0d61e612bcdebc6abb361",
         functionReview: {
           basis: "pinned-emscripten-runtime-sources-locked-link-flags-and-detached-raw-wasm-inspection",
@@ -100,6 +100,12 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
             { name: "module-initialization", exactFunctionCount: 1 },
             { name: "stack-runtime", exactFunctionCount: 8 },
           ],
+        },
+        tableReview: {
+          basis: "detached-raw-wasm-inspection-and-javascript-exception-dispatch-requirement",
+          visibility: "worker-internal-not-browsergrad-c-api",
+          exactExportCount: 1,
+          runtimeRole: "javascript-exception-dispatch-table",
         },
         exactFunctionAllowlist: [
           supportExport("__wasm_call_ctors", [], [], "module-initialization"),
@@ -133,13 +139,19 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
           supportExport("__set_stack_limits", ["i32", "i32"], [], "stack-runtime"),
         ],
         exactGlobalAllowlist: [],
-        exactTableAllowlist: [],
+        exactTableAllowlist: [
+          {
+            name: "__indirect_function_table",
+            index: 0,
+            runtimeRole: "javascript-exception-dispatch-table",
+          },
+        ],
         unlistedExports: "forbidden",
         observedModuleCannotExtendAllowlist: true,
-        releaseConformance: "forbidden-until-table-and-global-structure-review",
+        releaseConformance: "allowed-only-for-exact-reviewed-support-exports",
       },
       structuralPolicy: {
-        status: "unresolved-first-build-review-required",
+        status: "table-and-global-projections-reviewed-target-features-pending",
         releaseConformance: "forbidden-until-exact-first-build-projection-is-reviewed-and-repinned",
         tables: {
           maximumCount: 1,
@@ -147,7 +159,9 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
           imported: "forbidden",
           declaredMaximumRequired: true,
           maximumElementsCeiling: 65_536,
-          exactReviewedProjection: [],
+          exactReviewedProjection: [
+            { elementType: "funcref", minimum: 14_549, maximum: 14_549 },
+          ],
         },
         globals: {
           maximumCount: 4_096,

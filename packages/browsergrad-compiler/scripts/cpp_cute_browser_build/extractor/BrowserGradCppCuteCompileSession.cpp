@@ -33,7 +33,7 @@ constexpr std::string_view kContractSchema =
 constexpr std::string_view kRuntimeAbiId =
     "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1";
 constexpr std::string_view kRuntimeAbiManifestSha256 =
-    "e9678bd9df9f0904a804055a12ab1625b420b866a8e24b2f2530f349f59ebe04";
+    "4d6de469eb287dabfdc8ed4d1c057c5aef2af915a651a8d9c6eee2e9e9c57c69";
 constexpr std::string_view kSemanticAdapterManifestSha256 =
     "e5aa795c4feebd523ed72b95be03b102d497f2e0313ee9c99fadf1309cde6150";
 constexpr std::string_view kTemporalPolicyId =
