@@ -21,6 +21,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verification-boundary:
+    name: Verify JavaScript build boundary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Install Node 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Verify the JavaScript boundary outside the compiler critical path
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm --filter @unlocalhosted/browsergrad-compiler... build
+          if [[ "${{ inputs.mode }}" == 'fast-validation' ]]; then
+            pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:fast
+          else
+            pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:run
+          fi
+
   build:
     name: Locked Linux amd64 build ${{ matrix.buildOrdinal }}
     runs-on: ubuntu-24.04
@@ -44,16 +72,11 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - name: Build the JavaScript verification boundary
+      - name: Materialize the exact JavaScript runtime closure
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
           pnpm --filter @unlocalhosted/browsergrad-compiler... build
-          if [[ "${{ inputs.mode }}" == 'fast-validation' ]]; then
-            pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:fast
-          else
-            pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:run
-          fi
 
       - name: Project the diagnostic toolchain cache key
         id: toolchain-cache-key
@@ -278,7 +301,7 @@ jobs:
 
   reproducibility:
     name: Verify two clean extractor builds
-    needs: build
+    needs: [verification-boundary, build]
     if: ${{ inputs.mode == 'reproducibility' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -300,7 +323,6 @@ jobs:
           set -euo pipefail
           pnpm install --frozen-lockfile
           pnpm --filter @unlocalhosted/browsergrad-compiler... build
-          pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:run
 
       - name: Allocate private comparison root
         run: |

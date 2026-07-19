@@ -80,7 +80,7 @@ describe("Clang-Wasm evidence workflow", () => {
     );
     expect(workflow).toContain("work/build-${BG_CLANG_BUILD_ORDINAL}");
     expect(workflow).toContain("inputs/build-${BG_CLANG_BUILD_ORDINAL}");
-    expect(workflow).toContain("needs: build");
+    expect(workflow).toContain("needs: [verification-boundary, build]");
     expect(workflow).toContain("if: ${{ inputs.mode == 'reproducibility' }}");
     expect(workflow).toContain("cpp_cute_browser_build_reproducibility.mjs");
     expect(workflow).toContain("clang-wasm-reproducibility.v3.json");
@@ -100,7 +100,7 @@ describe("Clang-Wasm evidence workflow", () => {
 
   it("keeps cached feedback content-addressed and non-authoritative", () => {
     expect(workflow.match(/pnpm --filter @unlocalhosted\/browsergrad-compiler\.\.\. build/gu))
-      .toHaveLength(2);
+      .toHaveLength(3);
     expect(workflow).not.toContain("pnpm -r build");
     expect(workflow).toContain("cpp_cute_browser_toolchain_cache.mjs");
     expect(workflow).toContain(
@@ -133,6 +133,25 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain(
       "linux-amd64-${{ steps.toolchain-cache-key.outputs.compatible-legacy-cache-key }}",
     );
+  });
+
+  it("runs JavaScript verification once in parallel with every expensive build", () => {
+    expect(workflow).toContain("verification-boundary:");
+    expect(workflow).toContain("name: Verify JavaScript build boundary");
+    expect(workflow).toContain(
+      "name: Verify the JavaScript boundary outside the compiler critical path",
+    );
+    expect(workflow.match(/test:browser-clang-wasm-build-plan:fast/gu)).toHaveLength(1);
+    expect(workflow.match(/test:browser-clang-wasm-build-plan:run/gu)).toHaveLength(1);
+
+    const buildStart = workflow.indexOf("\n  build:\n");
+    const reproducibilityStart = workflow.indexOf("\n  reproducibility:\n");
+    expect(buildStart).toBeGreaterThan(0);
+    expect(reproducibilityStart).toBeGreaterThan(buildStart);
+    const buildJob = workflow.slice(buildStart, reproducibilityStart);
+    expect(buildJob).toContain("Materialize the exact JavaScript runtime closure");
+    expect(buildJob).not.toContain("test:browser-clang-wasm-build-plan:");
+    expect(buildJob).not.toContain("needs: verification-boundary");
   });
 
   it("pins every third-party workflow action to a full commit", () => {
