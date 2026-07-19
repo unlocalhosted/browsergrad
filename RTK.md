@@ -86,11 +86,13 @@ pnpm --filter @unlocalhosted/browsergrad-compiler run verify:browser-clang-wasm:
 
 It builds once, runs the no-rebuild lock check, and exercises the build-plan,
 runtime-ABI, browser-profile, and browser-asset identity chain sequentially.
-At the current 2026-07-19 checkpoint it passes 427 tests across 45 files in
-about 28 seconds end to end on Node 25. The set includes package invocation,
+At the current 2026-07-19 checkpoint it passes 431 tests across 47 files in
+the low-thirty-second range end to end on Node 25; the test phase alone is
+about 24 seconds. The set includes package invocation,
 Worker entry, production-controller lifecycle, seven-archive admission, strict
 tar/Debian normalization, collision-free source extraction, exact header-tree
-inventory/materialization, distribution-notice verification, and
+inventory/materialization, exact CUDA redistribution-index admission, the
+complete per-file header distribution review input, notice verification, and
 package-pinned two-clean-build reproducibility coverage.
 Use `test:browser-clang-wasm-build-plan` for the broader native/sanitizer
 pre-commit gate; its same-checkpoint run passed 187 tests with 9 intentional
@@ -115,15 +117,23 @@ pnpm --filter @unlocalhosted/browsergrad-compiler run materialize:browser-header
   --ubuntu-noble-libc6-dev-amd64-cross=/absolute/libc6-dev.deb \
   --ubuntu-noble-linux-libc-dev-amd64-cross=/absolute/linux-libc-dev.deb \
   --bsdtar=/usr/bin/bsdtar \
+  --cuda-redistribution-index=/absolute/private/redistrib_12.6.3.json \
   --output-root=/absolute/private-source-output \
   --pack-output-root=/absolute/private-pack-output
 ```
 
-The current exact local command completes in about 23 seconds including the
-package build. It verifies the locked WebAssembly-only Clang configuration has
-an empty generated-header set and excludes the upstream build manifest from
-the distributed pack. The exact Darwin arm64 builder is package-pinned to
-Node 25.9.0, Node's Zstandard 1.5.7 closure, and `/usr/bin/bsdtar` 3.5.3. Check
+The CUDA index and all archives must already be canonical files inside
+current-user private directories. The current direct pipeline completes in
+about 22.4 seconds; the package command additionally performs one package
+build. It verifies the locked WebAssembly-only Clang configuration has an
+empty generated-header set and excludes the upstream build manifest from the
+distributed pack. It also writes the deterministic
+`assets/browsergrad-cpp-cute/license-inventory.json` review input: every one of
+the 5,768 distributed files is bound to its exact pack identity, component,
+package notice, upstream license/copyright evidence, and CUDA index record.
+This is review input, not legal approval. The exact Darwin arm64 builder is
+package-pinned to Node 25.9.0, Node's Zstandard 1.5.7 closure, and
+`/usr/bin/bsdtar` 3.5.3. Check
 that identity before materialization with:
 
 ```sh

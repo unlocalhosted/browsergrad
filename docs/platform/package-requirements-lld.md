@@ -37,8 +37,8 @@ glibc/Linux UAPI cross-development packages. It streams and verifies all
 normalization closure: exact `/usr/bin/bsdtar` bytes/version, exact Node 25.9.0
 executable bytes, Zstandard 1.5.7, empty runtime flags, and absent
 `NODE_OPTIONS`. It uses that bounded Node decoder for Debian `data.tar.zst` and
-normalizes only the eight selected subtrees through a strict streamed tar
-parser. The parser
+normalizes only the eight selected header subtrees plus eight exact upstream
+license/copyright review files through a strict streamed tar parser. The parser
 rejects traversal, links, special files, duplicate virtual paths, malformed
 PAX metadata, invalid checksums/padding, and budget overflow. Extracted files
 use a content-addressed flat host store, so a case-insensitive macOS filesystem
@@ -53,24 +53,34 @@ rules. The pipeline verifies the exact 25,049-byte upstream CMake manifest,
 records an empty generated-file set, and omits that build-only manifest from
 the distributed pack. The resulting 5,768 files occupy 67,470,214 pack bytes
 and cover the complete configured Clang resource output, libc++, CUDA, CUTLASS,
-and the Linux sysroot. The current direct exact-source materialization completed
-locally in 22.70 seconds; the package entrypoint remains an approximately
-23-second operation. All ten distribution notices
-approved by the build lock remain exact checked-in resources. These are real
+and the Linux sysroot. The same pipeline admits the exact 49,142-byte CUDA
+12.6.3 redistribution index and writes a canonical 1,203,103-byte
+`license-inventory.json`. Its 5,768 unique file-map entries bind every
+distributed virtual path and content identity to the materialized pack,
+license component, and relevant package notice while also binding the complete
+ten-resource notice set, eight extracted upstream evidence files totaling
+250,207 bytes, and the selected CUDA index records. Two final direct runs
+produced the same review-input and pipeline identities in about 22.4 seconds.
+These are real
 source-derived, independently inspected non-release pack observations. They do
 establish the complete configured header universe under one package-reviewed
-builder identity. They do not establish independent third-party implementation
-attestation, external per-file license approval, full distribution
+builder identity and the complete engineering input for external header-file
+license review. They do not establish independent third-party implementation
+attestation, external review or approval, full distribution
 reproducibility, signed provenance, Worker execution, or release authority.
 
 The exact source plan is
-`bg.cpp.browser-header-source-plan.sha256.f4c97df4ad6e8413bf8c66d488bd12c3f175778054e5ed80e6c124e8790ceb4f`;
+`bg.cpp.browser-header-source-plan.sha256.613b74fcf41ee5a9d4d8878af219c8e9da8ba6c91f067eb074140325feac457d`;
 the seven-archive admission is
-`bg.cpp.browser-header-source-archive-admission.sha256.1b42a2b4c2729facb403195d85aab884a5640cc43de10e00143c4c0d58216392`;
+`bg.cpp.browser-header-source-archive-admission.sha256.9ef05aeebc15a47b926b289250d26c414a1eec21314bb37697ae901a768ec8f3`;
 the pinned normalization environment is
 `bg.cpp.pinned-archive-normalization-environment.sha256.d9461759522fbe616b0244ab63267854eb249f546a1b8560c7b7b0cd6b6df818`;
 and the composed observation is
-`bg.cpp.browser-header-pack-pipeline.sha256.b204eda9f2f8f7cab60396bb3e60f85a6abe422e63197a85e4b091d90f91ff3c`.
+`bg.cpp.browser-header-pack-pipeline.sha256.fbc8e39bb2bf49a5124a10bce434e121a5638d42d60ed7df6075086842a9a154`.
+The header review input is
+`bg.cpp.header-distribution-review-input.sha256.28346afa0239011e988de9cd40818b9eff6bbeeecc6e7e4bf508137697f4dc82`
+with exact file SHA-256
+`0c809a69554731e3b78acc8c0717c1c0939883b8df811637120a067e28be97b7`.
 The five output SHA-256 identities are `fd7fb977...` (configured Clang resource),
 `f795494a...` (CUDA), `4f1c39b7...` (CUTLASS), `f66f1284...` (libc++), and
 `d04a460d...` (Linux sysroot); the implementation ledger retains the complete
@@ -93,13 +103,14 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 427 tests across 45 files covering the build plan, runtime ABI,
+clean, then runs 431 tests across 47 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
 package invocation, Worker entry, production controller, exact header-tree
 inventory/materialization, seven-archive admission, strict archive
-normalization/extraction, the reviewed builder identity, and
-distribution-notice verification. The current gate remains about 28 seconds
-end to end on Node 25. Clean validation and two-build
+normalization/extraction, the reviewed builder identity, CUDA-index admission,
+the complete header distribution review input, and distribution-notice
+verification. The focused test phase is 23.55 seconds and the complete gate
+remains in the low-thirty-second range on Node 25. Clean validation and two-build
 reproducibility still restore no cache and remain intentionally more expensive.
 
 The current CMake-stable primary cache is now proved at exact source.
@@ -188,8 +199,8 @@ isolated build. Its 31,641,377-byte module has SHA-256
 passes raw review with zero mismatches. The ABI 1.8 local fast gate passes 30
 files/338 tests in 24.7 seconds on Node 25; the later controller-complete gate
 passed 34 files/381 tests in 25.26 seconds, and the current reproducibility-,
-archive-, extraction-, and header-capable gate passes 45 files/427 tests in
-about 28 seconds.
+archive-, extraction-, and header-capable gate passes 47 files/431 tests in
+the low-thirty-second range.
 
 The harness audit found strong isolation, exact-input closure, bounded logs,
 independent Wasm parsing, and separate authority tiers. It also records real
