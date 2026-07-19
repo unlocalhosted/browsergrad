@@ -12,6 +12,7 @@ export default defineConfig({
       "tests/compiler/cpp_cute_browser_assets.test.ts",
       "tests/compiler/cpp_cute_browser_emscripten_factory.test.ts",
       "tests/compiler/cpp_cute_browser_generated_factory.test.ts",
+      "tests/compiler/cpp_cute_browser_wasm_compiler.test.ts",
       "tests/compiler/cpp_cute_frontend_profile.test.ts",
     ],
     exclude: ["scripts/cpp_cute_browser_build/*_native.test.ts"],
