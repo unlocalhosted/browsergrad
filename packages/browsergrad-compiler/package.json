@@ -41,7 +41,7 @@
     "CHANGELOG.md"
   ],
   "scripts": {
-    "build": "pnpm run clean && tsc -p tsconfig.build.json",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json && node scripts/cpp_cute_browser_build/cpp_cute_browser_package_factory.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:wgsl-modules": "vitest run tests/wgsl_modules.test.ts",
