@@ -80,6 +80,14 @@ export interface PreparedCppCuteAttestationTrustStore {
   readonly keyIds: readonly string[];
 }
 
+export interface CheckedCppCutePreparedAttestationSignature {
+  readonly signatureVerified: true;
+  readonly callerSignaturePolicyMatched: true;
+  readonly trustStoreHash: string;
+  readonly keyId: string;
+  readonly builderId: string;
+}
+
 interface ImportedTrustKey {
   readonly record: CppCuteAttestationTrustKeyV1;
   readonly cryptoKey: CryptoKey;
@@ -304,6 +312,125 @@ export async function prepareCppCuteAttestationTrustStore(
   return prepared;
 }
 
+/**
+ * Verifies one P-256 signature against an already prepared, hash-pinned trust
+ * store and caller-supplied key policy. The plain result is not producer-trust
+ * authority; protocol-specific verifiers must still bind the authenticated
+ * payload and policy to a product-owned trust root.
+ */
+export async function verifyCppCutePreparedAttestationSignature(request: {
+  readonly trustStore: PreparedCppCuteAttestationTrustStore;
+  readonly expectedTrustStoreHash: string;
+  readonly allowlistedBuilderIds: readonly string[];
+  readonly builderId: string;
+  readonly keyId: string;
+  readonly signatureBase64: string;
+  readonly signingBytes: Uint8Array;
+  readonly signal?: AbortSignal;
+  readonly paths?: Readonly<{
+    trustStore: string;
+    keyId: string;
+    builderId: string;
+    signature: string;
+    signingBytes: string;
+  }>;
+}): Promise<CheckedCppCutePreparedAttestationSignature> {
+  const signal = request.signal;
+  const trustStore = request.trustStore;
+  const expectedTrustStoreHash = request.expectedTrustStoreHash;
+  const allowlistedBuilderIdInput = request.allowlistedBuilderIds;
+  const builderId = request.builderId;
+  const keyId = request.keyId;
+  const signatureBase64 = request.signatureBase64;
+  const signingByteInput = request.signingBytes;
+  const paths = request.paths ?? {
+    trustStore: "$.trustStore",
+    keyId: "$.keyId",
+    builderId: "$.builderId",
+    signature: "$.signature",
+    signingBytes: "$.signingBytes",
+  };
+  throwIfAborted(signal);
+  if (!Array.isArray(allowlistedBuilderIdInput) ||
+      allowlistedBuilderIdInput.length === 0 ||
+      allowlistedBuilderIdInput.length > 64) {
+    invalid(paths.builderId, "attestation signature policy must allowlist 1..64 builders");
+  }
+  const allowlistedBuilderIds: string[] = [];
+  for (let index = 0; index < allowlistedBuilderIdInput.length; index += 1) {
+    const allowedBuilderId = allowlistedBuilderIdInput[index];
+    if (typeof allowedBuilderId !== "string" ||
+        allowedBuilderId.length === 0 ||
+        allowedBuilderId.length > 2_048) {
+      invalid(paths.builderId, "attestation signature policy contains an invalid builder identity");
+    }
+    allowlistedBuilderIds.push(allowedBuilderId);
+  }
+  Object.freeze(allowlistedBuilderIds);
+  if (typeof signatureBase64 !== "string" ||
+      signatureBase64.length === 0 ||
+      signatureBase64.length > 512) {
+    invalid(paths.signature, "attestation signature must be nonempty bounded base64");
+  }
+  const trustStoreRecord = unwrapTrustStore(trustStore);
+  if (trustStoreRecord.trustStoreHash !== expectedTrustStoreHash) {
+    policyMismatch(paths.trustStore, "prepared trust store differs from the profile-pinned trust anchor");
+  }
+  const trustedKey = trustStoreRecord.keys.get(keyId);
+  if (trustedKey === undefined) {
+    provenanceFailure(
+      "BG-COMPILER-CPP-CUTE-PROVENANCE-UNTRUSTED-KEY",
+      paths.keyId,
+      "signature key is not present in the profile-pinned trust store",
+    );
+  }
+  if (trustedKey.record.builderId !== builderId ||
+      !allowlistedBuilderIds.includes(builderId)) {
+    policyMismatch(paths.builderId, "authenticated builder is not allowlisted for this key and profile");
+  }
+  const signature = decodeCanonicalBase64(signatureBase64, paths.signature);
+  if (signature.byteLength !== 64) {
+    invalid(paths.signature, "P-256 ECDSA signature must use 64-byte IEEE P1363 encoding");
+  }
+  if (!(signingByteInput instanceof Uint8Array) ||
+      signingByteInput.byteLength === 0 ||
+      signingByteInput.byteLength > 512 * 1024) {
+    invalid(paths.signingBytes, "attestation signing bytes must be a nonempty bounded Uint8Array");
+  }
+  const signingBytes = new Uint8Array(signingByteInput);
+  let valid: boolean;
+  try {
+    valid = await requireSubtleCrypto(paths.signature).verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      trustedKey.cryptoKey,
+      copyToArrayBuffer(signature),
+      copyToArrayBuffer(signingBytes),
+    );
+  } catch (cause) {
+    provenanceFailure(
+      "BG-COMPILER-CPP-CUTE-PROVENANCE-SIGNATURE",
+      paths.signature,
+      "attestation signature verification failed",
+      { cause },
+    );
+  }
+  if (!valid) {
+    provenanceFailure(
+      "BG-COMPILER-CPP-CUTE-PROVENANCE-SIGNATURE",
+      paths.signature,
+      "attestation signature is invalid for the exact payload",
+    );
+  }
+  throwIfAborted(signal);
+  return Object.freeze({
+    signatureVerified: true,
+    callerSignaturePolicyMatched: true,
+    trustStoreHash: trustStoreRecord.trustStoreHash,
+    keyId,
+    builderId,
+  });
+}
+
 export async function verifyCppCuteFrontendAttestation(
   value: unknown,
   request: {
@@ -322,57 +449,25 @@ export async function verifyCppCuteFrontendAttestation(
   const profile = receiptRecord.profile;
   const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
   const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(profile);
-  const trustStoreRecord = unwrapTrustStore(request.trustStore);
-  if (trustStoreRecord.trustStoreHash !== profileRecord.profile.deployment.provenance.trustStoreSha256) {
-    policyMismatch("$.trustStore", "prepared trust store differs from profile-pinned trust anchor");
-  }
   const dsseSignature = provenance.signatures[0];
   const predicate = statement.predicate;
-  const trustedKey = trustStoreRecord.keys.get(dsseSignature.keyid);
-  if (trustedKey === undefined) {
-    provenanceFailure(
-      "BG-COMPILER-CPP-CUTE-PROVENANCE-UNTRUSTED-KEY",
-      "$.signatures[0].keyid",
-      "signature key is not present in the profile-pinned trust store",
-    );
-  }
-  const signature = decodeCanonicalBase64(dsseSignature.sig, "$.signatures[0].sig");
-  // P1363 wire shape is fixed; signatures never enter semantic identity, so low-S canonicalization is unnecessary.
-  if (signature.byteLength !== 64) {
-    invalid("$.signatures[0].sig", "P-256 ECDSA signature must use 64-byte IEEE P1363 encoding");
-  }
-  let valid: boolean;
-  try {
-    valid = await requireSubtleCrypto("$.signatures[0].sig").verify(
-      { name: "ECDSA", hash: "SHA-256" },
-      trustedKey.cryptoKey,
-      copyToArrayBuffer(signature),
-      copyToArrayBuffer(dsseSigningBytes(provenance.payloadType, payloadBytes)),
-    );
-  } catch (cause) {
-    provenanceFailure(
-      "BG-COMPILER-CPP-CUTE-PROVENANCE-SIGNATURE",
-      "$.signatures[0].sig",
-      "attestation signature verification failed",
-      { cause },
-    );
-  }
-  if (!valid) {
-    provenanceFailure(
-      "BG-COMPILER-CPP-CUTE-PROVENANCE-SIGNATURE",
-      "$.signatures[0].sig",
-      "DSSE signature is invalid for the exact canonical in-toto payload",
-    );
-  }
-  throwIfAborted(request.signal);
-  if (trustedKey.record.builderId !== predicate.builderId ||
-      !profileRecord.profile.deployment.provenance.builderIds.includes(predicate.builderId)) {
-    provenanceFailure(
-      "BG-COMPILER-CPP-CUTE-PROVENANCE-POLICY-MISMATCH",
-      "$.payload.predicate.builderId",
-      "authenticated builder is not allowlisted for this key and prepared profile",
-    );
-  }
+  const signatureBinding = await verifyCppCutePreparedAttestationSignature({
+    trustStore: request.trustStore,
+    expectedTrustStoreHash: profileRecord.profile.deployment.provenance.trustStoreSha256,
+    allowlistedBuilderIds: profileRecord.profile.deployment.provenance.builderIds,
+    builderId: predicate.builderId,
+    keyId: dsseSignature.keyid,
+    signatureBase64: dsseSignature.sig,
+    signingBytes: dsseSigningBytes(provenance.payloadType, payloadBytes),
+    ...(request.signal === undefined ? {} : { signal: request.signal }),
+    paths: {
+      trustStore: "$.trustStore",
+      keyId: "$.signatures[0].keyid",
+      builderId: "$.payload.predicate.builderId",
+      signature: "$.signatures[0].sig",
+      signingBytes: "$.payload",
+    },
+  });
   await verifyStatementBindings(statement, receipt, receiptRecord, artifactRecord, profileRecord);
   throwIfAborted(request.signal);
   const statementHash = await hashCanonicalJson({
@@ -382,7 +477,7 @@ export async function verifyCppCuteFrontendAttestation(
   const evidenceHash = await hashCanonicalJson({
     domain: "browsergrad.compiler.cpp-cute.aot-attestation-evidence.v3",
     statementHash,
-    trustStoreHash: trustStoreRecord.trustStoreHash,
+    trustStoreHash: signatureBinding.trustStoreHash,
     keyId: dsseSignature.keyid,
     builderId: predicate.builderId,
     receiptId: receipt.receiptId,
@@ -407,7 +502,7 @@ export async function verifyCppCuteFrontendAttestation(
     executionPlanSha256: receipt.executionPlanSha256,
     executionEnvironmentManifestSha256: receipt.executionEnvironmentManifestSha256,
     profileHash: predicate.artifact.profileHash,
-    trustStoreHash: trustStoreRecord.trustStoreHash,
+    trustStoreHash: signatureBinding.trustStoreHash,
     declaredSourceRepository: predicate.declaredSource.repository,
     declaredSourceRevision: predicate.declaredSource.revision,
   }) as VerifiedCppCuteFrontendAttestation;
@@ -419,7 +514,7 @@ export async function verifyCppCuteFrontendAttestation(
     profile,
     statementHash,
     evidenceHash,
-    trustStoreHash: trustStoreRecord.trustStoreHash,
+    trustStoreHash: signatureBinding.trustStoreHash,
   }));
   return verified;
 }

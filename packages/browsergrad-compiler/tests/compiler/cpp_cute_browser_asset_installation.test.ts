@@ -30,6 +30,7 @@ import {
   CPP_CUTE_BROWSER_ASSET_MANIFEST_MAJOR,
   CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR,
   CPP_CUTE_BROWSER_ASSET_MANIFEST_SCHEMA,
+  CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE,
   cppCuteBrowserSourceAbi,
   deriveCppCuteBrowserAssetManifestId,
   deriveCppCuteBrowserAssetSetSha256,
@@ -67,6 +68,11 @@ import { createCppCuteBrowserProfileInput } from "./support/cpp_cute_frontend_fi
 
 const ORIGIN = "https://assets.example.test";
 const BUILD_SUBJECT_ID = `bg.cpp.browser-build-subject.sha256.${"9".repeat(64)}`;
+const BUILD_PROVENANCE_POLICY = {
+  predicateType: CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE,
+  trustStoreSha256: "d".repeat(64),
+  builderIds: ["https://builders.browsergrad.dev/cpp-cute-browser-test"],
+} as const;
 
 interface Environment {
   readonly manifest: PreparedCppCuteBrowserAssetManifest;
@@ -294,6 +300,7 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
     sourceAbiSha256,
     dependencyIds,
     buildSubjectIds: [BUILD_SUBJECT_ID],
+    buildProvenancePolicy: BUILD_PROVENANCE_POLICY,
     mountedVirtualRoots,
     assets,
   });
@@ -312,6 +319,7 @@ async function createEnvironment(options: EnvironmentOptions = {}): Promise<Envi
     assetSetSha256,
     dependencyIds,
     buildSubjectIds: [BUILD_SUBJECT_ID],
+    buildProvenancePolicy: BUILD_PROVENANCE_POLICY,
     mountedVirtualRoots,
     assets,
     totals: {

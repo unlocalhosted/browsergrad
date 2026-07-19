@@ -250,7 +250,7 @@ export interface CppCuteFrontendBrowserDeploymentProfile extends JsonObject {
   readonly contractId: "browsergrad.compiler.cpp-cute.browser-worker@1";
   /** Hash of the exact content-addressed browser asset identity projection. */
   readonly assetSetSha256: string;
-  /** Hash of release-verified build evidence for every member of the asset set. */
+  /** Historical wire name; this binds the exact build-input lock resource, not verified provenance. */
   readonly buildProvenanceLockSha256: string;
   readonly extractor: CppCuteFrontendExtractorProfile;
   readonly worker: CppCuteFrontendBrowserWorkerProfile;

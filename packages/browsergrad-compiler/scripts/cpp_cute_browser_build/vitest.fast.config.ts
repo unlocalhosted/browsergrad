@@ -6,6 +6,7 @@ export default defineConfig({
     globals: false,
     include: [
       "scripts/cpp_cute_browser_build/*.test.ts",
+      "tests/compiler/cpp_cute_browser_build_provenance.test.ts",
       "tests/compiler/cpp_cute_browser_build_provenance_syntax.test.ts",
       "tests/compiler/cpp_cute_browser_build_lock.test.ts",
       "tests/compiler/cpp_cute_browser_runtime_abi.test.ts",

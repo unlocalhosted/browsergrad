@@ -14,6 +14,7 @@ import {
   type WireU64,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
+  CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE,
   unwrapPreparedCppCuteBrowserAssetManifest,
   type CppCuteBrowserAssetV1,
   type PreparedCppCuteBrowserAssetManifest,
@@ -26,9 +27,7 @@ import {
   inspectVerifiedCppCuteBrowserWorkerBundle,
   type VerifiedCppCuteBrowserWorkerBundle,
 } from "./cpp_cute_browser_worker_bundle.js";
-
-export const CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE =
-  "https://browsergrad.dev/provenance/cpp-cute-browser-build/v1";
+export { CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE } from "./cpp_cute_browser_assets.js";
 export const CPP_CUTE_BROWSER_BUILD_TYPE =
   "https://browsergrad.dev/build-types/cpp-cute-browser-assets/v1";
 export const CPP_CUTE_BROWSER_BUILD_DSSE_PAYLOAD_TYPE = "application/vnd.in-toto+json";

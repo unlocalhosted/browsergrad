@@ -18,6 +18,7 @@ import {
   CPP_CUTE_BROWSER_ASSET_MANIFEST_MAJOR,
   CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR,
   CPP_CUTE_BROWSER_ASSET_MANIFEST_SCHEMA,
+  CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE,
   cppCuteBrowserSourceAbi,
   deriveCppCuteBrowserAssetManifestId,
   deriveCppCuteBrowserAssetSetSha256,
@@ -94,6 +95,11 @@ import { createCppCuteBrowserProfileInput } from "./support/cpp_cute_frontend_fi
 
 const ORIGIN = "https://vfs.example.test";
 const BUILD_SUBJECT_ID = `bg.cpp.browser-build-subject.sha256.${"9".repeat(64)}`;
+const BUILD_PROVENANCE_POLICY = {
+  predicateType: CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE,
+  trustStoreSha256: "d".repeat(64),
+  builderIds: ["https://builders.browsergrad.dev/cpp-cute-browser-test"],
+} as const;
 const MAIN_PATH = "/workspace/src/main.cu";
 const HEADER_PATH = "/workspace/src/project.hpp";
 const MAIN_BYTES = new TextEncoder().encode('#include "project.hpp"\nauto layout = make_layout(Int<2>{});\n');
@@ -1062,6 +1068,7 @@ async function createAuthorityFixture(
     sourceAbiSha256,
     dependencyIds,
     buildSubjectIds: [BUILD_SUBJECT_ID],
+    buildProvenancePolicy: BUILD_PROVENANCE_POLICY,
     mountedVirtualRoots,
     assets,
   });
@@ -1112,6 +1119,7 @@ async function prepareManifest(
     assetSetSha256,
     dependencyIds: profileRecord.toolchain.dependencies.map((entry) => entry.dependencyId),
     buildSubjectIds: [BUILD_SUBJECT_ID],
+    buildProvenancePolicy: BUILD_PROVENANCE_POLICY,
     mountedVirtualRoots,
     assets,
     totals: {

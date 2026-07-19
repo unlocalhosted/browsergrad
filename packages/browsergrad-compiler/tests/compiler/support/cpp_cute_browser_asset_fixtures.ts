@@ -7,6 +7,7 @@ import {
   CPP_CUTE_BROWSER_ASSET_MANIFEST_MAJOR,
   CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR,
   CPP_CUTE_BROWSER_ASSET_MANIFEST_SCHEMA,
+  CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE,
   cppCuteBrowserSourceAbi,
   deriveCppCuteBrowserAssetSetSha256,
   deriveCppCuteBrowserAssetManifestId,
@@ -37,6 +38,7 @@ import {
 } from "./cpp_cute_frontend_fixtures.js";
 
 const BUILD_SUBJECT_ID = `bg.cpp.browser-build-subject.sha256.${"9".repeat(64)}`;
+const BUILD_PROVENANCE_BUILDER_ID = "https://builders.browsergrad.dev/cpp-cute-browser-test";
 const SEMANTIC_ADAPTER_RESOURCE_BYTE_LENGTH =
   cppCuteSemanticAdapterManifestResourceBytes().byteLength;
 const DIAGNOSTIC_NORMALIZATION_RESOURCE_BYTE_LENGTH =
@@ -50,6 +52,8 @@ export interface CppCuteBrowserAssetFixture {
 
 export interface CppCuteBrowserAssetFixtureOptions {
   readonly profile?: CppCuteBrowserProfileFixtureOptions;
+  readonly buildSubjectId?: string;
+  readonly buildProvenanceTrustStoreSha256?: string;
   readonly assetLimits?: Partial<CppCuteFrontendBrowserAssetLimits>;
   readonly packOverrides?: Readonly<Record<string, CppCuteBrowserPackAssetFixtureOverride>>;
 }
@@ -73,6 +77,12 @@ export async function createCppCuteBrowserAssetFixture(
     domain: "browsergrad.compiler.cpp-cute.browser-source-abi.v1",
     sourceAbi,
   });
+  const buildSubjectId = options.buildSubjectId ?? BUILD_SUBJECT_ID;
+  const buildProvenancePolicy = {
+    predicateType: CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE,
+    trustStoreSha256: options.buildProvenanceTrustStoreSha256 ?? "d".repeat(64),
+    builderIds: [BUILD_PROVENANCE_BUILDER_ID],
+  } as const;
   const assets: CppCuteBrowserAssetV1[] = [
     {
       assetId: "adapter",
@@ -84,7 +94,7 @@ export async function createCppCuteBrowserAssetFixture(
       unpackedByteLength: wire(SEMANTIC_ADAPTER_RESOURCE_BYTE_LENGTH),
       mediaType: "application/vnd.browsergrad.cpp-cute.semantic-adapter.v1+json",
       compression: "identity",
-      buildSubjectId: BUILD_SUBJECT_ID,
+      buildSubjectId,
     },
     {
       assetId: "clang-wasm",
@@ -96,7 +106,7 @@ export async function createCppCuteBrowserAssetFixture(
       unpackedByteLength: wire(4_096),
       mediaType: "application/wasm",
       compression: "identity",
-      buildSubjectId: BUILD_SUBJECT_ID,
+      buildSubjectId,
       sourceAbiSha256,
     },
     {
@@ -109,7 +119,7 @@ export async function createCppCuteBrowserAssetFixture(
       unpackedByteLength: wire(DIAGNOSTIC_NORMALIZATION_RESOURCE_BYTE_LENGTH),
       mediaType: "application/vnd.browsergrad.cpp-cute.diagnostic-normalization.v1+json",
       compression: "identity",
-      buildSubjectId: BUILD_SUBJECT_ID,
+      buildSubjectId,
     },
     {
       assetId: "runtime-abi",
@@ -121,11 +131,11 @@ export async function createCppCuteBrowserAssetFixture(
       unpackedByteLength: wire(cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength),
       mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
       compression: "identity",
-      buildSubjectId: BUILD_SUBJECT_ID,
+      buildSubjectId,
       runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
       runtimeAbiManifestId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
     },
-    compilerResourceAsset(provisionalRecord, BUILD_SUBJECT_ID, options.packOverrides),
+    compilerResourceAsset(provisionalRecord, buildSubjectId, options.packOverrides),
     ...provisionalRecord.virtualFileSystem.includeRoots
       .filter((root) => root.owner.kind === "dependency")
       .map((root, index): CppCuteBrowserAssetV1 => {
@@ -143,7 +153,7 @@ export async function createCppCuteBrowserAssetFixture(
           fileContentByteLength: wire(override?.fileContentByteLength ?? 16_000 + index),
           mediaType: "application/vnd.browsergrad.vfs-pack.v1",
           compression: "identity",
-          buildSubjectId: BUILD_SUBJECT_ID,
+          buildSubjectId,
           dependencyId: root.owner.dependencyId,
           includeRootId: root.includeRootId,
           mountedVirtualRoot: root.virtualPath,
@@ -166,7 +176,8 @@ export async function createCppCuteBrowserAssetFixture(
   const assetSetSha256 = await deriveCppCuteBrowserAssetSetSha256({
     sourceAbiSha256,
     dependencyIds: provisionalRecord.toolchain.dependencies.map((dependency) => dependency.dependencyId),
-    buildSubjectIds: [BUILD_SUBJECT_ID],
+    buildSubjectIds: [buildSubjectId],
+    buildProvenancePolicy,
     mountedVirtualRoots,
     assets,
   });
@@ -189,7 +200,8 @@ export async function createCppCuteBrowserAssetFixture(
     sourceAbiSha256,
     assetSetSha256,
     dependencyIds: profileRecord.toolchain.dependencies.map((dependency) => dependency.dependencyId),
-    buildSubjectIds: [BUILD_SUBJECT_ID],
+    buildSubjectIds: [buildSubjectId],
+    buildProvenancePolicy,
     mountedVirtualRoots,
     assets,
     totals: {

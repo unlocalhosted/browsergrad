@@ -76,12 +76,12 @@ describe("C++/CuTe browser-local asset manifest", () => {
       minor: CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR,
     });
     expect(fixture.input.manifestId).toBe(
-      "bg.cpp.browser-assets.sha256.a98e7c2c56de7edc486fdac10a0162374254a510f47288eceb8153a8800bfe17",
+      "bg.cpp.browser-assets.sha256.05a9ee8868ca1a4b697d344d2f66cdc050ae191a4e3423aad5b667b76e84953e",
     );
-    expect(first.assetSetSha256).toBe("a2b055b418bef301502d6d2eedead44f7cf6bc2dbf7a1532355ec32a74f36c6a");
+    expect(first.assetSetSha256).toBe("cd5a2a7c91fdb4009ab8f9b28391db99086e06a84944089a480885e0d1b6a24f");
     expect(first.assetCount).toBe(9);
-    expect(first.manifestSha256).toBe("a74471670867ab31f191930b7078b159173929e719c0d2178e4f869740586331");
-    expect(first.manifestByteLength).toBe("11118");
+    expect(first.manifestSha256).toBe("d596172169e142cadc854d964b86fd37b864eea9ea30a84647252a943f90cf53");
+    expect(first.manifestByteLength).toBe("11381");
     expect(Object.isFrozen(first)).toBe(true);
     const record = unwrapPreparedCppCuteBrowserAssetManifest(first);
     expect(record.profile).toBe(fixture.profile);
@@ -417,6 +417,47 @@ describe("C++/CuTe browser-local asset manifest", () => {
     await rederiveAssetSetAndResign(buildSubject);
     await expectAssetError(
       prepareCppCuteBrowserAssetManifest(buildSubject, fixture.profile),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-HASH-MISMATCH",
+      "$.body.assetSetSha256",
+    );
+  });
+
+  it("closes the profile-indirect build provenance trust policy", async () => {
+    const fixture = await createCppCuteBrowserAssetFixture();
+
+    const trustStore = cloneCppCuteBrowserAssetInput(fixture.input);
+    const trustPolicy = (body(trustStore)["buildProvenancePolicy"] as Record<string, unknown>);
+    trustPolicy["trustStoreSha256"] = "not-a-digest";
+    await expectAssetError(
+      prepareCppCuteBrowserAssetManifest(trustStore, fixture.profile),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-INVALID",
+      "$.body.buildProvenancePolicy.trustStoreSha256",
+    );
+
+    const noBuilders = cloneCppCuteBrowserAssetInput(fixture.input);
+    const noBuilderPolicy = (body(noBuilders)["buildProvenancePolicy"] as Record<string, unknown>);
+    noBuilderPolicy["builderIds"] = [];
+    await expectAssetError(
+      prepareCppCuteBrowserAssetManifest(noBuilders, fixture.profile),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-INVALID",
+      "$.body.buildProvenancePolicy.builderIds",
+    );
+
+    const noncanonicalBuilder = cloneCppCuteBrowserAssetInput(fixture.input);
+    const builderPolicy = (body(noncanonicalBuilder)["buildProvenancePolicy"] as Record<string, unknown>);
+    builderPolicy["builderIds"] = ["https://builders.browsergrad.dev/cpp-cute-browser-test?key=1"];
+    await expectAssetError(
+      prepareCppCuteBrowserAssetManifest(noncanonicalBuilder, fixture.profile),
+      "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-INVALID",
+      "$.body.buildProvenancePolicy.builderIds[0]",
+    );
+
+    const policyDrift = cloneCppCuteBrowserAssetInput(fixture.input);
+    const driftPolicy = (body(policyDrift)["buildProvenancePolicy"] as Record<string, unknown>);
+    driftPolicy["trustStoreSha256"] = "a".repeat(64);
+    await rederiveAssetSetAndResign(policyDrift);
+    await expectAssetError(
+      prepareCppCuteBrowserAssetManifest(policyDrift, fixture.profile),
       "BG-COMPILER-CPP-CUTE-BROWSER-ASSETS-HASH-MISMATCH",
       "$.body.assetSetSha256",
     );

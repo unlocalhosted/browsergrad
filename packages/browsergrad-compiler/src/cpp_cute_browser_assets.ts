@@ -46,8 +46,10 @@ import {
 export const CPP_CUTE_BROWSER_ASSET_MANIFEST_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-asset-manifest";
 export const CPP_CUTE_BROWSER_ASSET_MANIFEST_MAJOR = 1;
-export const CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR = 3;
+export const CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR = 4;
 export const CPP_CUTE_BROWSER_ASSET_MANIFEST_BYTE_LIMIT = 256 * 1024;
+export const CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE =
+  "https://browsergrad.dev/provenance/cpp-cute-browser-build/v1";
 
 const MANIFEST_ID = /^bg\.cpp\.browser-assets\.sha256\.[0-9a-f]{64}$/u;
 const ASSET_ID = /^[a-z][a-z0-9._-]*$/u;
@@ -101,6 +103,12 @@ export interface CppCuteBrowserAssetTotalsV1 extends JsonObject {
   readonly compressedByteLength: WireU64;
   readonly unpackedByteLength: WireU64;
   readonly fileContentByteLength: WireU64;
+}
+
+export interface CppCuteBrowserBuildProvenancePolicyV1 extends JsonObject {
+  readonly predicateType: typeof CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE;
+  readonly trustStoreSha256: string;
+  readonly builderIds: readonly string[];
 }
 
 interface CppCuteBrowserAssetCommonV1 extends JsonObject {
@@ -164,6 +172,7 @@ export interface CppCuteBrowserAssetManifestBodyV1 extends JsonObject {
   readonly assetSetSha256: string;
   readonly dependencyIds: readonly string[];
   readonly buildSubjectIds: readonly string[];
+  readonly buildProvenancePolicy: CppCuteBrowserBuildProvenancePolicyV1;
   readonly mountedVirtualRoots: readonly string[];
   readonly assets: readonly CppCuteBrowserAssetV1[];
   readonly totals: CppCuteBrowserAssetTotalsV1;
@@ -375,6 +384,7 @@ export async function deriveCppCuteBrowserAssetSetSha256(
     | "sourceAbiSha256"
     | "dependencyIds"
     | "buildSubjectIds"
+    | "buildProvenancePolicy"
     | "mountedVirtualRoots"
     | "assets"
   >,
@@ -390,6 +400,7 @@ export async function deriveCppCuteBrowserAssetSetSha256(
     sourceAbiSha256: body.sourceAbiSha256,
     dependencyIds: body.dependencyIds,
     buildSubjectIds: body.buildSubjectIds,
+    buildProvenancePolicy: body.buildProvenancePolicy,
     mountedVirtualRoots: body.mountedVirtualRoots,
     assets: body.assets,
   }, "$.body.assetSetSha256");
@@ -468,6 +479,7 @@ function parseBody(
     "assetSetSha256",
     "dependencyIds",
     "buildSubjectIds",
+    "buildProvenancePolicy",
     "mountedVirtualRoots",
     "assets",
     "totals",
@@ -492,6 +504,10 @@ function parseBody(
     BUILD_SUBJECT_ID,
   );
   if (buildSubjectIds.length === 0) invalid(`${path}.buildSubjectIds`, "at least one build subject ID is required");
+  const buildProvenancePolicy = parseBuildProvenancePolicy(
+    field(object, "buildProvenancePolicy", path),
+    `${path}.buildProvenancePolicy`,
+  );
   const mountedVirtualRoots = sortedStringArray(
     field(object, "mountedVirtualRoots", path),
     `${path}.mountedVirtualRoots`,
@@ -523,9 +539,33 @@ function parseBody(
     assetSetSha256,
     dependencyIds,
     buildSubjectIds,
+    buildProvenancePolicy,
     mountedVirtualRoots,
     assets,
     totals,
+  };
+}
+
+function parseBuildProvenancePolicy(
+  value: JsonValue,
+  path: string,
+): CppCuteBrowserBuildProvenancePolicyV1 {
+  const object = closedObject(value, ["predicateType", "trustStoreSha256", "builderIds"], path, true);
+  exactString(
+    field(object, "predicateType", path),
+    CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE,
+    `${path}.predicateType`,
+  );
+  const builderIds = sortedStringArray(field(object, "builderIds", path), `${path}.builderIds`);
+  if (builderIds.length === 0 || builderIds.length > 64) {
+    invalid(`${path}.builderIds`, "browser build provenance policy requires 1..64 builders");
+  }
+  builderIds.forEach((builderId, index) =>
+    canonicalHttpsIdentifier(builderId, `${path}.builderIds[${index}]`));
+  return {
+    predicateType: CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE,
+    trustStoreSha256: sha256(field(object, "trustStoreSha256", path), `${path}.trustStoreSha256`),
+    builderIds,
   };
 }
 
@@ -1014,6 +1054,20 @@ function sameOriginRootRelativeUrl(value: JsonValue, path: string): string {
     invalid(path, "URL must be a normalized same-origin root-relative path without authority, query, or fragment");
   }
   return result;
+}
+
+function canonicalHttpsIdentifier(value: string, path: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    invalid(path, "builder identity must be a canonical HTTPS URL");
+  }
+  if (parsed.protocol !== "https:" || parsed.username !== "" || parsed.password !== "" ||
+      parsed.search !== "" || parsed.hash !== "" || parsed.pathname === "/" ||
+      parsed.pathname.endsWith("/") || `${parsed.origin}${parsed.pathname}` !== value) {
+    invalid(path, "builder identity must be a canonical credential-free HTTPS URL without query, fragment, or trailing slash");
+  }
 }
 
 function virtualPathValue(value: JsonValue, path: string): string {

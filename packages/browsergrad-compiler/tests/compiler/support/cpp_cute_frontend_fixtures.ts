@@ -77,6 +77,8 @@ export interface CppCuteBrowserProfileFixtureOptions extends CppCuteProfileFixtu
   readonly assetSetSha256?: string;
   readonly buildProvenanceLockSha256?: string;
   readonly runtimeAbiManifestSha256?: string;
+  readonly workerModuleSha256?: string;
+  readonly workerModuleByteLength?: number;
 }
 
 export function createCppCuteProfileInput(
@@ -290,8 +292,8 @@ export function createCppCuteBrowserProfileInput(
       worker: {
         protocolId: "browsergrad.compiler.cpp-cute.browser-worker@1",
         buildId: "browsergrad-cpp-cute-browser-worker-0.1.0",
-        moduleSha256: "9".repeat(64),
-        moduleByteLength: 65_536,
+        moduleSha256: options.workerModuleSha256 ?? "9".repeat(64),
+        moduleByteLength: options.workerModuleByteLength ?? 65_536,
         moduleFormat: "self-contained-es-module",
         construction: "host-verified-blob-url",
         isolation: "dedicated-worker",

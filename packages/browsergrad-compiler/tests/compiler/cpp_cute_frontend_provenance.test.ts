@@ -5,6 +5,7 @@ import {
 } from "../../src/cpp_cute_frontend_authorization.js";
 import {
   unwrapVerifiedCppCuteFrontendAttestation,
+  verifyCppCutePreparedAttestationSignature,
   verifyCppCuteFrontendAttestation,
 } from "../../src/cpp_cute_frontend_provenance.js";
 import {
@@ -17,6 +18,7 @@ import {
 import {
   CPP_CUTE_FIXTURE_SOURCE_REPOSITORY,
   CPP_CUTE_FIXTURE_SOURCE_REVISION,
+  CPP_CUTE_FIXTURE_BUILDER_ID,
 } from "./support/cpp_cute_frontend_fixtures.js";
 
 describe("C++/CuTe AOT provenance v3", () => {
@@ -70,6 +72,31 @@ describe("C++/CuTe AOT provenance v3", () => {
       receipt: fixture.receiptResource,
       trustStore: fixture.trustStore,
     })).rejects.toBeDefined();
+  });
+
+  it("bounds direct signature-check inputs before decoding or copying them", async () => {
+    const fixture = await createCppCuteProvenanceFixture();
+    const request = {
+      trustStore: fixture.trustStore,
+      expectedTrustStoreHash: fixture.trustStore.trustStoreHash,
+      allowlistedBuilderIds: [CPP_CUTE_FIXTURE_BUILDER_ID],
+      builderId: CPP_CUTE_FIXTURE_BUILDER_ID,
+      keyId: fixture.keyId,
+      signatureBase64: "A".repeat(513),
+      signingBytes: new Uint8Array([1]),
+    } as const;
+    await expect(verifyCppCutePreparedAttestationSignature(request)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-PROVENANCE-INVALID",
+      path: "$.signature",
+    });
+    await expect(verifyCppCutePreparedAttestationSignature({
+      ...request,
+      allowlistedBuilderIds: Array.from({ length: 65 }, () => CPP_CUTE_FIXTURE_BUILDER_ID),
+      signatureBase64: fixture.provenance.signatures[0].sig,
+    })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-PROVENANCE-INVALID",
+      path: "$.builderId",
+    });
   });
 
   it("rejects authorization cross-wired to another request binding", async () => {
