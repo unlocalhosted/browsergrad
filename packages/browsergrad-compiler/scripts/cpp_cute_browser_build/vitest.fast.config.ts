@@ -13,6 +13,7 @@ export default defineConfig({
       "tests/compiler/cpp_cute_browser_emscripten_factory.test.ts",
       "tests/compiler/cpp_cute_browser_frontend_work_metrics.test.ts",
       "tests/compiler/cpp_cute_browser_generated_factory.test.ts",
+      "tests/compiler/cpp_cute_browser_header_distribution_reproducibility.test.ts",
       "tests/compiler/cpp_cute_browser_wasm_compiler.test.ts",
       "tests/compiler/cpp_cute_browser_worker_bundle.test.ts",
       "tests/compiler/cpp_cute_browser_worker_controller.test.ts",
