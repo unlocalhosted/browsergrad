@@ -112,6 +112,7 @@ import {
   unwrapPreparedCppCuteBrowserRuntimeAbiManifest,
 } from "../../src/cpp_cute_browser_runtime_abi.js";
 import {
+  buildCanonicalCppCuteBrowserWorkerResultControl,
   canonicalCppCuteBrowserWorkerProfileRegionBytes,
   canonicalCppCuteBrowserWorkerRequestRegionBytes,
   copyCppCuteBrowserWorkerSourceSnapshots,
@@ -122,6 +123,13 @@ import {
   type CppCuteBrowserWorkerResultV1,
   type PreparedCppCuteBrowserWorkerInvocation,
 } from "../../src/cpp_cute_browser_worker_protocol.js";
+import {
+  CPP_CUTE_BROWSER_WASM_COMPILER_PROTOCOL,
+  type CppCuteBrowserWasmCompilerExecution,
+} from "../../src/cpp_cute_browser_wasm_compiler.js";
+import {
+  CPP_CUTE_BROWSER_FRONTEND_WORK_METRICS_PROTOCOL,
+} from "../../src/cpp_cute_browser_frontend_work_metrics.js";
 import {
   deriveCppCuteFrontendEntryRequestId,
   deriveCppCuteFrontendRequestHash,
@@ -181,6 +189,34 @@ interface ArtifactFixture {
 }
 
 describe("C++/CuTe browser Worker positive framing", () => {
+  it("builds canonical control from the exact local execution projection", async () => {
+    const environment = await createEnvironment("accepted");
+    const expected = await createResult(
+      environment.invocation,
+      environment.accepted,
+      environment.profile,
+    );
+    const execution = await createExecution(
+      environment.invocation,
+      environment.accepted,
+      expected,
+    );
+
+    const controlBytes = await buildCanonicalCppCuteBrowserWorkerResultControl(
+      environment.invocation,
+      execution,
+    );
+    expect(controlBytes).toEqual(canonicalJsonBytes(expected));
+    await expect(validateCppCuteBrowserWorkerResultFrame(
+      environment.invocation,
+      controlBytes,
+      environment.accepted.bytes,
+    )).resolves.toMatchObject({
+      outcome: "accepted",
+      artifactId: environment.accepted.artifact.artifactId,
+    });
+  });
+
   it("validates canonical accepted and rejected caller-frame protocol consistency", async () => {
     const acceptedEnvironment = await createEnvironment("accepted");
     const acceptedResult = await createResult(
@@ -951,6 +987,110 @@ async function createResult(
       resultBytesCopied: fixture.artifact.artifactByteLength,
     },
     outcome: fixture.artifact.outcome,
+  };
+}
+
+async function createExecution(
+  invocation: PreparedCppCuteBrowserWorkerInvocation,
+  fixture: ArtifactFixture,
+  claimed: CppCuteBrowserWorkerResultV1,
+): Promise<CppCuteBrowserWasmCompilerExecution> {
+  const invocationRecord = unwrapPreparedCppCuteBrowserWorkerInvocation(invocation).invocation;
+  const vfs = claimed.resources.vfs;
+  const zeroAllocator = {
+    currentLiveGlobalRequestedByteLength: wire(0),
+    peakLiveGlobalRequestedByteLength: wire(0),
+    cumulativeGlobalAllocatedRequestedByteLength: wire(0),
+    cumulativeGlobalFreedRequestedByteLength: wire(0),
+    successfulAllocationCount: wire(0),
+    freeCount: wire(0),
+    failedAllocationCount: wire(0),
+  };
+  const runtimeSample = (pages: WireU64) => ({
+    wasmMemory: {
+      source: "webassembly-memory-buffer-byte-length" as const,
+      confidence: "exact" as const,
+      pageByteLength: 65_536 as const,
+      pages,
+      linearMemoryCapacityByteLength: wire(wireIntegerToBigInt(pages) * 65_536n),
+    },
+    allocator: {
+      source: "wasm-memory-allocator-metrics-record-v1" as const,
+      confidence: "record-exact-unverified-producer" as const,
+      values: zeroAllocator,
+    },
+  });
+  return {
+    authority: "wasm-c-abi-local-execution-only",
+    protocol: CPP_CUTE_BROWSER_WASM_COMPILER_PROTOCOL,
+    profileHash: invocation.profileHash,
+    wasmSha256: invocationRecord.clangWasmSha256,
+    wasmByteLength: Number(wireIntegerToBigInt(invocationRecord.clangWasmByteLength)),
+    inputFrameByteLength: 0,
+    resultByteLength: fixture.bytes.byteLength,
+    compileStatus: { code: 0, name: "artifact-ready" },
+    artifactBytes: fixture.bytes,
+    runtime: {
+      authority: "wasm-runtime-local-observation-only",
+      profileHash: invocation.profileHash,
+      initial: runtimeSample(claimed.resources.wasmMemory.initialPages),
+      current: runtimeSample(claimed.resources.wasmMemory.finalPages),
+      peakWasmMemoryPages: claimed.resources.wasmMemory.peakPages,
+      phases: [],
+      workerExecutionObserved: false,
+      loweringAuthorityReady: false,
+    },
+    frontendWork: {
+      authority: "wasm-frontend-work-local-observation-only",
+      protocol: CPP_CUTE_BROWSER_FRONTEND_WORK_METRICS_PROTOCOL,
+      profileHash: invocation.profileHash,
+      source: "wasm-memory-frontend-work-metrics-record-v1",
+      confidence: "record-exact-unverified-producer",
+      generation: wire(1),
+      values: {
+        ...claimed.resources.frontendWork,
+        completedSemanticPasses: wire(2),
+      },
+      resetConfirmed: true,
+      workerExecutionObserved: false,
+      loweringAuthorityReady: false,
+    },
+    vfs: {
+      installationId: invocationRecord.vfsInstallationId,
+      requestId: invocation.requestId,
+      profileHash: invocation.profileHash,
+      state: "disposed",
+      counters: {
+        totalSessionCalls: vfs.totalSessionCalls,
+        statusCalls: vfs.statusCalls,
+        openCalls: vfs.openCalls,
+        readCalls: vfs.readCalls,
+        closeCalls: vfs.closeCalls,
+        directoryCountCalls: vfs.directoryCountCalls,
+        directoryEntryCalls: vfs.directoryEntryCalls,
+        currentLiveHandles: wire(0),
+        peakLiveHandles: vfs.peakLiveHandles,
+        currentLiveSourceLogicalReservationByteLength: wire(0),
+        currentLiveInstalledVfsLogicalReservationByteLength: wire(0),
+        currentLiveLogicalReservationByteLength: wire(0),
+        peakLiveLogicalReservationByteLength: vfs.peakLiveLogicalReservationByteLength,
+        indexedNodes: vfs.indexedNodes,
+        indexLogicalByteLength: vfs.indexLogicalByteLength,
+        logicalOpenedSourceByteLength: vfs.logicalOpenedSourceByteLength,
+        logicalOpenedInstalledVfsByteLength: vfs.logicalOpenedInstalledVfsByteLength,
+        logicalOpenedTotalByteLength: vfs.logicalOpenedTotalByteLength,
+      },
+      openedFiles: fixture.payload.inputs.files.map((file) => ({
+        virtualPath: file.virtualPath,
+        source: file.owner.kind === "source" ? "request-source" : "installed-pack",
+        contentSha256: file.contentSha256,
+        byteLength: file.byteLength,
+      })),
+    },
+    cAbiExecutionObserved: true,
+    artifactVerificationObserved: false,
+    workerExecutionObserved: false,
+    loweringAuthorityMinted: false,
   };
 }
 

@@ -65,6 +65,9 @@ import type {
   CppCuteFrontendDiagnosticV3,
   CppCuteFrontendPayloadV3,
 } from "./cpp_cute_frontend_types.js";
+import type {
+  CppCuteBrowserWasmCompilerExecution,
+} from "./cpp_cute_browser_wasm_compiler.js";
 
 export const CPP_CUTE_BROWSER_WORKER_INVOCATION_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-worker-invocation";
@@ -87,6 +90,7 @@ const RAW_WASM_CONFORMANCE_ID = /^bg\.cpp\.browser-wasm-conformance\.sha256\.[0-
 const FRONTEND_REQUEST_ID = /^bg\.cpp\.frontend-request\.sha256\.[0-9a-f]{64}$/u;
 const ENTRY_REQUEST_ID = /^bg\.cpp\.entry-request\.sha256\.[0-9a-f]{64}$/u;
 const ARTIFACT_ID = /^bg\.artifact\.cpp-cute-frontend\.sha256\.[0-9a-f]{64}$/u;
+const UTF8_ENCODER = new TextEncoder();
 const SECURE_GET_RANDOM_VALUES = typeof globalThis.crypto?.getRandomValues === "function"
   ? globalThis.crypto.getRandomValues.bind(globalThis.crypto)
   : undefined;
@@ -700,6 +704,210 @@ export function copyCppCuteBrowserWorkerSourceSnapshots(
   invocation: PreparedCppCuteBrowserWorkerInvocation,
 ) {
   return copyPreparedCppCuteFrontendSourceSnapshots(activeStoredInvocation(invocation).request);
+}
+
+/**
+ * Builds the canonical result control from the exact local C-ABI execution
+ * projection and independently verified Artifact V3 bytes. This is a Worker-
+ * local encoding seam only; caller-side validation remains authoritative.
+ */
+export async function buildCanonicalCppCuteBrowserWorkerResultControl(
+  invocation: PreparedCppCuteBrowserWorkerInvocation,
+  execution: CppCuteBrowserWasmCompilerExecution,
+): Promise<Uint8Array> {
+  const stored = activeStoredInvocation(invocation);
+  const effectiveLimits = stored.extractionLimits;
+  const artifactVerification = stored.artifactVerification;
+  if (execution.authority !== "wasm-c-abi-local-execution-only" ||
+      execution.profileHash !== stored.profile.profileHash ||
+      execution.wasmSha256 !== stored.invocation.clangWasmSha256 ||
+      BigInt(execution.wasmByteLength) !==
+        wireIntegerToBigInt(stored.invocation.clangWasmByteLength) ||
+      execution.compileStatus.code !== 0 ||
+      execution.compileStatus.name !== "artifact-ready" ||
+      execution.cAbiExecutionObserved !== true ||
+      execution.artifactVerificationObserved !== false ||
+      execution.workerExecutionObserved !== false ||
+      execution.loweringAuthorityMinted !== false) {
+    mismatch(
+      "$.execution",
+      "local C-ABI execution differs from the prepared Worker invocation",
+    );
+  }
+  if (execution.runtime.authority !== "wasm-runtime-local-observation-only" ||
+      execution.runtime.profileHash !== stored.profile.profileHash ||
+      execution.runtime.workerExecutionObserved !== false ||
+      execution.runtime.loweringAuthorityReady !== false ||
+      execution.frontendWork.authority !==
+        "wasm-frontend-work-local-observation-only" ||
+      execution.frontendWork.source !==
+        "wasm-memory-frontend-work-metrics-record-v1" ||
+      execution.frontendWork.confidence !==
+        "record-exact-unverified-producer" ||
+      execution.frontendWork.profileHash !== stored.profile.profileHash ||
+      execution.frontendWork.workerExecutionObserved !== false ||
+      execution.frontendWork.loweringAuthorityReady !== false ||
+      execution.vfs.profileHash !== stored.profile.profileHash ||
+      execution.vfs.requestId !== stored.request.requestId ||
+      execution.vfs.state !== "disposed" ||
+      execution.vfs.counters.currentLiveHandles !== "0" ||
+      execution.vfs.counters.currentLiveSourceLogicalReservationByteLength !== "0" ||
+      execution.vfs.counters.currentLiveInstalledVfsLogicalReservationByteLength !== "0" ||
+      execution.vfs.counters.currentLiveLogicalReservationByteLength !== "0" ||
+      execution.frontendWork.resetConfirmed !== true ||
+      execution.frontendWork.values.completedSemanticPasses !== "2") {
+    mismatch(
+      "$.execution.observations",
+      "runtime, frontend-work, or VFS observation is not the exact completed invocation",
+    );
+  }
+
+  const artifactSnapshot = snapshotBytesWithinLimit(
+    execution.artifactBytes,
+    "$.execution.artifactBytes",
+    effectiveLimits.maxOutputBytes,
+  );
+  if (artifactSnapshot.byteLength !== execution.resultByteLength) {
+    mismatch(
+      "$.execution.resultByteLength",
+      "execution result length differs from the copied artifact bytes",
+    );
+  }
+  const artifactResource = await decodeCppCuteFrontendArtifact(artifactSnapshot, {
+    limits: artifactVerification.decodeLimits,
+    artifactLimits: artifactVerification.artifactLimits,
+  });
+  const canonicalArtifact = canonicalCppCuteFrontendArtifactResourceBytes(
+    artifactResource,
+    { limits: artifactVerification.decodeLimits },
+  );
+  if (!equalBytes(artifactSnapshot, canonicalArtifact)) {
+    noncanonical(
+      "$.execution.artifactBytes",
+      "execution artifact differs from canonical verified Artifact V3 bytes",
+    );
+  }
+  const artifact = unwrapVerifiedCppCuteFrontendArtifactResource(artifactResource);
+  const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
+  const payload = artifactRecord.envelope.payload;
+  await prepareCppCuteFrontendRequestBinding(stored.request, artifactResource);
+  verifyInstalledOpenedInputs(stored, artifact);
+  verifyObservedOpenedInputs(execution, payload);
+
+  const sources = payload.inputs.files.filter((file) => file.owner.kind === "source");
+  const headers = payload.inputs.files.filter((file) => file.owner.kind !== "source");
+  const runtimeVfs = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(stored.runtimeAbi)
+    .manifest.body.vfs;
+  const deployment = unwrapPreparedCppCuteBrowserFrontendProfile(stored.profile)
+    .profile.deployment;
+  if (deployment.mode !== "browser-local") {
+    mismatch("$.profile.deployment", "Worker result control requires browser-local deployment");
+  }
+  const vfsCounters = execution.vfs.counters;
+  const frontend = execution.frontendWork.values;
+  const result: CppCuteBrowserWorkerResultV1 = deepFreezeJson({
+    schema: CPP_CUTE_BROWSER_WORKER_RESULT_SCHEMA,
+    version: {
+      major: CPP_CUTE_BROWSER_WORKER_PROTOCOL_MAJOR,
+      minor: CPP_CUTE_BROWSER_WORKER_PROTOCOL_MINOR,
+    },
+    invocationId: stored.invocation.invocationId,
+    invocationNonceSha256: stored.invocation.invocationNonceSha256,
+    terminal: "completed",
+    compileStatus: { code: 0, name: "artifact-ready" },
+    artifact: {
+      artifactId: artifact.artifactId,
+      artifactHash: artifact.artifactHash,
+      transportHash: artifact.transportHash,
+      artifactBytesSha256: artifact.artifactBytesSha256,
+      artifactByteLength: artifact.artifactByteLength,
+    },
+    openedInputs: {
+      sourceSetSha256: artifact.sourceSetSha256,
+      headerSetSha256: artifact.headerSetSha256,
+      inputClosureSha256: artifact.inputClosureSha256,
+      openedSourceFiles: wireCount(sources.length),
+      openedSourceBytes: encodeWireU64(sumFileBytes(sources)),
+      openedHeaderFiles: wireCount(headers.length),
+      openedHeaderBytes: encodeWireU64(sumFileBytes(headers)),
+    },
+    diagnostics: await diagnosticsProjection(
+      payload.diagnostics,
+      artifactVerification.decodeLimits,
+    ),
+    resources: {
+      wasmMemory: {
+        initialPages: execution.runtime.initial.wasmMemory.pages,
+        peakPages: execution.runtime.peakWasmMemoryPages,
+        finalPages: execution.runtime.current.wasmMemory.pages,
+      },
+      frontendWork: {
+        includeDepth: frontend.includeDepth,
+        macroExpansions: frontend.macroExpansions,
+        preprocessedTokens: frontend.preprocessedTokens,
+        astNodes: frontend.astNodes,
+        constexprSteps: frontend.constexprSteps,
+        templateInstantiations: frontend.templateInstantiations,
+        templateDepth: frontend.templateDepth,
+      },
+      emittedArtifact: emittedArtifactProjection(payload),
+      vfs: {
+        ceilingStatus: "enforced-runtime-abi-and-profile-ceilings",
+        maxLiveFileHandles: encodeWireU64(BigInt(runtimeVfs.maxLiveFileHandles)),
+        maxSessionCalls: encodeWireU64(BigInt(runtimeVfs.maxSessionCalls)),
+        maxIndexedNodes: encodeWireU64(
+          BigInt(deployment.compilerRuntime.virtualFileSystem.maxIndexedNodes),
+        ),
+        maxIndexLogicalByteLength: encodeWireU64(
+          BigInt(deployment.compilerRuntime.virtualFileSystem.maxIndexLogicalByteLength),
+        ),
+        indexedNodes: vfsCounters.indexedNodes,
+        indexLogicalByteLength: vfsCounters.indexLogicalByteLength,
+        totalSessionCalls: vfsCounters.totalSessionCalls,
+        statusCalls: vfsCounters.statusCalls,
+        openCalls: vfsCounters.openCalls,
+        readCalls: vfsCounters.readCalls,
+        closeCalls: vfsCounters.closeCalls,
+        directoryCountCalls: vfsCounters.directoryCountCalls,
+        directoryEntryCalls: vfsCounters.directoryEntryCalls,
+        peakLiveHandles: vfsCounters.peakLiveHandles,
+        logicalOpenedSourceByteLength:
+          vfsCounters.logicalOpenedSourceByteLength,
+        logicalOpenedInstalledVfsByteLength:
+          vfsCounters.logicalOpenedInstalledVfsByteLength,
+        logicalOpenedTotalByteLength: vfsCounters.logicalOpenedTotalByteLength,
+        peakLiveLogicalReservationByteLength:
+          vfsCounters.peakLiveLogicalReservationByteLength,
+      },
+      resultBytesCopied: encodeWireU64(BigInt(execution.resultByteLength)),
+    },
+    outcome: artifact.outcome,
+  }) as CppCuteBrowserWorkerResultV1;
+  await verifyClaimedResultConsistency(
+    result,
+    artifact,
+    payload,
+    stored.profile,
+    effectiveLimits,
+    stored.runtimeAbi,
+    artifactVerification.decodeLimits,
+  );
+  const controlBytes = canonicalJsonBytes(result);
+  if (controlBytes.byteLength > CPP_CUTE_BROWSER_WORKER_RESULT_CONTROL_BYTE_LIMIT) {
+    resource(
+      "$.resultControl",
+      "canonical Worker result control exceeds the fixed protocol byte ceiling",
+    );
+  }
+  parseCanonicalResult(controlBytes);
+  return controlBytes;
+}
+
+/** Worker-realm terminalization after successful control construction. */
+export function consumeCppCuteBrowserWorkerInvocationResultControl(
+  invocation: PreparedCppCuteBrowserWorkerInvocation,
+): void {
+  beginTerminal(invocation);
 }
 
 /**
@@ -1360,6 +1568,60 @@ function verifyInstalledOpenedInputs(stored: ActiveStoredInvocation, artifact: V
       );
     }
   }
+}
+
+function verifyObservedOpenedInputs(
+  execution: CppCuteBrowserWasmCompilerExecution,
+  payload: CppCuteFrontendPayloadV3,
+): void {
+  const expected = payload.inputs.files.map((file) => ({
+    virtualPath: file.virtualPath,
+    source: file.owner.kind === "source" ? "request-source" : "installed-pack",
+    contentSha256: file.contentSha256,
+    byteLength: file.byteLength,
+  })).sort((left, right) => compareUtf8(left.virtualPath, right.virtualPath));
+  const actual = execution.vfs.openedFiles.map((file) => ({
+    virtualPath: file.virtualPath,
+    source: file.source,
+    contentSha256: file.contentSha256,
+    byteLength: file.byteLength,
+  })).sort((left, right) => compareUtf8(left.virtualPath, right.virtualPath));
+  if (!sameJson(actual as unknown as JsonValue, expected as unknown as JsonValue)) {
+    resultMismatch(
+      "$.execution.vfs.openedFiles",
+      "observed VFS opened files differ from the verified artifact input closure",
+    );
+  }
+}
+
+function compareUtf8(left: string, right: string): number {
+  const leftBytes = UTF8_ENCODER.encode(left);
+  const rightBytes = UTF8_ENCODER.encode(right);
+  const length = Math.min(leftBytes.byteLength, rightBytes.byteLength);
+  for (let index = 0; index < length; index += 1) {
+    const difference = leftBytes[index]! - rightBytes[index]!;
+    if (difference !== 0) return difference;
+  }
+  return leftBytes.byteLength - rightBytes.byteLength;
+}
+
+function emittedArtifactProjection(
+  payload: CppCuteFrontendPayloadV3,
+): CppCuteBrowserWorkerEmittedArtifactCountsV1 {
+  return {
+    declarations: wireCount(payload.declarations.length),
+    types: wireCount(payload.types.length),
+    constants: wireCount(payload.constants.length),
+    layouts: wireCount(payload.facts.filter((fact) => fact.kind === "affine-layout").length),
+    tensors: wireCount(payload.facts.filter((fact) => fact.kind === "tensor").length),
+    operations: wireCount(payload.facts.filter((fact) =>
+      fact.kind !== "affine-layout" && fact.kind !== "tensor" &&
+      fact.kind !== "target-intrinsic").length),
+    targetIntrinsics: wireCount(
+      payload.facts.filter((fact) => fact.kind === "target-intrinsic").length,
+    ),
+    diagnostics: wireCount(payload.diagnostics.length),
+  };
 }
 
 function verifyFrontendWorkLimits(

@@ -14,6 +14,8 @@ import {
   CPP_CUTE_BROWSER_GENERATED_FACTORY,
 } from "./cpp_cute_browser_generated_factory.js";
 import {
+  buildCanonicalCppCuteBrowserWorkerResultControl,
+  consumeCppCuteBrowserWorkerInvocationResultControl,
   discardCppCuteBrowserWorkerInvocation,
   unwrapPreparedCppCuteBrowserWorkerInvocation,
   type CppCuteBrowserWorkerInvocationDiscardReason,
@@ -37,10 +39,9 @@ import {
 export const CPP_CUTE_BROWSER_WORKER_RUNTIME_PROTOCOL =
   "browsergrad.compiler.cpp-cute.package-worker-runtime@1";
 export const CPP_CUTE_BROWSER_WORKER_RUNTIME_BUNDLE_STATUS =
-  "blocked-missing-self-contained-bundle-and-instrumented-result-control";
+  "blocked-missing-self-contained-bundle";
 export const CPP_CUTE_BROWSER_WORKER_RUNTIME_BLOCKERS = Object.freeze([
   "missing-self-contained-package-worker-bundle-bytes",
-  "missing-instrumented-frontend-work-result-control",
 ] as const);
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
@@ -295,9 +296,7 @@ export async function prepareCppCuteBrowserWorkerRuntimeBinding(
   }
 }
 
-/** Executes the package-pinned factory and C ABI, then fails closed until the
- * native producer exposes exact instrumented-work counters for result control.
- */
+/** Executes the package-pinned factory and C ABI and emits canonical control. */
 export async function startCppCuteBrowserWorkerRuntime(
   binding: PreparedCppCuteBrowserWorkerRuntimeBinding,
 ): Promise<CppCuteBrowserWorkerRuntimeResult> {
@@ -353,6 +352,19 @@ export async function startCppCuteBrowserWorkerRuntime(
       );
     }
     stored.cAbiExecutionObserved = true;
+    const controlBytes = await buildCanonicalCppCuteBrowserWorkerResultControl(
+      active.invocation,
+      execution,
+    );
+    const result = NATIVE_OBJECT_FREEZE({
+      kind: "browsergrad-cpp-cute-runtime-result" as const,
+      controlBytes,
+      artifactBytes,
+    });
+    consumeCppCuteBrowserWorkerInvocationResultControl(active.invocation);
+    zeroBytes(active.inputFrameBytes);
+    zeroBytes(active.clangWasmBytes);
+    return result;
   } catch (cause) {
     const startCause = settlePreparedFactoryAfterFailedStart(preparedFactory, cause);
     zeroBytes(artifactBytes);
@@ -368,18 +380,6 @@ export async function startCppCuteBrowserWorkerRuntime(
       startCause,
     );
   }
-  zeroBytes(artifactBytes);
-  cleanupAdoptedRuntimeInput(
-    active,
-    undefined,
-    "result-control blocked start",
-    "result-control-unavailable",
-  );
-  capability(
-    "$.resultControl",
-    "package Worker C ABI executed, but result control is blocked until exact " +
-      "instrumented frontend-work counters are exported by the native producer",
-  );
 }
 
 function settlePreparedFactoryAfterFailedStart(
@@ -596,10 +596,6 @@ function invalid(path: string, message: string, options?: ErrorOptions): never {
 
 function mismatch(path: string, message: string): never {
   fail("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-MISMATCH", path, message);
-}
-
-function capability(path: string, message: string): never {
-  fail("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CAPABILITY", path, message);
 }
 
 function executionFailure(path: string, message: string, cause: unknown): never {

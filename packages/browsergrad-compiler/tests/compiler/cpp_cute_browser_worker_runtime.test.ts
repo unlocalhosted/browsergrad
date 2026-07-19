@@ -14,6 +14,8 @@ interface InvocationState {
   discardCalls: number;
   discardReasons: string[];
   discardFailure: Error | undefined;
+  resultControlBuildCalls: number;
+  resultControlConsumeCalls: number;
 }
 
 interface FrameState {
@@ -115,6 +117,19 @@ vi.mock("../../src/cpp_cute_browser_worker_protocol.js", async (importOriginal) 
       stored.discardReasons.push(reason);
       stored.active = false;
       if (stored.discardFailure !== undefined) throw stored.discardFailure;
+    },
+    buildCanonicalCppCuteBrowserWorkerResultControl: async (
+      value: object,
+      execution: { readonly artifactBytes: Uint8Array },
+    ) => {
+      const stored = invocation(value);
+      stored.resultControlBuildCalls += 1;
+      return Uint8Array.of(0x42, 0x47, execution.artifactBytes.byteLength);
+    },
+    consumeCppCuteBrowserWorkerInvocationResultControl: (value: object) => {
+      const stored = invocation(value);
+      stored.resultControlConsumeCalls += 1;
+      stored.active = false;
     },
   };
 });
@@ -398,6 +413,8 @@ async function runtimeFixture(
     discardCalls: 0,
     discardReasons: [],
     discardFailure: options.discardFailure,
+    resultControlBuildCalls: 0,
+    resultControlConsumeCalls: 0,
   };
   const frameState: FrameState = {
     bytes: new Uint8Array(INPUT_FRAME_BYTES),
@@ -549,13 +566,15 @@ describe("package-owned C++/CuTe Worker runtime boundary", () => {
     expect(fixture.realmInputState).toMatchObject({ state: "adopted", takeCalls: 2 });
   });
 
-  it("executes the pinned C ABI, then fails closed before uninstrumented result control", async () => {
+  it("executes the pinned C ABI and returns canonical result control with copied artifact bytes", async () => {
     const fixture = await runtimeFixture();
     const binding = await prepareCppCuteBrowserWorkerRuntimeBinding(bindingInput(fixture));
 
-    await expect(startCppCuteBrowserWorkerRuntime(binding)).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CAPABILITY",
-      path: "$.resultControl",
+    const result = await startCppCuteBrowserWorkerRuntime(binding);
+    expect(result).toEqual({
+      kind: "browsergrad-cpp-cute-runtime-result",
+      controlBytes: Uint8Array.of(0x42, 0x47, 4),
+      artifactBytes: Uint8Array.of(7, 8, 9, INPUT_FRAME_BYTES.byteLength),
     });
     expect(fixture.mountState).toMatchObject({
       state: "bound",
@@ -565,11 +584,15 @@ describe("package-owned C++/CuTe Worker runtime boundary", () => {
     });
     expect(fixture.invocationState).toMatchObject({
       active: false,
-      discardCalls: 1,
-      discardReasons: ["result-control-unavailable"],
+      discardCalls: 0,
+      discardReasons: [],
+      resultControlBuildCalls: 1,
+      resultControlConsumeCalls: 1,
     });
     expect(fixture.transferredClangWasmBytes).toEqual(new Uint8Array(CLANG_WASM_BYTES.byteLength));
-    expect(fixture.mountState.executionArtifactBytes).toEqual(new Uint8Array(4));
+    expect(fixture.mountState.executionArtifactBytes).toEqual(
+      Uint8Array.of(7, 8, 9, INPUT_FRAME_BYTES.byteLength),
+    );
     expect(inspectCppCuteBrowserWorkerRuntimeBinding(binding)).toMatchObject({
       state: "execution-blocked-terminal",
       factoryInvoked: true,
@@ -893,8 +916,8 @@ describe("package-owned C++/CuTe Worker runtime boundary", () => {
     const test = vi.spyOn(RegExp.prototype, "test").mockImplementation(() => false);
     try {
       const binding = await prepareCppCuteBrowserWorkerRuntimeBinding(bindingInput(fixture));
-      await expect(startCppCuteBrowserWorkerRuntime(binding)).rejects.toMatchObject({
-        code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CAPABILITY",
+      await expect(startCppCuteBrowserWorkerRuntime(binding)).resolves.toMatchObject({
+        kind: "browsergrad-cpp-cute-runtime-result",
       });
     } finally {
       set.mockRestore();
