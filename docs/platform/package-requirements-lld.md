@@ -90,6 +90,18 @@ Worker, remaining deterministic outputs, detached provenance, external legal
 review, and approved package asset set are not part of this subset, so full
 distribution reproducibility and release remain false.
 
+The package now pins the path-independent 4,042-byte header reproducibility
+record at SHA-256
+`eb85b8fb54d1bad1b932bd4bfb3ffc7aff8d66d6185c9926ddd3c9f6084d918a`.
+Admission accepts only those exact bytes, verifies the current build-input lock
+and its resource identity, validates the sorted 17-output projection and byte
+total, and independently rederives both the output-verification and
+reproducibility identities before minting an opaque subset authority. This
+closes the gap between local live-run evidence and package-consumable technical
+evidence without turning reproducible header bytes into legal approval, signed
+provenance, full-distribution reproducibility, Worker execution, or release
+authority.
+
 The exact source plan is
 `bg.cpp.browser-header-source-plan.sha256.613b74fcf41ee5a9d4d8878af219c8e9da8ba6c91f067eb074140325feac457d`;
 the seven-archive admission is
@@ -128,16 +140,16 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 437 tests across 50 files covering the build plan, runtime ABI,
+clean, then runs 440 tests across 51 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
 package invocation, Worker entry, production controller, exact header-tree
 inventory/materialization, seven-archive admission, strict archive
 normalization/extraction, the reviewed builder identity, CUDA-index admission,
 the complete header distribution review input, distribution-notice
-verification, exact notice-output materialization, and two-root distribution
-reproducibility. The focused test phase is 24.55 seconds and the complete gate
-is 35.32 seconds on Node 25. Clean
-validation and two-build
+verification, exact notice-output materialization, two-root distribution
+reproducibility, and exact package admission of that evidence. The focused
+test phase is 26.22 seconds and the complete gate is 37.19 seconds on Node 25.
+Clean validation and two-build
 reproducibility still restore no cache and remain intentionally more expensive.
 
 The current CMake-stable primary cache is now proved at exact source.
