@@ -3291,12 +3291,19 @@ whether any files may be left partially changed.
   last populated CMake identity. The workflow may restore only that compatible
   full key, then saves the successful reconfigured tree under the new primary
   key. There is no broad or trust-granting fallback.
+- Migration run `29680036963` exposed that `actions/cache/restore` reports
+  `cache-hit: false` for a compatible restore-key match even after downloading
+  it. The admission step therefore ignored the restored tree and began another
+  cold build; the run was cancelled at roughly 20 minutes. Admission now uses
+  the pinned action's `cache-matched-key` output, while cache staging still uses
+  the exact-hit signal so a compatible restore can be saved under the primary
+  key.
 - The new primary key is
   `bg.cpp.clang-wasm-toolchain-cache.sha256.eb130b274f93b28885dcecd1147c69763630b900c9178a6fc056c54b4f7a42f3`;
   its exact compatible legacy key is
   `bg.cpp.clang-wasm-toolchain-cache.sha256.ba2867dd05bdc99485e0de219510c5f87ec5c5a459d2ee607bca40be549de41a`.
   The canonical Node 25 fast gate remains 30 files/338 tests and passes in
-  29.17 seconds.
+  29.20 seconds.
 
 ## Quick Resume Checklist
 

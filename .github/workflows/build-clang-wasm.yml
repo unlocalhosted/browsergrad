@@ -93,10 +93,12 @@ jobs:
 
       - name: Admit the restored diagnostic cache into the private build root
         if: ${{ inputs.mode == 'fast-validation' }}
+        env:
+          BG_MATCHED_DIAGNOSTIC_CACHE_KEY: ${{ steps.toolchain-cache.outputs.cache-matched-key }}
         run: |
           set -euo pipefail
           bg_cache_source=''
-          if [[ "${{ steps.toolchain-cache.outputs.cache-hit }}" == 'true' ]]; then
+          if [[ -n "${BG_MATCHED_DIAGNOSTIC_CACHE_KEY}" ]]; then
             bg_cache_source="${BG_CLANG_CACHE_ROOT}"
           fi
           if [[ -n "${bg_cache_source}" ]]; then

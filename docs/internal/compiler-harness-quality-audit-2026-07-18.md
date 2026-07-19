@@ -59,7 +59,14 @@ BrowserGrad target objects are invalidated, and generated flags are reviewed
 before compile. One exact compatible legacy key migrates the already populated
 untrusted cache to the CMake-stable primary key; no broad fallback or clean
 authority was added. The expanded local gate remains green at 30 files/338
-tests in 29.17 seconds.
+tests in 29.20 seconds.
+
+The first migration attempt then exposed a workflow admission bug: the pinned
+cache action returns `cache-hit: false` for a restore-key match even when it has
+downloaded a compatible cache. Run `29680036963` therefore ignored those bytes
+and was cancelled at roughly 20 minutes into another cold build. Admission now
+uses the separate `cache-matched-key` output; exact-hit state remains separate
+so a compatible restore is staged and saved under the new primary key.
 
 ## Why feedback was slow
 

@@ -108,6 +108,10 @@ describe("Clang-Wasm evidence workflow", () => {
       "${{ runner.temp }}/browsergrad-clang-wasm-cache-v2/build-${{ matrix.buildOrdinal }}/native-tablegen",
     );
     expect(workflow).toContain("Admit the restored diagnostic cache into the private build root");
+    expect(workflow).toContain(
+      "BG_MATCHED_DIAGNOSTIC_CACHE_KEY: ${{ steps.toolchain-cache.outputs.cache-matched-key }}",
+    );
+    expect(workflow).toContain('if [[ -n "${BG_MATCHED_DIAGNOSTIC_CACHE_KEY}" ]]');
     expect(workflow).toContain("Stage a complete reusable diagnostic toolchain cache");
     expect(workflow).not.toContain("diagnostic cache for migration");
     expect(workflow).not.toContain("previous-broad-toolchain-cache");
