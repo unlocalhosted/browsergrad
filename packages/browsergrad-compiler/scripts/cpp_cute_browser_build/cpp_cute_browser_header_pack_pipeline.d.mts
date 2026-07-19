@@ -11,6 +11,9 @@ import type {
   CppCuteBrowserHeaderDistributionReviewInputReport,
 } from "./cpp_cute_browser_header_distribution_review_input.mjs";
 import type {
+  CppCuteBrowserHeaderNoticeMaterializationReport,
+} from "./cpp_cute_browser_header_notice_materialization.mjs";
+import type {
   CppCuteBrowserSourceArchiveInput,
 } from "./cpp_cute_browser_source_archive_admission.mjs";
 
@@ -32,7 +35,7 @@ export interface CppCuteBrowserHeaderPackPipelineInput {
 
 export interface CppCuteBrowserHeaderPackPipeline {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA;
-  readonly version: 3;
+  readonly version: 4;
   readonly pipelineId: string;
   readonly authority: "exact-source-host-tool-vfs-pack-pipeline-observation-only";
   readonly buildInputLockId: string;
@@ -76,6 +79,7 @@ export interface CppCuteBrowserHeaderPackPipeline {
   readonly outputs: readonly CppCuteBrowserHeaderPackMaterializationOutput[];
   readonly totalPackByteLength: string;
   readonly distributionReviewInput: CppCuteBrowserHeaderDistributionReviewInputReport;
+  readonly noticeMaterialization: CppCuteBrowserHeaderNoticeMaterializationReport;
   readonly unresolvedBlockers: readonly CppCuteBrowserHeaderSourceBlocker[];
   readonly claims: Readonly<{
     exactCurrentHeaderSourcePlanArchiveBytesVerified: true;
@@ -92,6 +96,10 @@ export interface CppCuteBrowserHeaderPackPipeline {
     exactCudaRedistributionIndexBound: true;
     exactPerDistributedFileComponentMapPrepared: true;
     deterministicLicenseInventoryMaterialized: true;
+    exactApprovedDistributionNoticeBytesMaterialized: true;
+    deterministicAggregateNoticeMaterialized: true;
+    exactFinalDistributionOutputTreeVerified: true;
+    allHeaderNoticesResolved: false;
     externalDistributedFileLicenseMapReviewed: false;
     licenseReviewComplete: false;
     headerUniverseComplete: true;

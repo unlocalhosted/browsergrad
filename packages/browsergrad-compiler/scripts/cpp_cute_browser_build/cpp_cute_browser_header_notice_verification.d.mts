@@ -51,6 +51,11 @@ export function requireCppCuteBrowserHeaderNoticeVerificationAuthority(
   evidence: CppCuteBrowserHeaderNoticeVerification,
 ): void;
 
+export function copyCppCuteBrowserVerifiedHeaderNoticeBytes(
+  evidence: CppCuteBrowserHeaderNoticeVerification,
+  componentId: string,
+): Uint8Array;
+
 export function canonicalCppCuteBrowserHeaderNoticeVerificationBytes(
   evidence: CppCuteBrowserHeaderNoticeVerification,
 ): Uint8Array;

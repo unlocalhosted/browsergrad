@@ -20,7 +20,7 @@ const SCRIPT_ROOT = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = resolve(SCRIPT_ROOT, "..", "..");
 const DEFAULT_RESOURCE_ROOT = join(PACKAGE_ROOT, "src", "resources", "licenses");
 const MAX_NOTICE_BYTES = 64 * 1024;
-const VERIFIED_NOTICES = new WeakSet();
+const VERIFIED_NOTICES = new WeakMap();
 
 export class CppCuteBrowserHeaderNoticeVerificationError extends Error {
   constructor(path, message, options) {
@@ -62,6 +62,7 @@ export async function verifyCppCuteBrowserHeaderPackNotices(input = {}) {
   await assertExactResourceDirectory(resourceRoot, expectedNames);
 
   const notices = [];
+  const noticeBytes = new Map();
   for (const [index, notice] of approved.entries()) {
     const resourceFileName = basename(notice.noticeOutputPath);
     const bytes = await readExactNotice(
@@ -73,6 +74,7 @@ export async function verifyCppCuteBrowserHeaderPackNotices(input = {}) {
     if (digest !== notice.noticeSha256) {
       invalid(`$.notices[${index}]`, "package notice bytes differ from the current build lock");
     }
+    noticeBytes.set(notice.componentId, bytes);
     notices.push(Object.freeze({
       componentId: notice.componentId,
       licenseExpression: notice.licenseExpression,
@@ -107,7 +109,7 @@ export async function verifyCppCuteBrowserHeaderPackNotices(input = {}) {
       releaseReady: false,
     }),
   });
-  VERIFIED_NOTICES.add(evidence);
+  VERIFIED_NOTICES.set(evidence, noticeBytes);
   return evidence;
 }
 
@@ -115,6 +117,25 @@ export function requireCppCuteBrowserHeaderNoticeVerificationAuthority(evidence)
   if (typeof evidence !== "object" || evidence === null || !VERIFIED_NOTICES.has(evidence)) {
     invalid("$.evidence", "expected verifier-issued approved header-notice authority");
   }
+}
+
+/**
+ * Returns an isolated copy of the exact package-owned notice bytes retained by
+ * the verifier. Metadata projections cannot be used to select arbitrary files
+ * or replace the verified byte snapshot.
+ */
+export function copyCppCuteBrowserVerifiedHeaderNoticeBytes(evidence, componentId) {
+  requireCppCuteBrowserHeaderNoticeVerificationAuthority(evidence);
+  if (typeof componentId !== "string" || componentId.length === 0) {
+    invalid("$.componentId", "expected one nonempty component identifier");
+  }
+  const bytes = VERIFIED_NOTICES.get(evidence)?.get(componentId);
+  const notice = evidence.notices.find((candidate) => candidate.componentId === componentId);
+  if (bytes === undefined || notice === undefined || bytes.byteLength !== Number(notice.noticeByteLength) ||
+      sha256(bytes) !== notice.noticeSha256) {
+    invalid("$.componentId", "component has no retained exact notice-byte authority");
+  }
+  return new Uint8Array(bytes);
 }
 
 export function canonicalCppCuteBrowserHeaderNoticeVerificationBytes(evidence) {

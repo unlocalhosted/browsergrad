@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   chmod,
   mkdtemp,
@@ -17,6 +18,7 @@ import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/sch
 import {
   CppCuteBrowserHeaderNoticeVerificationError,
   canonicalCppCuteBrowserHeaderNoticeVerificationBytes,
+  copyCppCuteBrowserVerifiedHeaderNoticeBytes,
   requireCppCuteBrowserHeaderNoticeVerificationAuthority,
   verifyCppCuteBrowserHeaderPackNotices,
 } from "./cpp_cute_browser_header_notice_verification.mjs";
@@ -81,6 +83,16 @@ describe("browser header-pack approved notice bytes", () => {
     ]);
     expect(canonicalCppCuteBrowserHeaderNoticeVerificationBytes(evidence))
       .toEqual(canonicalJsonBytes(evidence));
+    const firstCopy = copyCppCuteBrowserVerifiedHeaderNoticeBytes(evidence, "clang");
+    expect(createHash("sha256").update(firstCopy).digest("hex"))
+      .toBe("ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47");
+    firstCopy[0] = firstCopy[0] === 0 ? 1 : 0;
+    expect(createHash("sha256")
+      .update(copyCppCuteBrowserVerifiedHeaderNoticeBytes(evidence, "clang"))
+      .digest("hex"))
+      .toBe("ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47");
+    expect(() => copyCppCuteBrowserVerifiedHeaderNoticeBytes(evidence, "unknown"))
+      .toThrow(CppCuteBrowserHeaderNoticeVerificationError);
     expect(() => requireCppCuteBrowserHeaderNoticeVerificationAuthority({ ...evidence }))
       .toThrow(CppCuteBrowserHeaderNoticeVerificationError);
   });

@@ -1,7 +1,4 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
-import { lstat, open, opendir, realpath, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path/posix";
 
 import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
@@ -13,6 +10,9 @@ import {
 import {
   requireCppCuteBrowserCudaRedistributionIndexAuthority,
 } from "./cpp_cute_browser_cuda_redistribution_index.mjs";
+import {
+  materializeCppCuteBrowserDistributionOutputFiles,
+} from "./cpp_cute_browser_distribution_output_files.mjs";
 import {
   requireCppCuteBrowserHeaderNoticeVerificationAuthority,
 } from "./cpp_cute_browser_header_notice_verification.mjs";
@@ -33,11 +33,6 @@ const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-DISTRIBUTION-REVIEW-INPU
 const REVIEW_HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.header-distribution-review-input.v1";
 const MAX_REVIEW_INPUT_BYTES = 32 * 1024 * 1024;
-const MAX_PACK_BYTES = 128 * 1024 * 1024;
-const READ_BUFFER_BYTES = 256 * 1024;
-const MAX_OUTPUT_TREE_ENTRIES = 128;
-const MAX_OUTPUT_TREE_DEPTH = 16;
-const MAX_OUTPUT_PATH_BYTES = 4_096;
 const REVIEW_INPUTS = new WeakMap();
 
 export class CppCuteBrowserHeaderDistributionReviewInputError extends Error {
@@ -69,33 +64,23 @@ export async function materializeCppCuteBrowserHeaderDistributionReviewInput(inp
   if (bytes.byteLength === 0 || bytes.byteLength > MAX_REVIEW_INPUT_BYTES) {
     resource("$.reviewInput", `canonical review input exceeds ${MAX_REVIEW_INPUT_BYTES} bytes`);
   }
-  const expectedPackPaths = new Set(object.materialization.outputs.map((output) => output.outputPath));
-  const rootIdentity = await assertExactOutputTree(
-    object.materialization.outputRoot,
-    expectedPackPaths,
-    "$.materialization.outputRoot",
-  );
-  await verifyPersistedPacks(object.materialization);
-  const absoluteOutputPath = join(object.materialization.outputRoot, outputPath);
-  const outputIdentity = await writeExclusiveReviewInput(absoluteOutputPath, bytes);
-  const persisted = await readExactFile(
-    absoluteOutputPath,
-    bytes.byteLength,
-    outputIdentity,
-    MAX_REVIEW_INPUT_BYTES,
-    "$.reviewInput.output",
-  );
-  if (sha256(persisted) !== sha256(bytes) || !sameBytes(persisted, bytes)) {
-    invalid("$.reviewInput.output", "persisted review input differs from canonical bytes");
+  let outputMaterialization;
+  try {
+    outputMaterialization = await materializeCppCuteBrowserDistributionOutputFiles({
+      outputRoot: object.materialization.outputRoot,
+      existingOutputs: object.materialization.outputs.map((output) => Object.freeze({
+        outputPath: output.outputPath,
+        sha256: output.packSha256,
+        byteLength: output.packByteLength,
+      })),
+      outputs: [Object.freeze({ outputPath, bytes })],
+    });
+  } catch (cause) {
+    invalid("$.reviewInput.output", "failed to materialize the exact distribution review input", { cause });
   }
-  const finalPaths = new Set([...expectedPackPaths, outputPath]);
-  const finalRootIdentity = await assertExactOutputTree(
-    object.materialization.outputRoot,
-    finalPaths,
-    "$.materialization.outputRoot",
-  );
-  if (rootIdentity.dev !== finalRootIdentity.dev || rootIdentity.ino !== finalRootIdentity.ino) {
-    invalid("$.materialization.outputRoot", "pack output root identity changed during review authoring");
+  const persisted = outputMaterialization.outputs[0];
+  if (persisted === undefined || persisted.outputPath !== outputPath) {
+    invalid("$.reviewInput.output", "distribution output materializer omitted the review input");
   }
   const report = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REVIEW_INPUT_SCHEMA,
@@ -109,8 +94,8 @@ export async function materializeCppCuteBrowserHeaderDistributionReviewInput(inp
     inventoryId: manifest.inventoryId,
     cudaRedistributionIndexId: manifest.cudaRedistributionIndex.indexId,
     outputPath,
-    reviewInputSha256: sha256(persisted),
-    reviewInputByteLength: String(persisted.byteLength),
+    reviewInputSha256: persisted.sha256,
+    reviewInputByteLength: persisted.byteLength,
     totals: manifest.totals,
     unresolvedExternalReviews: manifest.unresolvedExternalReviews,
     claims: manifest.claims,
@@ -364,193 +349,6 @@ function composeReviewInput(object) {
   });
 }
 
-async function verifyPersistedPacks(materialization) {
-  for (const [index, output] of materialization.outputs.entries()) {
-    const path = join(materialization.outputRoot, output.outputPath);
-    const byteLength = Number(output.packByteLength);
-    if (!Number.isSafeInteger(byteLength) || byteLength <= 0 || byteLength > MAX_PACK_BYTES) {
-      invalid(`$.materialization.outputs[${index}]`, "pack length is outside the reread bound");
-    }
-    const identity = await lstat(path, { bigint: true }).catch((cause) =>
-      invalid(`$.materialization.outputs[${index}]`, "pack output is unavailable", { cause }));
-    const digest = await hashExactFile(
-      path,
-      byteLength,
-      identity,
-      `$.materialization.outputs[${index}]`,
-    );
-    if (digest !== output.packSha256) {
-      invalid(`$.materialization.outputs[${index}]`, "pack bytes changed before review-input authoring");
-    }
-  }
-}
-
-async function hashExactFile(path, expectedByteLength, discovered, diagnosticPath) {
-  const uid = typeof process.getuid === "function" ? BigInt(process.getuid()) : undefined;
-  if (!discovered.isFile() || discovered.isSymbolicLink() || discovered.nlink !== 1n ||
-      discovered.size !== BigInt(expectedByteLength) || Number(discovered.mode & 0o022n) !== 0 ||
-      (uid !== undefined && discovered.uid !== uid) || await realpath(path) !== path) {
-    invalid(diagnosticPath, "expected one exact canonical regular file");
-  }
-  let handle;
-  try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const before = await handle.stat({ bigint: true });
-    if (!sameFileIdentity(discovered, before)) invalid(diagnosticPath, "file identity changed before read");
-    const digest = createHash("sha256");
-    const buffer = new Uint8Array(READ_BUFFER_BYTES);
-    let offset = 0;
-    while (offset < expectedByteLength) {
-      const length = Math.min(buffer.byteLength, expectedByteLength - offset);
-      const { bytesRead } = await handle.read(buffer, 0, length, offset);
-      if (bytesRead <= 0) invalid(diagnosticPath, "file changed while read");
-      digest.update(buffer.subarray(0, bytesRead));
-      offset += bytesRead;
-    }
-    const after = await handle.stat({ bigint: true });
-    if (!sameFileIdentity(before, after)) invalid(diagnosticPath, "file identity changed while read");
-    return digest.digest("hex");
-  } catch (cause) {
-    if (cause instanceof CppCuteBrowserHeaderDistributionReviewInputError) throw cause;
-    invalid(diagnosticPath, "failed to reread exact file", { cause });
-  } finally {
-    await handle?.close();
-  }
-}
-
-async function writeExclusiveReviewInput(path, bytes) {
-  const parent = dirname(path);
-  const parentBefore = await lstat(parent, { bigint: true }).catch((cause) =>
-    invalid("$.reviewInput.output.parent", "review-input parent is unavailable", { cause }));
-  if (!parentBefore.isDirectory() || parentBefore.isSymbolicLink() ||
-      Number(parentBefore.mode & 0o077n) !== 0 || await realpath(parent) !== parent) {
-    invalid("$.reviewInput.output.parent", "review-input parent must be one private canonical directory");
-  }
-  let handle;
-  let identity;
-  try {
-    handle = await open(
-      path,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-      0o400,
-    );
-    identity = await handle.stat({ bigint: true });
-    let offset = 0;
-    while (offset < bytes.byteLength) {
-      const { bytesWritten } = await handle.write(bytes, offset, bytes.byteLength - offset, offset);
-      if (bytesWritten <= 0) invalid("$.reviewInput.output", "review-input write made no progress");
-      offset += bytesWritten;
-    }
-    await handle.sync();
-    const after = await handle.stat({ bigint: true });
-    if (!sameStableFileIdentity(identity, after) || after.size !== BigInt(bytes.byteLength)) {
-      invalid("$.reviewInput.output", "review-input identity changed while written");
-    }
-    const parentAfter = await lstat(parent, { bigint: true });
-    if (!sameDirectoryIdentity(parentBefore, parentAfter) || await realpath(parent) !== parent) {
-      invalid("$.reviewInput.output.parent", "review-input parent changed while written");
-    }
-    return Object.freeze({ dev: after.dev, ino: after.ino, mode: after.mode, nlink: after.nlink,
-      size: after.size, mtimeNs: after.mtimeNs, ctimeNs: after.ctimeNs });
-  } catch (cause) {
-    if (identity !== undefined) await unlinkOwnedFile(path, identity);
-    if (cause instanceof CppCuteBrowserHeaderDistributionReviewInputError) throw cause;
-    invalid("$.reviewInput.output", "failed to persist review input", { cause });
-  } finally {
-    await handle?.close();
-  }
-}
-
-async function readExactFile(path, expectedByteLength, identity, maximumBytes, diagnosticPath) {
-  if (expectedByteLength <= 0 || expectedByteLength > maximumBytes) {
-    resource(diagnosticPath, "file exceeds reread bound");
-  }
-  let handle;
-  try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const before = await handle.stat({ bigint: true });
-    if (!sameFileIdentity(identity, before) || before.size !== BigInt(expectedByteLength)) {
-      invalid(diagnosticPath, "persisted file identity differs before reread");
-    }
-    const bytes = new Uint8Array(expectedByteLength);
-    let offset = 0;
-    while (offset < bytes.byteLength) {
-      const { bytesRead } = await handle.read(bytes, offset, bytes.byteLength - offset, offset);
-      if (bytesRead <= 0) invalid(diagnosticPath, "persisted file changed while reread");
-      offset += bytesRead;
-    }
-    const after = await handle.stat({ bigint: true });
-    if (!sameFileIdentity(before, after)) invalid(diagnosticPath, "persisted file changed while reread");
-    return bytes;
-  } finally {
-    await handle?.close();
-  }
-}
-
-async function assertExactOutputTree(root, expectedFiles, diagnosticPath) {
-  const canonical = await realpath(root).catch((cause) =>
-    invalid(diagnosticPath, "pack output root is unavailable", { cause }));
-  if (canonical !== root) invalid(diagnosticPath, "pack output root must be canonical");
-  const rootStat = await lstat(root, { bigint: true });
-  if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || Number(rootStat.mode & 0o077n) !== 0) {
-    invalid(diagnosticPath, "pack output root must remain one private directory");
-  }
-  const observed = [];
-  await walkOutputTree(root, "", observed, diagnosticPath, { entries: 0 }, 0);
-  observed.sort(compareUtf8);
-  const expected = [...expectedFiles].sort(compareUtf8);
-  if (!sameStrings(observed, expected)) {
-    invalid(diagnosticPath, "pack output tree differs from the exact expected file set");
-  }
-  return Object.freeze({ dev: rootStat.dev, ino: rootStat.ino });
-}
-
-async function walkOutputTree(root, relativeDirectory, files, diagnosticPath, budget, depth) {
-  if (depth > MAX_OUTPUT_TREE_DEPTH) resource(diagnosticPath, "output tree exceeds depth bound");
-  const path = relativeDirectory === "" ? root : join(root, relativeDirectory);
-  let directory;
-  try {
-    directory = await opendir(path);
-    for await (const entry of directory) {
-      budget.entries += 1;
-      if (budget.entries > MAX_OUTPUT_TREE_ENTRIES) {
-        resource(diagnosticPath, "output tree exceeds entry bound");
-      }
-      const relativePath = relativeDirectory === "" ? entry.name : `${relativeDirectory}/${entry.name}`;
-      if (Buffer.byteLength(relativePath, "utf8") > MAX_OUTPUT_PATH_BYTES) {
-        resource(diagnosticPath, "output tree path exceeds byte bound");
-      }
-      const entryPath = join(root, relativePath);
-      const stat = await lstat(entryPath, { bigint: true });
-      if (entry.isSymbolicLink() || stat.isSymbolicLink()) {
-        invalid(diagnosticPath, "pack output tree contains a symbolic link");
-      }
-      if (stat.isDirectory()) {
-        if (Number(stat.mode & 0o077n) !== 0) {
-          invalid(diagnosticPath, "pack output tree contains a non-private directory");
-        }
-        await walkOutputTree(root, relativePath, files, diagnosticPath, budget, depth + 1);
-      } else if (stat.isFile() && stat.nlink === 1n && Number(stat.mode & 0o022n) === 0) {
-        files.push(relativePath);
-      } else {
-        invalid(diagnosticPath, "pack output tree contains a non-regular entry");
-      }
-    }
-  } catch (cause) {
-    if (cause instanceof CppCuteBrowserHeaderDistributionReviewInputError) throw cause;
-    invalid(diagnosticPath, "failed to inspect pack output tree", { cause });
-  } finally {
-    await directory?.close().catch(() => undefined);
-  }
-}
-
-async function unlinkOwnedFile(path, identity) {
-  const observed = await lstat(path, { bigint: true }).catch(() => undefined);
-  if (observed !== undefined && observed.dev === identity.dev && observed.ino === identity.ino) {
-    await unlink(path);
-  }
-}
-
 function exactObject(value, keys, diagnosticPath) {
   if (typeof value !== "object" || value === null || Object.getPrototypeOf(value) !== Object.prototype) {
     invalid(diagnosticPath, "expected one plain data record");
@@ -572,21 +370,6 @@ function exactObject(value, keys, diagnosticPath) {
   return result;
 }
 
-function sameFileIdentity(left, right) {
-  return left.dev === right.dev && left.ino === right.ino && left.mode === right.mode &&
-    left.nlink === right.nlink && left.size === right.size && left.mtimeNs === right.mtimeNs &&
-    left.ctimeNs === right.ctimeNs;
-}
-
-function sameStableFileIdentity(left, right) {
-  return left.dev === right.dev && left.ino === right.ino && left.mode === right.mode &&
-    left.nlink === right.nlink;
-}
-
-function sameDirectoryIdentity(left, right) {
-  return left.dev === right.dev && left.ino === right.ino && left.mode === right.mode;
-}
-
 function cloneNotice(notice) {
   return Object.freeze({
     ...notice,
@@ -596,12 +379,6 @@ function cloneNotice(notice) {
 
 function cloneCudaIndexComponent(component) {
   return Object.freeze({ ...component });
-}
-
-function sameBytes(left, right) {
-  if (left.byteLength !== right.byteLength) return false;
-  return Buffer.from(left.buffer, left.byteOffset, left.byteLength)
-    .equals(Buffer.from(right.buffer, right.byteOffset, right.byteLength));
 }
 
 function sameStrings(left, right) {

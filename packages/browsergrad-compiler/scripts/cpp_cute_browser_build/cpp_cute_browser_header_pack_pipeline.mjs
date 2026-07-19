@@ -17,6 +17,9 @@ import {
 import {
   verifyCppCuteBrowserHeaderPackNotices,
 } from "./cpp_cute_browser_header_notice_verification.mjs";
+import {
+  materializeCppCuteBrowserHeaderDistributionNotices,
+} from "./cpp_cute_browser_header_notice_materialization.mjs";
 import { admitCppCuteBrowserHeaderSourcePlanArchives } from "./cpp_cute_browser_header_source_archive_admission.mjs";
 import {
   extractCppCuteBrowserHeaderSourcePlan,
@@ -31,7 +34,7 @@ export const CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline";
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-PACK-PIPELINE";
-const PIPELINE_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline.v3";
+const PIPELINE_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline.v4";
 
 export class CppCuteBrowserHeaderPackPipelineError extends Error {
   constructor(path, message, options) {
@@ -81,6 +84,7 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
   let inventory;
   let materialization;
   let distributionReviewInput;
+  let noticeMaterialization;
   let packOutputIdentity;
   try {
     packOutputIdentity = await createCppCuteBrowserPrivatePackOutputRoot(packOutputRoot);
@@ -98,6 +102,11 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
       cudaRedistributionIndex,
       extraction,
       inventory,
+      materialization,
+      notices,
+    });
+    noticeMaterialization = await materializeCppCuteBrowserHeaderDistributionNotices({
+      distributionReviewInput,
       materialization,
       notices,
     });
@@ -122,10 +131,11 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
     inventoryId: inventory.inventoryId,
     outputs: materialization.outputs,
     distributionReviewInput,
+    noticeMaterializationId: noticeMaterialization.noticeMaterializationId,
   }));
   return Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA,
-    version: 3,
+    version: 4,
     pipelineId: `bg.cpp.browser-header-pack-pipeline.sha256.${pipelineHash}`,
     authority: "exact-source-host-tool-vfs-pack-pipeline-observation-only",
     buildInputLockId: extraction.buildInputLockId,
@@ -145,6 +155,7 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
     outputs: materialization.outputs,
     totalPackByteLength: materialization.totalPackByteLength,
     distributionReviewInput,
+    noticeMaterialization,
     unresolvedBlockers: extraction.unresolvedBlockers,
     claims: Object.freeze({
       exactCurrentHeaderSourcePlanArchiveBytesVerified: true,
@@ -161,6 +172,10 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
       exactCudaRedistributionIndexBound: true,
       exactPerDistributedFileComponentMapPrepared: true,
       deterministicLicenseInventoryMaterialized: true,
+      exactApprovedDistributionNoticeBytesMaterialized: true,
+      deterministicAggregateNoticeMaterialized: true,
+      exactFinalDistributionOutputTreeVerified: true,
+      allHeaderNoticesResolved: false,
       externalDistributedFileLicenseMapReviewed: false,
       licenseReviewComplete: false,
       headerUniverseComplete: true,
