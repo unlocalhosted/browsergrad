@@ -249,15 +249,46 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(ciWorkflow).not.toContain("continue-on-error");
   });
 
-  it("shards complete real-world CUDA gates by bundle without changing corpus selection", () => {
-    expect(ciWorkflow).toContain("browser-real-world:");
-    expect(ciWorkflow).toContain("bundle: [src, dist]");
-    expect(ciWorkflow).toContain("verify:real-world-cuda --");
-    expect(ciWorkflow).toContain("--skip-build");
-    expect(ciWorkflow).toContain("--require-webgpu");
-    expect(ciWorkflow).toContain("--bundle=${{ matrix.bundle }}");
-    expect(ciWorkflow.match(/verify:real-world-cuda/gu)).toHaveLength(1);
-    expect(ciWorkflow).not.toMatch(/--(?:only|corpus)(?:=|\s)/u);
+  it("runs one complete corpus audit beside both complete bundle E2E lanes and aggregates them", () => {
+    const auditStart = ciWorkflow.indexOf("\n  browser-real-world-audit:\n");
+    const e2eStart = ciWorkflow.indexOf("\n  browser-real-world-e2e:\n");
+    const aggregateStart = ciWorkflow.indexOf("\n  browser-real-world:\n");
+    expect(auditStart).toBeGreaterThan(0);
+    expect(e2eStart).toBeGreaterThan(auditStart);
+    expect(aggregateStart).toBeGreaterThan(e2eStart);
+
+    const auditJob = ciWorkflow.slice(auditStart, e2eStart);
+    const e2eJob = ciWorkflow.slice(e2eStart, aggregateStart);
+    const aggregateJob = ciWorkflow.slice(aggregateStart);
+
+    expect(auditJob).toContain("audit:real-world-cuda --");
+    expect(auditJob).toContain("--skip-build");
+    expect(auditJob).toContain("--skip-fetch");
+    expect(auditJob).toContain("--limit 0");
+    expect(auditJob).not.toContain("Playwright");
+    expect(auditJob).not.toContain("needs:");
+
+    expect(e2eJob).toContain("bundle: [src, dist]");
+    expect(e2eJob).toContain("fail-fast: false");
+    expect(e2eJob).toContain("verifyRealWorldCudaPlan");
+    expect(e2eJob).toContain('"--require-webgpu"');
+    expect(e2eJob).toContain("`--bundle=${bundle}`");
+    expect(e2eJob).toContain("plan.length !== 2");
+    expect(e2eJob).toContain("spawnSync(process.execPath, plan[1].args");
+    expect(e2eJob).not.toContain("needs:");
+
+    expect(aggregateJob).toContain("if: ${{ always() }}");
+    expect(aggregateJob).toContain("- browser-real-world-audit");
+    expect(aggregateJob).toContain("- browser-real-world-e2e");
+    expect(aggregateJob).toContain("needs['browser-real-world-audit'].result");
+    expect(aggregateJob).toContain("needs['browser-real-world-e2e'].result");
+    expect(aggregateJob).toContain('!= "success"');
+
+    const realWorldJobs = ciWorkflow.slice(auditStart);
+    expect(realWorldJobs).not.toContain("verify:real-world-cuda --");
+    expect(realWorldJobs).not.toContain("upload-artifact");
+    expect(realWorldJobs).not.toContain("download-artifact");
+    expect(realWorldJobs).not.toMatch(/--(?:only|corpus)(?:=|\s)/u);
   });
 
   it("keeps compatibility lanes independent from the required-native harness", () => {

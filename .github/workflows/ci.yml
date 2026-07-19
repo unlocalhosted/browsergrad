@@ -8,8 +8,9 @@
 #   4. browser — real Chromium + WebGPU via Playwright. Linux only; macOS
 #      headed Metal cannot run on hosted runners. Set BG_BROWSER_HEADLESS=1
 #      and pass the WebGPU flags the config already declares.
-#   5. browser-real-world — source and dist bundle CUDA gates on separate
-#      runners. Each shard still audits every corpus and runs the full smoke set.
+#   5. browser-real-world — the complete corpus audit and source/dist bundle
+#      CUDA E2E gates run on three independent runners, followed by one required
+#      aggregate status that preserves all three evidence boundaries.
 #
 # Build matrix:
 #   - Node 20 (oldest supported via engines.node ≥20)
@@ -171,7 +172,32 @@ jobs:
       - name: Run compiler browser suite
         run: pnpm --filter @unlocalhosted/browsergrad-compiler test:browser
 
-  browser-real-world:
+  browser-real-world-audit:
+    name: Real-world CUDA corpus audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+
+      - name: Run complete real-world CUDA compile and codegen audit
+        run: >-
+          pnpm --filter @unlocalhosted/browsergrad-compiler
+          audit:real-world-cuda --
+          --skip-build
+          --skip-fetch
+          --limit 0
+
+  browser-real-world-e2e:
     name: Real-world CUDA (${{ matrix.bundle }} bundle)
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -198,9 +224,53 @@ jobs:
         run: pnpm --filter @unlocalhosted/browsergrad-kernels exec playwright install --with-deps chromium
 
       - name: Run complete real-world CUDA bundle gate
-        run: >-
-          pnpm --filter @unlocalhosted/browsergrad-compiler
-          verify:real-world-cuda --
-          --skip-build
-          --require-webgpu
-          --bundle=${{ matrix.bundle }}
+        env:
+          BG_REAL_WORLD_BUNDLE: ${{ matrix.bundle }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { spawnSync } from "node:child_process";
+          import {
+            parseVerifyRealWorldCudaArgs,
+            verifyRealWorldCudaPlan,
+          } from "./scripts/verify-real-world-cuda.mjs";
+
+          const bundle = process.env.BG_REAL_WORLD_BUNDLE;
+          if (bundle !== "src" && bundle !== "dist") {
+            throw new Error(`unexpected real-world CUDA bundle: ${bundle}`);
+          }
+          const plan = verifyRealWorldCudaPlan(parseVerifyRealWorldCudaArgs([
+            "--skip-fetch",
+            "--require-webgpu",
+            `--bundle=${bundle}`,
+          ]));
+          const expectedLabel = `real-world CUDA browser fixture e2e (${bundle})`;
+          if (plan.length !== 2 || plan[0]?.label !== "real-world CUDA compile/codegen audit" || plan[1]?.label !== expectedLabel) {
+            throw new Error(`unexpected real-world CUDA verification plan for ${bundle}`);
+          }
+          const result = spawnSync(process.execPath, plan[1].args, {
+            cwd: process.cwd(),
+            stdio: "inherit",
+          });
+          if (result.error) throw result.error;
+          if (result.status !== 0) process.exit(result.status ?? 1);
+          NODE
+
+  browser-real-world:
+    name: Real-world CUDA required evidence
+    if: ${{ always() }}
+    needs:
+      - browser-real-world-audit
+      - browser-real-world-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require corpus audit and both bundle E2E lanes
+        env:
+          BG_REAL_WORLD_AUDIT_RESULT: ${{ needs['browser-real-world-audit'].result }}
+          BG_REAL_WORLD_E2E_RESULT: ${{ needs['browser-real-world-e2e'].result }}
+        run: |
+          if [[ "${BG_REAL_WORLD_AUDIT_RESULT}" != "success" || "${BG_REAL_WORLD_E2E_RESULT}" != "success" ]]; then
+            echo "real-world CUDA audit result: ${BG_REAL_WORLD_AUDIT_RESULT}"
+            echo "real-world CUDA bundle E2E result: ${BG_REAL_WORLD_E2E_RESULT}"
+            exit 1
+          fi
