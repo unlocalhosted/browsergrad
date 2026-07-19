@@ -25,9 +25,13 @@ generated factory inside one exact 584,954-byte package-owned Worker module
 with zero static or dynamic imports. The production controller captures its
 browser effects at module evaluation, composes only package-owned Worker bytes
 into a one-shot invocation, terminalizes every Worker/Blob/timer/listener
-effect before returning, and still mints no lowering authority. Validated
-terminal frames retain the exact observed-execution, invocation, request,
-profile, asset-manifest, VFS, runtime-ABI, and package-Worker authority chain;
+effect before returning, and still mints no lowering authority. Immediately
+before minting execution evidence it re-unwraps the exact protocol-issued
+validated frame and cross-binds its invocation, request, profile,
+request-binding, and artifact identities; a structural copy cannot substitute
+for that authority. Validated terminal frames retain the exact
+observed-execution, invocation, request, profile, asset-manifest, VFS,
+runtime-ABI, and package-Worker authority chain;
 hostile view-copy graphs are checked with non-recursive, target-intrinsic cycle
 detection before any semantic authority can be minted. Two distinct
 cache-free builds now prove exact extractor Wasm/factory reproducibility; the
@@ -157,7 +161,7 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 509 tests across 56 files covering the build plan, runtime ABI,
+clean, then runs 510 tests across 56 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
 package invocation, Worker entry, production controller, exact header-tree
 inventory/materialization, seven-archive admission, strict archive
@@ -166,8 +170,8 @@ the complete header distribution review input, distribution-notice
 verification, exact notice-output materialization, two-root distribution
 reproducibility, exact package admission of that evidence, browser build-subject
 syntax, and signature/build-subject binding. The current Node 25 focused Vitest
-phase passes 509 tests across the same 56 files in 11.39 seconds. The complete
-local compiler suite passes 80 files and 1,500 tests in 11.27 seconds when run
+phase passes 510 tests across the same 56 files in 11.19 seconds. The complete
+local compiler suite passes 80 files and 1,501 tests in 12.51 seconds when run
 after the package build. The local feedback loop remains measured in tens of
 seconds.
 Clean validation and two-build
@@ -1146,6 +1150,11 @@ creates the exact verified Worker, binds a fresh package-generated invocation
 nonce, accepts one terminal message only from that Worker instance, measures
 host time, and owns terminate-and-replace cleanup. The pure result verifier is
 wrapped by that controller; it is not a public self-attestation path.
+Immediately before minting execution evidence, the controller MUST re-unwrap
+the exact protocol-issued validated frame and cross-bind its invocation,
+request, profile, request-binding, and artifact identities. Re-decoded or
+structurally copied frames MUST NOT substitute for the opaque validator-issued
+authority.
 
 #### Closed browser VFS assets
 
