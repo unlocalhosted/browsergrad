@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
-          pnpm -r build
+          pnpm --filter @unlocalhosted/browsergrad-compiler... build
           pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:run
 
       - name: Project the diagnostic toolchain cache key
@@ -294,7 +294,7 @@ jobs:
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
-          pnpm -r build
+          pnpm --filter @unlocalhosted/browsergrad-compiler... build
           pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:run
 
       - name: Allocate private comparison root

@@ -87,6 +87,9 @@ describe("Clang-Wasm evidence workflow", () => {
   });
 
   it("keeps cached feedback content-addressed and non-authoritative", () => {
+    expect(workflow.match(/pnpm --filter @unlocalhosted\/browsergrad-compiler\.\.\. build/gu))
+      .toHaveLength(2);
+    expect(workflow).not.toContain("pnpm -r build");
     expect(workflow).toContain("cpp_cute_browser_toolchain_cache.mjs");
     expect(workflow).toContain(
       "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0",
