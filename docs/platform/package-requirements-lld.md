@@ -1,7 +1,7 @@
 # BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
 - **Status:** normative platform architecture; implementation status is not implied
-- **Last reviewed:** 2026-07-18
+- **Last reviewed:** 2026-07-19
 - **Implementation ledger:**
   [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
 - **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
@@ -13,79 +13,51 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
 describe requirement strength. They are used deliberately rather than as
 general emphasis.
 
-## Implementation Checkpoint — Active 2026-07-18
+## Implementation Checkpoint — Active 2026-07-19
 
-Implementation resumed from the intentionally red `7b7757fa` Gate 3 handover.
 Gates 0 through 2 remain verified; Gate 3 is active; Gates 4 through 7 have not
-started. The strict native compile session, sealed CUDA device-first/host-second
-passes, diagnostic normalization, and production Artifact V3 writer are now
-implemented. A pinned no-shell Clang-Wasm executor, isolated manual build lane,
-two-clean-build comparator, native TableGen identity observation, and raw-Wasm
-ABI review producer are on `main` through `1eac0a1c`.
+started. The strict native producer, pinned no-shell Clang-Wasm executor,
+isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
+are implemented on `main` through `056aaf02`.
 
-Harness hardening, build fixes, and fast feedback are on `main` through
-`09dc21a2`. Validation
-run `29650211276` exposed a target exception-mode mismatch after 86 minutes 45
-seconds; run `29653908647` cleared that failure and exposed missing Clang source
-and generated include roots after 94 minutes 45 seconds. Both failures occurred
-before any factory/Wasm output was admitted. Run `29657388282` exercised the
-new configured-target preflight and rejected a noncanonical include-path
-spelling after 9 minutes 36 seconds, before the expensive Wasm compile. Failure
-receipts now preserve bounded typed cause chains, and both include roots are
-canonicalized before target attachment. Future validation and reproducibility
-runs stage only the exact JavaScript/package runtime files plus the lock-listed
-extractor source files, reject altered, missing, or ambient entries, mount that
-sealed tree instead of package or checkout trees, and bind its per-file identity
-into build-execution evidence v2. The million-call VFS limit test has direct
-exact-boundary coverage. Exact-source CI `29658935991` is green at `3e17a744`,
-including Node 20/24/25 and the real Chromium/WebGPU CUDA corpus. Validation
-`29658164083` passed the configured-target preflight, compiled every BrowserGrad
-translation unit, and reached the final Wasm link after 97 minutes 5 seconds of
-isolated execution. It then failed closed on two exact platform mismatches: the
-LLVM/Clang libraries lacked RTTI, and LLVM Support referenced POSIX user,
-process, resource, and signal-stack services unavailable to the browser
-product. It admitted no factory/Wasm and, because it started before `df849d95`,
-cannot evidence the newer exact runtime-closure boundary.
+The original cold diagnostic run `29658164083` spent 97 minutes 5 seconds in
+isolated execution before failing closed at link. That result exposed two
+different costs that the harness had conflated: reusable LLVM/Clang
+provisioning and ordinary extractor edit validation. The cached diagnostic lane
+now reuses only the content-addressed toolchain directories, keeps the cache
+untrusted inside the networkless/capability-free container, and never grants
+clean-build, reproducibility, provenance, or release authority. Run
+`29668611133` completed in 5 minutes 3 seconds. Final no-migration proof
+`29668822793` at `056aaf02` then completed in 4 minutes 39 seconds: the
+JavaScript boundary took 27 seconds, cache restoration took 2 seconds, the
+isolated compile/link executor took 3 minutes 14 seconds, and ABI review took 3
+seconds. Link policy no longer invalidates the expensive toolchain cache, and
+all temporary cache-migration shims have been removed. Clean validation and
+two-build reproducibility still restore no cache and remain intentionally more
+expensive. Exact-source CI `29668819938` is green at the same revision.
 
-Commit `37dacbf6` enables RTTI on the actual Wasm LLVM/Clang libraries and adds
-a BrowserGrad-owned in-module host boundary that returns deterministic
-identity-free values or `ENOSYS` for those unsupported services. It does not
-grant process or ambient-filesystem capability. The configured-target preflight
-now reads the sealed CMake cache and rejects RTTI-disabled libraries before the
-expensive compile; the linker reports the complete unresolved-symbol set. The
-new build lock covers 37 extractor files, and its required-native harness passes
-25 files with 161 tests and 9 intentional platform skips. Validation
-`29661850267` then failed in that native harness before root allocation,
-acquisition, or build because its POSIX test violated Linux non-null parameter
-contracts and the shim retained tautological null checks under `-Werror`.
-Commit `60a3d9f9` makes the test and shim portable without weakening the browser
-authority boundary and advances the content-addressed lock to
-`bg.cpp.browser-build-input-lock.sha256.74a783b4b283f533ca599b0bf3197346d20f9f2bf90ad612a1f557b5e1df662b`.
-Replacement validation `29662148150` was cancelled during JavaScript
-verification, before root allocation or acquisition, when feedback latency
-became the immediate priority.
+Every admitted build now runs the independent production-scale raw-Wasm
+inspector and uploads its exact report. The first ABI-preserving artifact is a
+31,327,956-byte module. Inspection completes in about 3 seconds and reports ten
+real mismatches rather than granting conformance. Its six explicit
+`browsergrad_vfs_v1` imports are correct, but 92 generated Emscripten imports
+remain, including clock, random, process, environment, and ambient-filesystem
+services forbidden by the browser runtime contract. Memory naming is now
+correct; table/support exports and target-feature declarations also require
+explicit review. The runtime ABI MUST NOT be repinned to authorize these
+ambient capabilities. Production Worker construction remains blocked until
+the generated import surface is closed, a clean build and two-build
+reproducibility pass, and the independently reviewed projection conforms.
 
-Commit `d0f970ee` pins four-way clean compilation and advances the lock to
-`bg.cpp.browser-build-input-lock.sha256.15a71eedf31da3ec752332f90ce74c3d2f7308bb81d3eeba698fc466b683fe14`.
-Commit `09dc21a2` makes cached fast validation the default manual mode. Its exact
-cache key binds LLVM, Emscripten, recipe, selected-library, and extractor-CMake
-inputs while excluding ordinary extractor implementation edits. Cache contents
-remain untrusted, run only inside the networkless/capability-free container,
-and emit a separate non-clean diagnostic observation. Clean validation and
-two-build reproducibility never restore this cache. Executor option admission
-is now a separate exact runtime-closure module, reducing the executor to 2,198
-lines; the 26-file required-native harness passes 166 tests with 9 platform
-skips in 89.31 seconds locally under Clang 22. Cold provisioning run
-`29663494490` is active; no warm timing or build output is claimed yet.
-
-CI `29660204901` then exposed an unrelated Grad reproducibility defect: fresh
-NumPy generators in parameterized layer constructors bypassed
-`torch.manual_seed`. Commit `81984eda` routes those initializers through the
-seeded global generator and covers every affected layer family. Replacement CI
-`29660471267` has passed the full Pyodide/Grad lane and Node 20/24/25, including
-the exact native compiler harness, plus the real Chromium/WebGPU corpus. That
-repair removes nondeterministic workspace-gate noise but grants no Clang-Wasm
-or browser-local C++ capability.
+The harness audit found strong isolation, exact-input closure, bounded logs,
+independent Wasm parsing, and separate authority tiers. It also records real
+maintenance debt: the JavaScript executor sits close to its line-count ratchet,
+native producer files remain large, and several semantic TypeScript modules are
+5,000 to 8,000 lines. Cold provisioning is still roughly 40 minutes and the
+cached link loop still spends about 29 seconds regenerating Emscripten system
+libraries. These are explicit follow-on optimization and decomposition tasks;
+they do not weaken the current fail-closed boundary or turn cached diagnostics
+into release evidence.
 
 An active or failed run is not build, ABI, reproducibility, Worker, browser, or
 release evidence. The package Worker remains capability-blocked until real
