@@ -189,6 +189,10 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect(wasmExceptionTagCount).toBe(0);
   });
 
+  it("preserves raw Wasm import and export names for the pinned runtime ABI", () => {
+    expect(wasmLinkerFlags).toContain("-sMINIFY_WASM_EXPORT_NAMES=0");
+  });
+
   it("closes unsupported browser host services inside the Wasm module", async () => {
     const source = await extractorSource("BrowserGradCppCuteBrowserHost.cpp");
     for (const symbol of [

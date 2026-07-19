@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.5465949ac7b6e9a9ed7948edd0cb279b3ced7c2cfe553e6764c62fb28a1d6b2a",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.fa72ad834fa04ed63e2355a13af7bdf64091101e52ef524526a8fc407b1e7b5e",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -225,6 +225,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
             "-sMODULARIZE=1",
             "-sEXPORT_ES6=1",
             "-sEXPORT_NAME=createBrowserGradCppCuteExtractor",
+            "-sMINIFY_WASM_EXPORT_NAMES=0",
             "-sENVIRONMENT=worker",
             "-sFILESYSTEM=0",
             "-sDYNAMIC_EXECUTION=0",
