@@ -59,9 +59,15 @@ and the Linux sysroot. The same pipeline admits the exact 49,142-byte CUDA
 distributed virtual path and content identity to the materialized pack,
 license component, and relevant package notice while also binding the complete
 ten-resource notice set, eight extracted upstream evidence files totaling
-250,207 bytes, and the selected CUDA index records. Two final direct runs
-produced the same review-input and pipeline identities in about 22.4 seconds.
-These are real
+250,207 bytes, and the selected CUDA index records. The pipeline now copies the
+ten verifier-retained package notice snapshots into their exact declared
+component-license paths and constructs a deterministic 115,316-byte aggregate
+notice containing ten components, nine of them third party. The eleven new
+notice files total 226,326 bytes, are created without clobber at mode `0400`,
+are independently reread, and complete an exact 17-file private output tree
+with the five packs and review input. Three final direct runs produced stable
+review-input, notice-materialization, aggregate, and path-independent pipeline
+identities in 23.1 to 25.4 seconds. These are real
 source-derived, independently inspected non-release pack observations. They do
 establish the complete configured header universe under one package-reviewed
 builder identity and the complete engineering input for external header-file
@@ -76,11 +82,15 @@ the seven-archive admission is
 the pinned normalization environment is
 `bg.cpp.pinned-archive-normalization-environment.sha256.d9461759522fbe616b0244ab63267854eb249f546a1b8560c7b7b0cd6b6df818`;
 and the composed observation is
-`bg.cpp.browser-header-pack-pipeline.sha256.fbc8e39bb2bf49a5124a10bce434e121a5638d42d60ed7df6075086842a9a154`.
+`bg.cpp.browser-header-pack-pipeline.sha256.35e0d574519cf799844dfb3f72c2b6e6ae00532224ee34ddbcab2ba3a6e03556`.
 The header review input is
 `bg.cpp.header-distribution-review-input.sha256.28346afa0239011e988de9cd40818b9eff6bbeeecc6e7e4bf508137697f4dc82`
 with exact file SHA-256
 `0c809a69554731e3b78acc8c0717c1c0939883b8df811637120a067e28be97b7`.
+The notice materialization is
+`bg.cpp.browser-header-notice-materialization.sha256.a560867d2614feeb1c460c2192435b5472780c5538ab8d0c11c2cf6207df430a`;
+its exact aggregate SHA-256 is
+`9933f791012ac5662cc87a63cdf56d794893e59d49ac8a013c05f29709b4e30b`.
 The five output SHA-256 identities are `fd7fb977...` (configured Clang resource),
 `f795494a...` (CUDA), `4f1c39b7...` (CUTLASS), `f66f1284...` (libc++), and
 `d04a460d...` (Linux sysroot); the implementation ledger retains the complete
@@ -103,14 +113,15 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 431 tests across 47 files covering the build plan, runtime ABI,
+clean, then runs 434 tests across 49 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
 package invocation, Worker entry, production controller, exact header-tree
 inventory/materialization, seven-archive admission, strict archive
 normalization/extraction, the reviewed builder identity, CUDA-index admission,
-the complete header distribution review input, and distribution-notice
-verification. The focused test phase is 23.55 seconds and the complete gate
-remains in the low-thirty-second range on Node 25. Clean validation and two-build
+the complete header distribution review input, distribution-notice
+verification, and exact notice-output materialization. The focused test phase
+is 25.59 seconds and the complete gate is 37.26 seconds on Node 25. Clean
+validation and two-build
 reproducibility still restore no cache and remain intentionally more expensive.
 
 The current CMake-stable primary cache is now proved at exact source.
@@ -199,8 +210,8 @@ isolated build. Its 31,641,377-byte module has SHA-256
 passes raw review with zero mismatches. The ABI 1.8 local fast gate passes 30
 files/338 tests in 24.7 seconds on Node 25; the later controller-complete gate
 passed 34 files/381 tests in 25.26 seconds, and the current reproducibility-,
-archive-, extraction-, and header-capable gate passes 47 files/431 tests in
-the low-thirty-second range.
+archive-, extraction-, and header-capable gate passes 49 files/434 tests in
+37.26 seconds.
 
 The harness audit found strong isolation, exact-input closure, bounded logs,
 independent Wasm parsing, and separate authority tiers. It also records real
