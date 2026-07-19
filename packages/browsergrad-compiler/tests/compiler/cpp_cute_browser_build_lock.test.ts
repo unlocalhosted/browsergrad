@@ -22,9 +22,9 @@ import {
 } from "../../src/cpp_cute_browser_runtime_abi.js";
 
 const LOCK_ID =
-  "bg.cpp.browser-build-input-lock.sha256.f14f21668a20debc641b2a554d77b01136026d7f58e1715c3df607a32277cc39";
-const RESOURCE_SHA256 = "f1080c605986fd166893e30edd8348c9ba03821caae686271b2e07dedaad9b44";
-const RECIPE_SHA256 = "c6d5075c09c9d3cd775425c4c0a0c7c4d4ac7dbe04b38cf9fc79c0495534f794";
+  "bg.cpp.browser-build-input-lock.sha256.5465949ac7b6e9a9ed7948edd0cb279b3ced7c2cfe553e6764c62fb28a1d6b2a";
+const RESOURCE_SHA256 = "d26cdb225f585f608d27deac3049fd896cebc1486aeb06463f39dcafa4acc422";
+const RECIPE_SHA256 = "f128d4a16b5399c683754f41dd3f7267c422b83a121f2cc1b5af301fd537bff2";
 const EXTRACTOR_SOURCE_SHA256 = "5647e5acf4658cb5bea29db05dd1e6d7fd0d71bebb434aab2ecee9ed96d2524f";
 const NOTICE_SHA256 = "ae94cc9272e8d3458778dda90db035388450075d5404f736f6daadc7192163d1";
 const BLOCKERS = [
@@ -171,6 +171,8 @@ describe("browser Clang-WASM build-input lock", () => {
     expect(recipe.stages[1]?.linkerFlags).toContain("-sFILESYSTEM=0");
     expect(recipe.stages[1]?.linkerFlags).toContain("-sMAXIMUM_MEMORY=1073741824");
     expect(recipe.stages[1]?.linkerFlags).toContain("-sABORTING_MALLOC=0");
+    expect(recipe.stages[1]?.linkerFlags).toContain("-sERROR_ON_UNDEFINED_SYMBOLS=0");
+    expect(recipe.stages[1]?.linkerFlags).not.toContain("-sERROR_ON_UNDEFINED_SYMBOLS=1");
     expect(recipe.stages[1]?.linkerFlags).toContain(
       "-sEXPORTED_FUNCTIONS=['_bg_cpp_cute_abi_version','_bg_cpp_cute_alloc','_bg_cpp_cute_allocator_metrics_pointer','_bg_cpp_cute_compile','_bg_cpp_cute_free','_bg_cpp_cute_reset','_bg_cpp_cute_result_length','_bg_cpp_cute_result_pointer','_bg_cpp_cute_status']",
     );

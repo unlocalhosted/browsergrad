@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.f14f21668a20debc641b2a554d77b01136026d7f58e1715c3df607a32277cc39",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.5465949ac7b6e9a9ed7948edd0cb279b3ced7c2cfe553e6764c62fb28a1d6b2a",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -239,7 +239,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
             "-sSTACK_SIZE=16777216",
             "-sABORTING_MALLOC=0",
             "-sMALLOC=dlmalloc",
-            "-sERROR_ON_UNDEFINED_SYMBOLS=1",
+            "-sERROR_ON_UNDEFINED_SYMBOLS=0",
             "-Wl,--error-limit=0",
             "-sWASM_ASYNC_COMPILATION=1",
             "-sRETAIN_COMPILER_SETTINGS=0",
