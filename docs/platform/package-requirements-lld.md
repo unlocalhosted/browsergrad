@@ -140,15 +140,17 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 442 tests across 51 files covering the build plan, runtime ABI,
+clean, then runs 444 tests across 51 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
 package invocation, Worker entry, production controller, exact header-tree
 inventory/materialization, seven-archive admission, strict archive
 normalization/extraction, the reviewed builder identity, CUDA-index admission,
 the complete header distribution review input, distribution-notice
 verification, exact notice-output materialization, two-root distribution
-reproducibility, and exact package admission of that evidence. The focused
-test phase is 23.41 seconds and the complete gate is 33.89 seconds on Node 25.
+reproducibility, and exact package admission of that evidence. The current
+Node 25 gate passes 444 tests across the same 51 files; its focused Vitest
+phase is 26.97 seconds, so the local feedback loop remains measured in tens of
+seconds.
 Clean validation and two-build
 reproducibility still restore no cache and remain intentionally more expensive.
 
@@ -166,6 +168,26 @@ Workflow concurrency is now mode-scoped: fast feedback no longer queues behind
 clean or reproducibility evidence, and a newer fast request cancels only an
 older fast request. Clean validation and reproducibility never cancel one
 another and retain separate isolated runners and roots.
+
+Exact-source remote run `29695343749` proves the revised graph on Linux/Node
+24. The JavaScript branch passed in 56 seconds while the cached compiler branch
+continued independently; its locked executor took 3 minutes 15 seconds and the
+complete build job took 4 minutes 30 seconds. The run also exposed and closed a
+real harness race: a small fast-exiting normalizer could close stdout while its
+strict consumer was still creating private parser output. The process harness
+now attaches a bounded backpressured stream bridge immediately, awaits process,
+transport, parser, and stderr settlement, and preserves strict rejection and
+owned-output cleanup. Tests cover output beyond pipe capacity and malformed
+tar rejection without weakening the two-zero-block requirement.
+
+The remaining cache-free build cost is inside the LLVM/Clang dependency graph,
+not JavaScript verification or workflow queueing. The two reproducibility
+builds already occupy separate runners and each CMake build uses all four cores
+of the current standard runner. Moving to a larger pinned runner and repinning
+the build parallelism is the next low-risk wall-clock lever. Removing the one
+LibTooling use would prune only the small Tooling/DependencyScanning closure;
+a deeper direct-`cc1` refactor reaches more files but changes CUDA invocation
+semantics and is not an iteration-speed shortcut.
 
 The current CMake-stable primary cache is now proved at exact source.
 Migration run `29680686426` completed in 4 minutes 14 seconds and populated the
