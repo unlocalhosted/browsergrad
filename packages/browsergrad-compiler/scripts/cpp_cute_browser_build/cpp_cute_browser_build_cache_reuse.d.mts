@@ -8,3 +8,7 @@ export function invalidateCachedCppCuteExtractorObjects(input: Readonly<{
   wasmBuildRoot: string;
   sourcePaths: readonly string[];
 }>): Promise<void>;
+
+export function refreshCachedCppCuteToolchainOutputs(input: Readonly<{
+  wasmBuildRoot: string;
+}>): Promise<number>;

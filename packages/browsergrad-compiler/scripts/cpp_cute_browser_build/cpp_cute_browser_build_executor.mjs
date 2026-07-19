@@ -15,7 +15,7 @@ import { TextDecoder } from "node:util";
 
 import { hashCanonicalJson } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
-import { CppCuteBrowserBuildCacheReuseError, invalidateCachedCppCuteExtractorObjects } from "./cpp_cute_browser_build_cache_reuse.mjs";
+import { CppCuteBrowserBuildCacheReuseError, invalidateCachedCppCuteExtractorObjects, refreshCachedCppCuteToolchainOutputs } from "./cpp_cute_browser_build_cache_reuse.mjs";
 import { planCppCuteClangWasmBuild } from "./cpp_cute_browser_build_plan.mjs";
 import { reviewCppCuteBrowserConfiguredTarget } from "./cpp_cute_browser_configured_target_review.mjs";
 import { CPP_CUTE_BROWSER_BUILD_EXECUTOR_FS } from "./cpp_cute_browser_build_executor_fs.mjs";
@@ -265,6 +265,8 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
       }
       await verifyRegularFileBindings(nativeToolBindings);
     }
+    if (step.id === "clang-extractor-wasm-build" && buildDirectoryPolicy === "reuse-untrusted-diagnostic")
+      await refreshCachedCppCuteToolchainOutputs({ wasmBuildRoot: roots.wasmBuildRoot });
     if (step.id === "clang-extractor-wasm-build") {
       try {
         configuredTargetReview = await reviewCppCuteBrowserConfiguredTarget({
