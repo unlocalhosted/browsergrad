@@ -89,6 +89,12 @@ export function canonicalCppCuteBrowserHeaderPackInventoryBytes(
   inventory: CppCuteBrowserHeaderPackInventory,
 ): Uint8Array;
 
+export function copyCppCuteBrowserHeaderPackInventorySourceFile(
+  inventory: CppCuteBrowserHeaderPackInventory,
+  includeRootId: string,
+  virtualPath: string,
+): Promise<Uint8Array>;
+
 export function parseCppCuteBrowserHeaderPackInventoryArguments(
   argv: readonly string[],
 ): Readonly<CppCuteBrowserHeaderPackInventoryArguments>;

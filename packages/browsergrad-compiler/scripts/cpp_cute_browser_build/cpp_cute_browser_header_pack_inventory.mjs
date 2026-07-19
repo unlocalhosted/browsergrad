@@ -32,6 +32,7 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_TOTAL_FILE_BYTES = 512 * 1024 * 1024;
 const READ_BUFFER_BYTES = 256 * 1024;
 const TEXT_ENCODER = new TextEncoder();
+const INVENTORY_SOURCE_FILES = new WeakMap();
 const PACK_POLICIES = Object.freeze([
   Object.freeze({
     includeRootId: "clang-resource",
@@ -118,10 +119,12 @@ export async function inventoryCppCuteBrowserHeaderPackSources(input) {
 
   const budget = { files: 0, bytes: 0 };
   const packs = [];
+  const sourceFilesByIncludeRootId = new Map();
   for (const [packIndex, pack] of parsedPacks.entries()) {
     const policy = packPolicies[packIndex];
     if (policy === undefined) invalid("$.input.packs", "current build-lock pack policy is incomplete");
     const filesByPath = new Map();
+    const sourceFilesByPath = new Map();
     for (const source of pack.sources) {
       const sourceRoot = await admitCanonicalDirectory(
         source.sourceRoot,
@@ -134,6 +137,7 @@ export async function inventoryCppCuteBrowserHeaderPackSources(input) {
         virtualPrefix: source.virtualPrefix,
         licenseComponentIds: source.licenseComponentIds,
         filesByPath,
+        sourceFilesByPath,
         budget,
         diagnosticPath: `$.input.packs[${pack.inputIndex}].sources[${source.inputIndex}]`,
       });
@@ -168,6 +172,7 @@ export async function inventoryCppCuteBrowserHeaderPackSources(input) {
       fileContentByteLength,
       files: Object.freeze(files),
     }));
+    sourceFilesByIncludeRootId.set(pack.includeRootId, sourceFilesByPath);
   }
 
   const inventoryHash = sha256(canonicalJsonBytes({
@@ -206,7 +211,27 @@ export async function inventoryCppCuteBrowserHeaderPackSources(input) {
   if (bytes.byteLength > MAX_OUTPUT_BYTES) {
     resource("$.inventory", `canonical inventory exceeds ${MAX_OUTPUT_BYTES} bytes`);
   }
+  INVENTORY_SOURCE_FILES.set(manifest, Object.freeze({ sourceFilesByIncludeRootId }));
   return manifest;
+}
+
+/**
+ * Copies one file from the exact live source-tree authority behind an
+ * inventory instance. Serialized or forged inventory records have no access
+ * to caller paths, and changed source bytes fail before they are returned.
+ */
+export async function copyCppCuteBrowserHeaderPackInventorySourceFile(
+  inventory,
+  includeRootId,
+  virtualPath,
+) {
+  const stored = INVENTORY_SOURCE_FILES.get(inventory);
+  if (stored === undefined) invalid("$.inventory", "inventory has no live source-tree authority");
+  identifier(includeRootId, "$.includeRootId");
+  portableRelativePath(virtualPath, "$.virtualPath", false);
+  const source = stored.sourceFilesByIncludeRootId.get(includeRootId)?.get(virtualPath);
+  if (source === undefined) invalid("$.virtualPath", "file is absent from the exact inventory");
+  return readExactInventorySourceFile(source.sourcePath, source.expected, "$.virtualPath");
 }
 
 export function canonicalCppCuteBrowserHeaderPackInventoryBytes(inventory) {
@@ -349,6 +374,10 @@ async function inventoryDirectory(context) {
       byteLength: String(file.byteLength),
       licenseComponentIds: Object.freeze([...context.licenseComponentIds]),
     }));
+    context.sourceFilesByPath.set(virtualPath, Object.freeze({
+      sourcePath: entryPath,
+      expected: context.filesByPath.get(virtualPath),
+    }));
   }
   const after = await lstatDirectory(context.directoryPath, context.diagnosticPath);
   if (!sameStatIdentity(before, after)) {
@@ -489,6 +518,44 @@ async function readBoundedRegularFile(path, maximum, diagnosticPath) {
   } catch (cause) {
     if (cause instanceof CppCuteBrowserHeaderPackInventoryError) throw cause;
     invalid(diagnosticPath, "failed to read bounded regular file", { cause });
+  } finally {
+    await handle?.close();
+  }
+}
+
+async function readExactInventorySourceFile(path, expected, diagnosticPath) {
+  let discovered;
+  try {
+    discovered = await lstat(path, { bigint: true });
+  } catch (cause) {
+    invalid(diagnosticPath, "inventoried source file is unavailable", { cause });
+  }
+  if (!discovered.isFile() || discovered.isSymbolicLink() || discovered.nlink !== 1n ||
+      discovered.size !== BigInt(expected.byteLength)) {
+    invalid(diagnosticPath, "inventoried source file identity or length changed");
+  }
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const before = await handle.stat({ bigint: true });
+    if (!sameStatIdentity(discovered, before)) {
+      invalid(diagnosticPath, "inventoried source file changed before read");
+    }
+    const bytes = new Uint8Array(Number(before.size));
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      const { bytesRead } = await handle.read(bytes, offset, bytes.byteLength - offset, offset);
+      if (bytesRead <= 0) invalid(diagnosticPath, "inventoried source file changed while read");
+      offset += bytesRead;
+    }
+    const after = await handle.stat({ bigint: true });
+    if (!sameStatIdentity(before, after) || sha256(bytes) !== expected.contentSha256) {
+      invalid(diagnosticPath, "inventoried source file bytes changed");
+    }
+    return bytes;
+  } catch (cause) {
+    if (cause instanceof CppCuteBrowserHeaderPackInventoryError) throw cause;
+    invalid(diagnosticPath, "failed to copy inventoried source file", { cause });
   } finally {
     await handle?.close();
   }

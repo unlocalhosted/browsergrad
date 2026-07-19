@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  chmod,
   link,
   mkdir,
   mkdtemp,
@@ -19,6 +20,7 @@ import {
   CppCuteBrowserHeaderPackInventoryError,
   authorCppCuteBrowserHeaderPackInventory,
   canonicalCppCuteBrowserHeaderPackInventoryBytes,
+  copyCppCuteBrowserHeaderPackInventorySourceFile,
   inventoryCppCuteBrowserHeaderPackSources,
   parseCppCuteBrowserHeaderPackInventoryArguments,
   type CppCuteBrowserHeaderPackInventoryInput,
@@ -85,6 +87,26 @@ describe("browser header-pack source inventory", () => {
     const bytes = canonicalCppCuteBrowserHeaderPackInventoryBytes(one);
     expect(bytes).toEqual(canonicalJsonBytes(one));
     expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual(one);
+
+    const copied = await copyCppCuteBrowserHeaderPackInventorySourceFile(
+      one,
+      "cutlass",
+      "cute/layout.hpp",
+    );
+    expect(new TextDecoder().decode(copied)).toBe("// layout v1\nabc");
+    await expect(copyCppCuteBrowserHeaderPackInventorySourceFile(
+      { ...one },
+      "cutlass",
+      "cute/layout.hpp",
+    )).rejects.toSatisfy(expectInventoryPath("$.inventory"));
+
+    await chmod(join(first.cutlassRoot, "cute", "layout.hpp"), 0o600);
+    await writeFile(join(first.cutlassRoot, "cute", "layout.hpp"), "changed\n");
+    await expect(copyCppCuteBrowserHeaderPackInventorySourceFile(
+      one,
+      "cutlass",
+      "cute/layout.hpp",
+    )).rejects.toSatisfy(expectMessage("changed"));
   });
 
   it("authors one immutable canonical inventory through strict path arguments", async () => {
