@@ -20,6 +20,9 @@ export interface CppCuteClangWasmReproducibilityBuildIdentity {
   readonly factoryModuleByteLength: number;
   readonly wasmSha256: string;
   readonly wasmByteLength: number;
+  readonly runtimeAbiReviewSha256: string;
+  readonly runtimeAbiReviewByteLength: number;
+  readonly runtimeAbiReviewExactInterfaceConformance: boolean;
   readonly linkMapSha256: string;
   readonly linkMapByteLength: number;
 }
@@ -50,6 +53,7 @@ export interface VerifiedCppCuteClangWasmReproducibility {
     readonly nativeTablegenIdentitiesMatched: true;
     readonly factoryModuleBytesMatched: true;
     readonly wasmBytesMatched: true;
+    readonly runtimeAbiReviewBytesMatched: true;
     readonly linkMapBytesMatched: true;
   }>;
   readonly claims: Readonly<{

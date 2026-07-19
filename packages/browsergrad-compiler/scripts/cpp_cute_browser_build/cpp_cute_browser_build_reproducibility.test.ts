@@ -52,6 +52,7 @@ interface BuildFixtureOptions {
   readonly evidenceWasmBytes?: Uint8Array;
   readonly observedWasmBytes?: Uint8Array;
   readonly runtimeClosureContent?: string;
+  readonly runtimeAbiReviewTag?: string;
   readonly extraEvidenceField?: boolean;
   readonly nonCanonicalEvidence?: boolean;
 }
@@ -186,6 +187,27 @@ async function writeBuild(
     releaseReady: false,
     factoryModuleDistributed: false,
   };
+  const runtimeAbiProjection = {
+    fixtureTag: options.runtimeAbiReviewTag ?? "matching-review",
+  };
+  const runtimeAbiReview = {
+    authority: "review-observation-only",
+    wasmSha256: execution.wasmSha256,
+    wasmByteLength: execution.wasmByteLength,
+    observedProjectionSha256: sha256(canonicalJsonBytes(runtimeAbiProjection)),
+    runtimeAbiManifestId: body.runtimeAbiResource.manifestId,
+    runtimeAbiContractSha256: "1".repeat(64),
+    exactInterfaceConformance: false,
+    mismatches: ["fixture module intentionally lacks the production ABI"],
+    projection: runtimeAbiProjection,
+    rawWasmVerified: true,
+    workerExecutionReady: false,
+    releaseReady: false,
+  };
+  await writeFile(
+    join(outputRoot, "clang-wasm-runtime-abi-review.v1.json"),
+    canonicalJsonBytes(runtimeAbiReview),
+  );
   const runtimeClosureBytes = new TextEncoder().encode(
     options.runtimeClosureContent ?? "runtime closure fixture",
   );
@@ -307,6 +329,7 @@ describe("Clang-Wasm clean-build reproducibility authority", () => {
         nativeTablegenIdentitiesMatched: true,
         factoryModuleBytesMatched: true,
         wasmBytesMatched: true,
+        runtimeAbiReviewBytesMatched: true,
         linkMapBytesMatched: true,
       },
       claims: {
@@ -320,6 +343,9 @@ describe("Clang-Wasm clean-build reproducibility authority", () => {
     });
     expect(evidence.builds).toHaveLength(2);
     expect(evidence.builds[0]?.wasmSha256).toBe(evidence.builds[1]?.wasmSha256);
+    expect(evidence.builds[0]?.runtimeAbiReviewSha256).toBe(
+      evidence.builds[1]?.runtimeAbiReviewSha256,
+    );
   });
 
   it("rejects reused or overlapping clean-build roots", async () => {
@@ -361,6 +387,16 @@ describe("Clang-Wasm clean-build reproducibility authority", () => {
     await expect(verifyCppCuteClangWasmReproducibility({ firstRoot, secondRoot })).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-MISMATCH",
       path: "$comparison.runtimeClosure",
+    });
+  });
+
+  it("rejects different runtime-ABI review sidecars across clean builds", async () => {
+    const { firstRoot, secondRoot } = await fixture({
+      second: { runtimeAbiReviewTag: "drifted-review" },
+    });
+    await expect(verifyCppCuteClangWasmReproducibility({ firstRoot, secondRoot })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-MISMATCH",
+      path: "$comparison.runtimeAbiReview",
     });
   });
 

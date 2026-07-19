@@ -29,6 +29,7 @@ const REPRODUCIBILITY_SCHEMA =
 const PORTABLE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._+/-]+$/u;
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const MAX_EVIDENCE_BYTE_LENGTH = 1024 * 1024;
+const MAX_RUNTIME_ABI_REVIEW_BYTE_LENGTH = 1024 * 1024;
 const MAX_RUNTIME_CLOSURE_OBSERVATION_BYTE_LENGTH = 256 * 1024;
 const MAX_RUNTIME_CLOSURE_FILE_COUNT = 256;
 const MAX_RUNTIME_CLOSURE_FILE_BYTE_LENGTH = 16 * 1024 * 1024;
@@ -124,6 +125,7 @@ export async function verifyCppCuteClangWasmReproducibility(input) {
       nativeTablegenIdentitiesMatched: true,
       factoryModuleBytesMatched: true,
       wasmBytesMatched: true,
+      runtimeAbiReviewBytesMatched: true,
       linkMapBytesMatched: true,
     }),
     claims: Object.freeze({
@@ -185,6 +187,7 @@ async function admitBuild(root, diagnosticPath, lockId, sourceSetSha256, body, l
   const expectedOutputFiles = [
     "browsergrad-cpp-cute/clang-extractor.wasm",
     "build-execution-observation.v2.json",
+    "clang-wasm-runtime-abi-review.v1.json",
   ];
   const expectedEvidenceFiles = [
     "build-logs/clang-extractor-wasm-build.stderr.log",
@@ -218,10 +221,66 @@ async function admitBuild(root, diagnosticPath, lockId, sourceSetSha256, body, l
     llvm,
   );
   await verifyObservedFiles(root, evidence, diagnosticPath);
+  const runtimeAbiReview = await admitRuntimeAbiReview(
+    join(root, "output", "clang-wasm-runtime-abi-review.v1.json"),
+    evidence.execution,
+    `${diagnosticPath}.runtimeAbiReview`,
+  );
   return Object.freeze({
     evidenceSha256: sha256(evidenceSnapshot.bytes),
     evidenceByteLength: evidenceSnapshot.bytes.byteLength,
+    runtimeAbiReview,
     ...evidence,
+  });
+}
+
+async function admitRuntimeAbiReview(path, execution, diagnosticPath) {
+  const snapshot = await readSmallFile(
+    path,
+    MAX_RUNTIME_ABI_REVIEW_BYTE_LENGTH,
+    diagnosticPath,
+  );
+  let value;
+  try {
+    value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(snapshot.bytes));
+  } catch (cause) {
+    invalid(diagnosticPath, "runtime-ABI review must be strict UTF-8 JSON", { cause });
+  }
+  const canonical = canonicalJsonBytes(value);
+  if (!equalBytes(snapshot.bytes, canonical)) {
+    invalid(diagnosticPath, "runtime-ABI review must use canonical JSON bytes");
+  }
+  const report = exactObject(value, [
+    "authority", "wasmSha256", "wasmByteLength", "observedProjectionSha256",
+    "runtimeAbiManifestId", "runtimeAbiContractSha256", "exactInterfaceConformance",
+    "mismatches", "projection", "rawWasmVerified", "workerExecutionReady", "releaseReady",
+  ], diagnosticPath);
+  exactValue(report.authority, "review-observation-only", `${diagnosticPath}.authority`);
+  exactValue(report.wasmSha256, execution.wasmSha256, `${diagnosticPath}.wasmSha256`);
+  exactValue(report.wasmByteLength, execution.wasmByteLength, `${diagnosticPath}.wasmByteLength`);
+  exactSha(report.observedProjectionSha256, `${diagnosticPath}.observedProjectionSha256`);
+  exactSha(report.runtimeAbiContractSha256, `${diagnosticPath}.runtimeAbiContractSha256`);
+  exactString(report.runtimeAbiManifestId, `${diagnosticPath}.runtimeAbiManifestId`);
+  exactValue(report.rawWasmVerified, true, `${diagnosticPath}.rawWasmVerified`);
+  exactValue(report.workerExecutionReady, false, `${diagnosticPath}.workerExecutionReady`);
+  exactValue(report.releaseReady, false, `${diagnosticPath}.releaseReady`);
+  const mismatches = exactArray(report.mismatches, `${diagnosticPath}.mismatches`);
+  for (const [index, mismatch_] of mismatches.entries()) {
+    exactString(mismatch_, `${diagnosticPath}.mismatches[${index}]`);
+  }
+  exactValue(
+    report.exactInterfaceConformance,
+    mismatches.length === 0,
+    `${diagnosticPath}.exactInterfaceConformance`,
+  );
+  if (typeof report.projection !== "object" || report.projection === null ||
+      Array.isArray(report.projection)) {
+    invalid(`${diagnosticPath}.projection`, "expected a projection object");
+  }
+  return Object.freeze({
+    sha256: sha256(snapshot.bytes),
+    byteLength: snapshot.bytes.byteLength,
+    exactInterfaceConformance: report.exactInterfaceConformance,
   });
 }
 
@@ -702,6 +761,7 @@ function assertIdentityParity(first, second) {
     [first.execution.nativeTools.llvmTablegen, second.execution.nativeTools.llvmTablegen, "$comparison.nativeTools.llvmTablegen"],
     [identity(first.execution, "factoryModule"), identity(second.execution, "factoryModule"), "$comparison.factoryModule"],
     [identity(first.execution, "wasm"), identity(second.execution, "wasm"), "$comparison.wasm"],
+    [first.runtimeAbiReview, second.runtimeAbiReview, "$comparison.runtimeAbiReview"],
     [identity(first.execution, "linkMap"), identity(second.execution, "linkMap"), "$comparison.linkMap"],
   ];
   for (const [left, right, path] of pairs) {
@@ -736,6 +796,10 @@ function buildIdentity(ordinal, build) {
     factoryModuleByteLength: build.execution.factoryModuleByteLength,
     wasmSha256: build.execution.wasmSha256,
     wasmByteLength: build.execution.wasmByteLength,
+    runtimeAbiReviewSha256: build.runtimeAbiReview.sha256,
+    runtimeAbiReviewByteLength: build.runtimeAbiReview.byteLength,
+    runtimeAbiReviewExactInterfaceConformance:
+      build.runtimeAbiReview.exactInterfaceConformance,
     linkMapSha256: build.execution.linkMapSha256,
     linkMapByteLength: build.execution.linkMapByteLength,
   });
