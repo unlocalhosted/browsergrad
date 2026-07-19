@@ -113,7 +113,9 @@ export async function materializeCppCuteBrowserSelectedTarStream(input) {
       }),
       claims: Object.freeze({
         strictNormalizedTarParsed: true,
-        onlyRegularFilesMaterialized: true,
+        onlyRegularFileContentsMaterialized: true,
+        collisionFreePortableStorageMaterialized: true,
+        hierarchicalSourceTreesMaterialized: false,
         allSelectedStreamFilesMaterialized: true,
         callerSelectedSubtreesComplete: false,
         archiveIdentityVerified: false,
@@ -125,7 +127,14 @@ export async function materializeCppCuteBrowserSelectedTarStream(input) {
         releaseReady: false,
       }),
     });
-    MATERIALIZED_TREES.set(manifest, Object.freeze({ outputRoot, rootIdentity }));
+    MATERIALIZED_TREES.set(manifest, Object.freeze({
+      outputRoot,
+      rootIdentity,
+      selectionFiles: new Map([...parser.results].map(([selectionId, result]) => [
+        selectionId,
+        new Map(result.sourceFiles),
+      ])),
+    }));
     return manifest;
   } catch (cause) {
     await closeParserOutput(parser);
@@ -147,9 +156,49 @@ export function cppCuteBrowserSelectedTarMaterializationRoots(manifest) {
   if (stored === undefined) invalid("$.manifest", "expected parser-issued live selected-tree authority");
   return Object.freeze(manifest.selections.map((selection) => Object.freeze({
     selectionId: selection.selectionId,
-    sourceRoot: join(stored.outputRoot, selection.outputSubdirectory),
+    storageRoot: join(stored.outputRoot, selection.outputSubdirectory),
     sourceTreeId: selection.sourceTreeId,
   })));
+}
+
+export async function copyCppCuteBrowserSelectedTarMaterializationFile(
+  manifest,
+  selectionId,
+  relativePath,
+) {
+  const stored = MATERIALIZED_TREES.get(manifest);
+  if (stored === undefined) invalid("$.manifest", "expected parser-issued selected-file authority");
+  if (typeof selectionId !== "string" || !SELECTION_ID.test(selectionId)) {
+    invalid("$.selectionId", "expected one portable selection ID");
+  }
+  portableRelativePath(relativePath, "$.relativePath");
+  const source = stored.selectionFiles.get(selectionId)?.get(relativePath);
+  if (source === undefined) invalid("$.relativePath", "selected file is absent from the materialization");
+  let handle;
+  try {
+    const discovered = await lstat(source.path, { bigint: true });
+    if (!sameOwnedFile(source, discovered)) invalid("$.relativePath", "selected file identity changed");
+    handle = await open(source.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const before = await handle.stat({ bigint: true });
+    if (!sameOwnedFile(source, before)) invalid("$.relativePath", "selected file changed before read");
+    const bytes = new Uint8Array(Number(before.size));
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      const { bytesRead } = await handle.read(bytes, offset, bytes.byteLength - offset, offset);
+      if (bytesRead <= 0) invalid("$.relativePath", "selected file became shorter while read");
+      offset += bytesRead;
+    }
+    const after = await handle.stat({ bigint: true });
+    if (!sameOwnedFile(source, after) || sha256(bytes) !== source.contentSha256) {
+      invalid("$.relativePath", "selected file bytes changed while read");
+    }
+    return bytes;
+  } catch (cause) {
+    if (cause instanceof CppCuteBrowserSelectedTarStreamError) throw cause;
+    invalid("$.relativePath", "failed to read exact selected file", { cause });
+  } finally {
+    await handle?.close();
+  }
 }
 
 function createParserState(outputRoot, selections) {
@@ -165,7 +214,10 @@ function createParserState(outputRoot, selections) {
     fileCount: 0,
     fileBytes: 0,
     entryCount: 0,
-    results: new Map(selections.map((selection) => [selection.selectionId, { files: [] }])),
+    results: new Map(selections.map((selection) => [selection.selectionId, {
+      files: [],
+      sourceFiles: new Map(),
+    }])),
     seenArchivePaths: new Set(),
   };
 }
@@ -249,10 +301,16 @@ async function prepareEntry(state) {
   state.fileBytes += current.size;
   if (state.fileCount > MAX_FILES) resource(current.path, "selected file count exceeds ceiling");
   if (state.fileBytes > MAX_TOTAL_FILE_BYTES) resource(current.path, "selected file bytes exceed ceiling");
+  const storageKey = sha256(Buffer.from(
+    `${selected.selection.selectionId}\0${selected.relativePath}`,
+    "utf8",
+  ));
   const outputPath = join(
     state.outputRoot,
     selected.selection.outputSubdirectory,
-    selected.relativePath,
+    ".browsergrad-files",
+    storageKey.slice(0, 2),
+    storageKey,
   );
   await ensurePrivateDirectory(dirname(outputPath), state.outputRoot, current.path);
   let handle;
@@ -328,6 +386,13 @@ async function finishEntryBody(state, current) {
     relativePath: output.relativePath,
     contentSha256: output.digest.digest("hex"),
     byteLength: String(current.size),
+  }));
+  const expected = output.result.files.at(-1);
+  output.result.sourceFiles.set(output.relativePath, Object.freeze({
+    path: output.path,
+    identity: output.identity,
+    contentSha256: expected.contentSha256,
+    byteLength: expected.byteLength,
   }));
 }
 
@@ -704,6 +769,12 @@ function sha256(bytes) {
 
 function compareUtf8(left, right) {
   return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
+}
+
+function sameOwnedFile(source, stat) {
+  return stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1n &&
+    stat.dev === source.identity.dev && stat.ino === source.identity.ino &&
+    stat.size === BigInt(source.byteLength);
 }
 
 function invalid(path, message, options) {

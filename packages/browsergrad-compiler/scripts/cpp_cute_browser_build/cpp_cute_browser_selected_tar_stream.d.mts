@@ -40,7 +40,9 @@ export interface CppCuteBrowserSelectedTarMaterialization {
   }>;
   readonly claims: Readonly<{
     strictNormalizedTarParsed: true;
-    onlyRegularFilesMaterialized: true;
+    onlyRegularFileContentsMaterialized: true;
+    collisionFreePortableStorageMaterialized: true;
+    hierarchicalSourceTreesMaterialized: false;
     allSelectedStreamFilesMaterialized: true;
     callerSelectedSubtreesComplete: false;
     archiveIdentityVerified: false;
@@ -55,7 +57,7 @@ export interface CppCuteBrowserSelectedTarMaterialization {
 
 export interface CppCuteBrowserSelectedTarMaterializationRoot {
   readonly selectionId: string;
-  readonly sourceRoot: string;
+  readonly storageRoot: string;
   readonly sourceTreeId: string;
 }
 
@@ -72,3 +74,9 @@ export function requireCppCuteBrowserSelectedTarMaterializationAuthority(
 export function cppCuteBrowserSelectedTarMaterializationRoots(
   manifest: CppCuteBrowserSelectedTarMaterialization,
 ): readonly Readonly<CppCuteBrowserSelectedTarMaterializationRoot>[];
+
+export function copyCppCuteBrowserSelectedTarMaterializationFile(
+  manifest: CppCuteBrowserSelectedTarMaterialization,
+  selectionId: string,
+  relativePath: string,
+): Promise<Uint8Array>;

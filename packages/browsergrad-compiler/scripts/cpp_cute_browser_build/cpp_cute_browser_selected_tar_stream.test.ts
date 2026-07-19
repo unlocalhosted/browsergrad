@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { lstat, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   CppCuteBrowserSelectedTarStreamError,
+  copyCppCuteBrowserSelectedTarMaterializationFile,
   cppCuteBrowserSelectedTarMaterializationRoots,
   materializeCppCuteBrowserSelectedTarStream,
   requireCppCuteBrowserSelectedTarMaterializationAuthority,
@@ -26,6 +27,8 @@ describe("selected normalized tar stream", () => {
       file("pkg/include/cute/empty.hpp", ""),
       file("pkg/include/cute/layout.hpp", "layout\n"),
       file("pkg/include/cute/tensor.hpp", "tensor\n"),
+      file("pkg/include/linux/xt_CONNMARK.h", "upper\n"),
+      file("pkg/include/linux/xt_connmark.h", "lower\n"),
       directory("pkg/libcxx/"),
       file("pkg/libcxx/vector", "vector\n"),
     ]);
@@ -53,29 +56,28 @@ describe("selected normalized tar stream", () => {
       selection.fileCount,
       selection.fileContentByteLength,
     ])).toEqual([
-      ["cutlass", 3, "14"],
+      ["cutlass", 5, "26"],
       ["libcxx", 1, "7"],
     ]);
     expect(first.totals).toMatchObject({
       selectionCount: 2,
-      fileCount: 4,
-      fileContentByteLength: "21",
+      fileCount: 6,
+      fileContentByteLength: "33",
       consumedTarByteLength: String(archive.byteLength),
     });
-    expect(await readFile(join(firstRoot, "out", "cutlass", "cute", "layout.hpp"), "utf8"))
-      .toBe("layout\n");
-    expect(await readFile(join(firstRoot, "out", "cutlass", "cute", "empty.hpp"), "utf8"))
-      .toBe("");
-    expect(await readFile(join(firstRoot, "out", "libcxx", "vector"), "utf8"))
-      .toBe("vector\n");
+    expect(await selectedUtf8(first, "cutlass", "cute/layout.hpp")).toBe("layout\n");
+    expect(await selectedUtf8(first, "cutlass", "cute/empty.hpp")).toBe("");
+    expect(await selectedUtf8(first, "cutlass", "linux/xt_CONNMARK.h")).toBe("upper\n");
+    expect(await selectedUtf8(first, "cutlass", "linux/xt_connmark.h")).toBe("lower\n");
+    expect(await selectedUtf8(first, "libcxx", "vector")).toBe("vector\n");
     expect(cppCuteBrowserSelectedTarMaterializationRoots(first)).toEqual([
       expect.objectContaining({
         selectionId: "cutlass",
-        sourceRoot: join(firstRoot, "out", "cutlass"),
+        storageRoot: join(firstRoot, "out", "cutlass"),
       }),
       expect.objectContaining({
         selectionId: "libcxx",
-        sourceRoot: join(firstRoot, "out", "libcxx"),
+        storageRoot: join(firstRoot, "out", "libcxx"),
       }),
     ]);
     expect(() => requireCppCuteBrowserSelectedTarMaterializationAuthority({ ...first } as never))
@@ -103,7 +105,7 @@ describe("selected normalized tar stream", () => {
       contentSha256: createHash("sha256").update("pax-data\n").digest("hex"),
       byteLength: "9",
     });
-    expect(await readFile(join(root, "out", "headers", relative), "utf8")).toBe("pax-data\n");
+    expect(await selectedUtf8(manifest, "headers", relative)).toBe("pax-data\n");
 
     const forbiddenRoot = await fixtureRoot("pax-size");
     await expect(materializeCppCuteBrowserSelectedTarStream({
@@ -312,4 +314,16 @@ async function exists(path: string): Promise<boolean> {
 function expectMessage(message: string) {
   return (error: unknown) => error instanceof CppCuteBrowserSelectedTarStreamError &&
     error.message.includes(message);
+}
+
+async function selectedUtf8(
+  manifest: Awaited<ReturnType<typeof materializeCppCuteBrowserSelectedTarStream>>,
+  selectionId: string,
+  relativePath: string,
+): Promise<string> {
+  return Buffer.from(await copyCppCuteBrowserSelectedTarMaterializationFile(
+    manifest,
+    selectionId,
+    relativePath,
+  )).toString("utf8");
 }
