@@ -23,12 +23,14 @@ import {
 } from "../../dist/cpp_cute_browser_build_lock.js";
 import {
   parseCppCuteClangWasmReproducibilityArguments,
+  parseCppCuteClangWasmCleanBuildArguments,
   readVerifiedCppCuteClangWasmFactoryModuleBytes,
   verifyCppCuteClangWasmCleanBuild,
   verifyCppCuteClangWasmReproducibility,
   writeVerifiedCppCuteClangWasmFactoryCandidate,
   writeCppCuteClangWasmReproducibilityEvidence,
 } from "./cpp_cute_browser_build_reproducibility.mjs";
+import { admitCppCuteClangWasmCleanBuild } from "./cpp_cute_browser_clean_build_admission.mjs";
 
 const temporaryRoots: string[] = [];
 const factoryBytes = new TextEncoder().encode(
@@ -618,5 +620,60 @@ describe("Clang-Wasm reproducibility CLI arguments", () => {
       "--second-root=/work/second",
       "--output=/work/reproducibility.json",
     ])).toThrow();
+  });
+});
+
+describe("Clang-Wasm clean-build admission CLI arguments", () => {
+  it("accepts only the exact named normalized absolute paths", () => {
+    expect(parseCppCuteClangWasmCleanBuildArguments([
+      "--root=/work/clean-build",
+      "--factory-output=/work/candidate/clang-extractor.mjs",
+    ])).toEqual({
+      "factory-output": "/work/candidate/clang-extractor.mjs",
+      root: "/work/clean-build",
+    });
+    expect(() => parseCppCuteClangWasmCleanBuildArguments([
+      "--root=/work/clean-build",
+    ])).toThrow();
+    expect(() => parseCppCuteClangWasmCleanBuildArguments([
+      "--root=relative",
+      "--factory-output=/work/candidate/clang-extractor.mjs",
+    ])).toThrow();
+    expect(() => parseCppCuteClangWasmCleanBuildArguments([
+      "--root=/work/clean-build",
+      "--output=/work/candidate/clang-extractor.mjs",
+    ])).toThrow();
+  });
+
+  it("admits and persists a no-clobber candidate through one explicit command boundary", async () => {
+    const { root, firstRoot } = await fixture({
+      first: { exactRuntimeAbiConformance: true },
+    });
+    const outputPath = join(root, "command-candidate.mjs");
+    const observation = await admitCppCuteClangWasmCleanBuild([
+      `--root=${firstRoot}`,
+      `--factory-output=${outputPath}`,
+    ]);
+
+    expect(observation).toMatchObject({
+      schema: "browsergrad.compiler.cpp-cute.clean-build-package-candidate-observation",
+      version: 1,
+      authority: "clean-build-admission-and-package-candidate-observation-only",
+      cleanBuild: {
+        claims: {
+          cleanBuildObserved: true,
+          rawWasmAbiConformanceObserved: true,
+          releaseReady: false,
+        },
+      },
+      factoryCandidate: {
+        outputPath: join(await realpath(root), "command-candidate.mjs"),
+        outputIdentityAuthorized: false,
+        releaseReady: false,
+      },
+    });
+    expect([...(await readFile(outputPath))]).toEqual([...factoryBytes]);
+    expect((await stat(outputPath)).mode & 0o222).toBe(0);
+    await chmod(outputPath, 0o600);
   });
 });

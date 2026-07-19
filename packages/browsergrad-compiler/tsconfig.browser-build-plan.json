@@ -18,6 +18,7 @@
     "scripts/cpp_cute_browser_build/cpp_cute_browser_build_runner.mjs",
     "scripts/cpp_cute_browser_build/cpp_cute_browser_build_reproducibility.mjs",
     "scripts/cpp_cute_browser_build/cpp_cute_browser_build_reproducibility.d.mts",
+    "scripts/cpp_cute_browser_build/cpp_cute_browser_clean_build_admission.mjs",
     "scripts/cpp_cute_browser_build/cpp_cute_browser_worker_bundle_authoring.mjs",
     "scripts/cpp_cute_browser_build/cpp_cute_browser_worker_bundle_authoring.d.mts",
     "scripts/cpp_cute_browser_build/cpp_cute_browser_wasm_review.mjs",

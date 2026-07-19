@@ -40,6 +40,7 @@ const MAX_LOG_BYTE_LENGTH = 16 * 1024 * 1024;
 const MAX_NATIVE_TOOL_BYTE_LENGTH = 256 * 1024 * 1024;
 const HASH_BUFFER_BYTE_LENGTH = 1024 * 1024;
 const ARGUMENT_NAMES = Object.freeze(["first-root", "output", "second-root"]);
+const CLEAN_BUILD_ARGUMENT_NAMES = Object.freeze(["factory-output", "root"]);
 const STEP_PROFILES = Object.freeze([
   Object.freeze({ id: "native-tablegen-configure", stageId: "native-tablegen", kind: "configure" }),
   Object.freeze({ id: "native-tablegen-build", stageId: "native-tablegen", kind: "build" }),
@@ -75,6 +76,30 @@ export function parseCppCuteClangWasmReproducibilityArguments(argv) {
     values.set(name, portableAbsolutePath(argument.slice(equals + 1), `$argv.${name}`));
   }
   return Object.freeze(Object.fromEntries(ARGUMENT_NAMES.map((name) => [name, values.get(name)])));
+}
+
+/** @param {readonly string[]} argv */
+export function parseCppCuteClangWasmCleanBuildArguments(argv) {
+  if (argv.length !== CLEAN_BUILD_ARGUMENT_NAMES.length) {
+    invalid("$argv", "expected exactly two named arguments");
+  }
+  const values = new Map();
+  for (const [index, argument] of argv.entries()) {
+    if (typeof argument !== "string" || !argument.startsWith("--")) {
+      invalid(`$argv[${index}]`, "expected --name=/absolute/path");
+    }
+    const equals = argument.indexOf("=");
+    if (equals <= 2) invalid(`$argv[${index}]`, "expected --name=/absolute/path");
+    const name = argument.slice(2, equals);
+    if (!CLEAN_BUILD_ARGUMENT_NAMES.includes(name)) {
+      invalid(`$argv[${index}]`, `unknown argument ${name}`);
+    }
+    if (values.has(name)) invalid(`$argv[${index}]`, `duplicate argument ${name}`);
+    values.set(name, portableAbsolutePath(argument.slice(equals + 1), `$argv.${name}`));
+  }
+  return Object.freeze(Object.fromEntries(
+    CLEAN_BUILD_ARGUMENT_NAMES.map((name) => [name, values.get(name)]),
+  ));
 }
 
 /**

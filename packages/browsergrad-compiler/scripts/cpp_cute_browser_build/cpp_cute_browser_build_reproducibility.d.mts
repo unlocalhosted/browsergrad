@@ -172,3 +172,10 @@ export function parseCppCuteClangWasmReproducibilityArguments(
   "second-root": string;
   output: string;
 }>;
+
+export function parseCppCuteClangWasmCleanBuildArguments(
+  argv: readonly string[],
+): Readonly<{
+  "factory-output": string;
+  root: string;
+}>;
