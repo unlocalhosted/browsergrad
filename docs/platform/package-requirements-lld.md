@@ -30,22 +30,41 @@ cache-free builds now prove exact extractor Wasm/factory reproducibility; the
 package binds their canonical v3 evidence without claiming reproducibility of
 the still-incomplete distributed asset set.
 
-The header-pack harness now inventories the five complete locked source trees,
-binds them to the exact build lock and notice policy, and retains an opaque
-same-process authority that can reread every source byte immediately before
-materialization. The materializer writes only canonical BrowserGrad VFS packs
-into a private no-clobber tree, rereads and independently inspects the persisted
-bytes, and rejects symlinks, hardlinks, special files, mutations, and incomplete
-trees. The acquisition boundary separately admits the exact current-lock LLVM
-22.1.8 and CUTLASS 3.7.0 archives as current-user-owned, canonical,
-single-link, non-writable regular files, streams their full 196,789,917 bytes
-through SHA-256, and retains local paths only behind opaque same-process
-authority. All ten distribution notices already approved by the build lock are
-checked in as exact locked bytes and independently rehashed. This is packaging
-capability plus exact archive-byte admission, not extracted-tree, real-pack, or
-license authority: CUDA 12.6.3 plus the Linux sysroot still need exact source
-selection and distribution-policy closure, and an externally reviewed per-file
-license map remains mandatory.
+The header-pack harness now binds seven exact source archives to the build lock:
+LLVM 22.1.8, CUTLASS 3.7.0, CUDA 12.6.3 CCCL/cudart/nvcc, and Ubuntu Noble
+glibc/Linux UAPI cross-development packages. It streams and verifies all
+252,406,685 archive bytes, admits one hash-observed `bsdtar`, uses Node's
+bounded Zstandard decoder for Debian `data.tar.zst`, and normalizes only the
+eight selected subtrees through a strict streamed tar parser. The parser
+rejects traversal, links, special files, duplicate virtual paths, malformed
+PAX metadata, invalid checksums/padding, and budget overflow. Extracted files
+use a content-addressed flat host store, so a case-insensitive macOS filesystem
+cannot collapse distinct Linux virtual paths such as `xt_CONNMARK.h` and
+`xt_connmark.h`.
+
+One same-process opaque pipeline rereads all 5,769 selected files and their
+67,092,008 content bytes, detects conflicting overlays, and materializes the
+five canonical BrowserGrad VFS packs. The observed packs total 67,495,319 bytes
+and cover Clang source resource templates, libc++, CUDA, CUTLASS, and the Linux
+sysroot. The full exact-source pipeline completed locally in 16.97 seconds;
+repeating it through the composed entrypoint produced the same five pack
+identities. All ten distribution notices approved by the build lock remain
+exact checked-in resources. These are real source-derived, independently
+inspected non-release pack observations. They do not establish complete
+generated Clang resource headers, an independently attested/package-pinned
+normalizer implementation, external per-file license approval, full
+distribution reproducibility, Worker execution, or release authority.
+
+The exact source plan is
+`bg.cpp.browser-header-source-plan.sha256.360bfef6bc046ebbed5cc51b3a585a10ad0189b107d92f14df89772b265c1162`;
+the seven-archive admission is
+`bg.cpp.browser-header-source-archive-admission.sha256.b365f8f65931a94728775dc56b173ac7673a2a528f1e5fe12de7451e76881d20`;
+and the composed observation is
+`bg.cpp.browser-header-pack-pipeline.sha256.431f8b7c20bfdb4b6f129a04fb22ee24c5bcdd53cf29f2dd3b953abf007d39e2`.
+The five output SHA-256 identities are `1d05ba63...` (Clang resource source),
+`f795494a...` (CUDA), `4f1c39b7...` (CUTLASS), `f66f1284...` (libc++), and
+`d04a460d...` (Linux sysroot); the implementation ledger retains the complete
+hashes and byte counts.
 
 The original cold diagnostic run `29658164083` spent 97 minutes 5 seconds in
 isolated execution before failing closed at link. That result exposed two
@@ -64,12 +83,13 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 406 tests across 38 files covering the build plan, runtime ABI,
+clean, then runs 425 tests across 45 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
 package invocation, Worker entry, production controller, exact header-tree
-inventory/materialization, source-archive admission, and distribution-notice
-verification. The current gate measured 27.49 seconds end to end on Node 25;
-its Vitest phase took 19.08 seconds. Clean validation and two-build
+inventory/materialization, seven-archive admission, strict archive
+normalization/extraction, and distribution-notice verification. The current
+gate measured 29.86 seconds end to end on Node 25; its Vitest phase took 21.24
+seconds. Clean validation and two-build
 reproducibility still restore no cache and remain intentionally more expensive.
 
 The current CMake-stable primary cache is now proved at exact source.
@@ -158,7 +178,8 @@ isolated build. Its 31,641,377-byte module has SHA-256
 passes raw review with zero mismatches. The ABI 1.8 local fast gate passes 30
 files/338 tests in 24.7 seconds on Node 25; the later controller-complete gate
 passed 34 files/381 tests in 25.26 seconds, and the current reproducibility-,
-archive-, and header-capable gate passes 38 files/406 tests in 27.49 seconds.
+archive-, extraction-, and header-capable gate passes 45 files/425 tests in
+29.86 seconds.
 
 The harness audit found strong isolation, exact-input closure, bounded logs,
 independent Wasm parsing, and separate authority tiers. It also records real
@@ -1029,6 +1050,14 @@ pack bytes are independently bounded. Entry lengths consume the data region
 exactly; truncation and trailing bytes are invalid. The content-set hash covers
 only canonical path, content hash, and file length, while the outer asset hash
 covers the complete pack bytes.
+
+Source-archive extraction MUST preserve this virtual-path identity without
+depending on host filesystem case folding or Unicode normalization. A portable
+extractor MUST use collision-free storage keyed independently from the display
+path, or prove that its storage medium preserves every admitted virtual path
+byte-for-byte. Extracting a Linux header universe directly into a default
+case-insensitive host directory is non-conforming even when the resulting tree
+appears complete.
 
 All header integers are parsed with checked unsigned-64-bit arithmetic and
 compared with profile and actual-buffer limits before conversion to JavaScript

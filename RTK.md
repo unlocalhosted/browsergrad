@@ -86,11 +86,12 @@ pnpm --filter @unlocalhosted/browsergrad-compiler run verify:browser-clang-wasm:
 
 It builds once, runs the no-rebuild lock check, and exercises the build-plan,
 runtime-ABI, browser-profile, and browser-asset identity chain sequentially.
-At the current 2026-07-19 checkpoint it passes 406 tests across 38 files in
-27.49 seconds end to end on Node 25. The set includes package invocation,
-Worker entry, production-controller lifecycle, exact header-tree
-inventory/materialization, distribution-notice verification, and package-pinned
-two-clean-build reproducibility plus exact source-archive admission coverage.
+At the current 2026-07-19 checkpoint it passes 425 tests across 45 files in
+29.86 seconds end to end on Node 25. The set includes package invocation,
+Worker entry, production-controller lifecycle, seven-archive admission, strict
+tar/Debian normalization, collision-free source extraction, exact header-tree
+inventory/materialization, distribution-notice verification, and
+package-pinned two-clean-build reproducibility coverage.
 Use `test:browser-clang-wasm-build-plan` for the broader native/sanitizer
 pre-commit gate; its same-checkpoint run passed 187 tests with 9 intentional
 platform skips in 77.84 seconds. Do not run package entrypoints that clean
@@ -100,6 +101,27 @@ Remote cached validation is diagnostic and ordinarily takes four to five
 minutes. Uncached clean and two-build reproducibility modes remain deliberately
 separate release-evidence authorities; their provisioning cost is not an edit
 loop and must not be placed on routine source iteration.
+
+To turn the seven exact locked archives into the five source-derived VFS packs,
+use the one-process command so its opaque authorities remain live:
+
+```sh
+pnpm --filter @unlocalhosted/browsergrad-compiler run materialize:browser-header-packs-from-archives -- \
+  --cuda-cccl-linux-x86-64=/absolute/cccl.tar.xz \
+  --cuda-cudart-linux-x86-64=/absolute/cudart.tar.xz \
+  --cuda-nvcc-linux-x86-64=/absolute/nvcc.tar.xz \
+  --cutlass=/absolute/cutlass.tar.gz \
+  --llvm-project=/absolute/llvm.tar.xz \
+  --ubuntu-noble-libc6-dev-amd64-cross=/absolute/libc6-dev.deb \
+  --ubuntu-noble-linux-libc-dev-amd64-cross=/absolute/linux-libc-dev.deb \
+  --bsdtar=/usr/bin/bsdtar \
+  --output-root=/absolute/private-source-output \
+  --pack-output-root=/absolute/private-pack-output
+```
+
+The current exact local pipeline completes in about 17 seconds. Its outputs are
+non-release observations until generated Clang resource headers, normalizer
+attestation, and external file-level licensing are closed.
 
 Use the smallest WebGPU loop that covers the suspected bug class:
 

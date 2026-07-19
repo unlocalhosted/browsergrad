@@ -88,6 +88,7 @@ pnpm --filter @unlocalhosted/browsergrad-jit test
 pnpm --filter @unlocalhosted/browsergrad-jit test:integration
 pnpm --filter @unlocalhosted/browsergrad-kernels test
 pnpm --filter @unlocalhosted/browsergrad-kernels test:browser
+pnpm --filter @unlocalhosted/browsergrad-compiler run verify:browser-clang-wasm:fast
 pnpm --filter @unlocalhosted/browsergrad-compiler verify:compiler
 pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --skip-fetch --require-webgpu
 pnpm --filter @unlocalhosted/browsergrad-primitives test

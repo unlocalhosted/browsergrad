@@ -6,7 +6,7 @@
 - **Last updated:** 2026-07-19
 - **Historical handover:**
   [`package-requirements-handover-2026-07-17.md`](./package-requirements-handover-2026-07-17.md)
-- **Current implementation slice:** Gate 3 pinned Clang-Wasm build, reproducibility, ABI review, and Worker-bundle integration
+- **Current implementation slice:** Gate 3 exact header-pack distribution closure and first valid browser-Worker compile
 
 **Runtime boundary:** the portable product runs the Clang/extractor as Wasm in
 a browser Worker, then executes verified semantics through CPU or WebGPU. It
@@ -40,7 +40,7 @@ test does not make a gate verified unless every exit criterion is covered.
 | Gate 0 — freeze and inventory | `verified` | Workspace direction and all six legacy adapters are machine-frozen. Stable diagnostic/capability/backend/requirement vocabularies are separated. Compiler pointer/scalar, runtime requirements, Grad behavior, and the exact JIT 36-constructor-call/39-operation matrix have pinned inventories and executable contracts. Grad parameterized-layer initialization now obeys `torch.manual_seed` across Linear, convolution, transposed-convolution, and Embedding families. | None. Any baseline change requires the accepted-ADR exception path. | Architecture check; 945 compiler tests; 125 runtime tests; blocking Grad contract; 5-case JIT Gate 0 contract and full JIT integration. Exact-source CI `29660471267` passed the repaired full Pyodide/Grad lane, Node 20/24/25, and real Chromium/WebGPU. |
 | Gate 1 — value/layout core and wire foundation | `verified` | Semantic-core `0.1.0` implements the bounded wire/value/layout contract, closed `browsergrad.layout@1` verification, authority-bound opaque artifacts, content-scoped IDs, deterministic normalization, and coordinate/address/alias traces. An independent Python reference matches TypeScript normalization, full-envelope canonicalization, semantic hashes, and traces for pinned static and symbolic fixtures. | None. The separate packed/release-tested `0.x` transition required by D-004 is also complete locally; registry publication remains a release operation, not a Gate 1 criterion. | Semantic-core typecheck/build/lint; 8 files and 68 tests; two pinned cross-language fixtures; 14 verifier rejection mutations; dynamic trace rejection and dominating-predicate parity; architecture check; packed-tarball gate. |
 | Gate 2 — multi-frontend, multi-backend view slice | `verified` | Semantic-core `0.2.0` owns verified view-copy meaning, shared specialization, and the sole canonical frontend construction sink. Kernels `0.2.0` passes the full nine-case CPU/actual-WebGPU bit-exact matrix. Compiler L1 preserves its six-case non-padded contract; sibling L2 binds the exact verified operation and proves rank-2/rank-3 guarded padding through CPU, structured IR, WGSL, and actual WebGPU. JIT `0.9.0` emits a closed typed permutation request and executes the same canonical operation through materializing/resident production routes without recovering semantic args from the frozen plan. All strict lanes passed from one clean detached worktree at exact source revision `aa605421410e9d4190d8939c24b1057731111231`. | None for the initial Gate 2 profile. Release CI must repeat the exact-source lanes before publication; registry publication is a separate release operation. | Exact clean-source Apple Metal 3 records: compiler L2 3 cases, compiler L1 6 cases, kernels 9 cases, and JIT 2 cases; compiler `verify:compiler` passed 35 files/1004 tests; release package gate passed 19 hostile-archive and 35 Node security tests plus packed/fresh consumers; combined publish guards accepted only exact L1/L2/JIT/kernels markers. |
-| Gate 3 — real C++/CuTe frontend slice | `in-progress` | Browser-local Clang-Wasm remains the primary portable-product producer. The strict native producer and pinned four-step no-shell build execute in a networkless, read-only, capability-free container with bounded immutable evidence. The canonical local harness loop is 27.49 seconds and exact-source warm validation is 5 minutes. C ABI 1.2 records exact frontend-work metrics. Runtime ABI 1.8 closes the observed 66-function generated-import surface and 15,166-entry exception table. Two distinct cache-free builds prove exact extractor Wasm/factory reproducibility. The package binds their canonical 3,470-byte evidence and includes the factory inside one exact 577,876-byte zero-import Worker graph. Production uses captured platform effects and package-owned one-shot invocation composition, but mints no lowering authority. Exact current-lock admission now covers the LLVM and CUTLASS source archives; inventory/materialization boundaries cover all five required header trees, and all ten approved notice resources are packaged and reverified. Real header packs, CUDA/Linux exact source closure, two remaining distribution reviews, external file-level license review, full-distribution reproducibility, provenance, valid browser-local C++ execution, and release authority remain false. Docker stays outside the portable runtime graph. | Select and admit exact CUDA 12.6.3 and Linux-sysroot sources, materialize the real exact header trees, close their distribution policy plus the external per-file license map, then prove one unmodified browser-local source through authenticated Worker execution, shared semantics, and real WebGPU. | Commit `3acf5b65` adds exact locked source-archive admission. Local `verify:browser-clang-wasm:fast` passes 38 files/406 tests in 27.49 seconds. The real current LLVM/CUTLASS admission covers 196,789,917 bytes under ID `bg.cpp.current-source-archive-admission.sha256.fe50109343304f2826967f2fc2438a7f1b9540edc3aa45e437fee1d66c75cf7b`. Build run `29683677087` produced matching extractor outputs; verifier-only run `29685632925` admitted them in 1 minute 7 seconds. Zero real distributed header packs, valid production Worker compiles, or browser-local C++ executions. |
+| Gate 3 — real C++/CuTe frontend slice | `in-progress` | Browser-local Clang-Wasm remains the primary portable-product producer. The strict native producer and pinned four-step no-shell build execute in a networkless, read-only, capability-free container with bounded immutable evidence. The canonical local harness loop is 29.86 seconds, the complete exact-source header-pack pipeline is 16.97 seconds, and exact-source warm extractor validation is about 5 minutes. C ABI 1.2 records exact frontend-work metrics. Runtime ABI 1.8 closes the observed 66-function generated-import surface and 15,166-entry exception table. Two distinct cache-free builds prove exact extractor Wasm/factory reproducibility. The package binds their canonical 3,470-byte evidence and includes the factory inside one exact 577,876-byte zero-import Worker graph. Production uses captured platform effects and package-owned one-shot invocation composition, but mints no lowering authority. Exact current-lock admission covers all seven LLVM, CUTLASS, CUDA, glibc, and Linux UAPI archives. The collision-free extraction/inventory/materialization pipeline observes 5,769 files and emits five independently inspected source-derived VFS packs totaling 67,495,319 bytes. All ten approved notice resources are packaged and reverified. Generated Clang resource headers, host-normalizer attestation, external file-level license review, full-distribution reproducibility, provenance, valid browser-local C++ execution, and release authority remain false. Docker stays outside the portable runtime graph. | Close the generated Clang resource-header step, package-pin or independently attest normalization, close the external per-file license map and distribution reviews, bind approved pack identities into the asset/provenance chain, then prove one unmodified browser-local source through authenticated Worker execution, shared semantics, and real WebGPU. | Capability commits `3acf5b65`, `1213cdea`, `fae32ded`, `1480b079`, `638264ef`, `48ac1055`, `e9b1e1a5`, and `91fc4610`. Local `verify:browser-clang-wasm:fast` passes 45 files/425 tests in 29.86 seconds. The seven-archive admission covers 252,406,685 bytes under ID `bg.cpp.browser-header-source-archive-admission.sha256.b365f8f65931a94728775dc56b173ac7673a2a528f1e5fe12de7451e76881d20`; the exact composed pipeline ID is `bg.cpp.browser-header-pack-pipeline.sha256.431f8b7c20bfdb4b6f129a04fb22ee24c5bcdd53cf29f2dd3b953abf007d39e2`. Build run `29683677087` produced matching extractor outputs; verifier-only run `29685632925` admitted them in 1 minute 7 seconds. Zero valid production Worker compiles or browser-local C++ executions. |
 | Gate 4 — tiled GEMM and schedule separation | `not-started` | No implementation in this workstream. | All Gate 4 exit criteria. | None. |
 | Gate 5 — tiled attention flagship | `not-started` | No implementation in this workstream. | All Gate 5 exit criteria. | None. |
 | Gate 6 — framework convergence | `not-started` | No implementation in this workstream. | All Gate 6 exit criteria. | None. |
@@ -82,7 +82,7 @@ browser-local producer evidence or make Docker a product dependency.
 | Gate 3 Worker-owned VFS session | `partial` | One exact unshared Wasm memory serves canonical source snapshots and verified pack ranges through the six runtime-ABI imports. VFS preparation is split into a memory-independent mount and one-time bind. Canonical transfer reconstructs exact manifest/assets/request/runtime-ABI/Wasm/invocation/frame authorities in the receiving realm, creates the mount there, and hands stable pre-bind imports to one runtime adoption. Buffers are uniquely owned, destructively transferred, capped before consumption, and cleared after downstream snapshots. The package invocation issuer and production controller are now implemented; the real Chromium exact-bundle test still deliberately stops at invalid pre-identity input because licensed real header packs and one valid source invocation remain unavailable. | Instantiate the reviewed current-ABI factory, bind only `instance.exports.memory`, and compare artifact `openedFileIds` with terminal VFS observations in a valid real-Worker compile. | Focused entry/transfer/runtime/controller coverage and exact package-bundle Chromium smoke are green. No valid Worker compile, C++ execution, or semantic-contribution evidence. |
 | Gate 3 Wasm runtime and frontend-work metrics | `partial` | C ABI 1.2 retains the exact allocator record and adds a 96-byte generation-bound frontend-work record. Native callbacks count maximum include depth, macro expansions, post-expansion tokens, AST nodes, classic-interpreter constexpr steps, template instantiations/depth, and completed CUDA passes. Overflow or any profile ceiling fails closed before artifact readiness. The Worker-local reader admits the record only across exact idle/complete/reset lifecycle states and composes it with runtime/VFS observations into canonical result control. | Observe the records in the authenticated production Worker lifecycle. | Commit `20e851e3`; exact-source run `29681607575` compiled and linked the metrics export and raw-reviewed its 31,641,377-byte Wasm with zero ABI mismatches. No production Worker metrics evidence yet. |
 | Gate 3 Worker invocation/result protocol | `partial` | Exact profile/asset/VFS/request/ABI/raw-Wasm identities bind one invocation. Host transfer remains single-reservation/single-materialization with no network authority. Caller input cannot provide Worker module bytes. The package composer injects a fresh exact bundle copy, and the production controller captures Blob/Worker/URL/timer/listener operations at module evaluation, rechecks bytes before Blob construction, validates one terminal frame, and closes every effect before minting an opaque execution observation. Caller validation remains `caller-frame-consistency-only`; no lowering authority is minted. | Execute and authenticate one valid package invocation using the reviewed factory, current ABI Wasm, and licensed packs; then add a separate authority transition from observed execution to the verified semantic artifact seam. | Commits `5733afe2`, `bc429d5e`, and `4f4e5814`; fast coverage passes 34 files/381 tests, full unit passes 76 files/1,474 tests, and real Chromium bundle/platform smoke passes 1 file/3 tests. No valid browser Worker compile or lowering authority exists. |
-| Gate 3 deterministic header-pack selection and assembly | `partial` | One opaque selection binds the exact prepared build lock and frontend profile to complete compiler-resource, libc++, CUDA, CuTe/CUTLASS, and Linux-sysroot inventories. The package strictly inventories exactly those five real source-tree roles with portable paths, file identities, and canonical content hashes, retains same-process source authority, rereads every byte, and writes canonical packs into a private no-clobber output tree. It independently rereads and inspects persisted bytes before returning opaque non-release output authority. A separate boundary now verifies the exact locked LLVM and CUTLASS archives without exposing local paths. All ten notices approved by the lock are packaged as exact hash/length-verified bytes. Policy remains non-authoritative: exact CUDA/Linux sources, their distribution review, and an externally reviewed per-file license map remain blockers; real-pack, build, full-distribution reproducibility, and release facts are false. | Select exact CUDA 12.6.3 and Linux-sysroot sources; derive the five complete source trees from admitted inputs; close the unresolved distribution policies and external file-license map; materialize and independently inspect all real packs; bind their observed output identities into the asset/build-provenance chain; then mount them only inside the package Worker. | Capability commits `6351bcd4` through `b64d8974` plus source-archive admission `3acf5b65`; current fast gate 38 files/406 tests in 27.49 seconds; strict typecheck/lint/architecture. Real LLVM/CUTLASS archive admission: 196,789,917 bytes, ID `bg.cpp.current-source-archive-admission.sha256.fe50109343304f2826967f2fc2438a7f1b9540edc3aa45e437fee1d66c75cf7b`. No real header pack, external legal review, build, Worker, Docker, or browser execution occurred. |
+| Gate 3 deterministic header-pack selection and assembly | `partial` | One opaque selection binds the exact prepared build lock and frontend profile to compiler-resource, libc++, CUDA, CuTe/CUTLASS, and Linux-sysroot inventories. The exact plan binds seven archives and eight subtrees to intended asset and license component IDs. Admission streams all 252,406,685 bytes. One hash-observed no-shell `bsdtar` normalizes compressed containers; Node's bounded Zstandard decoder handles Debian `data.tar.zst`; and a strict streamed tar reader rejects links, special files, traversal, duplicate virtual paths, malformed metadata, invalid framing, and budget overflow. Extracted content uses a collision-free flat store independent of host case semantics. The same process rereads 5,769 files/67,092,008 bytes and writes five canonical VFS packs into a private no-clobber output tree, then independently rereads and inspects all 67,495,319 persisted bytes. All ten approved notices are exact resources. Policy remains non-authoritative: generated Clang resource headers are incomplete, the host tool is observed rather than attested, and an externally reviewed per-file license map remains required; full-distribution reproducibility and release facts are false. | Generate and verify the missing Clang resource outputs; replace or attest the host normalization tool; close distribution policy and the external file-license map; bind approved pack identities into the asset/build-provenance chain; then mount only those exact packs inside the package Worker. | Capability commits `6351bcd4` through `91fc4610`; current fast gate 45 files/425 tests in 29.86 seconds with strict typecheck/lint/architecture. Exact pipeline completed in 16.97 seconds under ID `bg.cpp.browser-header-pack-pipeline.sha256.431f8b7c20bfdb4b6f129a04fb22ee24c5bcdd53cf29f2dd3b953abf007d39e2`. Pack SHA-256/bytes: Clang resource source `1d05ba63268f4ba0f19efd52e17f13b52978f5e3319479e178b688a7dda8b2ba`/7,729,504; CUDA `f795494ab3d97cbed3e8dab374daeb90574bbd52f0d462b3466bd89e2aa11a77`/16,848,942; CUTLASS `4f1c39b73f2fa7252628a253f7bb5b1411bdfdada872c5ff733b1b9008d89555`/21,403,975; libc++ `f66f128496f99e535e9d461fc9cf4b8b18f7a4e75406982470dd3451616f4fc2`/12,585,828; Linux sysroot `d04a460dc605703b8e8a104cc5c043e6a7020ca7201991470c615273d43e7ae4`/8,927,070. No license approval, production Worker compile, Docker, or browser execution occurred. |
 
 | Gate 3 native compile-session foundation | `verified` | One closed noncopyable session validates canonical profile/request regions, recomputes every bound identity, verifies exact VFS source bytes after identity admission, privately binds output ceilings, materializes closed argv, and runs fresh device-first/host-second policy/VFS/diagnostic state before canonical Artifact V3 production. Accepted and rejected outcomes remain explicit and bounded. This status applies only to the native producer slice, not Gate 3 or browser execution. | None for the native producer slice. The exact code must still compile to Wasm and execute in the Worker before it contributes browser-local evidence. | Commit `bf353f5f`; focused native strict/UBSan and TypeScript artifact tests green; no Emscripten/Worker execution evidence. |
 
@@ -3478,6 +3478,57 @@ whether any files may be left partially changed.
   end, including a 19.08-second Vitest phase. Strict typecheck, focused and
   package lint, architecture, and whitespace checks remain green.
 
+### 2026-07-19 — Exact seven-archive header-pack pipeline
+
+- `1213cdea` and `fae32ded` replace the partial archive set with one exact
+  current-lock plan for LLVM 22.1.8, CUTLASS 3.7.0, CUDA 12.6.3 CCCL/cudart/nvcc,
+  and Ubuntu Noble glibc/Linux UAPI cross-development packages. The admission
+  streams and verifies 252,406,685 bytes under
+  `bg.cpp.browser-header-source-archive-admission.sha256.b365f8f65931a94728775dc56b173ac7673a2a528f1e5fe12de7451e76881d20`.
+  Every selected subtree is bound to its intended asset and license component;
+  plan ID is
+  `bg.cpp.browser-header-source-plan.sha256.360bfef6bc046ebbed5cc51b3a585a10ad0189b107d92f14df89772b265c1162`.
+- `1480b079` adds a bounded streamed PAX/ustar selector that rejects malformed
+  checksums/padding/PAX, traversal, links, special entries, duplicates, glob
+  hazards, truncation, and all configured byte/file ceilings. `638264ef`
+  removes per-header `fsync` while retaining directory-level durable commit;
+  CUTLASS's 682-file materialization falls from about 4.6 seconds to 0.4
+  seconds. `48ac1055` wraps a caller-selected `bsdtar` in a closed no-shell
+  process boundary and uses Node 25's bounded Zstandard stream for Debian
+  `data.tar.zst`, removing an undeclared ambient `zstd` CLI dependency.
+- Default macOS cannot represent case-distinct Linux names directly in one
+  directory. The normalizer therefore stores files under collision-free hashes
+  while retaining portable virtual paths in authenticated metadata. This
+  preserves real pairs including `xt_CONNMARK.h` and `xt_connmark.h` and makes
+  extraction independent of host case folding.
+- `e9b1e1a5` composes admission, private staging, strict normalization, and
+  archive-copy removal. `91fc4610` keeps all opaque source authorities alive
+  through exact inventory and canonical VFS materialization. It observes seven
+  archives, eight selected subtrees, 5,769 files, and 67,092,008 content bytes;
+  its five independently inspected packs total 67,495,319 bytes. Pipeline ID is
+  `bg.cpp.browser-header-pack-pipeline.sha256.431f8b7c20bfdb4b6f129a04fb22ee24c5bcdd53cf29f2dd3b953abf007d39e2`.
+- Exact pack SHA-256/byte pairs are: Clang resource source
+  `1d05ba63268f4ba0f19efd52e17f13b52978f5e3319479e178b688a7dda8b2ba` /
+  7,729,504; CUDA
+  `f795494ab3d97cbed3e8dab374daeb90574bbd52f0d462b3466bd89e2aa11a77` /
+  16,848,942; CUTLASS
+  `4f1c39b73f2fa7252628a253f7bb5b1411bdfdada872c5ff733b1b9008d89555` /
+  21,403,975; libc++
+  `f66f128496f99e535e9d461fc9cf4b8b18f7a4e75406982470dd3451616f4fc2` /
+  12,585,828; Linux sysroot
+  `d04a460dc605703b8e8a104cc5c043e6a7020ca7201991470c615273d43e7ae4` /
+  8,927,070. A second composed run produced the same identities.
+- The exact end-to-end pipeline completed in 16.97 seconds. The ordinary Node
+  25 harness passes 45 files/425 tests in 29.86 seconds, including a 21.24-second
+  Vitest phase; architecture reports zero cycles, leaks, or failures. The old
+  90-minute-class LLVM provisioning path is no longer an edit-loop dependency.
+  Cache-free extractor builds remain a separate 25-to-49-minute evidence lane.
+- Authority remains deliberately narrow. The observed `bsdtar` executable is
+  hash/version recorded but not independently attested or package-pinned;
+  generated Clang resource headers are incomplete; external file-level license
+  review and remaining distribution review are unresolved. These packs are
+  real source-derived non-release observations, not approved product assets.
+
 ## Quick Resume Checklist
 
 1. Read this ledger, then the relevant gate and exit criteria in the normative
@@ -3491,11 +3542,12 @@ whether any files may be left partially changed.
 
 ## Next Checkpoint
 
-Extractor-output reproducibility is now independently admitted from two
-cache-free builds. Preserve that narrow authority while assembling the complete
-deterministic distribution closure. External signed provenance and exact
-notice/license review remain separate authorities; extractor reproducibility
-does not substitute for either.
+Extractor-output reproducibility and exact source-derived header-pack
+materialization are now independent narrow authorities. Preserve both while
+closing the generated Clang resource-header step, normalizer attestation, and
+the complete distribution/license closure. External signed provenance and
+exact notice/license review remain separate authorities; neither reproducible
+extractor bytes nor deterministic packs substitute for them.
 
 The controller and package invocation are wired. The next Worker proof must use
 them to instantiate only host-verified current-ABI Wasm bytes, preserve the
@@ -3503,11 +3555,10 @@ stable pre-bind VFS imports, bind exactly the exported unshared memory, exercise
 the allocator/result metrics synchronously, and keep lowering authority false
 until valid module observations satisfy the independent manifest.
 
-Derive compiler-resource, libc++, and CUTLASS trees only from the admitted
-archives. Select and pin exact CUDA 12.6.3 and Linux-sysroot source packages,
-close their distribution policies plus the external per-file license map, then
-run the implemented exact inventory/materialization boundary over every real
-source tree. Bind the independently reread output identities into the
+Generate the profile-required Clang resource outputs from the admitted LLVM
+source/toolchain closure, replace or attest the observed normalization tool,
+and close the remaining distribution policies plus external per-file license
+map. Then bind the independently reread approved output identities into the
 asset/provenance chain and mount only those exact packs in the package Worker.
 No ambient builder header may enter the parsed-program sysroot.
 
