@@ -8,6 +8,15 @@ import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/sch
 import {
   admitPinnedCppCuteBrowserArchiveNormalizationEnvironment,
 } from "./cpp_cute_browser_archive_normalization.mjs";
+import {
+  admitCppCuteBrowserCudaRedistributionIndex,
+} from "./cpp_cute_browser_cuda_redistribution_index.mjs";
+import {
+  materializeCppCuteBrowserHeaderDistributionReviewInput,
+} from "./cpp_cute_browser_header_distribution_review_input.mjs";
+import {
+  verifyCppCuteBrowserHeaderPackNotices,
+} from "./cpp_cute_browser_header_notice_verification.mjs";
 import { admitCppCuteBrowserHeaderSourcePlanArchives } from "./cpp_cute_browser_header_source_archive_admission.mjs";
 import {
   extractCppCuteBrowserHeaderSourcePlan,
@@ -22,7 +31,7 @@ export const CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline";
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-PACK-PIPELINE";
-const PIPELINE_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline.v2";
+const PIPELINE_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline.v3";
 
 export class CppCuteBrowserHeaderPackPipelineError extends Error {
   constructor(path, message, options) {
@@ -41,10 +50,14 @@ export class CppCuteBrowserHeaderPackPipelineError extends Error {
 export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(input) {
   const object = exactObject(
     input,
-    ["archives", "bsdtarPath", "packOutputRoot", "sourceOutputRoot"],
+    ["archives", "bsdtarPath", "cudaRedistributionIndexPath", "packOutputRoot", "sourceOutputRoot"],
     "$.input",
   );
   const bsdtarPath = absolutePath(object.bsdtarPath, "$.input.bsdtarPath");
+  const cudaRedistributionIndexPath = absolutePath(
+    object.cudaRedistributionIndexPath,
+    "$.input.cudaRedistributionIndexPath",
+  );
   const sourceOutputRoot = absolutePath(object.sourceOutputRoot, "$.input.sourceOutputRoot");
   const packOutputRoot = absolutePath(object.packOutputRoot, "$.input.packOutputRoot");
   if (sourceOutputRoot === packOutputRoot) {
@@ -52,17 +65,22 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
   }
   let archiveAdmission;
   let bsdtarTool;
+  let cudaRedistributionIndex;
+  let notices;
   try {
-    [archiveAdmission, bsdtarTool] = await Promise.all([
+    [archiveAdmission, bsdtarTool, cudaRedistributionIndex, notices] = await Promise.all([
       admitCppCuteBrowserHeaderSourcePlanArchives({ archives: object.archives }),
       admitPinnedCppCuteBrowserArchiveNormalizationEnvironment({ executablePath: bsdtarPath }),
+      admitCppCuteBrowserCudaRedistributionIndex({ indexPath: cudaRedistributionIndexPath }),
+      verifyCppCuteBrowserHeaderPackNotices(),
     ]);
   } catch (cause) {
-    invalid("$.input", "failed to admit exact archives or host normalization tool", { cause });
+    invalid("$.input", "failed to admit exact archives, CUDA index, notices, or host tool", { cause });
   }
   let extraction;
   let inventory;
   let materialization;
+  let distributionReviewInput;
   let packOutputIdentity;
   try {
     packOutputIdentity = await createCppCuteBrowserPrivatePackOutputRoot(packOutputRoot);
@@ -75,6 +93,13 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
     materialization = await materializeCppCuteBrowserHeaderPacks({
       inventory,
       outputRoot: packOutputRoot,
+    });
+    distributionReviewInput = await materializeCppCuteBrowserHeaderDistributionReviewInput({
+      cudaRedistributionIndex,
+      extraction,
+      inventory,
+      materialization,
+      notices,
     });
   } catch (cause) {
     if (packOutputIdentity !== undefined) {
@@ -96,10 +121,11 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
     extractionId: extraction.extractionId,
     inventoryId: inventory.inventoryId,
     outputs: materialization.outputs,
+    distributionReviewInput,
   }));
   return Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA,
-    version: 2,
+    version: 3,
     pipelineId: `bg.cpp.browser-header-pack-pipeline.sha256.${pipelineHash}`,
     authority: "exact-source-host-tool-vfs-pack-pipeline-observation-only",
     buildInputLockId: extraction.buildInputLockId,
@@ -118,6 +144,7 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
     inventoryTotals: inventory.totals,
     outputs: materialization.outputs,
     totalPackByteLength: materialization.totalPackByteLength,
+    distributionReviewInput,
     unresolvedBlockers: extraction.unresolvedBlockers,
     claims: Object.freeze({
       exactCurrentHeaderSourcePlanArchiveBytesVerified: true,
@@ -131,6 +158,9 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
       nodeZstdDecompressorPackageIdentityPinned: true,
       generatedClangResourceHeadersComplete: true,
       exactUpstreamLicenseEvidenceExtracted: true,
+      exactCudaRedistributionIndexBound: true,
+      exactPerDistributedFileComponentMapPrepared: true,
+      deterministicLicenseInventoryMaterialized: true,
       externalDistributedFileLicenseMapReviewed: false,
       licenseReviewComplete: false,
       headerUniverseComplete: true,
@@ -182,17 +212,32 @@ export function parseCppCuteBrowserHeaderPackPipelineArguments(argv) {
   const arguments_ = argv[0] === "--" ? argv.slice(1) : argv;
   const pipelineArguments = [];
   let packOutputRoot;
+  let cudaRedistributionIndexPath;
   for (const [index, argument] of arguments_.entries()) {
     if (typeof argument !== "string") invalid(`$arguments[${index}]`, "expected string argument");
     const match = /^--pack-output-root=(.+)$/u.exec(argument);
-    if (match === null) {
+    const cudaIndexMatch = /^--cuda-redistribution-index=(.+)$/u.exec(argument);
+    if (match === null && cudaIndexMatch === null) {
       pipelineArguments.push(argument);
       continue;
     }
-    if (packOutputRoot !== undefined) invalid(`$arguments[${index}]`, "duplicate --pack-output-root");
-    packOutputRoot = absolutePath(match[1], "$arguments.pack-output-root");
+    if (match !== null) {
+      if (packOutputRoot !== undefined) invalid(`$arguments[${index}]`, "duplicate --pack-output-root");
+      packOutputRoot = absolutePath(match[1], "$arguments.pack-output-root");
+    } else {
+      if (cudaRedistributionIndexPath !== undefined) {
+        invalid(`$arguments[${index}]`, "duplicate --cuda-redistribution-index");
+      }
+      cudaRedistributionIndexPath = absolutePath(
+        cudaIndexMatch[1],
+        "$arguments.cuda-redistribution-index",
+      );
+    }
   }
   if (packOutputRoot === undefined) invalid("$arguments", "missing --pack-output-root");
+  if (cudaRedistributionIndexPath === undefined) {
+    invalid("$arguments", "missing --cuda-redistribution-index");
+  }
   let extraction;
   try {
     extraction = parseCppCuteBrowserHeaderSourceExtractionArguments(pipelineArguments);
@@ -202,6 +247,7 @@ export function parseCppCuteBrowserHeaderPackPipelineArguments(argv) {
   return Object.freeze({
     archives: extraction.archives,
     bsdtarPath: extraction.bsdtarPath,
+    cudaRedistributionIndexPath,
     sourceOutputRoot: extraction.outputRoot,
     packOutputRoot,
   });

@@ -8,6 +8,9 @@ import type {
   CppCuteBrowserHeaderPackMaterializationOutput,
 } from "./cpp_cute_browser_header_pack_materialization.mjs";
 import type {
+  CppCuteBrowserHeaderDistributionReviewInputReport,
+} from "./cpp_cute_browser_header_distribution_review_input.mjs";
+import type {
   CppCuteBrowserSourceArchiveInput,
 } from "./cpp_cute_browser_source_archive_admission.mjs";
 
@@ -22,13 +25,14 @@ export class CppCuteBrowserHeaderPackPipelineError extends Error {
 export interface CppCuteBrowserHeaderPackPipelineInput {
   readonly archives: readonly CppCuteBrowserSourceArchiveInput[];
   readonly bsdtarPath: string;
+  readonly cudaRedistributionIndexPath: string;
   readonly sourceOutputRoot: string;
   readonly packOutputRoot: string;
 }
 
 export interface CppCuteBrowserHeaderPackPipeline {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA;
-  readonly version: 2;
+  readonly version: 3;
   readonly pipelineId: string;
   readonly authority: "exact-source-host-tool-vfs-pack-pipeline-observation-only";
   readonly buildInputLockId: string;
@@ -71,6 +75,7 @@ export interface CppCuteBrowserHeaderPackPipeline {
   }>;
   readonly outputs: readonly CppCuteBrowserHeaderPackMaterializationOutput[];
   readonly totalPackByteLength: string;
+  readonly distributionReviewInput: CppCuteBrowserHeaderDistributionReviewInputReport;
   readonly unresolvedBlockers: readonly CppCuteBrowserHeaderSourceBlocker[];
   readonly claims: Readonly<{
     exactCurrentHeaderSourcePlanArchiveBytesVerified: true;
@@ -84,6 +89,9 @@ export interface CppCuteBrowserHeaderPackPipeline {
     nodeZstdDecompressorPackageIdentityPinned: true;
     generatedClangResourceHeadersComplete: true;
     exactUpstreamLicenseEvidenceExtracted: true;
+    exactCudaRedistributionIndexBound: true;
+    exactPerDistributedFileComponentMapPrepared: true;
+    deterministicLicenseInventoryMaterialized: true;
     externalDistributedFileLicenseMapReviewed: false;
     licenseReviewComplete: false;
     headerUniverseComplete: true;

@@ -21,25 +21,35 @@ describe("exact header-pack pipeline", () => {
       "--",
       ...archiveArguments(),
       "--bsdtar=/usr/bin/bsdtar",
+      "--cuda-redistribution-index=/private/tmp/redistrib_12.6.3.json",
       "--output-root=/private/tmp/browsergrad-header-sources",
       "--pack-output-root=/private/tmp/browsergrad-header-packs",
     ]);
 
     expect(parsed.archives).toHaveLength(7);
     expect(parsed.bsdtarPath).toBe("/usr/bin/bsdtar");
+    expect(parsed.cudaRedistributionIndexPath).toBe("/private/tmp/redistrib_12.6.3.json");
     expect(parsed.sourceOutputRoot).toBe("/private/tmp/browsergrad-header-sources");
     expect(parsed.packOutputRoot).toBe("/private/tmp/browsergrad-header-packs");
     expect(() => parseCppCuteBrowserHeaderPackPipelineArguments([
       ...archiveArguments(),
       "--bsdtar=/usr/bin/bsdtar",
+      "--cuda-redistribution-index=/private/tmp/redistrib_12.6.3.json",
       "--output-root=/private/tmp/sources",
     ])).toThrow(CppCuteBrowserHeaderPackPipelineError);
     expect(() => parseCppCuteBrowserHeaderPackPipelineArguments([
       ...archiveArguments(),
       "--bsdtar=/usr/bin/bsdtar",
+      "--cuda-redistribution-index=/private/tmp/redistrib_12.6.3.json",
       "--output-root=/private/tmp/sources",
       "--pack-output-root=/private/tmp/one",
       "--pack-output-root=/private/tmp/two",
+    ])).toThrow(CppCuteBrowserHeaderPackPipelineError);
+    expect(() => parseCppCuteBrowserHeaderPackPipelineArguments([
+      ...archiveArguments(),
+      "--bsdtar=/usr/bin/bsdtar",
+      "--output-root=/private/tmp/sources",
+      "--pack-output-root=/private/tmp/packs",
     ])).toThrow(CppCuteBrowserHeaderPackPipelineError);
   });
 
