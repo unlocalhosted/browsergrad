@@ -35,6 +35,7 @@ export const CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA =
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-PACK-PIPELINE";
 const PIPELINE_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline.v4";
+const PIPELINES = new WeakSet();
 
 export class CppCuteBrowserHeaderPackPipelineError extends Error {
   constructor(path, message, options) {
@@ -133,7 +134,7 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
     distributionReviewInput,
     noticeMaterializationId: noticeMaterialization.noticeMaterializationId,
   }));
-  return Object.freeze({
+  const report = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA,
     version: 4,
     pipelineId: `bg.cpp.browser-header-pack-pipeline.sha256.${pipelineHash}`,
@@ -183,6 +184,14 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
       releaseReady: false,
     }),
   });
+  PIPELINES.add(report);
+  return report;
+}
+
+export function requireCppCuteBrowserHeaderPackPipelineAuthority(report) {
+  if (typeof report !== "object" || report === null || !PIPELINES.has(report)) {
+    invalid("$.report", "expected one live exact header-pack pipeline authority");
+  }
 }
 
 export async function createCppCuteBrowserPrivatePackOutputRoot(outputRoot) {

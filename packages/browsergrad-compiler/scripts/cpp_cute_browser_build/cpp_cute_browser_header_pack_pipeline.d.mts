@@ -112,6 +112,10 @@ export function materializeCppCuteBrowserHeaderPacksFromSourceArchives(
   input: CppCuteBrowserHeaderPackPipelineInput,
 ): Promise<Readonly<CppCuteBrowserHeaderPackPipeline>>;
 
+export function requireCppCuteBrowserHeaderPackPipelineAuthority(
+  report: CppCuteBrowserHeaderPackPipeline,
+): void;
+
 export function parseCppCuteBrowserHeaderPackPipelineArguments(
   argv: readonly string[],
 ): Readonly<CppCuteBrowserHeaderPackPipelineInput>;

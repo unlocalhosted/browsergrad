@@ -7,6 +7,7 @@ import {
   CppCuteBrowserHeaderPackPipelineError,
   createCppCuteBrowserPrivatePackOutputRoot,
   parseCppCuteBrowserHeaderPackPipelineArguments,
+  requireCppCuteBrowserHeaderPackPipelineAuthority,
 } from "./cpp_cute_browser_header_pack_pipeline.mjs";
 
 const TEST_ROOTS: string[] = [];
@@ -16,6 +17,11 @@ afterEach(async () => {
 });
 
 describe("exact header-pack pipeline", () => {
+  it("rejects forged pipeline authority", () => {
+    expect(() => requireCppCuteBrowserHeaderPackPipelineAuthority(Object.freeze({}) as never))
+      .toThrow(CppCuteBrowserHeaderPackPipelineError);
+  });
+
   it("parses one no-serialization pipeline invocation", () => {
     const parsed = parseCppCuteBrowserHeaderPackPipelineArguments([
       "--",

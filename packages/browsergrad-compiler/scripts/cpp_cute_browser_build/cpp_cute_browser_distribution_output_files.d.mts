@@ -1,5 +1,7 @@
 export const CPP_CUTE_BROWSER_DISTRIBUTION_OUTPUT_FILES_SCHEMA:
 "browsergrad.compiler.cpp-cute.distribution-output-file-materialization";
+export const CPP_CUTE_BROWSER_DISTRIBUTION_OUTPUT_VERIFICATION_SCHEMA:
+"browsergrad.compiler.cpp-cute.distribution-output-file-verification";
 
 export class CppCuteBrowserDistributionOutputFilesError extends Error {
   readonly code: "BG-COMPILER-CPP-CUTE-BROWSER-DISTRIBUTION-OUTPUT-FILES";
@@ -15,6 +17,28 @@ export interface CppCuteBrowserDistributionExistingOutput {
 export interface CppCuteBrowserDistributionNewOutput {
   readonly outputPath: string;
   readonly bytes: Uint8Array;
+}
+
+export interface CppCuteBrowserDistributionOutputFileVerification {
+  readonly schema: typeof CPP_CUTE_BROWSER_DISTRIBUTION_OUTPUT_VERIFICATION_SCHEMA;
+  readonly version: 1;
+  readonly verificationId: string;
+  readonly authority: "caller-expected-private-distribution-output-verification-only";
+  readonly outputRoot: string;
+  readonly outputs: readonly CppCuteBrowserDistributionExistingOutput[];
+  readonly totals: Readonly<{
+    fileCount: number;
+    byteLength: string;
+  }>;
+  readonly claims: Readonly<{
+    exactTreeVerifiedBeforeAndAfter: true;
+    exactFileBytesReverified: true;
+    callerPolicyBound: false;
+    reproducibilityVerified: false;
+    licenseReviewComplete: false;
+    distributionAuthorized: false;
+    releaseReady: false;
+  }>;
 }
 
 export interface CppCuteBrowserDistributionOutputFileMaterialization {
@@ -54,3 +78,8 @@ export function materializeCppCuteBrowserDistributionOutputFiles(input: Readonly
   existingOutputs: readonly CppCuteBrowserDistributionExistingOutput[];
   outputs: readonly CppCuteBrowserDistributionNewOutput[];
 }>): Promise<Readonly<CppCuteBrowserDistributionOutputFileMaterialization>>;
+
+export function verifyCppCuteBrowserDistributionOutputFiles(input: Readonly<{
+  outputRoot: string;
+  expectedOutputs: readonly CppCuteBrowserDistributionExistingOutput[];
+}>): Promise<Readonly<CppCuteBrowserDistributionOutputFileVerification>>;

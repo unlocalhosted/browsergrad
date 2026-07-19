@@ -7,10 +7,14 @@ import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/sch
 
 export const CPP_CUTE_BROWSER_DISTRIBUTION_OUTPUT_FILES_SCHEMA =
   "browsergrad.compiler.cpp-cute.distribution-output-file-materialization";
+export const CPP_CUTE_BROWSER_DISTRIBUTION_OUTPUT_VERIFICATION_SCHEMA =
+  "browsergrad.compiler.cpp-cute.distribution-output-file-verification";
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-DISTRIBUTION-OUTPUT-FILES";
 const MATERIALIZATION_HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.distribution-output-file-materialization.v1";
+const VERIFICATION_HASH_DOMAIN =
+  "browsergrad.compiler.cpp-cute.distribution-output-file-verification.v1";
 const SHA256 = /^[0-9a-f]{64}$/u;
 const WIRE_U64 = /^(0|[1-9][0-9]*)$/u;
 const PORTABLE_SEGMENT = /^[A-Za-z0-9._+@=-]+$/u;
@@ -33,6 +37,53 @@ export class CppCuteBrowserDistributionOutputFilesError extends Error {
 }
 
 /**
+ * Rehashes every expected immutable file while proving the complete private
+ * file and directory tree stayed exact before and after verification. Caller
+ * expectations grant no policy, provenance, approval, or release authority.
+ */
+export async function verifyCppCuteBrowserDistributionOutputFiles(input) {
+  const object = exactObject(input, ["expectedOutputs", "outputRoot"], "$.input");
+  const outputRoot = absolutePath(object.outputRoot, "$.input.outputRoot");
+  const expectedOutputs = parseExistingOutputs(
+    object.expectedOutputs,
+    "$.input.expectedOutputs",
+  );
+  await verifyExpectedOutputTree(
+    outputRoot,
+    expectedOutputs,
+    "$.input.expectedOutputs",
+  );
+  const verificationHash = sha256(canonicalJsonBytes({
+    domain: VERIFICATION_HASH_DOMAIN,
+    outputs: expectedOutputs,
+  }));
+  return Object.freeze({
+    schema: CPP_CUTE_BROWSER_DISTRIBUTION_OUTPUT_VERIFICATION_SCHEMA,
+    version: 1,
+    verificationId: `bg.cpp.distribution-output-file-verification.sha256.${verificationHash}`,
+    authority: "caller-expected-private-distribution-output-verification-only",
+    outputRoot,
+    outputs: Object.freeze(expectedOutputs),
+    totals: Object.freeze({
+      fileCount: expectedOutputs.length,
+      byteLength: expectedOutputs.reduce(
+        (total, output) => total + BigInt(output.byteLength),
+        0n,
+      ).toString(),
+    }),
+    claims: Object.freeze({
+      exactTreeVerifiedBeforeAndAfter: true,
+      exactFileBytesReverified: true,
+      callerPolicyBound: false,
+      reproducibilityVerified: false,
+      licenseReviewComplete: false,
+      distributionAuthorized: false,
+      releaseReady: false,
+    }),
+  });
+}
+
+/**
  * Verifies one exact private output tree, transactionally adds a bounded set of
  * caller-selected immutable files, independently rereads them, and verifies
  * the final exact tree. Caller expectations grant no license, provenance,
@@ -41,14 +92,18 @@ export class CppCuteBrowserDistributionOutputFilesError extends Error {
 export async function materializeCppCuteBrowserDistributionOutputFiles(input) {
   const object = exactObject(input, ["existingOutputs", "outputRoot", "outputs"], "$.input");
   const outputRoot = absolutePath(object.outputRoot, "$.input.outputRoot");
-  const existingOutputs = parseExistingOutputs(object.existingOutputs);
+  const existingOutputs = parseExistingOutputs(
+    object.existingOutputs,
+    "$.input.existingOutputs",
+  );
   const outputs = parseNewOutputs(object.outputs);
   validateCombinedPaths(existingOutputs, outputs);
-  const rootIdentity = await assertExactTree(
+  const initialVerification = await verifyExpectedOutputTree(
     outputRoot,
-    new Set(existingOutputs.map((output) => output.outputPath)),
+    existingOutputs,
+    "$.input.existingOutputs",
   );
-  await verifyExistingFiles(outputRoot, existingOutputs);
+  const rootIdentity = initialVerification.rootIdentity;
   const createdDirectories = [];
   const createdFiles = [];
   try {
@@ -69,11 +124,20 @@ export async function materializeCppCuteBrowserDistributionOutputFiles(input) {
       }
     }
     await syncAffectedDirectories(outputRoot, outputs);
-    const finalIdentity = await assertExactTree(
+    const finalOutputs = [
+      ...existingOutputs,
+      ...outputs.map((output) => Object.freeze({
+        outputPath: output.outputPath,
+        sha256: output.sha256,
+        byteLength: String(output.bytes.byteLength),
+      })),
+    ].sort((left, right) => compareUtf8(left.outputPath, right.outputPath));
+    const finalVerification = await verifyExpectedOutputTree(
       outputRoot,
-      new Set([...existingOutputs, ...outputs].map((output) => output.outputPath)),
+      finalOutputs,
+      "$.output.final",
     );
-    if (!sameDirectoryIdentity(rootIdentity, finalIdentity)) {
+    if (!sameDirectoryIdentity(rootIdentity, finalVerification.rootIdentity)) {
       invalid("$.input.outputRoot", "output root identity changed during materialization");
     }
   } catch (cause) {
@@ -127,13 +191,13 @@ export async function materializeCppCuteBrowserDistributionOutputFiles(input) {
   });
 }
 
-function parseExistingOutputs(value) {
+function parseExistingOutputs(value, diagnosticPath) {
   if (!Array.isArray(value) || value.length === 0 || value.length > MAX_TREE_ENTRIES) {
-    invalid("$.input.existingOutputs", "expected one bounded nonempty output list");
+    invalid(diagnosticPath, "expected one bounded nonempty output list");
   }
   let total = 0;
   const outputs = value.map((item, index) => {
-    const path = `$.input.existingOutputs[${index}]`;
+    const path = `${diagnosticPath}[${index}]`;
     const object = exactObject(item, ["byteLength", "outputPath", "sha256"], path);
     const outputPath = portablePath(object.outputPath, `${path}.outputPath`);
     if (typeof object.sha256 !== "string" || !SHA256.test(object.sha256) ||
@@ -148,7 +212,7 @@ function parseExistingOutputs(value) {
     if (total > MAX_EXISTING_TOTAL_BYTES) resource(path, "existing files exceed aggregate byte bound");
     return Object.freeze({ outputPath, sha256: object.sha256, byteLength: object.byteLength });
   }).sort((left, right) => compareUtf8(left.outputPath, right.outputPath));
-  assertUniquePaths(outputs, "$.input.existingOutputs");
+  assertUniquePaths(outputs, diagnosticPath);
   return outputs;
 }
 
@@ -187,21 +251,42 @@ function validateCombinedPaths(existingOutputs, outputs) {
   }
 }
 
-async function verifyExistingFiles(outputRoot, existingOutputs) {
+async function verifyExistingFiles(outputRoot, existingOutputs, diagnosticPath) {
+  const identities = [];
   for (const [index, output] of existingOutputs.entries()) {
     const path = join(outputRoot, output.outputPath);
     const discovered = await lstat(path, { bigint: true }).catch((cause) =>
-      invalid(`$.input.existingOutputs[${index}]`, "existing output is unavailable", { cause }));
-    const digest = await hashExactFile(
+      invalid(`${diagnosticPath}[${index}]`, "existing output is unavailable", { cause }));
+    const hashed = await hashExactFile(
       path,
       Number(output.byteLength),
       discovered,
-      `$.input.existingOutputs[${index}]`,
+      `${diagnosticPath}[${index}]`,
     );
-    if (digest !== output.sha256) {
-      invalid(`$.input.existingOutputs[${index}]`, "existing output bytes differ from expectation");
+    if (hashed.sha256 !== output.sha256) {
+      invalid(`${diagnosticPath}[${index}]`, "existing output bytes differ from expectation");
+    }
+    identities.push(Object.freeze({ path, identity: hashed.identity }));
+  }
+  return identities;
+}
+
+async function verifyExpectedOutputTree(outputRoot, expectedOutputs, diagnosticPath) {
+  const expectedPaths = new Set(expectedOutputs.map((output) => output.outputPath));
+  const before = await assertExactTree(outputRoot, expectedPaths);
+  const identities = await verifyExistingFiles(outputRoot, expectedOutputs, diagnosticPath);
+  const after = await assertExactTree(outputRoot, expectedPaths);
+  if (!sameDirectoryIdentity(before, after)) {
+    invalid("$.input.outputRoot", "output root identity changed during verification");
+  }
+  for (const [index, verified] of identities.entries()) {
+    const observed = await lstat(verified.path, { bigint: true }).catch((cause) =>
+      invalid(`${diagnosticPath}[${index}]`, "verified output disappeared after tree inspection", { cause }));
+    if (!sameFileIdentity(verified.identity, observed)) {
+      invalid(`${diagnosticPath}[${index}]`, "verified output identity changed after tree inspection");
     }
   }
+  return Object.freeze({ rootIdentity: after });
 }
 
 async function createPrivateParents(outputRoot, outputPath, createdDirectories) {
@@ -321,7 +406,10 @@ async function hashExactFile(path, expectedByteLength, discovered, diagnosticPat
     }
     const after = await handle.stat({ bigint: true });
     if (!sameFileIdentity(before, after)) invalid(diagnosticPath, "file identity changed while read");
-    return digest.digest("hex");
+    return Object.freeze({
+      sha256: digest.digest("hex"),
+      identity: after,
+    });
   } catch (cause) {
     if (cause instanceof CppCuteBrowserDistributionOutputFilesError) throw cause;
     invalid(diagnosticPath, "failed to hash exact existing output", { cause });

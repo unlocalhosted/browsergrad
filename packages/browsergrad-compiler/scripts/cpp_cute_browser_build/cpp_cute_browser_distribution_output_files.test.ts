@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   CppCuteBrowserDistributionOutputFilesError,
   materializeCppCuteBrowserDistributionOutputFiles,
+  verifyCppCuteBrowserDistributionOutputFiles,
 } from "./cpp_cute_browser_distribution_output_files.mjs";
 
 const ROOTS: string[] = [];
@@ -52,6 +53,27 @@ describe("private distribution output files", () => {
     expect(new TextDecoder().decode(await readFile(join(root, "licenses", "component.txt"))))
       .toBe("license\n");
     expect(Number((await lstat(join(root, "licenses"), { bigint: true })).mode & 0o077n)).toBe(0);
+    const verification = await verifyCppCuteBrowserDistributionOutputFiles({
+      outputRoot: root,
+      expectedOutputs: [
+        ...report.existingOutputs,
+        ...report.outputs.map((output) => ({
+          outputPath: output.outputPath,
+          sha256: output.sha256,
+          byteLength: output.byteLength,
+        })),
+      ],
+    });
+    expect(verification).toMatchObject({
+      schema: "browsergrad.compiler.cpp-cute.distribution-output-file-verification",
+      totals: { fileCount: 3 },
+      claims: {
+        exactTreeVerifiedBeforeAndAfter: true,
+        exactFileBytesReverified: true,
+        reproducibilityVerified: false,
+        distributionAuthorized: false,
+      },
+    });
   });
 
   it("rejects unexpected files, unsafe entries, byte drift, traversal, and clobber", async () => {
