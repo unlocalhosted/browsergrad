@@ -1,19 +1,9 @@
 namespace {
 
-// These definitions mirror the wasm32 layout in the pinned Emscripten 6.0.3
-// wasi/api.h. Keeping the small raw ABI mirror here avoids inheriting the
-// header's import attributes on definitions that deliberately close imports.
-struct WasiMutableIoVector {
-  std::uint8_t* data;
-  std::uint32_t byte_length;
-};
-
-constexpr std::uint16_t kWasiErrnoNosys = 52;
-
 static_assert(sizeof(void*) == 4);
-static_assert(sizeof(WasiMutableIoVector) == 8);
-static_assert(offsetof(WasiMutableIoVector, data) == 0);
-static_assert(offsetof(WasiMutableIoVector, byte_length) == 4);
+static_assert(sizeof(__wasi_iovec_t) == 8);
+static_assert(offsetof(__wasi_iovec_t, buf) == 0);
+static_assert(offsetof(__wasi_iovec_t, buf_len) == 4);
 
 }  // namespace
 
@@ -44,18 +34,18 @@ int __syscall_ioctl(int, int, ...) {
   return -ENOSYS;
 }
 
-std::uint16_t __wasi_fd_close(std::uint32_t) {
-  return kWasiErrnoNosys;
+__wasi_errno_t __wasi_fd_close(__wasi_fd_t) {
+  return __WASI_ERRNO_NOSYS;
 }
 
-std::uint16_t __wasi_fd_read(std::uint32_t, const WasiMutableIoVector*,
-                             std::size_t, std::uint32_t*) {
-  return kWasiErrnoNosys;
+__wasi_errno_t __wasi_fd_read(__wasi_fd_t, const __wasi_iovec_t*,
+                              std::size_t, __wasi_size_t*) {
+  return __WASI_ERRNO_NOSYS;
 }
 
-std::uint16_t __wasi_fd_seek(std::uint32_t, std::int64_t, std::uint8_t,
-                             std::uint64_t*) {
-  return kWasiErrnoNosys;
+__wasi_errno_t __wasi_fd_seek(__wasi_fd_t, __wasi_filedelta_t,
+                              __wasi_whence_t, __wasi_filesize_t*) {
+  return __WASI_ERRNO_NOSYS;
 }
 
 }  // extern "C"

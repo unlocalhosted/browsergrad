@@ -26,6 +26,7 @@
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/syscalls.h>
+#include <wasi/api.h>
 #endif
 
 namespace {

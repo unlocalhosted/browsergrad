@@ -238,7 +238,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
       expect(source).toMatch(new RegExp(`\\b${symbol}\\(`, "u"));
     }
     expect(source).toContain("return -ENOSYS;");
-    expect(source).toContain("return kWasiErrnoNosys;");
+    expect(source).toContain("return __WASI_ERRNO_NOSYS;");
     expect(source).toContain("static_assert(sizeof(void*) == 4);");
     expect(source).not.toMatch(/memcpy|memset|fetch|socket|filesystem|system\(|popen\(/u);
   });
