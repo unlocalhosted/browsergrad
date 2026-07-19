@@ -2011,49 +2011,10 @@ std::uint32_t DecodedCompileSession::maximum_output_byte_length() const noexcept
   return implementation_->storage.maximum_output_byte_length;
 }
 
-std::uint32_t DecodedCompileSession::maximum_diagnostic_count() const noexcept {
-  return static_cast<std::uint32_t>(
-      implementation_->storage.request_semantic_limits[18U]);
-}
-
-std::uint32_t DecodedCompileSession::maximum_source_file_count() const noexcept {
-  return static_cast<std::uint32_t>(
-      implementation_->storage.request_semantic_limits[0U]);
-}
-
-std::uint32_t DecodedCompileSession::maximum_header_file_count() const noexcept {
-  return static_cast<std::uint32_t>(
-      implementation_->storage.request_semantic_limits[2U]);
-}
-
-std::uint64_t DecodedCompileSession::maximum_include_depth() const noexcept {
-  return implementation_->storage.request_semantic_limits[4U];
-}
-
-std::uint64_t DecodedCompileSession::maximum_macro_expansions() const noexcept {
-  return implementation_->storage.request_semantic_limits[5U];
-}
-
-std::uint64_t
-DecodedCompileSession::maximum_preprocessed_tokens() const noexcept {
-  return implementation_->storage.request_semantic_limits[6U];
-}
-
-std::uint64_t DecodedCompileSession::maximum_ast_nodes() const noexcept {
-  return implementation_->storage.request_semantic_limits[7U];
-}
-
-std::uint64_t DecodedCompileSession::maximum_constexpr_steps() const noexcept {
-  return implementation_->storage.request_semantic_limits[8U];
-}
-
-std::uint64_t
-DecodedCompileSession::maximum_template_instantiations() const noexcept {
-  return implementation_->storage.request_semantic_limits[9U];
-}
-
-std::uint64_t DecodedCompileSession::maximum_template_depth() const noexcept {
-  return implementation_->storage.request_semantic_limits[10U];
+std::uint64_t DecodedCompileSession::request_semantic_limit(
+    CompileSemanticLimit limit) const noexcept {
+  return implementation_->storage.request_semantic_limits[
+      static_cast<std::size_t>(limit)];
 }
 
 std::size_t DecodedCompileSession::compiler_option_count() const noexcept {

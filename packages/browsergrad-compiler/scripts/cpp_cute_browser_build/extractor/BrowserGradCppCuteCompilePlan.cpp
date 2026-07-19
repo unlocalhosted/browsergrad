@@ -132,9 +132,11 @@ void append_frontend_resource_limits(
   // instrumented record enforces aggregate work across both semantic passes.
   arguments.push_back("-fno-experimental-new-constant-interpreter");
   arguments.push_back("-fconstexpr-steps=" +
-                      std::to_string(session.maximum_constexpr_steps()));
+                      std::to_string(session.request_semantic_limit(
+                          CompileSemanticLimit::kConstexprSteps)));
   arguments.push_back("-ftemplate-depth=" +
-                      std::to_string(session.maximum_template_depth()));
+                      std::to_string(session.request_semantic_limit(
+                          CompileSemanticLimit::kTemplateDepth)));
 }
 
 }  // namespace
@@ -183,7 +185,7 @@ PrepareCppCuteCompilePlanResult prepare_cpp_cute_compile_plan(
   try {
     if (session.semantic_pass_count() != 2U ||
         session.maximum_output_byte_length() == 0U ||
-        session.maximum_diagnostic_count() == 0U) {
+        session.request_semantic_limit(CompileSemanticLimit::kDiagnostics) == 0U) {
       result.status = CompilePlanStatus::kInvalidSessionData;
       return result;
     }
@@ -200,8 +202,8 @@ PrepareCppCuteCompilePlanResult prepare_cpp_cute_compile_plan(
         session.compilation_contract_hash();
     implementation->maximum_output_byte_length =
         session.maximum_output_byte_length();
-    implementation->maximum_diagnostic_count =
-        session.maximum_diagnostic_count();
+    implementation->maximum_diagnostic_count = static_cast<std::uint32_t>(
+        session.request_semantic_limit(CompileSemanticLimit::kDiagnostics));
     for (std::size_t index = 0U; index < 2U; ++index) {
       InvocationSemanticPass semantic_pass;
       if (!translate_pass(session.semantic_pass(index), semantic_pass)) {

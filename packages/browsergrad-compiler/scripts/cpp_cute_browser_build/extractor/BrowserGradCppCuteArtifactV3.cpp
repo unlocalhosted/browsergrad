@@ -113,13 +113,13 @@ ArtifactV3CompileResult build_artifact_v3(
   }
 
   const FrontendWorkLimitsV1 frontend_limits{
-      decoded.session->maximum_include_depth(),
-      decoded.session->maximum_macro_expansions(),
-      decoded.session->maximum_preprocessed_tokens(),
-      decoded.session->maximum_ast_nodes(),
-      decoded.session->maximum_constexpr_steps(),
-      decoded.session->maximum_template_instantiations(),
-      decoded.session->maximum_template_depth(),
+      decoded.session->request_semantic_limit(CompileSemanticLimit::kIncludeDepth),
+      decoded.session->request_semantic_limit(CompileSemanticLimit::kMacroExpansions),
+      decoded.session->request_semantic_limit(CompileSemanticLimit::kPreprocessedTokens),
+      decoded.session->request_semantic_limit(CompileSemanticLimit::kAstNodes),
+      decoded.session->request_semantic_limit(CompileSemanticLimit::kConstexprSteps),
+      decoded.session->request_semantic_limit(CompileSemanticLimit::kTemplateInstantiations),
+      decoded.session->request_semantic_limit(CompileSemanticLimit::kTemplateDepth),
   };
   if (!begin_frontend_work_invocation(frontend_limits)) {
     return {WireCompileStatus::kInternalError,

@@ -109,6 +109,20 @@ struct EntryRequestView {
 
 struct CompileSessionDecodeResult;
 
+/** Stable indices in the versioned profile/request semantic-limit vector. */
+enum class CompileSemanticLimit : std::uint8_t {
+  kSourceFiles = 0U,
+  kHeaderFiles = 2U,
+  kIncludeDepth = 4U,
+  kMacroExpansions = 5U,
+  kPreprocessedTokens = 6U,
+  kAstNodes = 7U,
+  kConstexprSteps = 8U,
+  kTemplateInstantiations = 9U,
+  kTemplateDepth = 10U,
+  kDiagnostics = 18U,
+};
+
 /**
  * Immutable, owning admission authority.
  *
@@ -134,16 +148,7 @@ class DecodedCompileSession final {
   std::string_view request_hash() const noexcept;
   std::string_view main_virtual_path() const noexcept;
   std::uint32_t maximum_output_byte_length() const noexcept;
-  std::uint32_t maximum_diagnostic_count() const noexcept;
-  std::uint32_t maximum_source_file_count() const noexcept;
-  std::uint32_t maximum_header_file_count() const noexcept;
-  std::uint64_t maximum_include_depth() const noexcept;
-  std::uint64_t maximum_macro_expansions() const noexcept;
-  std::uint64_t maximum_preprocessed_tokens() const noexcept;
-  std::uint64_t maximum_ast_nodes() const noexcept;
-  std::uint64_t maximum_constexpr_steps() const noexcept;
-  std::uint64_t maximum_template_instantiations() const noexcept;
-  std::uint64_t maximum_template_depth() const noexcept;
+  std::uint64_t request_semantic_limit(CompileSemanticLimit limit) const noexcept;
 
   std::size_t compiler_option_count() const noexcept;
   CompilerOptionView compiler_option(std::size_t index) const noexcept;

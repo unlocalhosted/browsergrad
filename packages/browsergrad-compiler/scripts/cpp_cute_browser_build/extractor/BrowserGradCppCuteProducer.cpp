@@ -168,8 +168,8 @@ ProducerReviewResult run_cpp_cute_producer_review(
       }
     }
     const std::uint64_t opened_limit =
-        static_cast<std::uint64_t>(session.maximum_source_file_count()) +
-        session.maximum_header_file_count();
+        session.request_semantic_limit(CompileSemanticLimit::kSourceFiles) +
+        session.request_semantic_limit(CompileSemanticLimit::kHeaderFiles);
     ImportedVfsObservationLimits observation_limits;
     observation_limits.max_opened_file_count = static_cast<std::uint32_t>(
         std::min<std::uint64_t>(opened_limit,
@@ -191,7 +191,8 @@ ProducerReviewResult run_cpp_cute_producer_review(
       ClangPassReview review;
       static_cast<void>(run_cpp_cute_clang_pass_for_review(
           owned_arguments, anchor, forced_includes, observation_limits,
-          session.maximum_diagnostic_count(),
+          static_cast<std::uint32_t>(session.request_semantic_limit(
+              CompileSemanticLimit::kDiagnostics)),
           session.maximum_output_byte_length(),
           review));
       if (review.policy_install_status !=

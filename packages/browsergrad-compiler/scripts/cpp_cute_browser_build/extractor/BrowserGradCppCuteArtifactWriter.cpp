@@ -392,8 +392,8 @@ struct FileRecord final {
 using SourceViewMap = std::map<std::string, SourceFileView, std::less<>>;
 
 SourceViewMap source_views(const DecodedCompileSession& session) {
-  if (session.source_file_count() == 0U ||
-      session.source_file_count() > session.maximum_source_file_count()) {
+  if (session.source_file_count() == 0U || session.source_file_count() >
+      session.request_semantic_limit(CompileSemanticLimit::kSourceFiles)) {
     throw InvalidObservation();
   }
   SourceViewMap result;
@@ -1392,7 +1392,7 @@ DiagnosticBuild normalize_diagnostics(
     DiagnosticNormalizerConfig config = {
         session.compilation_contract_hash(),
         semantic_pass.pass_id,
-        session.maximum_diagnostic_count(),
+        static_cast<std::uint32_t>(session.request_semantic_limit(CompileSemanticLimit::kDiagnostics)),
         session.maximum_output_byte_length(),
         opened_span_ids,
         opened_virtual_paths,
@@ -1483,7 +1483,7 @@ DiagnosticBuild normalize_diagnostics(
       throw InvalidObservation();
     }
   }
-  if (records.size() > session.maximum_diagnostic_count()) {
+  if (records.size() > session.request_semantic_limit(CompileSemanticLimit::kDiagnostics)) {
     throw ArtifactResourceLimit();
   }
   output.records.reserve(records.size());
