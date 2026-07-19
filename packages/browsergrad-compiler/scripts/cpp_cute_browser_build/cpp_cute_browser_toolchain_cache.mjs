@@ -19,7 +19,9 @@ const CACHE_KEY_PREFIX = "bg.cpp.clang-wasm-toolchain-cache.sha256.";
  * Selects only inputs that can change the reusable LLVM/Clang build layer.
  * Ordinary extractor implementation files are deliberately excluded; the
  * external project's CMake configuration remains included because it selects
- * libraries, compile flags, and the final target graph.
+ * libraries, compile flags, and the final target graph. Final-executable
+ * linker flags are excluded: CMake reapplies them during the mandatory exact
+ * reconfiguration, while they cannot change reusable static-library objects.
  *
  * The resulting cache is an untrusted diagnostic accelerator. It is never
  * build, reproducibility, provenance, distribution, or release evidence.
@@ -51,11 +53,23 @@ export function selectCppCuteBrowserToolchainCacheInputs(body) {
       environment: body.recipe.environment,
       parallelJobs: body.recipe.parallelJobs,
       prefixMapKinds: body.recipe.prefixMapKinds,
-      stages: body.recipe.stages,
+      stages: body.recipe.stages.map(selectReusableStageInputs),
     }),
     extractorConfiguration: Object.freeze({ ...cmake[0] }),
     selectedClangLibraries: body.recipe.extractorLinkPolicy.selectedClangLibraries,
   });
+}
+
+/**
+ * @template T
+ * @param {T & {readonly linkerFlags?: readonly string[]}} stage
+ * @returns {Readonly<Omit<T, "linkerFlags">>}
+ */
+function selectReusableStageInputs(stage) {
+  const selected = /** @type {Omit<T, "linkerFlags">} */ (Object.fromEntries(
+    Object.entries(stage).filter(([name]) => name !== "linkerFlags"),
+  ));
+  return Object.freeze(selected);
 }
 
 /** @param {ReturnType<typeof selectCppCuteBrowserToolchainCacheInputs>} inputs */

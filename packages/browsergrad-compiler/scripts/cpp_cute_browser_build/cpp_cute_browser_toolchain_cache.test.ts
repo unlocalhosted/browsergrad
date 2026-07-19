@@ -39,7 +39,7 @@ describe("Clang-Wasm diagnostic toolchain cache projection", () => {
     expect(report.inputs.extractorConfiguration.path).toBe("CMakeLists.txt");
   });
 
-  it("survives ordinary extractor edits but changes with its CMake graph", async () => {
+  it("survives extractor and final-link edits but changes with reusable build inputs", async () => {
     const original = await body();
     const sourceEdit = structuredClone(original);
     const ordinarySource = sourceEdit.recipe.extractorSource.files.find(
@@ -63,13 +63,44 @@ describe("Clang-Wasm diagnostic toolchain cache projection", () => {
     if (cmake === undefined) throw new Error("CMake fixture missing");
     Object.assign(cmake, { sha256: "d".repeat(64) });
 
+    const linkerEdit = structuredClone(original);
+    const wasmLinkStage = linkerEdit.recipe.stages.find(
+      (stage) => stage.stageId === "clang-extractor-wasm",
+    );
+    expect(wasmLinkStage?.linkerFlags).toBeDefined();
+    if (wasmLinkStage === undefined || wasmLinkStage.linkerFlags === undefined) {
+      throw new Error("Wasm linker stage fixture missing");
+    }
+    Object.assign(wasmLinkStage, {
+      linkerFlags: [...wasmLinkStage.linkerFlags, "-sMINIFY_WASM_EXPORT_NAMES=0"],
+    });
+
+    const compilerEdit = structuredClone(original);
+    const wasmCompileStage = compilerEdit.recipe.stages.find(
+      (stage) => stage.stageId === "clang-extractor-wasm",
+    );
+    expect(wasmCompileStage).toBeDefined();
+    if (wasmCompileStage === undefined) throw new Error("Wasm compiler stage fixture missing");
+    Object.assign(wasmCompileStage, {
+      compilerFlags: [...wasmCompileStage.compilerFlags, "-fno-omit-frame-pointer"],
+    });
+
     const originalInputs = selectCppCuteBrowserToolchainCacheInputs(original);
     const sourceEditInputs = selectCppCuteBrowserToolchainCacheInputs(sourceEdit);
     const cmakeEditInputs = selectCppCuteBrowserToolchainCacheInputs(cmakeEdit);
+    const linkerEditInputs = selectCppCuteBrowserToolchainCacheInputs(linkerEdit);
+    const compilerEditInputs = selectCppCuteBrowserToolchainCacheInputs(compilerEdit);
+    expect(JSON.stringify(originalInputs)).not.toContain("linkerFlags");
     await expect(deriveCppCuteBrowserToolchainCacheKey(sourceEditInputs)).resolves.toBe(
       await deriveCppCuteBrowserToolchainCacheKey(originalInputs),
     );
+    await expect(deriveCppCuteBrowserToolchainCacheKey(linkerEditInputs)).resolves.toBe(
+      await deriveCppCuteBrowserToolchainCacheKey(originalInputs),
+    );
     await expect(deriveCppCuteBrowserToolchainCacheKey(cmakeEditInputs)).resolves.not.toBe(
+      await deriveCppCuteBrowserToolchainCacheKey(originalInputs),
+    );
+    await expect(deriveCppCuteBrowserToolchainCacheKey(compilerEditInputs)).resolves.not.toBe(
       await deriveCppCuteBrowserToolchainCacheKey(originalInputs),
     );
   });
