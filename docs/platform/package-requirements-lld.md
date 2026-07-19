@@ -18,12 +18,14 @@ general emphasis.
 Gates 0 through 2 remain verified; Gate 3 is active; Gates 4 through 7 have not
 started. The strict native producer, pinned no-shell Clang-Wasm executor,
 isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
-are implemented on `main` through `9945c7f6`. The current source additionally
-owns exact frontend-work instrumentation, the local Wasm C-ABI runner, and a
-canonical Worker result-control encoder. It now also pins one exact
-574,770-byte package-owned Worker module with zero static or dynamic imports;
-the production host controller remains blocked on captured platform effects
-and package-owned invocation composition.
+are implemented on `main`. The current source additionally owns exact
+frontend-work instrumentation, the local Wasm C-ABI runner, and a canonical
+Worker result-control encoder. It now pins the current clean-built 27,125-byte
+generated factory inside one exact 577,480-byte package-owned Worker module
+with zero static or dynamic imports. The production controller captures its
+browser effects at module evaluation, composes only package-owned Worker bytes
+into a one-shot invocation, terminalizes every Worker/Blob/timer/listener
+effect before returning, and still mints no lowering authority.
 
 The original cold diagnostic run `29658164083` spent 97 minutes 5 seconds in
 isolated execution before failing closed at link. That result exposed two
@@ -42,11 +44,12 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 337 tests across the build plan, runtime ABI, browser profile,
-browser asset identity chain, and exact Worker-bundle authoring check. The
-pre-bundle gate measured 21.74 to 26.37 seconds on Node 25; the expanded gate
-measured 29.24 seconds end to end. Clean validation and two-build reproducibility still
-restore no cache and remain intentionally more expensive.
+clean, then runs 381 tests across 34 files covering the build plan, runtime ABI,
+browser profile, browser asset identity chain, exact Worker-bundle authoring,
+package invocation, Worker entry, and production controller. The current gate
+measured 25.26 seconds end to end on Node 25; its Vitest phase took 17.05
+seconds. Clean validation and two-build reproducibility still restore no cache
+and remain intentionally more expensive.
 
 The current CMake-stable primary cache is now proved at exact source.
 Migration run `29680686426` completed in 4 minutes 14 seconds and populated the
@@ -75,6 +78,17 @@ sidecar as undeclared. Commit `eda1ad9d` closes that harness defect by admitting
 binding, and comparing the canonical sidecar; no reproducibility authority is
 claimed from the failed run.
 
+Current-lock clean run `29681845216` at `aca7ee4e` completed successfully in 49
+minutes 2 seconds. Its isolated build took 45 minutes 37 seconds and produced
+the same 31,641,377-byte Wasm and 27,125-byte generated factory as the exact
+warm lane. The current admission boundary accepts its exact closed artifact
+tree, independently reruns the raw-Wasm inspector over the admitted bytes, and
+requires its canonical 1,678,025-byte report to match byte for byte before
+exposing a no-clobber factory candidate. The resulting factory SHA-256 is
+`796a548237420df7f5eca0c0260d3cbe752aeca155d9c7182c6ad0f5491dfb12`.
+The two-clean-build reproducibility run `29683677087` has been dispatched at
+`96ad7b16`; while active, it grants no reproducibility or release authority.
+
 Every admitted build runs the independent production-scale raw-Wasm inspector
 and uploads its exact report. The original 98-function import surface contained
 92 generated Emscripten imports, including forbidden clock, random, process,
@@ -91,9 +105,9 @@ Production run `29674599138` at `348d7373` completed in 4 minutes 44 seconds and
 reviewed a 31,307,826-byte module with SHA-256
 `b7a5daf6d121c306a2d07b5d3c14c00a664aaa2ff4ae3357a8b389326eeeb06f`, zero
 ABI mismatches, raw-Wasm verification, and exact interface conformance. This
-does not grant Worker or release authority: current-source clean-build,
-reproducibility, header-license, valid Worker-instantiation, and production
-execution evidence remain separate gates.
+does not grant Worker or release authority: reproducibility, header-license,
+valid Worker-instantiation, and production execution evidence remain separate
+gates.
 
 Exact-primary run `29680831101` produced a 31,641,378-byte module with SHA-256
 `20cf9ee448af03cd91395eb098e29a9c04be741097f4fb8c7d41fc602b68fc0a`.
@@ -107,13 +121,14 @@ rebuilt the repinned source in 5 minutes, including 3 minutes 19 seconds for the
 isolated build. Its 31,641,377-byte module has SHA-256
 `5fc425bbc051a2f5be588c2acbb164efb5e43f949afb48a373f3ed022c3b8758` and
 passes raw review with zero mismatches. The ABI 1.8 local fast gate passes 30
-files/338 tests in 24.7 seconds on Node 25.
+files/338 tests in 24.7 seconds on Node 25; the later controller-complete gate
+passes 34 files/381 tests in 25.26 seconds.
 
 The harness audit found strong isolation, exact-input closure, bounded logs,
 independent Wasm parsing, and separate authority tiers. It also records real
 maintenance debt: the JavaScript executor sits close to its line-count ratchet,
 native producer files remain large, and several semantic TypeScript modules are
-5,000 to 8,000 lines. Cold provisioning is still roughly 40 minutes and the
+5,000 to 8,000 lines. Cold provisioning is still roughly 40 to 46 minutes and the
 cached link loop still spends about 29 seconds regenerating Emscripten system
 libraries. Current diagnostic cache selection excludes extractor CMake and
 final-link changes are reapplied by mandatory exact configuration, every
@@ -140,9 +155,11 @@ An active or failed run is not build, ABI, reproducibility, Worker, browser, or
 release evidence. The Worker-local runtime now executes the pinned generated
 factory and C ABI, verifies exact frontend-work/VFS/runtime observations, and
 emits canonical control plus artifact bytes. The package-owned Worker graph is
-pinned at SHA-256 `4b1565e4ca8df2332cc6faabb6643226aa5cb26bcd5d9a8ac6d97d94972797a5`;
-the production host path remains capability-blocked until a captured platform
-adapter and package-owned invocation composition consume those verified bytes.
+pinned at SHA-256 `db0b0fd8f622d8c5febf7dc2c4daa75d68bf8be879f2d4f3d3670b56836f71d7`.
+The production host path now consumes those bytes through the captured platform
+and package invocation. It remains evidence-blocked from lowering until a valid
+real Worker compile authenticates the exact terminal frame, Artifact V3,
+frontend-work record, and VFS observations.
 Use the linked implementation ledger
 for exact chronology, failures, and evidence. This checkpoint is informational: the
 remainder of this document continues to define the normative target and does
