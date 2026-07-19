@@ -46,7 +46,10 @@ import {
   unwrapVerifiedCppCuteFrontendArtifactResource,
   type VerifiedCppCuteFrontendArtifact,
 } from "./cpp_cute_frontend_artifact.js";
-import { prepareCppCuteFrontendRequestBinding } from "./cpp_cute_frontend_request_binding.js";
+import {
+  prepareCppCuteFrontendRequestBinding,
+  type PreparedCppCuteFrontendRequestBinding,
+} from "./cpp_cute_frontend_request_binding.js";
 import {
   copyPreparedCppCuteFrontendSourceSnapshots,
   unwrapPreparedCppCuteFrontendRequest,
@@ -346,9 +349,17 @@ export interface ValidatedCppCuteBrowserWorkerResultFrame {
   readonly loweringAuthorityMinted: false;
 }
 
-/** Bounded record: no invocation, source snapshots, VFS assets, or executable bytes. */
+/**
+ * Bounded authority chain retained for the later host-execution authorization
+ * transition. It keeps the exact small profile/manifest/artifact authorities
+ * and request binding, but no invocation, VFS asset set, or executable bytes.
+ */
 export interface ValidatedCppCuteBrowserWorkerResultFrameRecord {
   readonly result: CppCuteBrowserWorkerResultV1;
+  readonly artifact: VerifiedCppCuteFrontendArtifact;
+  readonly profile: PreparedCppCuteFrontendProfile;
+  readonly assetManifest: PreparedCppCuteBrowserAssetManifest;
+  readonly requestBinding: PreparedCppCuteFrontendRequestBinding;
 }
 
 export type CppCuteBrowserWorkerProtocolErrorCode =
@@ -989,7 +1000,13 @@ export async function validateCppCuteBrowserWorkerResultFrame(
     workerTerminationObserved: false,
     loweringAuthorityMinted: false,
   }) as ValidatedCppCuteBrowserWorkerResultFrame;
-  VALIDATED_RESULT_FRAMES.set(validated, Object.freeze({ result }));
+  VALIDATED_RESULT_FRAMES.set(validated, Object.freeze({
+    result,
+    artifact,
+    profile: stored.profile,
+    assetManifest: stored.assetManifest,
+    requestBinding,
+  }));
   return validated;
 }
 

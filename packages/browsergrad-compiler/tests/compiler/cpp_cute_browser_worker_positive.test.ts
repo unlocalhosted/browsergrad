@@ -119,6 +119,7 @@ import {
   discardCppCuteBrowserWorkerInvocation,
   prepareCppCuteBrowserWorkerInvocation,
   unwrapPreparedCppCuteBrowserWorkerInvocation,
+  unwrapValidatedCppCuteBrowserWorkerResultFrame,
   validateCppCuteBrowserWorkerResultFrame,
   type CppCuteBrowserWorkerResultV1,
   type PreparedCppCuteBrowserWorkerInvocation,
@@ -145,6 +146,9 @@ import {
   unwrapPreparedCppCuteBrowserFrontendProfile,
   type PreparedCppCuteFrontendProfile,
 } from "../../src/cpp_cute_frontend_profile.js";
+import {
+  unwrapPreparedCppCuteFrontendRequestBinding,
+} from "../../src/cpp_cute_frontend_request_binding.js";
 import type {
   CppCuteFrontendArtifactV3,
   CppCuteFrontendPayloadV3,
@@ -236,6 +240,23 @@ describe("C++/CuTe browser Worker positive framing", () => {
       workerTerminationObserved: false,
       loweringAuthorityMinted: false,
     });
+    const acceptedRecord = unwrapValidatedCppCuteBrowserWorkerResultFrame(accepted);
+    const acceptedBinding = unwrapPreparedCppCuteFrontendRequestBinding(
+      acceptedRecord.requestBinding,
+    );
+    expect(acceptedRecord).toMatchObject({
+      artifact: acceptedEnvironment.accepted.artifact,
+      profile: acceptedEnvironment.profile,
+    });
+    expect(acceptedBinding).toMatchObject({
+      artifact: acceptedEnvironment.accepted.artifact,
+    });
+    expect(acceptedBinding.request.profileHash).toBe(acceptedEnvironment.profile.profileHash);
+    expect(() => unwrapValidatedCppCuteBrowserWorkerResultFrame({ ...accepted } as never))
+      .toThrowError(expect.objectContaining({
+        code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-UNVERIFIED",
+        path: "$.validatedResultFrame",
+      }));
 
     const rejectedEnvironment = await createEnvironment("rejected");
     const rejectedResult = await createResult(
