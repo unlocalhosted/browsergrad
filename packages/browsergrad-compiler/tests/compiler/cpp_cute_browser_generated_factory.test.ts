@@ -17,10 +17,16 @@ it("pins the exact package-owned generated factory without widening its authorit
   expect(CPP_CUTE_BROWSER_GENERATED_FACTORY_BYTE_LENGTH).toBe(23_916);
   expect(CPP_CUTE_BROWSER_GENERATED_FACTORY.constructor.name).toBe("AsyncFunction");
   expect(CPP_CUTE_BROWSER_GENERATED_FACTORY_AUTHORITY).toEqual({
-    source: "reviewed-cached-diagnostic-build-output",
+    source: "reviewed-clean-validation-build-output",
     packageOwned: true,
     exactSourcePinned: true,
-    cleanBuildVerified: false,
+    cleanValidationRunId: "29674887505",
+    cleanValidationSourceRevision: "d631cc3223777cada1284cf5284b1a0efdcb36c4",
+    cleanValidationWasmSha256:
+      "b7a5daf6d121c306a2d07b5d3c14c00a664aaa2ff4ae3357a8b389326eeeb06f",
+    cleanValidationWasmByteLength: 31_307_826,
+    exactCleanFactoryMatch: true,
+    cleanBuildVerified: true,
     reproducibilityVerified: false,
     workerBundleVerified: false,
     workerExecutionObserved: false,
