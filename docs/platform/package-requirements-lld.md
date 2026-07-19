@@ -18,7 +18,10 @@ general emphasis.
 Gates 0 through 2 remain verified; Gate 3 is active; Gates 4 through 7 have not
 started. The strict native producer, pinned no-shell Clang-Wasm executor,
 isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
-are implemented on `main` through `348d7373`.
+are implemented on `main` through `eda1ad9d`. The current source additionally
+owns exact frontend-work instrumentation, the local Wasm C-ABI runner, and a
+canonical Worker result-control encoder; the production host controller remains
+blocked on one self-contained package-owned Worker bundle.
 
 The original cold diagnostic run `29658164083` spent 97 minutes 5 seconds in
 isolated execution before failing closed at link. That result exposed two
@@ -37,10 +40,22 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 266 tests across the build plan, runtime ABI, browser profile,
+clean, then runs 333 tests across the build plan, runtime ABI, browser profile,
 and browser asset identity chain. Measured end-to-end runs complete in 21.74 to
 26.37 seconds on Node 25. Clean validation and two-build reproducibility still
 restore no cache and remain intentionally more expensive.
+
+The first successful uncached clean validation, run `29674887505`, completed in
+39 minutes 29 seconds rather than the earlier 97-minute failed cold diagnostic.
+Its locked build step took 36 minutes 25 seconds and produced the same
+31,307,826-byte exact-interface-conforming module as the reviewed diagnostic
+lane. This historical clean evidence predates the current ABI 1.2 frontend-work
+record, so run `29678087663` is re-proving current source and is not evidence
+until it completes. Reproducibility run `29676333678` completed both clean
+builds but its final comparator rejected the newly added per-build ABI-review
+sidecar as undeclared. Commit `eda1ad9d` closes that harness defect by admitting,
+binding, and comparing the canonical sidecar; no reproducibility authority is
+claimed from the failed run.
 
 Every admitted build runs the independent production-scale raw-Wasm inspector
 and uploads its exact report. The original 98-function import surface contained
@@ -83,10 +98,12 @@ Cross-runtime CI run `29674595640` confirms the source and harness on Node 20,
 specification instead of assuming one platform declaration.
 
 An active or failed run is not build, ABI, reproducibility, Worker, browser, or
-release evidence. The package Worker remains capability-blocked until real
-outputs are independently reviewed and the generated factory is bundled into
-package-owned Worker bytes. Use the linked implementation ledger for exact
-chronology, failures, and evidence. This checkpoint is informational: the
+release evidence. The Worker-local runtime now executes the pinned generated
+factory and C ABI, verifies exact frontend-work/VFS/runtime observations, and
+emits canonical control plus artifact bytes. The production host path remains
+capability-blocked until the generated factory and Worker graph are bundled
+into exact package-owned Worker bytes. Use the linked implementation ledger
+for exact chronology, failures, and evidence. This checkpoint is informational: the
 remainder of this document continues to define the normative target and does
 not become a mutable status dashboard.
 
