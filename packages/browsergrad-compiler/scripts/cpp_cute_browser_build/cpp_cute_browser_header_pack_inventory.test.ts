@@ -44,13 +44,22 @@ describe("browser header-pack source inventory", () => {
 
     expect(one).toEqual(two);
     expect(one.inventoryId).toMatch(/^bg\.cpp\.browser-header-pack-source-inventory\.sha256\.[0-9a-f]{64}$/u);
-    expect(one.packs.map((pack) => pack.includeRootId)).toEqual(["cutlass", "linux-sysroot"]);
-    expect(one.packs[0]).toMatchObject({
+    expect(one.packs.map((pack) => pack.includeRootId)).toEqual([
+      "clang-resource",
+      "cuda",
+      "cutlass",
+      "cxx-stdlib",
+      "linux-sysroot",
+    ]);
+    expect(one.packs[2]).toMatchObject({
       includeRootId: "cutlass",
+      intendedAsset: "dependency-header-pack:cutlass",
+      outputRole: "cutlass-header-vfs",
+      outputPath: "assets/browsergrad-cpp-cute/cutlass-3.7.0.headers.bgvfs",
       fileCount: 2,
       fileContentByteLength: "29",
     });
-    expect(one.packs[0]?.files).toEqual([
+    expect(one.packs[2]?.files).toEqual([
       expect.objectContaining({
         virtualPath: "cute/layout.hpp",
         byteLength: "16",
@@ -64,6 +73,7 @@ describe("browser header-pack source inventory", () => {
     ]);
     expect(one.claims).toEqual({
       exactReadableSourceTreesVerified: true,
+      buildInputLockBound: true,
       networkAccessed: false,
       archiveProvenanceVerified: false,
       licenseReviewComplete: false,
@@ -91,8 +101,8 @@ describe("browser header-pack source inventory", () => {
 
     expect(report).toMatchObject({
       outputPath,
-      packCount: 2,
-      fileCount: 3,
+      packCount: 5,
+      fileCount: 6,
       inventorySha256: createHash("sha256").update(bytes).digest("hex"),
       inventoryByteLength: bytes.byteLength,
       releaseReady: false,
@@ -157,6 +167,20 @@ describe("browser header-pack source inventory", () => {
       "--input=relative",
       "--output=/tmp/output",
     ])).toThrow(CppCuteBrowserHeaderPackInventoryError);
+
+    const current = await fixture("wrong-license");
+    const cutlass = current.input.packs.find((pack) => pack.includeRootId === "cutlass")!;
+    await expect(inventoryCppCuteBrowserHeaderPackSources({
+      packs: current.input.packs.map((pack) => pack === cutlass
+        ? {
+            ...pack,
+            sources: pack.sources.map((source) => ({
+              ...source,
+              licenseComponentIds: ["linux-sysroot"],
+            })),
+          }
+        : pack),
+    })).rejects.toSatisfy(expectMessage("current build-lock notice policy"));
   });
 });
 
@@ -170,11 +194,20 @@ async function fixture(name: string): Promise<{
   TEST_ROOTS.push(root);
   const cutlassRoot = join(root, "cutlass");
   const cuteRoot = join(cutlassRoot, "cute");
+  const clangResource = join(root, "clang-resource");
+  const cuda = join(root, "cuda");
+  const cxx = join(root, "cxx");
   const sysroot = join(root, "sysroot");
   await mkdir(cuteRoot, { recursive: true, mode: 0o700 });
+  await mkdir(clangResource, { mode: 0o700 });
+  await mkdir(cuda, { mode: 0o700 });
+  await mkdir(cxx, { mode: 0o700 });
   await mkdir(sysroot, { mode: 0o700 });
   await writeFile(join(cuteRoot, "layout.hpp"), "// layout v1\nabc", { mode: 0o400 });
   await writeFile(join(cuteRoot, "tensor.hpp"), "// tensor v1\n", { mode: 0o400 });
+  await writeFile(join(clangResource, "__clang_cuda_runtime_wrapper.h"), "// clang\n", { mode: 0o400 });
+  await writeFile(join(cuda, "cuda_runtime.h"), "// cuda\n", { mode: 0o400 });
+  await writeFile(join(cxx, "vector"), "// vector\n", { mode: 0o400 });
   await writeFile(join(sysroot, "stdint.h"), "// stdint\n", { mode: 0o400 });
   return {
     root,
@@ -182,15 +215,37 @@ async function fixture(name: string): Promise<{
     input: {
       packs: [
         {
+          includeRootId: "linux-sysroot",
+          sources: [
+            { sourceRoot: sysroot, virtualPrefix: "", licenseComponentIds: ["linux-sysroot"] },
+          ],
+        },
+        {
           includeRootId: "cutlass",
           sources: [
             { sourceRoot: cuteRoot, virtualPrefix: "cute", licenseComponentIds: ["cutlass"] },
           ],
         },
         {
-          includeRootId: "linux-sysroot",
+          includeRootId: "clang-resource",
           sources: [
-            { sourceRoot: sysroot, virtualPrefix: "", licenseComponentIds: ["linux-sysroot"] },
+            { sourceRoot: clangResource, virtualPrefix: "", licenseComponentIds: ["clang"] },
+          ],
+        },
+        {
+          includeRootId: "cxx-stdlib",
+          sources: [
+            { sourceRoot: cxx, virtualPrefix: "", licenseComponentIds: ["libcxx"] },
+          ],
+        },
+        {
+          includeRootId: "cuda",
+          sources: [
+            {
+              sourceRoot: cuda,
+              virtualPrefix: "",
+              licenseComponentIds: ["cuda-toolkit-12.6.3-headers"],
+            },
           ],
         },
       ],

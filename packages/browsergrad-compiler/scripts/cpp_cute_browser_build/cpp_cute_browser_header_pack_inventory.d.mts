@@ -30,6 +30,9 @@ export interface CppCuteBrowserHeaderPackInventoryFile {
 
 export interface CppCuteBrowserHeaderPackInventoryPack {
   readonly includeRootId: string;
+  readonly intendedAsset: string;
+  readonly outputRole: string;
+  readonly outputPath: string;
   readonly contentSetSha256: string;
   readonly fileCount: number;
   readonly fileContentByteLength: string;
@@ -41,6 +44,8 @@ export interface CppCuteBrowserHeaderPackInventory {
   readonly version: 1;
   readonly inventoryId: string;
   readonly authority: "local-source-tree-inventory-only";
+  readonly buildInputLockId: string;
+  readonly buildInputLockResourceSha256: string;
   readonly packs: readonly CppCuteBrowserHeaderPackInventoryPack[];
   readonly totals: Readonly<{
     packCount: number;
@@ -50,6 +55,7 @@ export interface CppCuteBrowserHeaderPackInventory {
   }>;
   readonly claims: Readonly<{
     exactReadableSourceTreesVerified: true;
+    buildInputLockBound: true;
     networkAccessed: false;
     archiveProvenanceVerified: false;
     licenseReviewComplete: false;

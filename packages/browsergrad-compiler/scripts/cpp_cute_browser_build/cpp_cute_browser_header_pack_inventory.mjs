@@ -9,6 +9,11 @@ import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/sch
 import {
   deriveCppCuteBrowserVfsContentSetSha256,
 } from "../../dist/cpp_cute_browser_vfs_pack.js";
+import {
+  cppCuteBrowserBuildInputLockResourceBytes,
+  decodeCppCuteBrowserBuildInputLock,
+  unwrapPreparedCppCuteBrowserBuildInputLock,
+} from "../../dist/cpp_cute_browser_build_lock.js";
 
 export const CPP_CUTE_BROWSER_HEADER_PACK_INVENTORY_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-header-pack-source-inventory";
@@ -20,7 +25,6 @@ const PORTABLE_SEGMENT = /^[A-Za-z0-9._+@=-]+$/u;
 const IDENTIFIER = /^[a-z][a-z0-9._-]*$/u;
 const MAX_INPUT_BYTES = 256 * 1024;
 const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
-const MAX_PACKS = 32;
 const MAX_SOURCES = 256;
 const MAX_FILES = 100_000;
 const MAX_PATH_BYTES = 4_096;
@@ -28,6 +32,38 @@ const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_TOTAL_FILE_BYTES = 512 * 1024 * 1024;
 const READ_BUFFER_BYTES = 256 * 1024;
 const TEXT_ENCODER = new TextEncoder();
+const PACK_POLICIES = Object.freeze([
+  Object.freeze({
+    includeRootId: "clang-resource",
+    intendedAsset: "compiler-resource-pack",
+    outputRole: "clang-resource-header-vfs",
+    outputPath: "assets/browsergrad-cpp-cute/clang-resource.headers.bgvfs",
+  }),
+  Object.freeze({
+    includeRootId: "cxx-stdlib",
+    intendedAsset: "dependency-header-pack:cxx-stdlib",
+    outputRole: "libcxx-header-vfs",
+    outputPath: "assets/browsergrad-cpp-cute/libcxx-22.1.8.headers.bgvfs",
+  }),
+  Object.freeze({
+    includeRootId: "cuda",
+    intendedAsset: "dependency-header-pack:cuda",
+    outputRole: "cuda-header-vfs",
+    outputPath: "assets/browsergrad-cpp-cute/cuda-12.6.3.headers.bgvfs",
+  }),
+  Object.freeze({
+    includeRootId: "cutlass",
+    intendedAsset: "dependency-header-pack:cutlass",
+    outputRole: "cutlass-header-vfs",
+    outputPath: "assets/browsergrad-cpp-cute/cutlass-3.7.0.headers.bgvfs",
+  }),
+  Object.freeze({
+    includeRootId: "linux-sysroot",
+    intendedAsset: "dependency-header-pack:linux-sysroot",
+    outputRole: "linux-sysroot-header-vfs",
+    outputPath: "assets/browsergrad-cpp-cute/linux-sysroot.headers.bgvfs",
+  }),
+]);
 
 export class CppCuteBrowserHeaderPackInventoryError extends Error {
   constructor(path, message, options) {
@@ -45,7 +81,12 @@ export class CppCuteBrowserHeaderPackInventoryError extends Error {
  */
 export async function inventoryCppCuteBrowserHeaderPackSources(input) {
   const root = exactObject(input, ["packs"], "$.input");
-  const rawPacks = denseArray(root.packs, "$.input.packs", 1, MAX_PACKS);
+  const rawPacks = denseArray(
+    root.packs,
+    "$.input.packs",
+    PACK_POLICIES.length,
+    PACK_POLICIES.length,
+  );
   const parsedPacks = rawPacks.map((value, index) => parsePack(value, index));
   parsedPacks.sort((left, right) => compareUtf8(left.includeRootId, right.includeRootId));
   for (let index = 1; index < parsedPacks.length; index += 1) {
@@ -53,12 +94,33 @@ export async function inventoryCppCuteBrowserHeaderPackSources(input) {
       invalid(`$.input.packs[${parsedPacks[index].inputIndex}].includeRootId`, "duplicate include-root inventory");
     }
   }
+  const buildInputLock = await decodeCppCuteBrowserBuildInputLock(
+    cppCuteBrowserBuildInputLockResourceBytes(),
+  );
+  const lockBody = unwrapPreparedCppCuteBrowserBuildInputLock(buildInputLock).lock.body;
+  const packPolicies = bindPackPoliciesToBuildLock(lockBody);
+  for (const [index, pack] of parsedPacks.entries()) {
+    const policy = packPolicies[index];
+    if (policy === undefined || pack.includeRootId !== policy.includeRootId) {
+      invalid("$.input.packs", "inventory must cover the exact current build-lock pack set");
+    }
+    for (const source of pack.sources) {
+      if (!sameStrings(source.licenseComponentIds, policy.licenseComponentIds)) {
+        invalid(
+          `$.input.packs[${pack.inputIndex}].sources[${source.inputIndex}].licenseComponentIds`,
+          "source-tree license components differ from the current build-lock notice policy",
+        );
+      }
+    }
+  }
   const sourceCount = parsedPacks.reduce((count, pack) => count + pack.sources.length, 0);
   if (sourceCount > MAX_SOURCES) resource("$.input.packs", `inventory exceeds ${MAX_SOURCES} source trees`);
 
   const budget = { files: 0, bytes: 0 };
   const packs = [];
-  for (const pack of parsedPacks) {
+  for (const [packIndex, pack] of parsedPacks.entries()) {
+    const policy = packPolicies[packIndex];
+    if (policy === undefined) invalid("$.input.packs", "current build-lock pack policy is incomplete");
     const filesByPath = new Map();
     for (const source of pack.sources) {
       const sourceRoot = await admitCanonicalDirectory(
@@ -98,6 +160,9 @@ export async function inventoryCppCuteBrowserHeaderPackSources(input) {
     ).toString();
     packs.push(Object.freeze({
       includeRootId: pack.includeRootId,
+      intendedAsset: policy.intendedAsset,
+      outputRole: policy.outputRole,
+      outputPath: policy.outputPath,
       contentSetSha256,
       fileCount: files.length,
       fileContentByteLength,
@@ -107,6 +172,8 @@ export async function inventoryCppCuteBrowserHeaderPackSources(input) {
 
   const inventoryHash = sha256(canonicalJsonBytes({
     domain: INVENTORY_HASH_DOMAIN,
+    buildInputLockId: buildInputLock.lockId,
+    buildInputLockResourceSha256: buildInputLock.resourceSha256,
     packs,
   }));
   const manifest = Object.freeze({
@@ -114,6 +181,8 @@ export async function inventoryCppCuteBrowserHeaderPackSources(input) {
     version: 1,
     inventoryId: `bg.cpp.browser-header-pack-source-inventory.sha256.${inventoryHash}`,
     authority: "local-source-tree-inventory-only",
+    buildInputLockId: buildInputLock.lockId,
+    buildInputLockResourceSha256: buildInputLock.resourceSha256,
     packs: Object.freeze(packs),
     totals: Object.freeze({
       packCount: packs.length,
@@ -123,6 +192,7 @@ export async function inventoryCppCuteBrowserHeaderPackSources(input) {
     }),
     claims: Object.freeze({
       exactReadableSourceTreesVerified: true,
+      buildInputLockBound: true,
       networkAccessed: false,
       archiveProvenanceVerified: false,
       licenseReviewComplete: false,
@@ -337,6 +407,32 @@ function rejectFileDirectoryCollisions(files, diagnosticPath) {
   }
 }
 
+function bindPackPoliciesToBuildLock(body) {
+  const approved = body.notices.approvedComponents;
+  const unresolved = body.notices.unresolvedComponents;
+  return Object.freeze(PACK_POLICIES
+    .map((policy) => {
+      const outputs = body.recipe.distributedOutputPlan.outputs.filter(
+        (output) => output.role === policy.outputRole,
+      );
+      if (outputs.length !== 1 || outputs[0].path !== policy.outputPath ||
+          outputs[0].reproducibilityClass !== "deterministic-subject") {
+        invalid("$.buildInputLock", `current build lock lost ${JSON.stringify(policy.outputRole)}`);
+      }
+      const licenseComponentIds = [
+        ...approved.filter((notice) => notice.appliesTo.includes(policy.intendedAsset))
+          .map((notice) => notice.componentId),
+        ...unresolved.filter((notice) => notice.intendedAsset === policy.intendedAsset)
+          .map((notice) => notice.componentId),
+      ].sort(compareUtf8);
+      if (licenseComponentIds.length === 0 || new Set(licenseComponentIds).size !== licenseComponentIds.length) {
+        invalid("$.buildInputLock", `header asset ${JSON.stringify(policy.intendedAsset)} has no unambiguous notice policy`);
+      }
+      return Object.freeze({ ...policy, licenseComponentIds: Object.freeze(licenseComponentIds) });
+    })
+    .sort((left, right) => compareUtf8(left.includeRootId, right.includeRootId)));
+}
+
 async function admitCanonicalDirectory(path, diagnosticPath) {
   const before = await lstatDirectory(path, diagnosticPath);
   let resolved;
@@ -546,6 +642,10 @@ function portableRelativePath(value, diagnosticPath, allowEmpty) {
 
 function compareUtf8(left, right) {
   return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
+}
+
+function sameStrings(left, right) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function sha256(bytes) {
