@@ -37,6 +37,9 @@ vi.mock("../../src/cpp_cute_browser_worker_protocol.js", () => ({
     harness.preparedInput = input;
     return harness.invocation;
   },
+  unwrapPreparedCppCuteBrowserWorkerInvocation: () => ({
+    invocation: { invocationNonceSha256: "5".repeat(64) },
+  }),
   copyCppCuteBrowserWorkerModuleBytes: () =>
     new Uint8Array(harness.preparedInput?.["workerModuleBytes"] as Uint8Array),
   validateCppCuteBrowserWorkerResultFrame: async () => {
@@ -121,6 +124,7 @@ describe("package-owned browser Worker invocation composition", () => {
       invocationId: harness.invocation.invocationId,
       profileHash: harness.invocation.profileHash,
       requestId: harness.invocation.requestId,
+      invocationNonceSha256: "5".repeat(64),
       workerModuleSha256: "4".repeat(64),
       workerModuleByteLength: harness.workerBytes.byteLength,
       maxWallTimeMs: 7_000,

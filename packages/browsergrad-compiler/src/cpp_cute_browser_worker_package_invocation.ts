@@ -8,6 +8,7 @@ import {
   copyCppCuteBrowserWorkerModuleBytes,
   discardCppCuteBrowserWorkerInvocation,
   prepareCppCuteBrowserWorkerInvocation,
+  unwrapPreparedCppCuteBrowserWorkerInvocation,
   validateCppCuteBrowserWorkerResultFrame,
   type CppCuteBrowserWorkerInvocationDiscardReason,
   type PrepareCppCuteBrowserWorkerInvocationInput,
@@ -60,6 +61,7 @@ export interface PreparedCppCuteBrowserPackageInvocation {
   readonly invocationId: string;
   readonly profileHash: string;
   readonly requestId: string;
+  readonly invocationNonceSha256: string;
   readonly workerModuleSha256: string;
   readonly workerModuleByteLength: number;
   readonly maxWallTimeMs: number;
@@ -123,6 +125,7 @@ export async function prepareCppCuteBrowserPackageInvocation(
     ...values,
     workerModuleBytes: copyVerifiedCppCuteBrowserWorkerBundleBytes(bundle),
   });
+  const invocationRecord = unwrapPreparedCppCuteBrowserWorkerInvocation(invocation);
   let transfer: PreparedCppCuteBrowserWorkerTransfer;
   try {
     transfer = prepareCppCuteBrowserWorkerTransfer(invocation);
@@ -135,6 +138,7 @@ export async function prepareCppCuteBrowserPackageInvocation(
     invocationId: invocation.invocationId,
     profileHash: invocation.profileHash,
     requestId: invocation.requestId,
+    invocationNonceSha256: invocationRecord.invocation.invocationNonceSha256,
     workerModuleSha256: inspection.sha256,
     workerModuleByteLength: inspection.byteLength,
     maxWallTimeMs: effectiveLimits.maxWallTimeMs,

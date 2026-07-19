@@ -112,7 +112,7 @@ it("uses only the module-captured browser effects for an exact package Worker", 
     expect(error.message).toContain("BG-COMPILER-CPP-CUTE-BROWSER-WORKER-TRANSFER-INVALID");
 
     worker.postMessage(Object.freeze({ kind: "second-launch-must-be-ignored" }) as never, []);
-    await new Promise((resolve) => platform.setHostTimeout(resolve, 100));
+    await new Promise<void>((resolve) => platform.setHostTimeout(() => resolve(), 100));
     expect(errors).toHaveLength(1);
   } finally {
     worker.terminate();
