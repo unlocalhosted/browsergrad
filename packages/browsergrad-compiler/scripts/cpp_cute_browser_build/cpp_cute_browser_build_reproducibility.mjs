@@ -6,7 +6,7 @@ import {
   opendir,
   realpath,
 } from "node:fs/promises";
-import { dirname, isAbsolute, join, normalize, resolve } from "node:path/posix";
+import { basename, dirname, isAbsolute, join, normalize, resolve } from "node:path/posix";
 import { pathToFileURL } from "node:url";
 
 import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
@@ -245,6 +245,93 @@ export async function readVerifiedCppCuteClangWasmFactoryModuleBytes(authority) 
     );
   }
   return snapshot.bytes.slice();
+}
+
+/**
+ * Persists an immutable, no-clobber package-factory candidate from one
+ * verifier-issued clean build. The candidate remains observation-only until a
+ * separate reviewed package identity authorizes it.
+ *
+ * @param {string} outputPath
+ * @param {import("./cpp_cute_browser_build_reproducibility.mjs").VerifiedCppCuteClangWasmCleanBuild} authority
+ */
+export async function writeVerifiedCppCuteClangWasmFactoryCandidate(
+  outputPath,
+  authority,
+) {
+  if (typeof authority !== "object" || authority === null) {
+    invalid("$authority", "expected verifier-issued clean-build authority");
+  }
+  const admitted = VERIFIED_CLEAN_BUILDS.get(authority);
+  if (admitted === undefined) {
+    invalid("$authority", "expected verifier-issued clean-build authority");
+  }
+  const requestedPath = portableAbsolutePath(outputPath, "$outputPath");
+  const parentPath = dirname(requestedPath);
+  await admitPrivateDirectory(parentPath, "$outputPath.parent");
+  let realParent;
+  try {
+    realParent = await realpath(parentPath);
+  } catch (cause) {
+    io("$outputPath.parent", "failed to resolve factory-candidate output directory", { cause });
+  }
+  const path = join(realParent, basename(requestedPath));
+  if (pathsOverlap(admitted.root, path)) {
+    conflict("$outputPath", "factory candidate must be outside the admitted clean-build tree");
+  }
+  const bytes = await readVerifiedCppCuteClangWasmFactoryModuleBytes(authority);
+  let handle;
+  try {
+    handle = await open(
+      path,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o400,
+    );
+    await handle.writeFile(bytes);
+    await handle.sync();
+    await handle.chmod(0o444);
+  } catch (cause) {
+    if (cause instanceof CppCuteClangWasmReproducibilityError) throw cause;
+    if (isNodeError(cause, "EEXIST") || isNodeError(cause, "ELOOP")) {
+      conflict("$outputPath", "factory candidate output must not already exist", { cause });
+    }
+    io("$outputPath", "failed to persist verified factory candidate", { cause });
+  } finally {
+    await handle?.close();
+  }
+  const directory = await open(dirname(path), constants.O_RDONLY | constants.O_DIRECTORY);
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
+  const written = await readSmallFile(
+    path,
+    MAX_FACTORY_MODULE_BYTE_LENGTH,
+    "$outputPath",
+  );
+  if (!equalBytes(bytes, written.bytes)) {
+    conflict("$outputPath", "factory candidate bytes changed after persistence");
+  }
+  return Object.freeze({
+    schema: "browsergrad.compiler.cpp-cute.package-factory-candidate",
+    version: 1,
+    authority: "clean-build-factory-candidate-only",
+    outputPath: path,
+    lockId: authority.lockId,
+    sourceSetSha256: authority.sourceSetSha256,
+    factoryModuleSha256: admitted.factoryModuleSha256,
+    factoryModuleByteLength: admitted.factoryModuleByteLength,
+    wasmSha256: authority.wasmSha256,
+    wasmByteLength: authority.wasmByteLength,
+    cleanBuildObserved: true,
+    rawWasmAbiConformanceObserved: true,
+    outputIdentityAuthorized: false,
+    reproducibilityVerified: false,
+    producerAttested: false,
+    workerExecutionObserved: false,
+    releaseReady: false,
+  });
 }
 
 /**

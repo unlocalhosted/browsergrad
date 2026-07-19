@@ -131,6 +131,31 @@ export function readVerifiedCppCuteClangWasmFactoryModuleBytes(
   authority: VerifiedCppCuteClangWasmCleanBuild,
 ): Promise<Uint8Array>;
 
+export interface CppCuteClangWasmFactoryCandidate {
+  readonly schema: "browsergrad.compiler.cpp-cute.package-factory-candidate";
+  readonly version: 1;
+  readonly authority: "clean-build-factory-candidate-only";
+  readonly outputPath: string;
+  readonly lockId: string;
+  readonly sourceSetSha256: string;
+  readonly factoryModuleSha256: string;
+  readonly factoryModuleByteLength: number;
+  readonly wasmSha256: string;
+  readonly wasmByteLength: number;
+  readonly cleanBuildObserved: true;
+  readonly rawWasmAbiConformanceObserved: true;
+  readonly outputIdentityAuthorized: false;
+  readonly reproducibilityVerified: false;
+  readonly producerAttested: false;
+  readonly workerExecutionObserved: false;
+  readonly releaseReady: false;
+}
+
+export function writeVerifiedCppCuteClangWasmFactoryCandidate(
+  outputPath: string,
+  authority: VerifiedCppCuteClangWasmCleanBuild,
+): Promise<Readonly<CppCuteClangWasmFactoryCandidate>>;
+
 export function writeCppCuteClangWasmReproducibilityEvidence(
   outputPath: string,
   evidence: VerifiedCppCuteClangWasmReproducibility,

@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   stat,
   writeFile,
@@ -25,6 +26,7 @@ import {
   readVerifiedCppCuteClangWasmFactoryModuleBytes,
   verifyCppCuteClangWasmCleanBuild,
   verifyCppCuteClangWasmReproducibility,
+  writeVerifiedCppCuteClangWasmFactoryCandidate,
   writeCppCuteClangWasmReproducibilityEvidence,
 } from "./cpp_cute_browser_build_reproducibility.mjs";
 
@@ -517,6 +519,62 @@ describe("Clang-Wasm single clean-build admission", () => {
     await expect(readVerifiedCppCuteClangWasmFactoryModuleBytes(authority)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-MISMATCH",
       path: "$authority.factoryModule.sha256",
+    });
+  });
+
+  it("writes one immutable no-clobber package-factory candidate outside the build tree", async () => {
+    const { root, firstRoot } = await fixture({
+      first: { exactRuntimeAbiConformance: true },
+    });
+    const authority = await verifyCppCuteClangWasmCleanBuild({ root: firstRoot });
+    const outputPath = join(root, "factory-candidate.mjs");
+    const expectedOutputPath = join(await realpath(root), "factory-candidate.mjs");
+    const candidate = await writeVerifiedCppCuteClangWasmFactoryCandidate(
+      outputPath,
+      authority,
+    );
+
+    expect(candidate).toMatchObject({
+      schema: "browsergrad.compiler.cpp-cute.package-factory-candidate",
+      version: 1,
+      authority: "clean-build-factory-candidate-only",
+      outputPath: expectedOutputPath,
+      lockId: lock.lockId,
+      factoryModuleSha256: sha256(factoryBytes),
+      factoryModuleByteLength: factoryBytes.byteLength,
+      wasmSha256: sha256(wasmBytes),
+      wasmByteLength: wasmBytes.byteLength,
+      cleanBuildObserved: true,
+      rawWasmAbiConformanceObserved: true,
+      outputIdentityAuthorized: false,
+      reproducibilityVerified: false,
+      producerAttested: false,
+      workerExecutionObserved: false,
+      releaseReady: false,
+    });
+    expect([...(await readFile(candidate.outputPath))]).toEqual([...factoryBytes]);
+    expect((await stat(candidate.outputPath)).mode & 0o222).toBe(0);
+    await expect(writeVerifiedCppCuteClangWasmFactoryCandidate(
+      outputPath,
+      authority,
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-CONFLICT",
+      path: "$outputPath",
+    });
+    await chmod(candidate.outputPath, 0o600);
+  });
+
+  it("refuses candidate writes inside the admitted artifact tree", async () => {
+    const { firstRoot } = await fixture({
+      first: { exactRuntimeAbiConformance: true },
+    });
+    const authority = await verifyCppCuteClangWasmCleanBuild({ root: firstRoot });
+    await expect(writeVerifiedCppCuteClangWasmFactoryCandidate(
+      join(firstRoot, "candidate.mjs"),
+      authority,
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-CONFLICT",
+      path: "$outputPath",
     });
   });
 
