@@ -86,8 +86,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler run verify:browser-clang-wasm:
 
 It builds once, runs the no-rebuild lock check, and exercises the build-plan,
 runtime-ABI, browser-profile, and browser-asset identity chain sequentially.
-At the current 2026-07-19 checkpoint it passes 434 tests across 49 files in
-37.26 seconds end to end on Node 25; the test phase alone is 25.59 seconds.
+At the current 2026-07-19 checkpoint it passes 437 tests across 50 files in
+35.32 seconds end to end on Node 25; the test phase alone is 24.55 seconds.
 The set includes package invocation,
 Worker entry, production-controller lifecycle, seven-archive admission, strict
 tar/Debian normalization, collision-free source extraction, exact header-tree
@@ -150,6 +150,31 @@ An unreviewed host or runtime fails closed instead of inheriting authority from
 a version string. Outputs remain non-release observations until external
 file-level licensing, distribution approval, signed provenance, approved asset
 binding, and browser execution are closed.
+
+To materialize the same exact input closure twice under distinct roots and
+independently rehash all 17 outputs in both trees, use:
+
+```sh
+pnpm --filter @unlocalhosted/browsergrad-compiler run verify:browser-header-distribution-reproducibility -- \
+  --cuda-cccl-linux-x86-64=/absolute/cccl.tar.xz \
+  --cuda-cudart-linux-x86-64=/absolute/cudart.tar.xz \
+  --cuda-nvcc-linux-x86-64=/absolute/nvcc.tar.xz \
+  --cutlass=/absolute/cutlass.tar.gz \
+  --llvm-project=/absolute/llvm.tar.xz \
+  --ubuntu-noble-libc6-dev-amd64-cross=/absolute/libc6-dev.deb \
+  --ubuntu-noble-linux-libc-dev-amd64-cross=/absolute/linux-libc-dev.deb \
+  --bsdtar=/usr/bin/bsdtar \
+  --cuda-redistribution-index=/absolute/private/redistrib_12.6.3.json \
+  --first-source-output-root=/absolute/private/source-a \
+  --first-pack-output-root=/absolute/private/packs-a \
+  --second-source-output-root=/absolute/private/source-b \
+  --second-pack-output-root=/absolute/private/packs-b
+```
+
+All four output roots must be absent, canonical, distinct, and non-overlapping
+under private parents. The current direct two-run proof takes 44 to 47 seconds.
+It proves the header-distribution subset only; it does not prove the complete
+release asset set, licensing, provenance, or release readiness.
 
 Use the smallest WebGPU loop that covers the suspected bug class:
 

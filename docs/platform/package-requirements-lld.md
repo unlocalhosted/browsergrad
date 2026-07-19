@@ -75,6 +75,21 @@ license review. They do not establish independent third-party implementation
 attestation, external review or approval, full distribution
 reproducibility, signed provenance, Worker execution, or release authority.
 
+The two-root reproducibility command now runs that exact pipeline twice from
+one common archive/index/tool closure under four distinct non-overlapping source
+and pack roots. It then concurrently rehashes every immutable output, checks
+the complete file/directory trees before and after hashing, and confirms all 17
+paths, 68,899,643 bytes, and identities match. Two final direct commands
+completed in 44.45 and 46.84 seconds with stable reproducibility ID
+`bg.cpp.browser-header-distribution-reproducibility.sha256.986bcd7b462b1bac0653f33e61dba69403295fd69df4fdb1780bb27092de9337`
+and output-verification ID
+`bg.cpp.distribution-output-file-verification.sha256.6eb7779eee72c9f65589656ac28b02f10caa9d9362a98d1d981f198de13a3937`.
+This proves exact reproducibility only for the five header packs, license
+inventory, ten component notices, and aggregate notice. The Wasm/factory,
+Worker, remaining deterministic outputs, detached provenance, external legal
+review, and approved package asset set are not part of this subset, so full
+distribution reproducibility and release remain false.
+
 The exact source plan is
 `bg.cpp.browser-header-source-plan.sha256.613b74fcf41ee5a9d4d8878af219c8e9da8ba6c91f067eb074140325feac457d`;
 the seven-archive admission is
@@ -113,14 +128,15 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 434 tests across 49 files covering the build plan, runtime ABI,
+clean, then runs 437 tests across 50 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
 package invocation, Worker entry, production controller, exact header-tree
 inventory/materialization, seven-archive admission, strict archive
 normalization/extraction, the reviewed builder identity, CUDA-index admission,
 the complete header distribution review input, distribution-notice
-verification, and exact notice-output materialization. The focused test phase
-is 25.59 seconds and the complete gate is 37.26 seconds on Node 25. Clean
+verification, exact notice-output materialization, and two-root distribution
+reproducibility. The focused test phase is 24.55 seconds and the complete gate
+is 35.32 seconds on Node 25. Clean
 validation and two-build
 reproducibility still restore no cache and remain intentionally more expensive.
 
@@ -210,8 +226,8 @@ isolated build. Its 31,641,377-byte module has SHA-256
 passes raw review with zero mismatches. The ABI 1.8 local fast gate passes 30
 files/338 tests in 24.7 seconds on Node 25; the later controller-complete gate
 passed 34 files/381 tests in 25.26 seconds, and the current reproducibility-,
-archive-, extraction-, and header-capable gate passes 49 files/434 tests in
-37.26 seconds.
+archive-, extraction-, and header-capable gate passes 50 files/437 tests in
+35.32 seconds.
 
 The harness audit found strong isolation, exact-input closure, bounded logs,
 independent Wasm parsing, and separate authority tiers. It also records real
