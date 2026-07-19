@@ -24,6 +24,7 @@ const expectedSourcePaths = [
   "BrowserGradCppCuteArtifactWriter.cpp",
   "BrowserGradCppCuteArtifactWriter.h",
   "BrowserGradCppCuteBrowserHost.cpp",
+  "BrowserGradCppCuteBrowserSyscalls.cpp",
   "BrowserGradCppCuteCanonicalJson.cpp",
   "BrowserGradCppCuteCanonicalJson.h",
   "BrowserGradCppCuteClangAction.cpp",
@@ -221,6 +222,21 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect(source).toContain("RLIM_INFINITY");
     expect(source).not.toMatch(/fetch|socket|filesystem|system\(|popen\(/u);
     expect(wasmLinkerFlags).toContain("-Wl,--error-limit=0");
+  });
+
+  it("closes retained Emscripten filesystem backends without caller mutation", async () => {
+    const source = await extractorSource("BrowserGradCppCuteBrowserSyscalls.cpp");
+    for (const symbol of [
+      "__syscall_unlinkat", "__syscall_rmdir", "__syscall_openat",
+      "__syscall_fcntl64", "__syscall_ioctl", "__wasi_fd_close",
+      "__wasi_fd_read", "__wasi_fd_seek",
+    ]) {
+      expect(source).toMatch(new RegExp(`\\b${symbol}\\(`, "u"));
+    }
+    expect(source).toContain("return -ENOSYS;");
+    expect(source).toContain("return kWasiErrnoNosys;");
+    expect(source).toContain("static_assert(sizeof(void*) == 4);");
+    expect(source).not.toMatch(/memcpy|memset|fetch|socket|filesystem|system\(|popen\(/u);
   });
 
   it("keeps the top-level translation unit as exact ABI-1.1 composition only", async () => {

@@ -15,7 +15,7 @@ describe("Clang-Wasm build-lock authoring projection", () => {
       authority: "authoring-projection-only",
       checkedInResourceMatches: true,
     });
-    expect(report.files).toHaveLength(37);
+    expect(report.files).toHaveLength(38);
     const paths = report.files.map((file) => file.path);
     expect(paths).toEqual(paths.slice().sort());
     expect(report.lockId).toMatch(/^bg\.cpp\.browser-build-input-lock\.sha256\.[0-9a-f]{64}$/u);
