@@ -153,6 +153,24 @@ describe("host archive normalization", () => {
     },
   );
 
+  it("settles bridged stdout and removes parser output after strict rejection", async () => {
+    const root = await fixtureRoot("malformed-stream");
+    const toolPath = await fakeBsdtar(root, Buffer.alloc(512), new Uint8Array());
+    const archivePath = join(root, "source.archive");
+    await writeFile(archivePath, "archive", { mode: 0o400 });
+    const tool = await admitCppCuteBrowserBsdtarTool({ executablePath: toolPath });
+    const outputRoot = join(root, "output");
+
+    await expect(materializeCppCuteBrowserNormalizedArchive({
+      archiveFormat: "tar.xz",
+      archivePath,
+      outputRoot,
+      selections: selection(),
+      tool,
+    })).rejects.toSatisfy(expectMessage("tar stream lacks two zero end blocks"));
+    expect(await exists(outputRoot)).toBe(false);
+  });
+
   it("fails closed on nonzero tool execution and removes parser-owned output", async () => {
     const root = await fixtureRoot("failure");
     const toolPath = await fakeBsdtar(root, new Uint8Array(), new Uint8Array(), true);

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdtemp, open, realpath, rm, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path/posix";
+import { PassThrough } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { createZstdDecompress } from "node:zlib";
@@ -520,9 +521,15 @@ async function runBoundToolProcess(input) {
   };
   const timeout = setTimeout(() => terminate("timeout"), PROCESS_TIMEOUT_MS);
   timeout.unref();
+  const stdoutBridge = new PassThrough({ highWaterMark: READ_BUFFER_BYTES });
+  const stdoutTransfer = pipeline(child.stdout, stdoutBridge).catch((cause) => {
+    terminate("stdout-transfer");
+    throw cause;
+  });
   const consumer = Promise.resolve()
-    .then(() => input.consumeStdout(child.stdout))
+    .then(() => input.consumeStdout(stdoutBridge))
     .catch((cause) => {
+      stdoutBridge.destroy(cause);
       terminate("stdout-consumer");
       throw cause;
     });
@@ -534,15 +541,17 @@ async function runBoundToolProcess(input) {
     terminate("stderr-limit");
     throw cause;
   });
-  const [closedResult, consumerResult, stderrResult] = await Promise.all([
+  const [closedResult, consumerResult, stdoutTransferResult, stderrResult] = await Promise.all([
     closed,
     Promise.allSettled([consumer]),
+    Promise.allSettled([stdoutTransfer]),
     Promise.allSettled([stderr]),
   ]);
   clearTimeout(timeout);
   if (killTimer !== undefined) clearTimeout(killTimer);
   await verifyTool(input.binding, `${input.diagnosticPath}.tool`);
   const consumed = consumerResult[0];
+  const transferredStdout = stdoutTransferResult[0];
   const capturedStderr = stderrResult[0];
   if (spawnFailure !== undefined) {
     invalid(input.diagnosticPath, "observed bsdtar executable failed to spawn", { cause: spawnFailure });
@@ -565,6 +574,11 @@ async function runBoundToolProcess(input) {
       `bsdtar stdout failed strict materialization: ${consumerDetail}; process: ${processDetail}`,
       { cause: consumed.reason },
     );
+  }
+  if (transferredStdout.status === "rejected") {
+    invalid(input.diagnosticPath, "bsdtar stdout transport failed", {
+      cause: transferredStdout.reason,
+    });
   }
   if (closedResult.exitCode !== 0 || closedResult.signal !== null) {
     const detail = stderrBytes.byteLength === 0
