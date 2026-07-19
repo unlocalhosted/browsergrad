@@ -311,7 +311,6 @@ async function finishEntryBody(state, current) {
   }
   const output = current.output;
   if (output === undefined) return;
-  await output.handle.sync();
   const written = await output.handle.stat({ bigint: true });
   if (written.dev !== output.identity.dev || written.ino !== output.identity.ino ||
       written.nlink !== 1n || written.size !== BigInt(current.size)) {
