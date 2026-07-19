@@ -89,25 +89,12 @@ jobs:
             ${{ runner.temp }}/browsergrad-clang-wasm-cache-v2/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
           key: linux-amd64-${{ steps.toolchain-cache-key.outputs.cache-key }}
 
-      # One-time migration from the broader key that included final-executable
-      # linker flags. Remove after the narrowed reusable-layer key is seeded.
-      - name: Restore the previous broad-key diagnostic cache for migration
-        id: previous-broad-toolchain-cache
-        if: ${{ inputs.mode == 'fast-validation' && steps.toolchain-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ${{ runner.temp }}/browsergrad-clang-wasm-cache-v2/build-${{ matrix.buildOrdinal }}/native-tablegen
-            ${{ runner.temp }}/browsergrad-clang-wasm-cache-v2/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
-          key: linux-amd64-bg.cpp.clang-wasm-toolchain-cache.sha256.dbeb6f8d371be3aebc3d118074234709ff435ddc08fa7f4096bfa6f0ebac82f2
-
       - name: Admit the restored diagnostic cache into the private build root
         if: ${{ inputs.mode == 'fast-validation' }}
         run: |
           set -euo pipefail
           bg_cache_source=''
-          if [[ "${{ steps.toolchain-cache.outputs.cache-hit }}" == 'true' || \
-                "${{ steps.previous-broad-toolchain-cache.outputs.cache-hit }}" == 'true' ]]; then
+          if [[ "${{ steps.toolchain-cache.outputs.cache-hit }}" == 'true' ]]; then
             bg_cache_source="${BG_CLANG_CACHE_ROOT}"
           fi
           if [[ -n "${bg_cache_source}" ]]; then

@@ -109,11 +109,8 @@ describe("Clang-Wasm evidence workflow", () => {
     );
     expect(workflow).toContain("Admit the restored diagnostic cache into the private build root");
     expect(workflow).toContain("Stage a complete reusable diagnostic toolchain cache");
-    expect(workflow).toContain("Restore the previous broad-key diagnostic cache for migration");
-    expect(workflow).toContain("previous-broad-toolchain-cache");
-    expect(workflow).toContain(
-      "key: linux-amd64-bg.cpp.clang-wasm-toolchain-cache.sha256.dbeb6f8d371be3aebc3d118074234709ff435ddc08fa7f4096bfa6f0ebac82f2",
-    );
+    expect(workflow).not.toContain("diagnostic cache for migration");
+    expect(workflow).not.toContain("previous-broad-toolchain-cache");
     expect(workflow).toContain(
       "if: ${{ success() && inputs.mode == 'fast-validation' && steps.toolchain-cache.outputs.cache-hit != 'true' }}",
     );
