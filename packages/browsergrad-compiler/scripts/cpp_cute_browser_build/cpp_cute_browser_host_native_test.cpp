@@ -130,6 +130,43 @@ int run_browser_host_tests() {
   BG_CHECK(isatty(7) == -1);
   BG_CHECK(errno == ENOSYS);
 
+  char path_output[16];
+  std::memset(path_output, 0x5a, sizeof(path_output));
+  char original_path_output[sizeof(path_output)];
+  std::memcpy(original_path_output, path_output, sizeof(path_output));
+  errno = 0;
+  BG_CHECK(access("/forbidden", F_OK) == -1);
+  BG_CHECK(errno == ENOSYS);
+  errno = 0;
+  BG_CHECK(getcwd(path_output, sizeof(path_output)) == nullptr);
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(std::memcmp(path_output, original_path_output,
+                       sizeof(path_output)) == 0);
+  errno = 0;
+  BG_CHECK(stat("/forbidden", &descriptor_status) == -1);
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(std::memcmp(&descriptor_status, &original_descriptor_status,
+                       sizeof(descriptor_status)) == 0);
+  errno = 0;
+  BG_CHECK(open("/forbidden", O_RDONLY) == -1);
+  BG_CHECK(errno == ENOSYS);
+  errno = 0;
+  BG_CHECK(opendir("/forbidden") == nullptr);
+  BG_CHECK(errno == ENOSYS);
+  errno = 0;
+  BG_CHECK(readlink("/forbidden", path_output, sizeof(path_output)) == -1);
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(std::memcmp(path_output, original_path_output,
+                       sizeof(path_output)) == 0);
+  struct statvfs filesystem_status;
+  std::memset(&filesystem_status, 0x5a, sizeof(filesystem_status));
+  const struct statvfs original_filesystem_status = filesystem_status;
+  errno = 0;
+  BG_CHECK(statvfs("/forbidden", &filesystem_status) == -1);
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(std::memcmp(&filesystem_status, &original_filesystem_status,
+                       sizeof(filesystem_status)) == 0);
+
   unsigned char entropy[16];
   std::memset(entropy, 0x5a, sizeof(entropy));
   unsigned char original_entropy[sizeof(entropy)];

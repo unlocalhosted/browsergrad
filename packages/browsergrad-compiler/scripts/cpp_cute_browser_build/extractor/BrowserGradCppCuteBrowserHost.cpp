@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <ctime>
 #include <cstdlib>
+#include <dirent.h>
 #include <cstring>
 #include <fcntl.h>
 #include <limits>
@@ -16,6 +17,7 @@
 #include <spawn.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
@@ -163,11 +165,118 @@ int fcntl(int, int, ...) {
   return fail_with_enosys();
 }
 
+#if defined(__EMSCRIPTEN__)
+int ioctl(int, int, ...) {
+#else
 int ioctl(int, unsigned long, ...) {
+#endif
   return fail_with_enosys();
 }
 
 int isatty(int) {
+  return fail_with_enosys();
+}
+
+int access(const char*, int) {
+  return fail_with_enosys();
+}
+
+int faccessat(int, const char*, int, int) {
+  return fail_with_enosys();
+}
+
+int chdir(const char*) {
+  return fail_with_enosys();
+}
+
+char* getcwd(char*, std::size_t) {
+  errno = ENOSYS;
+  return nullptr;
+}
+
+int stat(const char*, struct stat*) {
+  return fail_with_enosys();
+}
+
+int fstatat(int, const char*, struct stat*, int) {
+  return fail_with_enosys();
+}
+
+int lstat(const char*, struct stat*) {
+  return fail_with_enosys();
+}
+
+int mkdir(const char*, mode_t) {
+  return fail_with_enosys();
+}
+
+int mkdirat(int, const char*, mode_t) {
+  return fail_with_enosys();
+}
+
+int open(const char*, int, ...) {
+  return fail_with_enosys();
+}
+
+int openat(int, const char*, int, ...) {
+  return fail_with_enosys();
+}
+
+DIR* opendir(const char*) {
+  errno = ENOSYS;
+  return nullptr;
+}
+
+struct dirent* readdir(DIR*) {
+  errno = ENOSYS;
+  return nullptr;
+}
+
+int closedir(DIR*) {
+  return fail_with_enosys();
+}
+
+ssize_t readlink(const char*, char*, std::size_t) {
+  return static_cast<ssize_t>(fail_with_enosys());
+}
+
+ssize_t readlinkat(int, const char*, char*, std::size_t) {
+  return static_cast<ssize_t>(fail_with_enosys());
+}
+
+int unlink(const char*) {
+  return fail_with_enosys();
+}
+
+int unlinkat(int, const char*, int) {
+  return fail_with_enosys();
+}
+
+int rmdir(const char*) {
+  return fail_with_enosys();
+}
+
+int rename(const char*, const char*) {
+  return fail_with_enosys();
+}
+
+int renameat(int, const char*, int, const char*) {
+  return fail_with_enosys();
+}
+
+int symlink(const char*, const char*) {
+  return fail_with_enosys();
+}
+
+int symlinkat(const char*, int, const char*) {
+  return fail_with_enosys();
+}
+
+int statvfs(const char*, struct statvfs*) {
+  return fail_with_enosys();
+}
+
+int fstatvfs(int, struct statvfs*) {
   return fail_with_enosys();
 }
 
