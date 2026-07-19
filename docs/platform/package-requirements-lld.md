@@ -21,11 +21,14 @@ isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
 are implemented on `main`. The current source additionally owns exact
 frontend-work instrumentation, the local Wasm C-ABI runner, and a canonical
 Worker result-control encoder. It now pins the current clean-built 27,125-byte
-generated factory inside one exact 577,480-byte package-owned Worker module
+generated factory inside one exact 577,876-byte package-owned Worker module
 with zero static or dynamic imports. The production controller captures its
 browser effects at module evaluation, composes only package-owned Worker bytes
 into a one-shot invocation, terminalizes every Worker/Blob/timer/listener
-effect before returning, and still mints no lowering authority.
+effect before returning, and still mints no lowering authority. Two distinct
+cache-free builds now prove exact extractor Wasm/factory reproducibility; the
+package binds their canonical v3 evidence without claiming reproducibility of
+the still-incomplete distributed asset set.
 
 The header-pack harness now inventories the five complete locked source trees,
 binds them to the exact build lock and notice policy, and retains an opaque
@@ -57,11 +60,11 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 394 tests across 37 files covering the build plan, runtime ABI,
+clean, then runs 400 tests across 37 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
 package invocation, Worker entry, production controller, exact header-tree
 inventory/materialization, and distribution-notice verification. The current
-gate measured 28.36 seconds end to end on Node 25; its Vitest phase took 19.87
+gate measured 29.98 seconds end to end on Node 25; its Vitest phase took 21.72
 seconds. Clean validation and two-build reproducibility still restore no cache
 and remain intentionally more expensive.
 
@@ -100,11 +103,22 @@ tree, independently reruns the raw-Wasm inspector over the admitted bytes, and
 requires its canonical 1,678,025-byte report to match byte for byte before
 exposing a no-clobber factory candidate. The resulting factory SHA-256 is
 `796a548237420df7f5eca0c0260d3cbe752aeca155d9c7182c6ad0f5491dfb12`.
-The two-clean-build reproducibility run `29683677087` has been dispatched at
-`96ad7b16`. Its second independent job completed in 27 minutes 37 seconds,
-including a 24-minute-51-second locked build, while the first job remains
-active. An incomplete two-build lane grants no reproducibility or release
-authority.
+Two-clean-build run `29683677087` at `96ad7b16` completed both cache-free
+builds. Build 1 took 48 minutes 33 seconds including a 44-minute-57-second
+locked build; build 2 took 27 minutes 37 seconds including a
+24-minute-51-second locked build. The original v2 comparator failed only
+because the non-distributed linker maps embedded their intentionally distinct
+absolute build roots; their Wasm, factory, native TableGen tools, runtime
+closure, ABI-review sidecar, commands, and environments matched. Reproducibility
+v3 preserves each raw map identity and compares a strict boundary-aware
+projection that substitutes only the six recorded roots, rejects foreign-root
+references and reserved placeholders, and still requires all semantic map
+content to match. Verifier-only run `29685632925` at `c1a79c0d` independently
+admitted the existing immutable artifacts in 1 minute 7 seconds. Its exact
+3,470-byte evidence has SHA-256
+`6c7aebe1376edf0f9a526b55bacd930e7e9e0fd454a95213d97931117548f31a`
+and is package-pinned. This proves extractor-output reproducibility only, not
+headers, provenance, the complete distribution, Worker execution, or release.
 
 Every admitted build runs the independent production-scale raw-Wasm inspector
 and uploads its exact report. The original 98-function import surface contained
@@ -139,8 +153,8 @@ isolated build. Its 31,641,377-byte module has SHA-256
 `5fc425bbc051a2f5be588c2acbb164efb5e43f949afb48a373f3ed022c3b8758` and
 passes raw review with zero mismatches. The ABI 1.8 local fast gate passes 30
 files/338 tests in 24.7 seconds on Node 25; the later controller-complete gate
-passed 34 files/381 tests in 25.26 seconds, and the current header-capable gate
-passes 37 files/394 tests in 28.36 seconds.
+passed 34 files/381 tests in 25.26 seconds, and the current reproducibility- and
+header-capable gate passes 37 files/400 tests in 29.98 seconds.
 
 The harness audit found strong isolation, exact-input closure, bounded logs,
 independent Wasm parsing, and separate authority tiers. It also records real
@@ -174,7 +188,7 @@ An active or failed run is not build, ABI, reproducibility, Worker, browser, or
 release evidence. The Worker-local runtime now executes the pinned generated
 factory and C ABI, verifies exact frontend-work/VFS/runtime observations, and
 emits canonical control plus artifact bytes. The package-owned Worker graph is
-pinned at SHA-256 `db0b0fd8f622d8c5febf7dc2c4daa75d68bf8be879f2d4f3d3670b56836f71d7`.
+pinned at SHA-256 `652356abb90ad3ac80f2751e9db774185a3be529a93be597b3fe54921de910cf`.
 The production host path now consumes those bytes through the captured platform
 and package invocation. It remains evidence-blocked from lowering until a valid
 real Worker compile authenticates the exact terminal frame, Artifact V3,
