@@ -3,6 +3,48 @@ export interface VerifyCppCuteClangWasmReproducibilityInput {
   readonly secondRoot: string;
 }
 
+export interface VerifyCppCuteClangWasmCleanBuildInput {
+  readonly root: string;
+}
+
+declare const cppCuteClangWasmCleanBuildBrand: unique symbol;
+
+/**
+ * Single-build admission for the exact current build lock and raw-Wasm ABI.
+ * This authority does not establish reproducibility, provenance, Worker
+ * execution, output authorization, or release readiness.
+ */
+export interface VerifiedCppCuteClangWasmCleanBuild {
+  readonly [cppCuteClangWasmCleanBuildBrand]: true;
+  readonly schema: "browsergrad.compiler.cpp-cute.clang-wasm-clean-build-admission";
+  readonly version: 1;
+  readonly authority: "clang-wasm-clean-build-admission-only";
+  readonly lockId: string;
+  readonly sourceSetSha256: string;
+  readonly buildExecutionEvidenceSha256: string;
+  readonly buildExecutionEvidenceByteLength: number;
+  readonly runtimeClosureSha256: string;
+  readonly runtimeClosureObservationSha256: string;
+  readonly runtimeClosureObservationByteLength: number;
+  readonly factoryModuleSha256: string;
+  readonly factoryModuleByteLength: number;
+  readonly wasmSha256: string;
+  readonly wasmByteLength: number;
+  readonly runtimeAbiReviewSha256: string;
+  readonly runtimeAbiReviewByteLength: number;
+  readonly claims: Readonly<{
+    readonly cleanBuildObserved: true;
+    readonly exactArtifactTreeObserved: true;
+    readonly rawWasmAbiConformanceObserved: true;
+    readonly factoryModuleBytesReadable: true;
+    readonly outputIdentityAuthorized: false;
+    readonly reproducibilityVerified: false;
+    readonly producerAttested: false;
+    readonly workerExecutionObserved: false;
+    readonly releaseReady: false;
+  }>;
+}
+
 export interface CppCuteClangWasmReproducibilityBuildIdentity {
   readonly ordinal: 1 | 2;
   readonly buildExecutionEvidenceSha256: string;
@@ -80,6 +122,14 @@ export class CppCuteClangWasmReproducibilityError extends Error {
 export function verifyCppCuteClangWasmReproducibility(
   input: VerifyCppCuteClangWasmReproducibilityInput,
 ): Promise<VerifiedCppCuteClangWasmReproducibility>;
+
+export function verifyCppCuteClangWasmCleanBuild(
+  input: VerifyCppCuteClangWasmCleanBuildInput,
+): Promise<VerifiedCppCuteClangWasmCleanBuild>;
+
+export function readVerifiedCppCuteClangWasmFactoryModuleBytes(
+  authority: VerifiedCppCuteClangWasmCleanBuild,
+): Promise<Uint8Array>;
 
 export function writeCppCuteClangWasmReproducibilityEvidence(
   outputPath: string,

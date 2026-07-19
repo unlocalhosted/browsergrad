@@ -47,6 +47,7 @@ const STEP_PROFILES = Object.freeze([
   Object.freeze({ id: "clang-extractor-wasm-build", stageId: "clang-extractor-wasm", kind: "build" }),
 ]);
 const VERIFIED_REPRODUCIBILITY = new WeakSet();
+const VERIFIED_CLEAN_BUILDS = new WeakMap();
 
 export class CppCuteClangWasmReproducibilityError extends Error {
   /** @param {string} code @param {string} path @param {string} message @param {ErrorOptions} [options] */
@@ -139,6 +140,111 @@ export async function verifyCppCuteClangWasmReproducibility(input) {
   });
   VERIFIED_REPRODUCIBILITY.add(evidence);
   return /** @type {import("./cpp_cute_browser_build_reproducibility.mjs").VerifiedCppCuteClangWasmReproducibility} */ (evidence);
+}
+
+/**
+ * Admits one exact clean-build artifact tree for the current build lock. This
+ * is deliberately weaker than two-build reproducibility authority, but it is
+ * strong enough to expose only the self-consistent generated factory bytes
+ * from a raw-Wasm ABI-conforming clean build.
+ *
+ * @param {import("./cpp_cute_browser_build_reproducibility.mjs").VerifyCppCuteClangWasmCleanBuildInput} input
+ * @returns {Promise<import("./cpp_cute_browser_build_reproducibility.mjs").VerifiedCppCuteClangWasmCleanBuild>}
+ */
+export async function verifyCppCuteClangWasmCleanBuild(input) {
+  const object = exactObject(input, ["root"], "$input");
+  const root = portableAbsolutePath(exactString(object.root, "$.root"), "$.root");
+  const realRoot = await admitBuildRoot(root, "$.root");
+  const lock = await decodeCppCuteBrowserBuildInputLock(
+    cppCuteBrowserBuildInputLockResourceBytes(),
+  );
+  const body = unwrapPreparedCppCuteBrowserBuildInputLock(lock).lock.body;
+  const llvm = body.sources.find((source) => source.sourceId === "llvm-project");
+  if (llvm === undefined) invalid("$buildLock.sources", "LLVM source selection is missing");
+  const build = await admitBuild(
+    realRoot,
+    "$build",
+    lock.lockId,
+    lock.extractorSourceSetSha256,
+    body,
+    llvm,
+  );
+  if (build.runtimeAbiReview.exactInterfaceConformance !== true) {
+    mismatch(
+      "$build.runtimeAbiReview.exactInterfaceConformance",
+      "clean-build raw Wasm does not conform exactly to the current runtime ABI",
+    );
+  }
+  const authority = Object.freeze({
+    schema: "browsergrad.compiler.cpp-cute.clang-wasm-clean-build-admission",
+    version: 1,
+    authority: "clang-wasm-clean-build-admission-only",
+    lockId: lock.lockId,
+    sourceSetSha256: lock.extractorSourceSetSha256,
+    buildExecutionEvidenceSha256: build.evidenceSha256,
+    buildExecutionEvidenceByteLength: build.evidenceByteLength,
+    runtimeClosureSha256: build.runtimeClosure.observation.closureSha256,
+    runtimeClosureObservationSha256: build.runtimeClosure.observationSha256,
+    runtimeClosureObservationByteLength: build.runtimeClosure.observationByteLength,
+    factoryModuleSha256: build.execution.factoryModuleSha256,
+    factoryModuleByteLength: build.execution.factoryModuleByteLength,
+    wasmSha256: build.execution.wasmSha256,
+    wasmByteLength: build.execution.wasmByteLength,
+    runtimeAbiReviewSha256: build.runtimeAbiReview.sha256,
+    runtimeAbiReviewByteLength: build.runtimeAbiReview.byteLength,
+    claims: Object.freeze({
+      cleanBuildObserved: true,
+      exactArtifactTreeObserved: true,
+      rawWasmAbiConformanceObserved: true,
+      factoryModuleBytesReadable: true,
+      outputIdentityAuthorized: false,
+      reproducibilityVerified: false,
+      producerAttested: false,
+      workerExecutionObserved: false,
+      releaseReady: false,
+    }),
+  });
+  VERIFIED_CLEAN_BUILDS.set(authority, Object.freeze({
+    root: realRoot,
+    factoryModuleSha256: build.execution.factoryModuleSha256,
+    factoryModuleByteLength: build.execution.factoryModuleByteLength,
+  }));
+  return /** @type {import("./cpp_cute_browser_build_reproducibility.mjs").VerifiedCppCuteClangWasmCleanBuild} */ (authority);
+}
+
+/**
+ * Returns a fresh copy of the exact factory bytes behind a verifier-issued
+ * clean-build authority. The artifact is re-read through a no-follow handle
+ * and rechecked so post-admission replacement or mutation fails closed.
+ *
+ * @param {import("./cpp_cute_browser_build_reproducibility.mjs").VerifiedCppCuteClangWasmCleanBuild} authority
+ */
+export async function readVerifiedCppCuteClangWasmFactoryModuleBytes(authority) {
+  if (typeof authority !== "object" || authority === null) {
+    invalid("$authority", "expected verifier-issued clean-build authority");
+  }
+  const admitted = VERIFIED_CLEAN_BUILDS.get(authority);
+  if (admitted === undefined) {
+    invalid("$authority", "expected verifier-issued clean-build authority");
+  }
+  const snapshot = await readSmallFile(
+    join(admitted.root, "state", "evidence", "generated", "clang-extractor.mjs"),
+    MAX_FACTORY_MODULE_BYTE_LENGTH,
+    "$authority.factoryModule",
+  );
+  if (snapshot.bytes.byteLength !== admitted.factoryModuleByteLength) {
+    mismatch(
+      "$authority.factoryModule.byteLength",
+      "factory module length changed after clean-build admission",
+    );
+  }
+  if (sha256(snapshot.bytes) !== admitted.factoryModuleSha256) {
+    mismatch(
+      "$authority.factoryModule.sha256",
+      "factory module digest changed after clean-build admission",
+    );
+  }
+  return snapshot.bytes.slice();
 }
 
 /**
@@ -931,12 +1037,19 @@ function exactObject(value, keys, path) {
   if (typeof value !== "object" || value === null || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
     invalid(path, "expected a plain object");
   }
-  const object = /** @type {Record<string, unknown>} */ (value);
-  const observed = Object.keys(object);
-  if (observed.length !== keys.length || observed.some((key) => !keys.includes(key))) {
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const observed = Reflect.ownKeys(descriptors);
+  if (observed.length !== keys.length || observed.some((key) =>
+    typeof key !== "string" || !keys.includes(key))) {
     invalid(path, `expected exactly fields ${keys.join(", ")}`);
   }
-  return object;
+  return /** @type {Record<string, unknown>} */ (Object.fromEntries(keys.map((key) => {
+    const descriptor = descriptors[key];
+    if (descriptor === undefined || !("value" in descriptor)) {
+      invalid(`${path}.${key}`, "expected a data property");
+    }
+    return [key, descriptor.value];
+  })));
 }
 
 function exactArray(value, path) {

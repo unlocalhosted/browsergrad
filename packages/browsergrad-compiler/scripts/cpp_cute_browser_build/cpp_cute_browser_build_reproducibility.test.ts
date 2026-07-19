@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   cppCuteBrowserBuildInputLockResourceBytes,
@@ -22,6 +22,8 @@ import {
 } from "../../dist/cpp_cute_browser_build_lock.js";
 import {
   parseCppCuteClangWasmReproducibilityArguments,
+  readVerifiedCppCuteClangWasmFactoryModuleBytes,
+  verifyCppCuteClangWasmCleanBuild,
   verifyCppCuteClangWasmReproducibility,
   writeCppCuteClangWasmReproducibilityEvidence,
 } from "./cpp_cute_browser_build_reproducibility.mjs";
@@ -53,6 +55,7 @@ interface BuildFixtureOptions {
   readonly observedWasmBytes?: Uint8Array;
   readonly runtimeClosureContent?: string;
   readonly runtimeAbiReviewTag?: string;
+  readonly exactRuntimeAbiConformance?: boolean;
   readonly extraEvidenceField?: boolean;
   readonly nonCanonicalEvidence?: boolean;
 }
@@ -197,8 +200,10 @@ async function writeBuild(
     observedProjectionSha256: sha256(canonicalJsonBytes(runtimeAbiProjection)),
     runtimeAbiManifestId: body.runtimeAbiResource.manifestId,
     runtimeAbiContractSha256: "1".repeat(64),
-    exactInterfaceConformance: false,
-    mismatches: ["fixture module intentionally lacks the production ABI"],
+    exactInterfaceConformance: options.exactRuntimeAbiConformance === true,
+    mismatches: options.exactRuntimeAbiConformance === true
+      ? []
+      : ["fixture module intentionally lacks the production ABI"],
     projection: runtimeAbiProjection,
     rawWasmVerified: true,
     workerExecutionReady: false,
@@ -448,6 +453,90 @@ describe("Clang-Wasm clean-build reproducibility authority", () => {
     )).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-INVALID",
       path: "$evidence",
+    });
+  });
+});
+
+describe("Clang-Wasm single clean-build admission", () => {
+  it("admits one exact ABI-conforming build and exposes only its verified factory bytes", async () => {
+    const { firstRoot } = await fixture({
+      first: { exactRuntimeAbiConformance: true },
+    });
+    const authority = await verifyCppCuteClangWasmCleanBuild({ root: firstRoot });
+
+    expect(authority).toMatchObject({
+      schema: "browsergrad.compiler.cpp-cute.clang-wasm-clean-build-admission",
+      version: 1,
+      authority: "clang-wasm-clean-build-admission-only",
+      lockId: lock.lockId,
+      sourceSetSha256: lock.extractorSourceSetSha256,
+      factoryModuleSha256: sha256(factoryBytes),
+      factoryModuleByteLength: factoryBytes.byteLength,
+      wasmSha256: sha256(wasmBytes),
+      wasmByteLength: wasmBytes.byteLength,
+      claims: {
+        cleanBuildObserved: true,
+        exactArtifactTreeObserved: true,
+        rawWasmAbiConformanceObserved: true,
+        factoryModuleBytesReadable: true,
+        outputIdentityAuthorized: false,
+        reproducibilityVerified: false,
+        producerAttested: false,
+        workerExecutionObserved: false,
+        releaseReady: false,
+      },
+    });
+    const firstRead = await readVerifiedCppCuteClangWasmFactoryModuleBytes(authority);
+    const secondRead = await readVerifiedCppCuteClangWasmFactoryModuleBytes(authority);
+    expect([...firstRead]).toEqual([...factoryBytes]);
+    firstRead[0] = 0;
+    expect([...secondRead]).toEqual([...factoryBytes]);
+  });
+
+  it("rejects a self-consistent build whose raw Wasm does not match the runtime ABI", async () => {
+    const { firstRoot } = await fixture();
+    await expect(verifyCppCuteClangWasmCleanBuild({ root: firstRoot })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-MISMATCH",
+      path: "$build.runtimeAbiReview.exactInterfaceConformance",
+    });
+  });
+
+  it("rejects forged authority and post-admission factory mutation", async () => {
+    const { firstRoot } = await fixture({
+      first: { exactRuntimeAbiConformance: true },
+    });
+    const authority = await verifyCppCuteClangWasmCleanBuild({ root: firstRoot });
+    await expect(readVerifiedCppCuteClangWasmFactoryModuleBytes({ ...authority })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-INVALID",
+      path: "$authority",
+    });
+    await writeFile(
+      join(firstRoot, "state", "evidence", "generated", "clang-extractor.mjs"),
+      new Uint8Array(factoryBytes.byteLength).fill(0x61),
+    );
+    await expect(readVerifiedCppCuteClangWasmFactoryModuleBytes(authority)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-MISMATCH",
+      path: "$authority.factoryModule.sha256",
+    });
+  });
+
+  it("rejects accessor-bearing and symbol-extended inputs without invoking accessors", async () => {
+    const getter = vi.fn(() => "/should/not/be/read");
+    const accessorInput = Object.create(Object.prototype, {
+      root: { enumerable: true, get: getter },
+    });
+    await expect(verifyCppCuteClangWasmCleanBuild(accessorInput)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-INVALID",
+      path: "$input.root",
+    });
+    expect(getter).not.toHaveBeenCalled();
+
+    await expect(verifyCppCuteClangWasmCleanBuild({
+      root: "/work/build",
+      [Symbol("undeclared")]: true,
+    })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REPRODUCIBILITY-INVALID",
+      path: "$input",
     });
   });
 });
