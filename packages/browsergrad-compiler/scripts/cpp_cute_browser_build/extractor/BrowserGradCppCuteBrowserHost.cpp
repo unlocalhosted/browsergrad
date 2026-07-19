@@ -4,12 +4,15 @@
 
 #include <cerrno>
 #include <csignal>
+#include <ctime>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <pwd.h>
 #include <sys/mman.h>
 #include <spawn.h>
 #include <sys/resource.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
@@ -27,10 +30,74 @@ int fail_with_enosys() {
 // LLVM Support contains portable Unix implementation objects even though this
 // product runs in a dedicated browser Worker. These definitions close that
 // platform seam inside the Wasm module: they expose no process, user database,
-// signal-stack, or resource-accounting host import. APIs whose callers require
-// initialized output receive deterministic identity-free values; operations
-// that would require ambient host authority fail explicitly with ENOSYS.
+// signal-stack, clock, entropy, environment, or resource-accounting host
+// import. APIs whose callers require initialized output receive deterministic
+// identity-free values; operations that would require ambient host authority
+// fail explicitly with ENOSYS and do not modify caller output.
 extern "C" {
+
+char* getenv(const char*) {
+  return nullptr;
+}
+
+int __clock_gettime(clockid_t, struct timespec*) {
+  return fail_with_enosys();
+}
+
+int clock_gettime(clockid_t clock, struct timespec* time) {
+  return __clock_gettime(clock, time);
+}
+
+time_t time(time_t*) {
+  errno = ENOSYS;
+  return static_cast<time_t>(-1);
+}
+
+struct tm* __gmtime_r(const time_t*, struct tm*) {
+  errno = ENOSYS;
+  return nullptr;
+}
+
+struct tm* gmtime_r(const time_t* input, struct tm* output) {
+  return __gmtime_r(input, output);
+}
+
+struct tm* gmtime(const time_t*) {
+  errno = ENOSYS;
+  return nullptr;
+}
+
+struct tm* __localtime_r(const time_t*, struct tm*) {
+  errno = ENOSYS;
+  return nullptr;
+}
+
+struct tm* localtime_r(const time_t* input, struct tm* output) {
+  return __localtime_r(input, output);
+}
+
+struct tm* localtime(const time_t*) {
+  errno = ENOSYS;
+  return nullptr;
+}
+
+void __tzset() {}
+
+void tzset() {}
+
+int setitimer(int, const struct itimerval*, struct itimerval*) {
+  return fail_with_enosys();
+}
+
+int getentropy(void*, std::size_t) {
+  return fail_with_enosys();
+}
+
+#if defined(__EMSCRIPTEN__)
+int clock_nanosleep(clockid_t, int, const struct timespec*, struct timespec*) {
+  return ENOSYS;
+}
+#endif
 
 int getpwnam_r(const char*, struct passwd* password, char*, std::size_t,
                struct passwd** result) {

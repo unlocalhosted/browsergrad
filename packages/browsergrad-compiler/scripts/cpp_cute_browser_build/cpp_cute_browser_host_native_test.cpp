@@ -15,6 +15,52 @@ namespace {
   } while (false)
 
 int run_browser_host_tests() {
+  BG_CHECK(getenv("BROWSERGRAD_FORBIDDEN") == nullptr);
+
+  struct timespec observed_time;
+  std::memset(&observed_time, 0x5a, sizeof(observed_time));
+  const struct timespec original_time = observed_time;
+  errno = 0;
+  BG_CHECK(clock_gettime(CLOCK_REALTIME, &observed_time) == -1);
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(std::memcmp(&observed_time, &original_time, sizeof(observed_time)) == 0);
+
+  time_t written_time = 17;
+  errno = 0;
+  BG_CHECK(time(&written_time) == static_cast<time_t>(-1));
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(written_time == 17);
+
+  const time_t input_time = 0;
+  struct tm calendar;
+  std::memset(&calendar, 0x5a, sizeof(calendar));
+  const struct tm original_calendar = calendar;
+  errno = 0;
+  BG_CHECK(gmtime_r(&input_time, &calendar) == nullptr);
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(std::memcmp(&calendar, &original_calendar, sizeof(calendar)) == 0);
+  errno = 0;
+  BG_CHECK(localtime_r(&input_time, &calendar) == nullptr);
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(std::memcmp(&calendar, &original_calendar, sizeof(calendar)) == 0);
+
+  struct itimerval timer;
+  std::memset(&timer, 0x5a, sizeof(timer));
+  const struct itimerval original_timer = timer;
+  errno = 0;
+  BG_CHECK(setitimer(ITIMER_REAL, &timer, nullptr) == -1);
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(std::memcmp(&timer, &original_timer, sizeof(timer)) == 0);
+
+  unsigned char entropy[16];
+  std::memset(entropy, 0x5a, sizeof(entropy));
+  unsigned char original_entropy[sizeof(entropy)];
+  std::memcpy(original_entropy, entropy, sizeof(entropy));
+  errno = 0;
+  BG_CHECK(getentropy(entropy, sizeof(entropy)) == -1);
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(std::memcmp(entropy, original_entropy, sizeof(entropy)) == 0);
+
   struct passwd password {};
   struct passwd* result = &password;
   char password_buffer[1] {};
