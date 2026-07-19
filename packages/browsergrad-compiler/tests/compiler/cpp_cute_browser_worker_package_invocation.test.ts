@@ -1,34 +1,101 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const harness = vi.hoisted(() => ({
-  bundle: Object.freeze({ bundle: true }),
-  invocation: Object.freeze({
-    invocationId: `bg.cpp.browser-worker-invocation.sha256.${"1".repeat(64)}`,
-    profileHash: "2".repeat(64),
-    requestId: `bg.cpp.frontend-request.sha256.${"3".repeat(64)}`,
-  }),
-  transfer: Object.freeze({ transfer: true }),
-  validation: Object.freeze({ validation: true }),
-  workerBytes: Uint8Array.of(1, 3, 3, 7),
-  preparedInput: null as null | Record<string, unknown>,
-  protocolDiscards: [] as string[],
-  transferDiscards: [] as string[],
-  prepareTransferFailure: null as Error | null,
-  takeFailure: null as Error | null,
-  verifyCalls: 0,
-  takeCalls: 0,
-  validateCalls: 0,
-}));
+const harness = vi.hoisted(() => {
+  const invocationHash = "1".repeat(64);
+  const invocationId = `bg.cpp.browser-worker-invocation.sha256.${invocationHash}`;
+  const profileHash = "2".repeat(64);
+  const requestId = `bg.cpp.frontend-request.sha256.${"3".repeat(64)}`;
+  const workerModuleSha256 = "4".repeat(64);
+  const invocationNonceSha256 = "5".repeat(64);
+  const manifestId = `bg.cpp.browser-asset-manifest.sha256.${"6".repeat(64)}`;
+  const manifestSha256 = "7".repeat(64);
+  const assetSetSha256 = "8".repeat(64);
+  const requestBindingId = `bg.cpp.frontend-request-binding.sha256.${"9".repeat(64)}`;
+  const artifactId = `bg.cpp.frontend-artifact.sha256.${"a".repeat(64)}`;
+  const artifactBytesSha256 = "b".repeat(64);
+  const workerBytes = Uint8Array.of(1, 3, 3, 7);
+  const invocationBody = Object.freeze({
+    invocationId,
+    invocationNonceSha256,
+    profileHash,
+    assetManifestId: manifestId,
+    assetManifestSha256: manifestSha256,
+    assetSetSha256,
+    requestId,
+    worker: Object.freeze({
+      moduleSha256: workerModuleSha256,
+      moduleByteLength: String(workerBytes.byteLength),
+    }),
+  });
+  const invocation = Object.freeze({
+    invocationHash,
+    invocationId,
+    profileHash,
+    requestId,
+  });
+  const bundleInspection = Object.freeze({
+    bundleId: `bg.cpp.browser-worker-bundle.sha256.${workerModuleSha256}`,
+    sha256: workerModuleSha256,
+    byteLength: workerBytes.byteLength,
+    entry: "src/cpp_cute_browser_worker_module.ts",
+    factorySha256: "c".repeat(64),
+    factoryByteLength: 27_125,
+    staticImportCount: 0,
+    dynamicImportCount: 0,
+    packageOwned: true,
+    exactBytesVerified: true,
+    selfContainedModuleGraph: true,
+    workerExecutionObserved: false,
+    releaseReady: false,
+  });
+  const requestBinding = Object.freeze({
+    bindingId: requestBindingId,
+    requestId,
+  });
+  const artifact = Object.freeze({
+    artifactId,
+    artifactBytesSha256,
+    outcome: "accepted",
+  });
+  const validation = Object.freeze({
+    validationId: `bg.cpp.browser-worker-caller-frame.sha256.${"d".repeat(64)}`,
+    invocationId,
+    requestId,
+    requestBindingId,
+    artifactId,
+    artifactBytesSha256,
+    outcome: "accepted",
+  });
+  return {
+    bundle: Object.freeze({ bundle: true }),
+    bundleInspection,
+    invocation,
+    invocationBody,
+    transfer: Object.freeze({ transfer: true }),
+    validation,
+    requestBinding,
+    artifact,
+    workerBytes,
+    preparedInput: null as null | Record<string, unknown>,
+    manifestMismatch: false,
+    crossWireAuthority: null as null | "profile" | "manifest" | "request",
+    cloneProtocolValidation: false,
+    protocolDiscards: [] as string[],
+    transferDiscards: [] as string[],
+    prepareTransferFailure: null as Error | null,
+    takeFailure: null as Error | null,
+    verifyCalls: 0,
+    takeCalls: 0,
+    validateCalls: 0,
+  };
+});
 
 vi.mock("../../src/cpp_cute_browser_worker_bundle.js", () => ({
   verifyCppCuteBrowserWorkerBundle: async () => {
     harness.verifyCalls += 1;
     return harness.bundle;
   },
-  inspectVerifiedCppCuteBrowserWorkerBundle: () => ({
-    sha256: "4".repeat(64),
-    byteLength: harness.workerBytes.byteLength,
-  }),
+  inspectVerifiedCppCuteBrowserWorkerBundle: () => harness.bundleInspection,
   copyVerifiedCppCuteBrowserWorkerBundleBytes: () => new Uint8Array(harness.workerBytes),
 }));
 
@@ -37,14 +104,41 @@ vi.mock("../../src/cpp_cute_browser_worker_protocol.js", () => ({
     harness.preparedInput = input;
     return harness.invocation;
   },
-  unwrapPreparedCppCuteBrowserWorkerInvocation: () => ({
-    invocation: { invocationNonceSha256: "5".repeat(64) },
-  }),
+  unwrapPreparedCppCuteBrowserWorkerInvocation: () => {
+    if (harness.preparedInput === null) throw new Error("missing prepared input");
+    return Object.freeze({
+      profile: harness.preparedInput["profile"],
+      assetManifest: harness.preparedInput["assetManifest"],
+      request: harness.preparedInput["request"],
+      invocation: harness.invocationBody,
+    });
+  },
   copyCppCuteBrowserWorkerModuleBytes: () =>
     new Uint8Array(harness.preparedInput?.["workerModuleBytes"] as Uint8Array),
   validateCppCuteBrowserWorkerResultFrame: async () => {
     harness.validateCalls += 1;
-    return harness.validation;
+    return harness.cloneProtocolValidation
+      ? { ...harness.validation }
+      : harness.validation;
+  },
+  unwrapValidatedCppCuteBrowserWorkerResultFrame: (value: unknown) => {
+    if (value !== harness.validation || harness.preparedInput === null) {
+      throw new Error("unregistered protocol validation authority");
+    }
+    const profile = harness.preparedInput["profile"] as Record<string, unknown>;
+    const manifest = harness.preparedInput["assetManifest"] as Record<string, unknown>;
+    return Object.freeze({
+      profile: harness.crossWireAuthority === "profile"
+        ? Object.freeze({ ...profile })
+        : profile,
+      assetManifest: harness.manifestMismatch
+        ? Object.freeze({ ...manifest, manifestSha256: "e".repeat(64) })
+        : harness.crossWireAuthority === "manifest"
+          ? Object.freeze({ ...manifest })
+          : manifest,
+      requestBinding: harness.requestBinding,
+      artifact: harness.artifact,
+    });
   },
   discardCppCuteBrowserWorkerInvocation: (_invocation: unknown, reason: string) => {
     harness.protocolDiscards.push(reason);
@@ -81,11 +175,26 @@ vi.mock("../../src/cpp_cute_frontend_request.js", () => ({
   }),
 }));
 
+vi.mock("../../src/cpp_cute_frontend_request_binding.js", () => ({
+  unwrapPreparedCppCuteFrontendRequestBinding: (value: unknown) => {
+    if (value !== harness.requestBinding || harness.preparedInput === null) {
+      throw new Error("unregistered request binding authority");
+    }
+    const request = harness.preparedInput["request"] as Record<string, unknown>;
+    return Object.freeze({
+      request: harness.crossWireAuthority === "request"
+        ? Object.freeze({ ...request })
+        : request,
+    });
+  },
+}));
+
 import {
   CppCuteBrowserPackageInvocationError,
   discardCppCuteBrowserPackageInvocation,
   prepareCppCuteBrowserPackageInvocation,
   takeCppCuteBrowserPackageInvocation,
+  unwrapValidatedCppCuteBrowserPackageInvocationResult,
   validateCppCuteBrowserPackageInvocationResult,
 } from "../../src/cpp_cute_browser_worker_package_invocation.js";
 
@@ -109,6 +218,9 @@ beforeEach(() => {
   harness.transferDiscards.length = 0;
   harness.prepareTransferFailure = null;
   harness.takeFailure = null;
+  harness.manifestMismatch = false;
+  harness.crossWireAuthority = null;
+  harness.cloneProtocolValidation = false;
   harness.verifyCalls = 0;
   harness.takeCalls = 0;
   harness.validateCalls = 0;
@@ -124,8 +236,8 @@ describe("package-owned browser Worker invocation composition", () => {
       invocationId: harness.invocation.invocationId,
       profileHash: harness.invocation.profileHash,
       requestId: harness.invocation.requestId,
-      invocationNonceSha256: "5".repeat(64),
-      workerModuleSha256: "4".repeat(64),
+      invocationNonceSha256: harness.invocationBody.invocationNonceSha256,
+      workerModuleSha256: harness.bundleInspection.sha256,
       workerModuleByteLength: harness.workerBytes.byteLength,
       maxWallTimeMs: 7_000,
       maxArtifactByteLength: 4_096,
@@ -157,11 +269,36 @@ describe("package-owned browser Worker invocation composition", () => {
       CppCuteBrowserPackageInvocationError,
     );
 
-    await expect(validateCppCuteBrowserPackageInvocationResult(
+    const validated = await validateCppCuteBrowserPackageInvocationResult(
       prepared,
       Uint8Array.of(1),
       Uint8Array.of(2),
-    )).resolves.toBe(harness.validation);
+    );
+    expect(validated).toMatchObject({
+      authority: "package-owned-worker-result-validation",
+      validationId: harness.validation.validationId,
+      invocationId: harness.invocation.invocationId,
+      profileHash: harness.invocation.profileHash,
+      requestId: harness.invocation.requestId,
+      workerModuleSha256: harness.bundleInspection.sha256,
+      packageWorkerVerified: true,
+      protocolResultValidated: true,
+      workerExecutionObserved: false,
+      loweringAuthorityMinted: false,
+    });
+    const record = unwrapValidatedCppCuteBrowserPackageInvocationResult(validated);
+    expect(record.validatedResultFrame).toBe(harness.validation);
+    expect(record.lineage.invocationHash).toBe(harness.invocation.invocationHash);
+    expect(record.lineage.invocation).toBe(harness.invocationBody);
+    expect(record.lineage.workerBundle).toBe(harness.bundleInspection);
+    expect(Object.keys(record.lineage)).toEqual([
+      "invocationHash", "invocation", "workerBundle",
+    ]);
+    expect(Object.values(record.lineage).some((value) => value instanceof Uint8Array))
+      .toBe(false);
+    expect(() => unwrapValidatedCppCuteBrowserPackageInvocationResult({
+      ...validated,
+    } as never)).toThrowError(CppCuteBrowserPackageInvocationError);
     expect(harness.validateCalls).toBe(1);
     await expect(validateCppCuteBrowserPackageInvocationResult(
       prepared,
@@ -171,6 +308,61 @@ describe("package-owned browser Worker invocation composition", () => {
       code: "BG-COMPILER-CPP-CUTE-BROWSER-PACKAGE-INVOCATION-STATE",
     });
   });
+
+  it("rejects a structural protocol frame or mismatched compact lineage before package result minting", async () => {
+    const copied = await prepareCppCuteBrowserPackageInvocation(fixture() as never);
+    takeCppCuteBrowserPackageInvocation(copied);
+    harness.cloneProtocolValidation = true;
+    await expect(validateCppCuteBrowserPackageInvocationResult(
+      copied,
+      Uint8Array.of(1),
+      Uint8Array.of(2),
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-PACKAGE-INVOCATION-INVALID",
+      path: "$.validatedResultFrame",
+    });
+
+    harness.cloneProtocolValidation = false;
+    const mismatched = await prepareCppCuteBrowserPackageInvocation(fixture() as never);
+    takeCppCuteBrowserPackageInvocation(mismatched);
+    harness.manifestMismatch = true;
+    await expect(validateCppCuteBrowserPackageInvocationResult(
+      mismatched,
+      Uint8Array.of(1),
+      Uint8Array.of(2),
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-PACKAGE-INVOCATION-INVALID",
+      path: "$.validatedResultFrame.assetManifest",
+    });
+  });
+
+  it.each([
+    ["profile", "$.validatedResultFrame.profile"],
+    ["manifest", "$.validatedResultFrame.assetManifest"],
+    ["request", "$.validatedResultFrame.requestBinding.request"],
+  ] as const)(
+    "rejects a field-identical cross-wired %s authority before package result minting",
+    async (authority, path) => {
+      const prepared = await prepareCppCuteBrowserPackageInvocation(fixture() as never);
+      takeCppCuteBrowserPackageInvocation(prepared);
+      harness.crossWireAuthority = authority;
+      await expect(validateCppCuteBrowserPackageInvocationResult(
+        prepared,
+        Uint8Array.of(1),
+        Uint8Array.of(2),
+      )).rejects.toMatchObject({
+        code: "BG-COMPILER-CPP-CUTE-BROWSER-PACKAGE-INVOCATION-INVALID",
+        path,
+      });
+      await expect(validateCppCuteBrowserPackageInvocationResult(
+        prepared,
+        Uint8Array.of(1),
+        Uint8Array.of(2),
+      )).rejects.toMatchObject({
+        code: "BG-COMPILER-CPP-CUTE-BROWSER-PACKAGE-INVOCATION-STATE",
+      });
+    },
+  );
 
   it("discards reserved and taken invocations through their owning lifecycle seams", async () => {
     const reserved = await prepareCppCuteBrowserPackageInvocation(fixture() as never);
@@ -240,11 +432,19 @@ describe("package-owned browser Worker invocation composition", () => {
 function fixture() {
   return {
     profile: Object.freeze({
+      profileHash: harness.invocation.profileHash,
       extractionLimits: Object.freeze({ maxWallTimeMs: 30_000, maxOutputBytes: 65_536 }),
     }) as TestProfile,
-    assetManifest: Object.freeze({ assetManifest: true }),
+    assetManifest: Object.freeze({
+      profileHash: harness.invocation.profileHash,
+      manifestId: harness.invocationBody.assetManifestId,
+      manifestSha256: harness.invocationBody.assetManifestSha256,
+      assetSetSha256: harness.invocationBody.assetSetSha256,
+    }),
     vfsInstallation: Object.freeze({ vfsInstallation: true }),
     request: Object.freeze({
+      requestId: harness.invocation.requestId,
+      profileHash: harness.invocation.profileHash,
       limits: Object.freeze({ maxWallTimeMs: 7_000, maxOutputBytes: 4_096 }),
     }) as TestRequest,
     runtimeAbiAsset: Object.freeze({ runtimeAbiAsset: true }),

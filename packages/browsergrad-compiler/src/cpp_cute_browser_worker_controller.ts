@@ -18,9 +18,12 @@ import {
   discardCppCuteBrowserPackageInvocation,
   prepareCppCuteBrowserPackageInvocation,
   takeCppCuteBrowserPackageInvocation,
+  unwrapValidatedCppCuteBrowserPackageInvocationResult,
   validateCppCuteBrowserPackageInvocationResult,
+  type CppCuteBrowserPackageInvocationLineage,
   type PrepareCppCuteBrowserPackageInvocationInput,
   type PreparedCppCuteBrowserPackageInvocation,
+  type ValidatedCppCuteBrowserPackageInvocationResult,
 } from "./cpp_cute_browser_worker_package_invocation.js";
 import { getCppCuteBrowserCapturedPlatform } from "./cpp_cute_browser_worker_platform.js";
 import {
@@ -89,6 +92,8 @@ export interface ObservedCppCuteBrowserWorkerExecution {
 
 export interface ObservedCppCuteBrowserWorkerExecutionRecord {
   readonly validatedResultFrame: ValidatedCppCuteBrowserWorkerResultFrame;
+  readonly validatedPackageResult: ValidatedCppCuteBrowserPackageInvocationResult;
+  readonly packageInvocationLineage: CppCuteBrowserPackageInvocationLineage;
   readonly productionAuthority: true;
 }
 
@@ -196,7 +201,7 @@ type ControllerTerminalValidation =
   | {
       readonly kind: "production";
       readonly validationId: string;
-      readonly validatedResultFrame: ValidatedCppCuteBrowserWorkerResultFrame;
+      readonly validatedPackageResult: ValidatedCppCuteBrowserPackageInvocationResult;
     };
 
 const LIVE_EXECUTIONS = new WeakMap<object, ObservedCppCuteBrowserWorkerExecutionRecord>();
@@ -387,7 +392,7 @@ function packageInvocationAdapter(
       return Object.freeze({
         kind: "production",
         validationId: validated.validationId,
-        validatedResultFrame: validated,
+        validatedPackageResult: validated,
       });
     },
     discard: (reason: CppCuteBrowserWorkerInvocationDiscardReason) => {
@@ -553,7 +558,32 @@ async function executeWithPlatform(
         .then(async (validated) => {
           const elapsed = elapsedMicroseconds(start, end);
           if (validated.kind === "production") {
-            const frame = validated.validatedResultFrame;
+            if (invocation.kind !== "production") {
+              throw controllerError(
+                "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL",
+                "$.validatedResultFrame",
+                "production validation cannot originate from a test invocation",
+              );
+            }
+            const packageResult = validated.validatedPackageResult;
+            let packageRecord: ReturnType<
+              typeof unwrapValidatedCppCuteBrowserPackageInvocationResult
+            >;
+            try {
+              packageRecord = unwrapValidatedCppCuteBrowserPackageInvocationResult(
+                packageResult,
+              );
+            } catch (cause) {
+              throw controllerError(
+                "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL",
+                "$.validatedPackageResult",
+                "terminal validation was not issued by the package result composer",
+                cause,
+              );
+            }
+            const frame = packageRecord.validatedResultFrame;
+            const lineage = packageRecord.lineage;
+            const packageInvocation = lineage.invocation;
             let frameRecord: ReturnType<typeof unwrapValidatedCppCuteBrowserWorkerResultFrame>;
             try {
               frameRecord = unwrapValidatedCppCuteBrowserWorkerResultFrame(frame);
@@ -565,11 +595,42 @@ async function executeWithPlatform(
                 cause,
               );
             }
-            if (validated.validationId !== frame.validationId ||
-                frame.invocationId !== invocation.invocationId ||
-                frame.requestId !== invocation.requestId ||
-                frameRecord.profile.profileHash !== invocation.profileHash ||
-                frameRecord.requestBinding.requestId !== invocation.requestId ||
+            if (validated.validationId !== packageResult.validationId ||
+                packageResult.validationId !== frame.validationId ||
+                packageResult.invocationId !== invocation.invocationId ||
+                packageResult.profileHash !== invocation.profileHash ||
+                packageResult.requestId !== invocation.requestId ||
+                packageResult.workerModuleSha256 !== invocation.workerModuleSha256 ||
+                packageResult.packageWorkerVerified !== true ||
+                packageResult.protocolResultValidated !== true ||
+                packageResult.workerExecutionObserved !== false ||
+                packageResult.loweringAuthorityMinted !== false ||
+                packageInvocation.invocationId !== invocation.invocationId ||
+                packageInvocation.invocationId !==
+                  `bg.cpp.browser-worker-invocation.sha256.${lineage.invocationHash}` ||
+                packageInvocation.profileHash !== invocation.profileHash ||
+                packageInvocation.requestId !== invocation.requestId ||
+                packageInvocation.invocationNonceSha256 !== invocation.invocationNonceSha256 ||
+                packageInvocation.worker.moduleSha256 !== invocation.workerModuleSha256 ||
+                packageInvocation.worker.moduleByteLength !== String(invocation.workerModuleByteLength) ||
+                lineage.workerBundle.sha256 !== invocation.workerModuleSha256 ||
+                lineage.workerBundle.byteLength !== invocation.workerModuleByteLength ||
+                lineage.workerBundle.staticImportCount !== 0 ||
+                lineage.workerBundle.dynamicImportCount !== 0 ||
+                lineage.workerBundle.packageOwned !== true ||
+                lineage.workerBundle.exactBytesVerified !== true ||
+                lineage.workerBundle.selfContainedModuleGraph !== true ||
+                lineage.workerBundle.workerExecutionObserved !== false ||
+                lineage.workerBundle.releaseReady !== false ||
+                frame.invocationId !== packageInvocation.invocationId ||
+                frame.requestId !== packageInvocation.requestId ||
+                frameRecord.profile.profileHash !== packageInvocation.profileHash ||
+                frameRecord.assetManifest.profileHash !== packageInvocation.profileHash ||
+                frameRecord.assetManifest.manifestId !== packageInvocation.assetManifestId ||
+                frameRecord.assetManifest.manifestSha256 !==
+                  packageInvocation.assetManifestSha256 ||
+                frameRecord.assetManifest.assetSetSha256 !== packageInvocation.assetSetSha256 ||
+                frameRecord.requestBinding.requestId !== packageInvocation.requestId ||
                 frame.requestBindingId !== frameRecord.requestBinding.bindingId ||
                 frame.artifactId !== frameRecord.artifact.artifactId ||
                 frame.artifactBytesSha256 !== frameRecord.artifact.artifactBytesSha256 ||
@@ -606,11 +667,20 @@ async function executeWithPlatform(
               loweringAuthorityMinted: false,
             }) as ObservedCppCuteBrowserWorkerExecution;
             LIVE_EXECUTIONS.set(execution, Object.freeze({
-              validatedResultFrame: validated.validatedResultFrame,
+              validatedResultFrame: frame,
+              validatedPackageResult: packageResult,
+              packageInvocationLineage: lineage,
               productionAuthority: true,
             }));
             resolve(execution);
             return;
+          }
+          if (invocation.kind !== "test") {
+            throw controllerError(
+              "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL",
+              "$.testValidation",
+              "test validation cannot originate from a production invocation",
+            );
           }
           const simulationHash = await hashCanonicalJson({
             domain: "browsergrad.compiler.cpp-cute.browser-worker-controller-test-simulation.v1",

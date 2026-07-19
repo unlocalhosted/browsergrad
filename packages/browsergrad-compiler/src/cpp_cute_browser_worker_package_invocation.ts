@@ -2,14 +2,16 @@ import {
   copyVerifiedCppCuteBrowserWorkerBundleBytes,
   inspectVerifiedCppCuteBrowserWorkerBundle,
   verifyCppCuteBrowserWorkerBundle,
-  type VerifiedCppCuteBrowserWorkerBundle,
+  type CppCuteBrowserWorkerBundleInspection,
 } from "./cpp_cute_browser_worker_bundle.js";
 import {
   copyCppCuteBrowserWorkerModuleBytes,
   discardCppCuteBrowserWorkerInvocation,
   prepareCppCuteBrowserWorkerInvocation,
   unwrapPreparedCppCuteBrowserWorkerInvocation,
+  unwrapValidatedCppCuteBrowserWorkerResultFrame,
   validateCppCuteBrowserWorkerResultFrame,
+  type CppCuteBrowserWorkerInvocationV1,
   type CppCuteBrowserWorkerInvocationDiscardReason,
   type PrepareCppCuteBrowserWorkerInvocationInput,
   type PreparedCppCuteBrowserWorkerInvocation,
@@ -23,6 +25,7 @@ import {
   type TakenCppCuteBrowserWorkerTransfer,
 } from "./cpp_cute_browser_worker_transfer.js";
 import { unwrapPreparedCppCuteFrontendRequest } from "./cpp_cute_frontend_request.js";
+import { unwrapPreparedCppCuteFrontendRequestBinding } from "./cpp_cute_frontend_request_binding.js";
 import { unwrapPreparedCppCuteBrowserFrontendProfile } from "./cpp_cute_frontend_profile.js";
 
 const INPUT_KEYS = Object.freeze([
@@ -43,6 +46,8 @@ const NATIVE_WEAK_MAP_GET = WeakMap.prototype.get;
 const NATIVE_WEAK_MAP_SET = WeakMap.prototype.set;
 const INPUT_KEY_SET = new Set<PropertyKey>(INPUT_KEYS);
 const PACKAGE_INVOCATIONS = new WeakMap<object, StoredPackageInvocation>();
+const VALIDATED_PACKAGE_RESULTS =
+  new WeakMap<object, ValidatedCppCuteBrowserPackageInvocationResultRecord>();
 
 export type PrepareCppCuteBrowserPackageInvocationInput = Omit<
   PrepareCppCuteBrowserWorkerInvocationInput,
@@ -77,11 +82,43 @@ export interface TakenCppCuteBrowserPackageInvocation {
   readonly transfer: TakenCppCuteBrowserWorkerTransfer;
 }
 
+/** Compact identity-only lineage retained after heavy protocol state is released. */
+export interface CppCuteBrowserPackageInvocationLineage {
+  readonly invocationHash: string;
+  readonly invocation: CppCuteBrowserWorkerInvocationV1;
+  readonly workerBundle: CppCuteBrowserWorkerBundleInspection;
+}
+
+declare const validatedPackageResultBrand: unique symbol;
+
+/**
+ * Package-layer composition of one exact protocol validation and its compact
+ * host invocation lineage. It proves neither Worker execution nor lowering.
+ */
+export interface ValidatedCppCuteBrowserPackageInvocationResult {
+  readonly [validatedPackageResultBrand]: true;
+  readonly authority: "package-owned-worker-result-validation";
+  readonly validationId: string;
+  readonly invocationId: string;
+  readonly profileHash: string;
+  readonly requestId: string;
+  readonly workerModuleSha256: string;
+  readonly packageWorkerVerified: true;
+  readonly protocolResultValidated: true;
+  readonly workerExecutionObserved: false;
+  readonly loweringAuthorityMinted: false;
+}
+
+export interface ValidatedCppCuteBrowserPackageInvocationResultRecord {
+  readonly validatedResultFrame: ValidatedCppCuteBrowserWorkerResultFrame;
+  readonly lineage: CppCuteBrowserPackageInvocationLineage;
+}
+
 type PackageInvocationState = "prepared" | "taken" | "consumed";
 
 interface StoredPackageInvocation {
   state: PackageInvocationState;
-  readonly bundle: VerifiedCppCuteBrowserWorkerBundle;
+  readonly lineage: CppCuteBrowserPackageInvocationLineage;
   invocation: PreparedCppCuteBrowserWorkerInvocation | null;
   transfer: PreparedCppCuteBrowserWorkerTransfer | null;
 }
@@ -126,6 +163,11 @@ export async function prepareCppCuteBrowserPackageInvocation(
     workerModuleBytes: copyVerifiedCppCuteBrowserWorkerBundleBytes(bundle),
   });
   const invocationRecord = unwrapPreparedCppCuteBrowserWorkerInvocation(invocation);
+  const lineage = NATIVE_OBJECT_FREEZE({
+    invocationHash: invocation.invocationHash,
+    invocation: invocationRecord.invocation,
+    workerBundle: inspection,
+  }) as CppCuteBrowserPackageInvocationLineage;
   let transfer: PreparedCppCuteBrowserWorkerTransfer;
   try {
     transfer = prepareCppCuteBrowserWorkerTransfer(invocation);
@@ -150,7 +192,7 @@ export async function prepareCppCuteBrowserPackageInvocation(
   }) as PreparedCppCuteBrowserPackageInvocation;
   weakMapSet(PACKAGE_INVOCATIONS, prepared, {
     state: "prepared",
-    bundle,
+    lineage,
     invocation,
     transfer,
   });
@@ -194,17 +236,50 @@ export async function validateCppCuteBrowserPackageInvocationResult(
   prepared: PreparedCppCuteBrowserPackageInvocation,
   controlBytes: Uint8Array,
   artifactBytes: Uint8Array,
-): Promise<ValidatedCppCuteBrowserWorkerResultFrame> {
+): Promise<ValidatedCppCuteBrowserPackageInvocationResult> {
   const stored = storedPackageInvocation(prepared);
   if (stored.state !== "taken") state("$.prepared", "package invocation has no active taken launch");
   const invocation = requiredInvocation(stored);
+  const invocationRecord = unwrapPreparedCppCuteBrowserWorkerInvocation(invocation);
   stored.state = "consumed";
   stored.invocation = null;
-  return validateCppCuteBrowserWorkerResultFrame(
+  const validatedResultFrame = await validateCppCuteBrowserWorkerResultFrame(
     invocation,
     controlBytes,
     artifactBytes,
   );
+  validateProtocolResultLineage(
+    prepared,
+    stored.lineage,
+    invocationRecord,
+    validatedResultFrame,
+  );
+  const validated = NATIVE_OBJECT_FREEZE({
+    authority: "package-owned-worker-result-validation",
+    validationId: validatedResultFrame.validationId,
+    invocationId: prepared.invocationId,
+    profileHash: prepared.profileHash,
+    requestId: prepared.requestId,
+    workerModuleSha256: prepared.workerModuleSha256,
+    packageWorkerVerified: true,
+    protocolResultValidated: true,
+    workerExecutionObserved: false,
+    loweringAuthorityMinted: false,
+  }) as ValidatedCppCuteBrowserPackageInvocationResult;
+  weakMapSet(VALIDATED_PACKAGE_RESULTS, validated, NATIVE_OBJECT_FREEZE({
+    validatedResultFrame,
+    lineage: stored.lineage,
+  }));
+  return validated;
+}
+
+export function unwrapValidatedCppCuteBrowserPackageInvocationResult(
+  validated: ValidatedCppCuteBrowserPackageInvocationResult,
+): ValidatedCppCuteBrowserPackageInvocationResultRecord {
+  if (typeof validated !== "object" || validated === null) unverifiedResult();
+  const record = weakMapGet(VALIDATED_PACKAGE_RESULTS, validated as object);
+  if (record === undefined) unverifiedResult();
+  return record;
 }
 
 /** Releases either a reserved or already-taken invocation without minting authority. */
@@ -284,6 +359,128 @@ function requiredTransfer(stored: StoredPackageInvocation): PreparedCppCuteBrows
   return stored.transfer;
 }
 
+function validateProtocolResultLineage(
+  prepared: PreparedCppCuteBrowserPackageInvocation,
+  lineage: CppCuteBrowserPackageInvocationLineage,
+  invocationRecord: ReturnType<typeof unwrapPreparedCppCuteBrowserWorkerInvocation>,
+  frame: ValidatedCppCuteBrowserWorkerResultFrame,
+): void {
+  let frameRecord: ReturnType<typeof unwrapValidatedCppCuteBrowserWorkerResultFrame>;
+  let requestBindingRecord: ReturnType<typeof unwrapPreparedCppCuteFrontendRequestBinding>;
+  try {
+    frameRecord = unwrapValidatedCppCuteBrowserWorkerResultFrame(frame);
+    requestBindingRecord = unwrapPreparedCppCuteFrontendRequestBinding(
+      frameRecord.requestBinding,
+    );
+  } catch (cause) {
+    invalid(
+      "$.validatedResultFrame",
+      "protocol validation did not retain its exact opaque result authority chain",
+      { cause },
+    );
+  }
+  const invocation = lineage.invocation;
+  const worker = lineage.workerBundle;
+  const manifest = frameRecord.assetManifest;
+  const request = requestBindingRecord.request;
+  requireLineage(
+    invocationRecord.invocation === invocation,
+    "$.lineage.invocation",
+    "compact lineage does not retain the exact canonical protocol invocation",
+  );
+  requireLineage(
+    frameRecord.profile === invocationRecord.profile,
+    "$.validatedResultFrame.profile",
+    "protocol result profile is not the exact prepared invocation authority",
+  );
+  requireLineage(
+    manifest === invocationRecord.assetManifest,
+    "$.validatedResultFrame.assetManifest",
+    "protocol result manifest is not the exact prepared invocation authority",
+  );
+  requireLineage(
+    request === invocationRecord.request,
+    "$.validatedResultFrame.requestBinding.request",
+    "protocol result request is not the exact prepared invocation authority",
+  );
+  requireLineage(
+    invocation.invocationId === prepared.invocationId &&
+      invocation.invocationId ===
+        `bg.cpp.browser-worker-invocation.sha256.${lineage.invocationHash}`,
+    "$.lineage.invocation.invocationId",
+    "compact invocation identity differs from the package invocation",
+  );
+  requireLineage(
+    invocation.profileHash === prepared.profileHash &&
+      frameRecord.profile.profileHash === invocation.profileHash,
+    "$.lineage.invocation.profileHash",
+    "compact invocation profile differs from the protocol result",
+  );
+  requireLineage(
+    invocation.requestId === prepared.requestId &&
+      frame.requestId === invocation.requestId &&
+      frameRecord.requestBinding.requestId === invocation.requestId &&
+      request.requestId === invocation.requestId,
+    "$.lineage.invocation.requestId",
+    "compact invocation request differs from the protocol result",
+  );
+  requireLineage(
+    request.profileHash === invocation.profileHash,
+    "$.validatedResultFrame.requestBinding.request.profileHash",
+    "exact request profile differs from the compact invocation",
+  );
+  requireLineage(
+    invocation.invocationNonceSha256 === prepared.invocationNonceSha256,
+    "$.lineage.invocation.invocationNonceSha256",
+    "compact invocation nonce differs from the package invocation",
+  );
+  requireLineage(
+    manifest.profileHash === invocation.profileHash &&
+      manifest.manifestId === invocation.assetManifestId &&
+      manifest.manifestSha256 === invocation.assetManifestSha256 &&
+      manifest.assetSetSha256 === invocation.assetSetSha256,
+    "$.lineage.invocation.assetManifestId",
+    "compact invocation manifest differs from the exact protocol manifest",
+  );
+  requireLineage(
+    invocation.worker.moduleSha256 === prepared.workerModuleSha256 &&
+      invocation.worker.moduleByteLength === String(prepared.workerModuleByteLength) &&
+      worker.sha256 === prepared.workerModuleSha256 &&
+      worker.byteLength === prepared.workerModuleByteLength,
+    "$.lineage.invocation.worker",
+    "compact invocation Worker differs from the exact package Worker",
+  );
+  requireLineage(
+    worker.staticImportCount === 0 && worker.dynamicImportCount === 0 &&
+      worker.packageOwned === true && worker.exactBytesVerified === true &&
+      worker.selfContainedModuleGraph === true &&
+      worker.workerExecutionObserved === false && worker.releaseReady === false,
+    "$.lineage.workerBundle",
+    "compact Worker inspection exceeds package bundle authority",
+  );
+  requireLineage(
+    frame.invocationId === invocation.invocationId,
+    "$.validatedResultFrame.invocationId",
+    "protocol result belongs to a different compact invocation",
+  );
+  requireLineage(
+    frame.requestBindingId === frameRecord.requestBinding.bindingId,
+    "$.validatedResultFrame.requestBindingId",
+    "protocol result request binding differs from its opaque authority",
+  );
+  requireLineage(
+    frame.artifactId === frameRecord.artifact.artifactId &&
+      frame.artifactBytesSha256 === frameRecord.artifact.artifactBytesSha256 &&
+      frame.outcome === frameRecord.artifact.outcome,
+    "$.validatedResultFrame.artifactId",
+    "protocol result artifact differs from its opaque authority",
+  );
+}
+
+function requireLineage(condition: boolean, path: string, message: string): void {
+  if (!condition) invalid(path, message);
+}
+
 function nativeGetPrototypeOf(value: object): object | null {
   return Reflect.apply(NATIVE_GET_PROTOTYPE_OF, Object, [value]) as object | null;
 }
@@ -334,5 +531,13 @@ function unverified(): never {
     "BG-COMPILER-CPP-CUTE-BROWSER-PACKAGE-INVOCATION-UNVERIFIED",
     "$.prepared",
     "expected opaque package invocation authority",
+  );
+}
+
+function unverifiedResult(): never {
+  throw new CppCuteBrowserPackageInvocationError(
+    "BG-COMPILER-CPP-CUTE-BROWSER-PACKAGE-INVOCATION-UNVERIFIED",
+    "$.validatedPackageResult",
+    "expected opaque package-issued result validation authority",
   );
 }

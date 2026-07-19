@@ -8,6 +8,9 @@ const production = vi.hoisted(() => {
   const requestBindingId = `bg.cpp.frontend-request-binding.sha256.${"5".repeat(64)}`;
   const artifactId = `bg.cpp.frontend-artifact.sha256.${"6".repeat(64)}`;
   const artifactBytesSha256 = "7".repeat(64);
+  const manifestId = `bg.cpp.browser-asset-manifest.sha256.${"9".repeat(64)}`;
+  const manifestSha256 = "a".repeat(64);
+  const assetSetSha256 = "b".repeat(64);
   const workerBytes = new TextEncoder().encode("export {}; // package Worker fixture");
   const listeners = {
     message: new Set<(event: { readonly data: unknown }) => void>(),
@@ -40,10 +43,23 @@ const production = vi.hoisted(() => {
     }),
     validationRecord: Object.freeze({
       profile: Object.freeze({ profileHash }),
+      assetManifest: Object.freeze({
+        profileHash,
+        manifestId,
+        manifestSha256,
+        assetSetSha256,
+      }),
       requestBinding: Object.freeze({ requestId, bindingId: requestBindingId }),
       artifact: Object.freeze({ artifactId, artifactBytesSha256, outcome: "accepted" }),
     }),
-    cloneValidation: false,
+    manifestId,
+    manifestSha256,
+    assetSetSha256,
+    clonePackageResult: false,
+    lineageMismatch: false,
+    issuedPrepared: null as object | null,
+    packageResult: null as Readonly<Record<string, unknown>> | null,
+    lineage: null as Readonly<Record<string, unknown>> | null,
     listeners,
     prepareCalls: 0,
     takeCalls: 0,
@@ -59,12 +75,56 @@ const production = vi.hoisted(() => {
 vi.mock("../../src/cpp_cute_browser_worker_package_invocation.js", async () => {
   const { sha256Hex } = await import("@unlocalhosted/browsergrad-semantic-core/schema");
   return {
-    prepareCppCuteBrowserPackageInvocation: async () => {
+    prepareCppCuteBrowserPackageInvocation: async (input: Record<string, unknown>) => {
       production.prepareCalls += 1;
-      return Object.freeze({
+      void input;
+      const workerModuleSha256 = await sha256Hex(production.workerBytes);
+      const prepared = Object.freeze({
         ...production.prepared,
-        workerModuleSha256: await sha256Hex(production.workerBytes),
+        workerModuleSha256,
       });
+      const invocation = Object.freeze({
+        invocationId: production.invocationId,
+        invocationNonceSha256: production.nonce,
+        profileHash: production.prepared.profileHash,
+        assetManifestId: production.manifestId,
+        assetManifestSha256: production.manifestSha256,
+        assetSetSha256: production.assetSetSha256,
+        requestId: production.prepared.requestId,
+        worker: Object.freeze({
+          moduleSha256: workerModuleSha256,
+          moduleByteLength: String(production.workerBytes.byteLength),
+        }),
+      });
+      production.lineage = Object.freeze({
+        invocationHash: production.invocationId.slice(-64),
+        invocation,
+        workerBundle: Object.freeze({
+          sha256: workerModuleSha256,
+          byteLength: production.workerBytes.byteLength,
+          staticImportCount: 0,
+          dynamicImportCount: 0,
+          packageOwned: true,
+          exactBytesVerified: true,
+          selfContainedModuleGraph: true,
+          workerExecutionObserved: false,
+          releaseReady: false,
+        }),
+      });
+      production.packageResult = Object.freeze({
+        authority: "package-owned-worker-result-validation",
+        validationId: production.validation.validationId,
+        invocationId: production.invocationId,
+        profileHash: production.prepared.profileHash,
+        requestId: production.prepared.requestId,
+        workerModuleSha256,
+        packageWorkerVerified: true,
+        protocolResultValidated: true,
+        workerExecutionObserved: false,
+        loweringAuthorityMinted: false,
+      });
+      production.issuedPrepared = prepared;
+      return prepared;
     },
     takeCppCuteBrowserPackageInvocation: () => {
       production.takeCalls += 1;
@@ -90,7 +150,33 @@ vi.mock("../../src/cpp_cute_browser_worker_package_invocation.js", async () => {
     },
     validateCppCuteBrowserPackageInvocationResult: async () => {
       production.validateCalls += 1;
-      return production.cloneValidation ? { ...production.validation } : production.validation;
+      if (production.packageResult === null) throw new Error("missing package result");
+      return production.clonePackageResult
+        ? { ...production.packageResult }
+        : production.packageResult;
+    },
+    unwrapValidatedCppCuteBrowserPackageInvocationResult: (value: unknown) => {
+      if (value !== production.packageResult || production.lineage === null) {
+        throw new Error("unregistered package result authority");
+      }
+      const lineage = production.lineage;
+      if (!production.lineageMismatch) {
+        return Object.freeze({
+          validatedResultFrame: production.validation,
+          lineage,
+        });
+      }
+      const invocation = lineage["invocation"] as Readonly<Record<string, unknown>>;
+      return Object.freeze({
+        validatedResultFrame: production.validation,
+        lineage: Object.freeze({
+          ...lineage,
+          invocation: Object.freeze({
+            ...invocation,
+            assetManifestSha256: "f".repeat(64),
+          }),
+        }),
+      });
     },
     discardCppCuteBrowserPackageInvocation: (_prepared: unknown, reason: string) => {
       production.discards.push(reason);
@@ -168,7 +254,11 @@ beforeEach(() => {
   production.revokeCalls = 0;
   production.clearTimerCalls = 0;
   production.clock = 10;
-  production.cloneValidation = false;
+  production.clonePackageResult = false;
+  production.lineageMismatch = false;
+  production.issuedPrepared = null;
+  production.packageResult = null;
+  production.lineage = null;
   production.listeners.message.clear();
   production.listeners.error.clear();
   production.listeners.messageerror.clear();
@@ -176,14 +266,15 @@ beforeEach(() => {
 
 describe("production package Worker controller composition", () => {
   it("mints execution evidence only after package launch, terminal validation, and cleanup", async () => {
-    const execution = await executeCppCuteBrowserWorker({
+    const input = Object.freeze({
       profile: Object.freeze({}),
       assetManifest: Object.freeze({}),
       vfsInstallation: Object.freeze({}),
       request: Object.freeze({}),
       runtimeAbiAsset: Object.freeze({}),
       rawWasmConformance: Object.freeze({}),
-    } as never);
+    });
+    const execution = await executeCppCuteBrowserWorker(input as never);
 
     expect(execution).toMatchObject({
       authority: "host-owned-browser-worker-execution",
@@ -203,16 +294,41 @@ describe("production package Worker controller composition", () => {
     expect(production.terminateCalls).toBe(1);
     expect(production.revokeCalls).toBe(1);
     expect(production.clearTimerCalls).toBe(1);
-    expect(unwrapObservedCppCuteBrowserWorkerExecution(execution)).toEqual({
-      validatedResultFrame: production.validation,
-      productionAuthority: true,
-    });
+    const record = unwrapObservedCppCuteBrowserWorkerExecution(execution);
+    expect(record.validatedResultFrame).toBe(production.validation);
+    expect(record.validatedPackageResult).toBe(production.packageResult);
+    expect(record.packageInvocationLineage).toBe(production.lineage);
+    expect(Object.keys(record.packageInvocationLineage)).toEqual([
+      "invocationHash", "invocation", "workerBundle",
+    ]);
+    expect(record.packageInvocationLineage).not.toHaveProperty("profile");
+    expect(record.packageInvocationLineage).not.toHaveProperty("assetManifest");
+    expect(record.packageInvocationLineage).not.toHaveProperty("vfsInstallation");
+    expect(record.packageInvocationLineage).not.toHaveProperty("request");
+    expect(record.packageInvocationLineage).not.toHaveProperty("runtimeAbiAsset");
+    expect(record.packageInvocationLineage).not.toHaveProperty("rawWasmConformance");
+    expect(record.productionAuthority).toBe(true);
     expect(() => unwrapObservedCppCuteBrowserWorkerExecution({ ...execution } as never))
       .toThrow();
   });
 
   it("rejects a structural validation copy before minting execution evidence", async () => {
-    production.cloneValidation = true;
+    production.clonePackageResult = true;
+    await expect(executeCppCuteBrowserWorker({
+      profile: Object.freeze({}),
+      assetManifest: Object.freeze({}),
+      vfsInstallation: Object.freeze({}),
+      request: Object.freeze({}),
+      runtimeAbiAsset: Object.freeze({}),
+      rawWasmConformance: Object.freeze({}),
+    } as never)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL",
+      path: "$.validatedPackageResult",
+    });
+  });
+
+  it("rejects package lineage that differs from the exact protocol frame", async () => {
+    production.lineageMismatch = true;
     await expect(executeCppCuteBrowserWorker({
       profile: Object.freeze({}),
       assetManifest: Object.freeze({}),
