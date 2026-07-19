@@ -59,6 +59,14 @@ export function materializeCppCuteBrowserHeaderPacks(
   input: CppCuteBrowserHeaderPackMaterializationInput,
 ): Promise<Readonly<CppCuteBrowserHeaderPackMaterialization>>;
 
+export function requireCppCuteBrowserHeaderPackMaterializationAuthority(
+  materialization: CppCuteBrowserHeaderPackMaterialization,
+): void;
+
+export function canonicalCppCuteBrowserHeaderPackMaterializationBytes(
+  materialization: CppCuteBrowserHeaderPackMaterialization,
+): Uint8Array;
+
 export function parseCppCuteBrowserHeaderPackMaterializationArguments(
   argv: readonly string[],
 ): Readonly<CppCuteBrowserHeaderPackMaterializationArguments>;

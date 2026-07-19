@@ -3,6 +3,8 @@ import { lstat, mkdir, open, opendir, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path/posix";
 import { pathToFileURL } from "node:url";
 
+import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
+
 import {
   encodeCppCuteBrowserVfsPack,
   inspectCppCuteBrowserVfsPack,
@@ -20,6 +22,7 @@ export const CPP_CUTE_BROWSER_HEADER_PACK_MATERIALIZATION_SCHEMA =
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-PACK-MATERIALIZATION";
 const SAFE_OUTPUT_PATH = /^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9._+@=/-]+$/u;
 const MAX_PACK_BYTES = 512 * 1024 * 1024;
+const MATERIALIZATIONS = new WeakSet();
 
 export class CppCuteBrowserHeaderPackMaterializationError extends Error {
   constructor(path, message, options) {
@@ -119,7 +122,7 @@ export async function materializeCppCuteBrowserHeaderPacks(input) {
   if (finalRoot.dev !== rootIdentity.dev || finalRoot.ino !== rootIdentity.ino) {
     invalid("$.input.outputRoot", "output root identity changed during materialization");
   }
-  return Object.freeze({
+  const materialization = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_PACK_MATERIALIZATION_SCHEMA,
     version: 1,
     authority: "deterministic-vfs-pack-materialization-only",
@@ -140,6 +143,20 @@ export async function materializeCppCuteBrowserHeaderPacks(input) {
       releaseReady: false,
     }),
   });
+  MATERIALIZATIONS.add(materialization);
+  return materialization;
+}
+
+export function requireCppCuteBrowserHeaderPackMaterializationAuthority(materialization) {
+  if (typeof materialization !== "object" || materialization === null ||
+      !MATERIALIZATIONS.has(materialization)) {
+    invalid("$.materialization", "expected verifier-issued header-pack materialization authority");
+  }
+}
+
+export function canonicalCppCuteBrowserHeaderPackMaterializationBytes(materialization) {
+  requireCppCuteBrowserHeaderPackMaterializationAuthority(materialization);
+  return canonicalJsonBytes(materialization);
 }
 
 export function parseCppCuteBrowserHeaderPackMaterializationArguments(argv) {

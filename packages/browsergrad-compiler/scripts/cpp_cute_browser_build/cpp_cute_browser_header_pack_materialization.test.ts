@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import { inspectCppCuteBrowserVfsPack } from "../../src/cpp_cute_browser_vfs_pack.js";
 import {
   inventoryCppCuteBrowserHeaderPackSources,
@@ -19,8 +20,10 @@ import {
 } from "./cpp_cute_browser_header_pack_inventory.mjs";
 import {
   CppCuteBrowserHeaderPackMaterializationError,
+  canonicalCppCuteBrowserHeaderPackMaterializationBytes,
   materializeCppCuteBrowserHeaderPacks,
   parseCppCuteBrowserHeaderPackMaterializationArguments,
+  requireCppCuteBrowserHeaderPackMaterializationAuthority,
 } from "./cpp_cute_browser_header_pack_materialization.mjs";
 
 const TEST_ROOTS: string[] = [];
@@ -54,6 +57,10 @@ describe("browser header-pack materialization", () => {
       },
     });
     expect(result.outputs).toHaveLength(5);
+    expect(canonicalCppCuteBrowserHeaderPackMaterializationBytes(result))
+      .toEqual(canonicalJsonBytes(result));
+    expect(() => requireCppCuteBrowserHeaderPackMaterializationAuthority({ ...result }))
+      .toThrow(CppCuteBrowserHeaderPackMaterializationError);
     for (const output of result.outputs) {
       const bytes = await readFile(join(outputRoot, output.outputPath));
       const inspected = await inspectCppCuteBrowserVfsPack(new Uint8Array(bytes));
