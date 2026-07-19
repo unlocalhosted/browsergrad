@@ -21,7 +21,7 @@ isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
 are implemented on `main` through `9945c7f6`. The current source additionally
 owns exact frontend-work instrumentation, the local Wasm C-ABI runner, and a
 canonical Worker result-control encoder. It now also pins one exact
-572,755-byte package-owned Worker module with zero static or dynamic imports;
+574,770-byte package-owned Worker module with zero static or dynamic imports;
 the production host controller remains blocked on captured platform effects
 and package-owned invocation composition.
 
@@ -48,6 +48,15 @@ pre-bundle gate measured 21.74 to 26.37 seconds on Node 25; the expanded gate
 measured 29.24 seconds end to end. Clean validation and two-build reproducibility still
 restore no cache and remain intentionally more expensive.
 
+The current CMake-stable primary cache is now proved at exact source.
+Migration run `29680686426` completed in 4 minutes 14 seconds and populated the
+new primary key. Exact-primary run `29680831101` completed in 4 minutes 17
+seconds: JavaScript verification took 32 seconds, cache restore took 3 seconds,
+the isolated compile/link took 2 minutes 25 seconds, and raw-Wasm review took 2
+seconds. Exact cache hits skip cache staging and saving. This is diagnostic
+iteration evidence only and cannot satisfy clean-build or reproducibility
+requirements.
+
 The first successful uncached clean validation, run `29674887505`, completed in
 39 minutes 29 seconds rather than the earlier 97-minute failed cold diagnostic.
 Its locked build step took 36 minutes 25 seconds and produced the same
@@ -70,13 +79,13 @@ Every admitted build runs the independent production-scale raw-Wasm inspector
 and uploads its exact report. The original 98-function import surface contained
 92 generated Emscripten imports, including forbidden clock, random, process,
 environment, and ambient-filesystem services. Those capabilities were closed
-inside the module before review. The current 58-function surface is exactly six
-`browsergrad_vfs_v1` functions plus 52 hash-pinned generated functions: 48
+inside the module before review. The current observed 72-function surface is exactly six
+`browsergrad_vfs_v1` functions plus 66 hash-pinned generated functions: 62
 JavaScript-exception/control-flow shims, two bounded memory-growth helpers, one
 stack-overflow trap, and output-only `fd_write`. The 29 worker-internal support
-functions and one fixed `funcref` dispatch table are separately pinned; absent
+functions and one fixed 15,166-entry `funcref` dispatch table are separately pinned; absent
 `target_features` metadata is advisory because static opcode/section inspection
-remains authoritative. ABI 1.7 now keeps browser-visible required features
+remains authoritative. ABI 1.8 keeps browser-visible required features
 separate from the inspector-only `bulk-memory-opt` opcode-subset marker.
 Production run `29674599138` at `348d7373` completed in 4 minutes 44 seconds and
 reviewed a 31,307,826-byte module with SHA-256
@@ -85,6 +94,17 @@ ABI mismatches, raw-Wasm verification, and exact interface conformance. This
 does not grant Worker or release authority: current-source clean-build,
 reproducibility, header-license, valid Worker-instantiation, and production
 execution evidence remain separate gates.
+
+Exact-primary run `29680831101` produced a 31,641,378-byte module with SHA-256
+`20cf9ee448af03cd91395eb098e29a9c04be741097f4fb8c7d41fc602b68fc0a`.
+Its first detached comparison exposed 14 additional generated `invoke_*`
+signatures and table growth from 14,549 to 15,166 entries. Review of the exact
+generated factory confirmed the additions remain bounded exception-control-flow
+bridges without ambient capabilities. Runtime ABI 1.8 now hash-pins the 66
+generated imports and table projection; local detached review of those exact
+Wasm bytes passes with zero mismatches. A new cached build is still required
+because the extractor source embeds the repinned ABI resource SHA. The ABI 1.8
+local fast gate passes 30 files/338 tests in 24.7 seconds on Node 25.
 
 The harness audit found strong isolation, exact-input closure, bounded logs,
 independent Wasm parsing, and separate authority tiers. It also records real
@@ -117,7 +137,7 @@ An active or failed run is not build, ABI, reproducibility, Worker, browser, or
 release evidence. The Worker-local runtime now executes the pinned generated
 factory and C ABI, verifies exact frontend-work/VFS/runtime observations, and
 emits canonical control plus artifact bytes. The package-owned Worker graph is
-pinned at SHA-256 `669f20f8994f96e69c40d1437f5fb15efe5208732b327df4af9a886525b19e78`;
+pinned at SHA-256 `4b1565e4ca8df2332cc6faabb6643226aa5cb26bcd5d9a8ac6d97d94972797a5`;
 the production host path remains capability-blocked until a captured platform
 adapter and package-owned invocation composition consume those verified bytes.
 Use the linked implementation ledger

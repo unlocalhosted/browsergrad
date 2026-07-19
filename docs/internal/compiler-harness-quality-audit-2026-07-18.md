@@ -14,9 +14,10 @@ modules. It is not justified as a claim that successful parser tests are being
 presented as real Clang, Wasm, Worker, or WebGPU execution. Those authorities
 remain explicitly separate and incomplete.
 
-No completed Clang-Wasm build, raw-Wasm ABI conformance, two-build
-reproducibility result, valid production Worker compile, or browser-local C++
-execution is claimed by this audit.
+Completed cached Clang-Wasm builds and detached raw-Wasm ABI review now exist.
+No current-source cache-free clean build, two-build reproducibility result,
+valid production Worker compile, or browser-local C++ execution is claimed by
+this audit.
 
 ## 2026-07-19 follow-up
 
@@ -34,7 +35,7 @@ access was consolidated and the file is now 2,112 lines against its 2,121-line
 ceiling, while the 1,784-line artifact writer remains exactly capped. Exact
 frontend-work records replaced estimate-only compiler work counters, and the
 reproducibility comparator now admits and compares the ABI-review sidecar that
-the workflow itself produces. One exact 572,755-byte zero-import Worker graph
+the workflow itself produces. One exact 574,770-byte zero-import Worker graph
 is now authored twice, hash-pinned, checked in the fast gate, and loaded from
 verified Blob bytes in Chromium. Production Worker execution, current-ABI clean
 proof, licensed header packs, and two-build reproducibility remain open.
@@ -67,6 +68,28 @@ downloaded a compatible cache. Run `29680036963` therefore ignored those bytes
 and was cancelled at roughly 20 minutes into another cold build. Admission now
 uses the separate `cache-matched-key` output; exact-hit state remains separate
 so a compatible restore is staged and saved under the new primary key.
+
+That repair is now proved. Migration run `29680686426` completed in 4 minutes
+14 seconds, including 2 minutes 29 seconds for the isolated build, and saved
+the migrated primary cache. Exact-primary run `29680831101` then completed in
+4 minutes 17 seconds: the JavaScript boundary took 32 seconds, exact cache
+restore took 3 seconds, isolated compile/link took 2 minutes 25 seconds, raw
+ABI review took 2 seconds, and cache staging/saving was correctly skipped.
+The original 90-to-97-minute build is therefore no longer the engineering
+iteration loop.
+
+The exact-primary output also demonstrated why raw interface review remains a
+separate gate. The 31,641,378-byte Wasm was structurally valid but added 14
+Emscripten `invoke_*` exception-control-flow signatures and grew the fixed
+exception dispatch table from 14,549 to 15,166 entries. Each new import was
+traced to the generated Emscripten factory's same bounded stack-save,
+table-dispatch, Emscripten-exception-only catch, stack-restore, and `setThrew`
+bridge; none adds ambient authority. Runtime ABI 1.8 now pins all 66 generated
+imports and the exact table projection. Detached local review of the same raw
+Wasm reports zero mismatches and exact interface conformance. Because the
+extractor embeds the ABI resource SHA, one new cached validation must still
+compile the repinned source before a cache-free clean proof can start. The
+repinned 30-file/338-test fast gate completes in 24.7 seconds on Node 25.
 
 ## Why feedback was slow
 
@@ -185,7 +208,7 @@ build to discover.
 | Build isolation | Strong containment; new boundary not yet exercised by a completed build | No network, read-only root and declared inputs, private work mount, zero capabilities, and no-new-privileges are observed. Future runs mount only the sealed exact runtime/extractor closure instead of checkout or package trees. | Preserve the same closure in a successful validation and both reproducibility builds. |
 | Native semantic coverage | Good but incomplete | Exact Clang 22 pass integration plus native behavioral, UBSan, and ASan lanes are required in CI. | Keep the exact-version lane blocking and add executed-Wasm coverage. |
 | Evidence quality | Mixed | Bounded immutable logs, raw-Wasm inspection, authority-specific records, and a failure-only observation for available partial logs exist. | Complete successful and reproducible build evidence. |
-| Feedback speed | Good for local harness work; native link remains minutes | The canonical Node 25 gate passes 30 files/337 tests in 29.24 seconds. Cached source validation is 4 minutes 27 seconds to 5 minutes 4 seconds; clean/reproducibility gates stay cache-free and authoritative. | Reduce the cached Emscripten system-library regeneration cost without allowing diagnostic cache state to satisfy clean proof. |
+| Feedback speed | Good for local harness work; native link remains minutes | The canonical Node 25 gate passes 30 files/338 tests in 24.7 seconds at ABI 1.8. Exact-primary validation `29680831101` completed in 4 minutes 17 seconds, including 2 minutes 25 seconds for isolated compile/link; clean/reproducibility gates stay cache-free and authoritative. | Keep ordinary edits on the local/warm paths and reserve cache-free work for evidence checkpoints. |
 | Maintainability | Weak but improving | The build executor is down to 2,198 lines; native compile session is 2,121 lines; artifact writer is 1,784 lines. Existing compiler-core modules range from roughly 5,400 to 8,000 lines. Exact per-module ratchets prevent all named monoliths from growing. | Continue extracting effect boundaries and semantic subcomponents without creating parallel execution paths, lowering each ratchet as code moves out. |
 | Delivery truthfulness | Good | Production Worker/controller paths remain capability-blocked; CPU, parser, Wasm, Worker, and WebGPU claims are distinct. | Do not relax blockers until reviewed factory/Wasm bytes execute in the package Worker. |
 

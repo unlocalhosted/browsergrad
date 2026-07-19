@@ -74,7 +74,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256,
       supportFunctionAllowlistSha256:
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256,
-      resourceByteLength: 38_269,
+      resourceByteLength: 40_578,
       designAuthority: true,
       interfaceReviewReady: false,
       observedWasmVerified: false,
@@ -386,12 +386,28 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       observedModuleCannotExtendAllowlist: true,
       releaseConformance: "allowed-only-for-exact-hash-pinned-signatures",
     });
-    expect(generated.exactFunctions).toHaveLength(52);
+    expect(generated.exactFunctions).toHaveLength(66);
     expect(generated.independentReview.runtimeRoles).toEqual([
-      { name: "javascript-exception-control-flow", exactFunctionCount: 48, ambientCapability: "none" },
+      { name: "javascript-exception-control-flow", exactFunctionCount: 62, ambientCapability: "none" },
       { name: "bounded-memory-growth", exactFunctionCount: 2, ambientCapability: "none" },
       { name: "stack-overflow-trap", exactFunctionCount: 1, ambientCapability: "none" },
       { name: "stdout-stderr-only", exactFunctionCount: 1, ambientCapability: "caller-provided-output-hooks-only" },
+    ]);
+    expect(generated.exactFunctions.slice(-15, -1)).toEqual([
+      { moduleName: "env", fieldName: "invoke_iiij", wasmParameters: ["i32", "i32", "i32", "i64"], wasmResults: ["i32"], runtimeRole: "javascript-exception-control-flow" },
+      { moduleName: "env", fieldName: "invoke_iiiiiiiii", wasmParameters: ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32"], wasmResults: ["i32"], runtimeRole: "javascript-exception-control-flow" },
+      { moduleName: "env", fieldName: "invoke_viji", wasmParameters: ["i32", "i32", "i64", "i32"], wasmResults: [], runtimeRole: "javascript-exception-control-flow" },
+      { moduleName: "env", fieldName: "invoke_iij", wasmParameters: ["i32", "i32", "i64"], wasmResults: ["i32"], runtimeRole: "javascript-exception-control-flow" },
+      { moduleName: "env", fieldName: "invoke_iiijiii", wasmParameters: ["i32", "i32", "i32", "i64", "i32", "i32", "i32"], wasmResults: ["i32"], runtimeRole: "javascript-exception-control-flow" },
+      { moduleName: "env", fieldName: "invoke_jii", wasmParameters: ["i32", "i32", "i32"], wasmResults: ["i64"], runtimeRole: "javascript-exception-control-flow" },
+      { moduleName: "env", fieldName: "invoke_iiiiji", wasmParameters: ["i32", "i32", "i32", "i32", "i64", "i32"], wasmResults: ["i32"], runtimeRole: "javascript-exception-control-flow" },
+      { moduleName: "env", fieldName: "invoke_iji", wasmParameters: ["i32", "i64", "i32"], wasmResults: ["i32"], runtimeRole: "javascript-exception-control-flow" },
+      { moduleName: "env", fieldName: "invoke_vijii", wasmParameters: ["i32", "i32", "i64", "i32", "i32"], wasmResults: [], runtimeRole: "javascript-exception-control-flow" },
+      { moduleName: "env", fieldName: "invoke_iiji", wasmParameters: ["i32", "i32", "i64", "i32"], wasmResults: ["i32"], runtimeRole: "javascript-exception-control-flow" },
+      { moduleName: "env", fieldName: "invoke_iid", wasmParameters: ["i32", "i32", "f64"], wasmResults: ["i32"], runtimeRole: "javascript-exception-control-flow" },
+      { moduleName: "env", fieldName: "invoke_iiiij", wasmParameters: ["i32", "i32", "i32", "i32", "i64"], wasmResults: ["i32"], runtimeRole: "javascript-exception-control-flow" },
+      { moduleName: "env", fieldName: "invoke_viiij", wasmParameters: ["i32", "i32", "i32", "i32", "i64"], wasmResults: [], runtimeRole: "javascript-exception-control-flow" },
+      { moduleName: "env", fieldName: "invoke_jij", wasmParameters: ["i32", "i32", "i64"], wasmResults: ["i64"], runtimeRole: "javascript-exception-control-flow" },
     ]);
     expect(generated.exactFunctions.filter((entry) => entry.runtimeRole === "stdout-stderr-only"))
       .toEqual([expect.objectContaining({
@@ -453,7 +469,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
         declaredMaximumRequired: true,
         maximumElementsCeiling: 65_536,
         exactReviewedProjection: [
-          { elementType: "funcref", minimum: 14_549, maximum: 14_549 },
+          { elementType: "funcref", minimum: 15_166, maximum: 15_166 },
         ],
       },
       globals: {

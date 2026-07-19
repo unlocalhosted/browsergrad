@@ -138,7 +138,7 @@ describe("package-generated Emscripten factory binding", () => {
       cAbiVersion: 65_538,
       allocatorMetricsPointer: 8,
       frontendWorkMetricsPointer: 16,
-      generatedImportCount: 52,
+      generatedImportCount: 66,
       vfsImportCount: 6,
       factoryInvoked: true,
       factoryFacadeMatchedInstance: true,

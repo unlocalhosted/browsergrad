@@ -44,7 +44,7 @@ function supportExport(
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
   version: { major: 1, minor: 8 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.2ad42184a70ae5e2039010868f87dce6273def0affe05f5baa220bd1fc1a23ac",
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.4e870314f139bd8af2f0e45a7410d8d3c6eaa2a8d358064bffd534ae7a91cb18",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -173,7 +173,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
           declaredMaximumRequired: true,
           maximumElementsCeiling: 65_536,
           exactReviewedProjection: [
-            { elementType: "funcref", minimum: 14_549, maximum: 14_549 },
+            { elementType: "funcref", minimum: 15_166, maximum: 15_166 },
           ],
         },
         globals: {
@@ -588,7 +588,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
       generatedImportAllowlist: {
         policyId: "browsergrad.compiler.cpp-cute.emscripten-generated-imports@1",
         status: "independently-reviewed-hash-pinned",
-        allowlistSha256: "8b48a9e038fc9c2b3ed677d6df99e7d0803da9083db19c41a3017f844fa10f48",
+        allowlistSha256: "8d320d2fb15525ef548446a5e3bb993369dc4d4cfcfe9cc0faaf5fd3639a370d",
         independentReview: {
           basis: "pinned-emscripten-runtime-sources-and-locked-link-flags",
           emscriptenVersion: "6.0.3",
@@ -601,7 +601,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
             "-sINCOMING_MODULE_JS_API=['instantiateWasm','onAbort','print','printErr']",
           ],
           runtimeRoles: [
-            { name: "javascript-exception-control-flow", exactFunctionCount: 48, ambientCapability: "none" },
+            { name: "javascript-exception-control-flow", exactFunctionCount: 62, ambientCapability: "none" },
             { name: "bounded-memory-growth", exactFunctionCount: 2, ambientCapability: "none" },
             { name: "stack-overflow-trap", exactFunctionCount: 1, ambientCapability: "none" },
             { name: "stdout-stderr-only", exactFunctionCount: 1, ambientCapability: "caller-provided-output-hooks-only" },
@@ -659,6 +659,20 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
           generatedImport("env", "invoke_iiiiiiiiiiii", ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
           generatedImport("env", "invoke_viiiiiiiiii", ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32"], [], "javascript-exception-control-flow"),
           generatedImport("env", "invoke_viiiiiiiiiiiiiii", ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiij", ["i32", "i32", "i32", "i64"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiiiiiiii", ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_viji", ["i32", "i32", "i64", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iij", ["i32", "i32", "i64"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiijiii", ["i32", "i32", "i32", "i64", "i32", "i32", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_jii", ["i32", "i32", "i32"], ["i64"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiiiji", ["i32", "i32", "i32", "i32", "i64", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iji", ["i32", "i64", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_vijii", ["i32", "i32", "i64", "i32", "i32"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiji", ["i32", "i32", "i64", "i32"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iid", ["i32", "i32", "f64"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_iiiij", ["i32", "i32", "i32", "i32", "i64"], ["i32"], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_viiij", ["i32", "i32", "i32", "i32", "i64"], [], "javascript-exception-control-flow"),
+          generatedImport("env", "invoke_jij", ["i32", "i32", "i64"], ["i64"], "javascript-exception-control-flow"),
           generatedImport("env", "__handle_stack_overflow", ["i32"], [], "stack-overflow-trap"),
         ],
         unlistedGeneratedImports: "forbidden",

@@ -442,7 +442,7 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
     cAbiVersion: 65_538,
     allocatorMetricsPointer: ALLOCATOR_RECORD_POINTER,
     frontendWorkMetricsPointer: FRONTEND_WORK_RECORD_POINTER,
-    generatedImportCount: 52,
+    generatedImportCount: 66,
     vfsImportCount: 6,
     networkAuthorityGranted: false,
     workerExecutionObserved: false,

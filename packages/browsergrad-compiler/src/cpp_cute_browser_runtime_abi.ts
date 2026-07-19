@@ -24,13 +24,13 @@ export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 8;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.2ad42184a70ae5e2039010868f87dce6273def0affe05f5baa220bd1fc1a23ac";
+  "bg.cpp.browser-runtime-abi.sha256.4e870314f139bd8af2f0e45a7410d8d3c6eaa2a8d358064bffd534ae7a91cb18";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "b24757f1517fb91474c4e5355bd7ec632baa188a55ec95cd15bb3c05501b3227";
+  "7b6c8891081d7a46c3064069aaf56b5e85635d72e17fe4d19bef021a922f68bc";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "2dc43565095554ef460108bf7d5075b0554f5292d6fff1c5bd5e6790866bf5ef";
+  "ba81bacb5111e69336d75bf5676297098953fb2313f2c3d0f03987527fbbf103";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
-  "8b48a9e038fc9c2b3ed677d6df99e7d0803da9083db19c41a3017f844fa10f48";
+  "8d320d2fb15525ef548446a5e3bb993369dc4d4cfcfe9cc0faaf5fd3639a370d";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 =
   "54fcf849f006f656162394c9feaeec801af059cbc7b0d61e612bcdebc6abb361";
 
@@ -393,8 +393,8 @@ function validateBodyInvariants(value: JsonObject): void {
         structural.tables.maximumElementsCeiling !== 65_536 ||
         structural.tables.exactReviewedProjection.length !== 1 ||
         structural.tables.exactReviewedProjection[0]?.elementType !== "funcref" ||
-        structural.tables.exactReviewedProjection[0].minimum !== 14_549 ||
-        structural.tables.exactReviewedProjection[0].maximum !== 14_549) {
+        structural.tables.exactReviewedProjection[0].minimum !== 15_166 ||
+        structural.tables.exactReviewedProjection[0].maximum !== 15_166) {
       invalid("$.body.wasm.structuralPolicy.tables", "table policy differs from the exact reviewed v1 projection");
     }
     assertExactStrings(
@@ -783,7 +783,7 @@ function validateBodyInvariants(value: JsonObject): void {
         generatedImports.status !== "independently-reviewed-hash-pinned" ||
         generatedImports.allowlistSha256 !==
           CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 ||
-        generatedImports.exactFunctions.length !== 52 ||
+        generatedImports.exactFunctions.length !== 66 ||
         generatedImports.unlistedGeneratedImports !== "forbidden" ||
         generatedImports.observedModuleCannotExtendAllowlist !== true ||
         generatedImports.capabilityCeiling !==
@@ -812,7 +812,7 @@ function validateBodyInvariants(value: JsonObject): void {
       "-sINCOMING_MODULE_JS_API=['instantiateWasm','onAbort','print','printErr']",
     ], "$.body.hostImports.generatedImportAllowlist.independentReview.lockedFlags");
     const expectedGeneratedRoles = [
-      ["javascript-exception-control-flow", 48, "none"],
+      ["javascript-exception-control-flow", 62, "none"],
       ["bounded-memory-growth", 2, "none"],
       ["stack-overflow-trap", 1, "none"],
       ["stdout-stderr-only", 1, "caller-provided-output-hooks-only"],
