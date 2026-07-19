@@ -10,6 +10,7 @@ import {
 } from "./cpp_cute_aot_bytes.js";
 import {
   CPP_CUTE_BROWSER_WORKER_RESULT_CONTROL_BYTE_LIMIT,
+  unwrapValidatedCppCuteBrowserWorkerResultFrame,
   type CppCuteBrowserWorkerInvocationDiscardReason,
   type ValidatedCppCuteBrowserWorkerResultFrame,
 } from "./cpp_cute_browser_worker_protocol.js";
@@ -552,6 +553,33 @@ async function executeWithPlatform(
         .then(async (validated) => {
           const elapsed = elapsedMicroseconds(start, end);
           if (validated.kind === "production") {
+            const frame = validated.validatedResultFrame;
+            let frameRecord: ReturnType<typeof unwrapValidatedCppCuteBrowserWorkerResultFrame>;
+            try {
+              frameRecord = unwrapValidatedCppCuteBrowserWorkerResultFrame(frame);
+            } catch (cause) {
+              throw controllerError(
+                "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL",
+                "$.validatedResultFrame",
+                "terminal validation was not issued by the strict result protocol",
+                cause,
+              );
+            }
+            if (validated.validationId !== frame.validationId ||
+                frame.invocationId !== invocation.invocationId ||
+                frame.requestId !== invocation.requestId ||
+                frameRecord.profile.profileHash !== invocation.profileHash ||
+                frameRecord.requestBinding.requestId !== invocation.requestId ||
+                frame.requestBindingId !== frameRecord.requestBinding.bindingId ||
+                frame.artifactId !== frameRecord.artifact.artifactId ||
+                frame.artifactBytesSha256 !== frameRecord.artifact.artifactBytesSha256 ||
+                frame.outcome !== frameRecord.artifact.outcome) {
+              throw controllerError(
+                "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL",
+                "$.validatedResultFrame",
+                "terminal validation is not the exact protocol-issued invocation authority chain",
+              );
+            }
             const evidenceHash = await hashCanonicalJson({
               domain: "browsergrad.compiler.cpp-cute.browser-worker-execution.v1",
               invocationId: invocation.invocationId,

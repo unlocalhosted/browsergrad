@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const production = vi.hoisted(() => {
   const invocationId = `bg.cpp.browser-worker-invocation.sha256.${"1".repeat(64)}`;
   const nonce = "2".repeat(64);
+  const profileHash = "3".repeat(64);
+  const requestId = `bg.cpp.frontend-request.sha256.${"4".repeat(64)}`;
+  const requestBindingId = `bg.cpp.frontend-request-binding.sha256.${"5".repeat(64)}`;
+  const artifactId = `bg.cpp.frontend-artifact.sha256.${"6".repeat(64)}`;
+  const artifactBytesSha256 = "7".repeat(64);
   const workerBytes = new TextEncoder().encode("export {}; // package Worker fixture");
   const listeners = {
     message: new Set<(event: { readonly data: unknown }) => void>(),
@@ -16,15 +21,29 @@ const production = vi.hoisted(() => {
     prepared: Object.freeze({
       authority: "package-owned-worker-invocation",
       invocationId,
-      profileHash: "3".repeat(64),
-      requestId: `bg.cpp.frontend-request.sha256.${"4".repeat(64)}`,
+      profileHash,
+      requestId,
       invocationNonceSha256: nonce,
       workerModuleSha256: "",
       workerModuleByteLength: workerBytes.byteLength,
       maxWallTimeMs: 10_000,
       maxArtifactByteLength: 1_024,
     }),
-    validation: Object.freeze({ validationId: `bg.cpp.browser-worker-caller-frame.sha256.${"5".repeat(64)}` }),
+    validation: Object.freeze({
+      validationId: `bg.cpp.browser-worker-caller-frame.sha256.${"8".repeat(64)}`,
+      invocationId,
+      requestId,
+      requestBindingId,
+      artifactId,
+      artifactBytesSha256,
+      outcome: "accepted",
+    }),
+    validationRecord: Object.freeze({
+      profile: Object.freeze({ profileHash }),
+      requestBinding: Object.freeze({ requestId, bindingId: requestBindingId }),
+      artifact: Object.freeze({ artifactId, artifactBytesSha256, outcome: "accepted" }),
+    }),
+    cloneValidation: false,
     listeners,
     prepareCalls: 0,
     takeCalls: 0,
@@ -71,10 +90,21 @@ vi.mock("../../src/cpp_cute_browser_worker_package_invocation.js", async () => {
     },
     validateCppCuteBrowserPackageInvocationResult: async () => {
       production.validateCalls += 1;
-      return production.validation;
+      return production.cloneValidation ? { ...production.validation } : production.validation;
     },
     discardCppCuteBrowserPackageInvocation: (_prepared: unknown, reason: string) => {
       production.discards.push(reason);
+    },
+  };
+});
+
+vi.mock("../../src/cpp_cute_browser_worker_protocol.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/cpp_cute_browser_worker_protocol.js")>();
+  return {
+    ...actual,
+    unwrapValidatedCppCuteBrowserWorkerResultFrame: (value: unknown) => {
+      if (value !== production.validation) throw new Error("unregistered protocol validation authority");
+      return production.validationRecord;
     },
   };
 });
@@ -138,6 +168,7 @@ beforeEach(() => {
   production.revokeCalls = 0;
   production.clearTimerCalls = 0;
   production.clock = 10;
+  production.cloneValidation = false;
   production.listeners.message.clear();
   production.listeners.error.clear();
   production.listeners.messageerror.clear();
@@ -178,5 +209,20 @@ describe("production package Worker controller composition", () => {
     });
     expect(() => unwrapObservedCppCuteBrowserWorkerExecution({ ...execution } as never))
       .toThrow();
+  });
+
+  it("rejects a structural validation copy before minting execution evidence", async () => {
+    production.cloneValidation = true;
+    await expect(executeCppCuteBrowserWorker({
+      profile: Object.freeze({}),
+      assetManifest: Object.freeze({}),
+      vfsInstallation: Object.freeze({}),
+      request: Object.freeze({}),
+      runtimeAbiAsset: Object.freeze({}),
+      rawWasmConformance: Object.freeze({}),
+    } as never)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL",
+      path: "$.validatedResultFrame",
+    });
   });
 });
