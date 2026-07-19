@@ -8,11 +8,14 @@
 #include <ctime>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <limits>
 #include <pwd.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <spawn.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/utsname.h>
@@ -130,6 +133,42 @@ int nanosleep(const struct timespec*, struct timespec*) {
 unsigned alarm(unsigned) {
   errno = ENOSYS;
   return 0;
+}
+
+int close(int) {
+  return fail_with_enosys();
+}
+
+ssize_t read(int, void*, std::size_t) {
+  return static_cast<ssize_t>(fail_with_enosys());
+}
+
+ssize_t pread(int, void*, std::size_t, off_t) {
+  return static_cast<ssize_t>(fail_with_enosys());
+}
+
+ssize_t write(int, const void*, std::size_t) {
+  return static_cast<ssize_t>(fail_with_enosys());
+}
+
+off_t lseek(int, off_t, int) {
+  return static_cast<off_t>(fail_with_enosys());
+}
+
+int fstat(int, struct stat*) {
+  return fail_with_enosys();
+}
+
+int fcntl(int, int, ...) {
+  return fail_with_enosys();
+}
+
+int ioctl(int, unsigned long, ...) {
+  return fail_with_enosys();
+}
+
+int isatty(int) {
+  return fail_with_enosys();
 }
 
 int getpwnam_r(const char*, struct passwd* password, char*, std::size_t,

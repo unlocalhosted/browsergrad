@@ -94,6 +94,42 @@ int run_browser_host_tests() {
   BG_CHECK(alarm(1) == 0);
   BG_CHECK(errno == ENOSYS);
 
+  unsigned char descriptor_byte = 0x5a;
+  struct stat descriptor_status;
+  std::memset(&descriptor_status, 0x5a, sizeof(descriptor_status));
+  const struct stat original_descriptor_status = descriptor_status;
+  errno = 0;
+  BG_CHECK(close(7) == -1);
+  BG_CHECK(errno == ENOSYS);
+  errno = 0;
+  BG_CHECK(read(7, &descriptor_byte, 1) == -1);
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(descriptor_byte == 0x5a);
+  errno = 0;
+  BG_CHECK(pread(7, &descriptor_byte, 1, 0) == -1);
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(descriptor_byte == 0x5a);
+  errno = 0;
+  BG_CHECK(write(7, &descriptor_byte, 1) == -1);
+  BG_CHECK(errno == ENOSYS);
+  errno = 0;
+  BG_CHECK(lseek(7, 0, SEEK_SET) == static_cast<off_t>(-1));
+  BG_CHECK(errno == ENOSYS);
+  errno = 0;
+  BG_CHECK(fstat(7, &descriptor_status) == -1);
+  BG_CHECK(errno == ENOSYS);
+  BG_CHECK(std::memcmp(&descriptor_status, &original_descriptor_status,
+                       sizeof(descriptor_status)) == 0);
+  errno = 0;
+  BG_CHECK(fcntl(7, F_GETFD) == -1);
+  BG_CHECK(errno == ENOSYS);
+  errno = 0;
+  BG_CHECK(ioctl(7, 0UL) == -1);
+  BG_CHECK(errno == ENOSYS);
+  errno = 0;
+  BG_CHECK(isatty(7) == -1);
+  BG_CHECK(errno == ENOSYS);
+
   unsigned char entropy[16];
   std::memset(entropy, 0x5a, sizeof(entropy));
   unsigned char original_entropy[sizeof(entropy)];

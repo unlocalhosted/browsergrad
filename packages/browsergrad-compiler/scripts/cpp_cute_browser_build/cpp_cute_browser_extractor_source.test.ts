@@ -202,6 +202,8 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
       "gmtime_r", "gmtime", "__localtime_r", "localtime_r", "localtime",
       "__tzset", "tzset", "setitimer", "getentropy", "__clock_nanosleep",
       "clock_nanosleep", "nanosleep", "alarm",
+      "close", "read", "pread", "write", "lseek", "fstat", "fcntl",
+      "ioctl", "isatty",
       "getpwnam_r", "getpwuid_r", "getuid", "getrlimit", "setrlimit",
       "getrusage", "posix_madvise", "uname", "getsid", "setsid", "fork",
       "execve", "posix_spawn", "wait4", "waitpid", "sigaltstack",
