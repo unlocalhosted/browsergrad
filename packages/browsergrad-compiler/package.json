@@ -61,6 +61,7 @@
     "test:browser-clang-wasm-build-plan:required-native": "BROWSERGRAD_REQUIRE_NATIVE_CLANG_PASS=1 BROWSERGRAD_REQUIRE_NATIVE_CPP_TESTS=1 pnpm run test:browser-clang-wasm-build-plan:run",
     "build:browser-clang-wasm:execute": "node scripts/cpp_cute_browser_build/cpp_cute_browser_build_runner.mjs",
     "admit:browser-clang-wasm-clean": "node scripts/cpp_cute_browser_build/cpp_cute_browser_clean_build_admission.mjs",
+    "admit:browser-source-archives": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_source_archive_admission.mjs",
     "author:browser-header-pack-inventory": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_pack_inventory.mjs",
     "materialize:browser-header-packs": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_pack_materialization.mjs",
     "verify:browser-distribution-notices": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_notice_verification.mjs",
