@@ -21,14 +21,14 @@ import {
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
-export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 5;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 6;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.0eb0fe895342f4a1ed2ab0ba765108aaf5e8133b1f0ad03110c722d58e0d68b7";
+  "bg.cpp.browser-runtime-abi.sha256.418401b7b55bfe45e1e9111d6956c5aeade7d693c1410c8ca6bcdd90b1db42b4";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "c71da30edc856f417bf01f3e2e84860af96d8bc2366a11ee285c01a6f25474a6";
+  "ffe39cfacdd7040d2ceae355f2994e48fe828ead1289f1cfb195c27701a0fe9a";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "658f6ae6c7c7302b1510f0491c63e730a0b539f5d6e22dd7b125d149341f5808";
+  "af0245a407df64e9485d650c80769a0a37a233e82a280a0212a5953fc9b9134e";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "8b48a9e038fc9c2b3ed677d6df99e7d0803da9083db19c41a3017f844fa10f48";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 =
@@ -442,7 +442,7 @@ function validateBodyInvariants(value: JsonObject): void {
       "atomics", "exception-handling", "memory64", "multimemory", "simd128",
     ], "$.body.wasm.structuralPolicy.customSections.targetFeatures.forbiddenDeclarations");
     assertExactStrings(body.wasm.requiredFeatures, [
-      "bulk-memory", "mutable-globals", "nontrapping-fptoint", "sign-extension",
+      "bulk-memory", "bulk-memory-opt", "mutable-globals", "nontrapping-fptoint", "sign-extension",
     ], "$.body.wasm.requiredFeatures");
     assertExactStrings(body.wasm.forbiddenFeatures, [
       "atomics", "exception-handling", "memory64", "multi-memory", "simd128", "threads",
@@ -454,6 +454,22 @@ function validateBodyInvariants(value: JsonObject): void {
         featurePolicy.targetFeaturesCrossCheck !== "optional-advisory-when-present") {
       invalid("$.body.wasm.featurePolicy", "Wasm extension policy must reject every undeclared extension");
     }
+    const reviewedSubset = featurePolicy.reviewedSubsets[0];
+    if (featurePolicy.reviewedSubsets.length !== 1 ||
+        reviewedSubset?.extension !== "bulk-memory-opt" ||
+        reviewedSubset.memoryIndices !== "zero-only" ||
+        reviewedSubset.multiMemory !== "forbidden" ||
+        reviewedSubset.ambientCapability !== "none") {
+      invalid(
+        "$.body.wasm.featurePolicy.reviewedSubsets",
+        "reviewed extension subset must remain single-memory memory.copy/memory.fill only",
+      );
+    }
+    assertExactStrings(
+      reviewedSubset.exactInstructions,
+      ["memory.copy", "memory.fill"],
+      "$.body.wasm.featurePolicy.reviewedSubsets[0].exactInstructions",
+    );
     assertExactStrings(
       featurePolicy.allowedExtensions,
       body.wasm.requiredFeatures,

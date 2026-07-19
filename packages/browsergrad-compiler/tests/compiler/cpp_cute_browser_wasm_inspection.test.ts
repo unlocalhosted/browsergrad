@@ -608,20 +608,29 @@ describe("bounded raw-Wasm inspection", () => {
     )).rejects.toSatisfy(expectCode("BG-COMPILER-CPP-CUTE-BROWSER-WASM-INVALID"));
   });
 
-  it("classifies memory.copy/fill as bulk-memory-opt and refuses ABI widening", async () => {
+  it("admits reviewed single-memory copy/fill while rejecting nonzero memory indices", async () => {
     const memory = section(5, [0x01, 0x01, 0x01, 0x02]);
-    const metadata = targetFeatures([
-      "+bulk-memory", "+bulk-memory-opt", "+mutable-globals", "+nontrapping-fptoint", "+sign-ext",
-    ]);
     const memoryCopy = oneFunctionModule(
       [0x41, 0x00, 0x41, 0x00, 0x41, 0x00, 0xfc, 0x0a, 0x00, 0x00],
-      { extraSections: [metadata, memory] },
+      { extraSections: [memory] },
     );
-    const report = await inspectCppCuteBrowserWasmAgainstRuntimeAbi(memoryCopy, await runtimeAbi());
-    expect(report.projection.staticallyUsedExtensions).toEqual(["bulk-memory", "bulk-memory-opt"]);
-    expect(report.mismatches).toContain("decoded extension bulk-memory-opt is not allowed");
-    expect(report.mismatches).toContain("target feature +bulk-memory-opt is outside the runtime ABI extension allowlist");
-    expect(report.exactInterfaceConformance).toBe(false);
+    const memoryFill = oneFunctionModule(
+      [0x41, 0x00, 0x41, 0x00, 0x41, 0x00, 0xfc, 0x0b, 0x00],
+      { extraSections: [memory] },
+    );
+    const abi = await runtimeAbi();
+    for (const bytes of [memoryCopy, memoryFill]) {
+      const report = await inspectCppCuteBrowserWasmAgainstRuntimeAbi(bytes, abi);
+      expect(report.projection.staticallyUsedExtensions).toEqual(["bulk-memory", "bulk-memory-opt"]);
+      expect(report.mismatches).not.toContain("decoded extension bulk-memory-opt is not allowed");
+      expect(report.exactInterfaceConformance).toBe(false);
+    }
+    const nonzeroMemoryIndex = oneFunctionModule(
+      [0x41, 0x00, 0x41, 0x00, 0x41, 0x00, 0xfc, 0x0a, 0x01, 0x00],
+      { extraSections: [memory] },
+    );
+    await expect(inspectCppCuteBrowserWasmAgainstRuntimeAbi(nonzeroMemoryIndex, abi))
+      .rejects.toSatisfy(expectCode("BG-COMPILER-CPP-CUTE-BROWSER-WASM-INVALID"));
   });
 
   it("rejects duplicate/negative-used target features and classifies valid unsorted/unlisted metadata", async () => {

@@ -43,8 +43,8 @@ function supportExport(
  */
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
-  version: { major: 1, minor: 5 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.0eb0fe895342f4a1ed2ab0ba765108aaf5e8133b1f0ad03110c722d58e0d68b7",
+  version: { major: 1, minor: 6 },
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.418401b7b55bfe45e1e9111d6956c5aeade7d693c1410c8ca6bcdd90b1db42b4",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -60,6 +60,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
       cAbiVersionEncoding: "major-shift-left-16-bitwise-or-minor",
       requiredFeatures: [
         "bulk-memory",
+        "bulk-memory-opt",
         "mutable-globals",
         "nontrapping-fptoint",
         "sign-extension",
@@ -76,6 +77,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         instructionSetBaseline: "webassembly-mvp",
         allowedExtensions: [
           "bulk-memory",
+          "bulk-memory-opt",
           "mutable-globals",
           "nontrapping-fptoint",
           "sign-extension",
@@ -83,6 +85,15 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         unlistedExtensions: "forbidden",
         staticOpcodeAndSectionInspection: "required",
         targetFeaturesCrossCheck: "optional-advisory-when-present",
+        reviewedSubsets: [
+          {
+            extension: "bulk-memory-opt",
+            exactInstructions: ["memory.copy", "memory.fill"],
+            memoryIndices: "zero-only",
+            multiMemory: "forbidden",
+            ambientCapability: "none",
+          },
+        ],
       },
       startSection: "forbidden",
       unlistedCExports: "forbidden",
