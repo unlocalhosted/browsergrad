@@ -24,7 +24,7 @@ const expectedSourcePaths = [
   "BrowserGradCppCuteArtifactWriter.cpp",
   "BrowserGradCppCuteArtifactWriter.h",
   "BrowserGradCppCuteBrowserHost.cpp",
-  "BrowserGradCppCuteBrowserSyscalls.cpp",
+  "BrowserGradCppCuteBrowserSyscalls.inc",
   "BrowserGradCppCuteCanonicalJson.cpp",
   "BrowserGradCppCuteCanonicalJson.h",
   "BrowserGradCppCuteClangAction.cpp",
@@ -143,9 +143,13 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
   it("builds every owned translation unit into the Emscripten factory target", async () => {
     const cmake = await extractorSource("CMakeLists.txt");
     expect(cmake).toContain("add_llvm_executable(browsergrad-cpp-cute-extractor");
-    for (const path of expectedSourcePaths.filter((path) => path !== "CMakeLists.txt")) {
+    for (const path of expectedSourcePaths.filter((path) =>
+      path !== "CMakeLists.txt" && path !== "BrowserGradCppCuteBrowserSyscalls.inc"
+    )) {
       expect(cmake).toContain(`  ${path}\n`);
     }
+    const browserHost = await extractorSource("BrowserGradCppCuteBrowserHost.cpp");
+    expect(browserHost).toContain('#include "BrowserGradCppCuteBrowserSyscalls.inc"');
     expect(cmake).toContain("BROWSERGRAD_EXTRACTOR_FACTORY_OUTPUT_PATH");
     expect(cmake).toContain('SUFFIX ".mjs"');
     expect(cmake).not.toContain('SUFFIX ".wasm"');
@@ -225,7 +229,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
   });
 
   it("closes retained Emscripten filesystem backends without caller mutation", async () => {
-    const source = await extractorSource("BrowserGradCppCuteBrowserSyscalls.cpp");
+    const source = await extractorSource("BrowserGradCppCuteBrowserSyscalls.inc");
     for (const symbol of [
       "__syscall_unlinkat", "__syscall_rmdir", "__syscall_openat",
       "__syscall_fcntl64", "__syscall_ioctl", "__wasi_fd_close",

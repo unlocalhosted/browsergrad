@@ -24,6 +24,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/syscalls.h>
+#endif
+
 namespace {
 
 int fail_with_enosys() {
@@ -394,3 +398,7 @@ int sigaltstack(const stack_t*, stack_t*) {
 }
 
 }  // extern "C"
+
+#if defined(__EMSCRIPTEN__)
+#include "BrowserGradCppCuteBrowserSyscalls.inc"
+#endif

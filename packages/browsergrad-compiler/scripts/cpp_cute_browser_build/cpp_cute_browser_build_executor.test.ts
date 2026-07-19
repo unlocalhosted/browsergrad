@@ -421,7 +421,7 @@ describe("bounded Clang-WASM build source executor", () => {
       "BrowserGradCppCuteArtifactWriter.cpp",
       "BrowserGradCppCuteArtifactWriter.h",
       "BrowserGradCppCuteBrowserHost.cpp",
-      "BrowserGradCppCuteBrowserSyscalls.cpp",
+      "BrowserGradCppCuteBrowserSyscalls.inc",
       "BrowserGradCppCuteCanonicalJson.cpp",
       "BrowserGradCppCuteCanonicalJson.h",
       "BrowserGradCppCuteClangAction.cpp",

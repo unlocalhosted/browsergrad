@@ -1,13 +1,3 @@
-#if !defined(__EMSCRIPTEN__)
-#error "BrowserGradCppCuteBrowserSyscalls.cpp requires the pinned Emscripten ABI"
-#endif
-
-#include <cerrno>
-#include <cstddef>
-#include <cstdint>
-
-#include <emscripten/syscalls.h>
-
 namespace {
 
 // These definitions mirror the wasm32 layout in the pinned Emscripten 6.0.3
@@ -27,11 +17,11 @@ static_assert(offsetof(WasiMutableIoVector, byte_length) == 4);
 
 }  // namespace
 
-// The public POSIX surface is closed in BrowserGradCppCuteBrowserHost.cpp.
-// Emscripten's libc retains a small set of raw backend calls through otherwise
-// unreachable helper objects. Close those true backend seams as well: Linux-
-// shaped syscalls return negative errno, WASI calls return their unsigned
-// errno, and caller-owned output remains untouched.
+// The public POSIX surface is closed above. Emscripten's libc retains a small
+// set of raw backend calls through otherwise unreachable helper objects. Close
+// those true backend seams as well: Linux-shaped syscalls return negative
+// errno, WASI calls return their unsigned errno, and caller-owned output
+// remains untouched.
 extern "C" {
 
 int __syscall_unlinkat(int, const char*, int) {
