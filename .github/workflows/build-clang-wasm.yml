@@ -85,20 +85,6 @@ jobs:
             ${{ runner.temp }}/browsergrad-clang-wasm-cache-v2/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
           key: linux-amd64-${{ steps.toolchain-cache-key.outputs.cache-key }}
 
-      # One-time migration for the cache seeded by run 29663494490 before the
-      # cache path was made stable and before the final host-import link policy
-      # changed. The reusable LLVM/Clang outputs are unaffected by that policy.
-      # Remove after the stable namespace is proven.
-      - name: Restore the legacy diagnostic toolchain cache for migration
-        id: legacy-toolchain-cache
-        if: ${{ inputs.mode == 'fast-validation' && steps.toolchain-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ${{ runner.temp }}/browsergrad-clang-wasm.d2uQIm/work/build-${{ matrix.buildOrdinal }}/native-tablegen
-            ${{ runner.temp }}/browsergrad-clang-wasm.d2uQIm/work/build-${{ matrix.buildOrdinal }}/clang-extractor-wasm
-          key: linux-amd64-bg.cpp.clang-wasm-toolchain-cache.sha256.9bd5cebfd49382887f2ee4c2f8841b477446a907e1d27634185ea6b1d4f93b0d
-
       - name: Admit the restored diagnostic cache into the private build root
         if: ${{ inputs.mode == 'fast-validation' }}
         run: |
@@ -106,8 +92,6 @@ jobs:
           bg_cache_source=''
           if [[ "${{ steps.toolchain-cache.outputs.cache-hit }}" == 'true' ]]; then
             bg_cache_source="${BG_CLANG_CACHE_ROOT}"
-          elif [[ "${{ steps.legacy-toolchain-cache.outputs.cache-hit }}" == 'true' ]]; then
-            bg_cache_source="${RUNNER_TEMP}/browsergrad-clang-wasm.d2uQIm/work/build-${BG_CLANG_BUILD_ORDINAL}"
           fi
           if [[ -n "${bg_cache_source}" ]]; then
             for bg_cache_entry in native-tablegen clang-extractor-wasm; do
