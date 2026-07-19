@@ -102,6 +102,9 @@ describe("Clang-Wasm evidence workflow", () => {
     );
     expect(workflow).toContain("Admit the restored diagnostic cache into the private build root");
     expect(workflow).toContain("Stage a complete reusable diagnostic toolchain cache");
+    expect(workflow).toContain(
+      "if: ${{ success() && inputs.mode == 'fast-validation' && steps.toolchain-cache.outputs.cache-hit != 'true' }}",
+    );
     expect(workflow).toContain("native-tablegen/bin/clang-tblgen");
     expect(workflow).toContain("clang-extractor-wasm/lib/libclangTooling.a");
     expect(workflow).toContain("--execution-mode=\"${{ inputs.mode == 'fast-validation' && 'cached-diagnostic' || 'clean' }}\"");

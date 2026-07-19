@@ -205,7 +205,7 @@ jobs:
 
       - name: Stage a complete reusable diagnostic toolchain cache
         id: stage-toolchain-cache
-        if: ${{ always() && inputs.mode == 'fast-validation' && steps.toolchain-cache.outputs.cache-hit != 'true' }}
+        if: ${{ success() && inputs.mode == 'fast-validation' && steps.toolchain-cache.outputs.cache-hit != 'true' }}
         run: |
           set -euo pipefail
           bg_build_root="${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}"
