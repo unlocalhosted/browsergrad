@@ -140,7 +140,7 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 441 tests across 51 files covering the build plan, runtime ABI,
+clean, then runs 442 tests across 51 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
 package invocation, Worker entry, production controller, exact header-tree
 inventory/materialization, seven-archive admission, strict archive
@@ -148,7 +148,7 @@ normalization/extraction, the reviewed builder identity, CUDA-index admission,
 the complete header distribution review input, distribution-notice
 verification, exact notice-output materialization, two-root distribution
 reproducibility, and exact package admission of that evidence. The focused
-test phase is 24.48 seconds and the complete gate is 34.96 seconds on Node 25.
+test phase is 23.41 seconds and the complete gate is 33.89 seconds on Node 25.
 Clean validation and two-build
 reproducibility still restore no cache and remain intentionally more expensive.
 
@@ -162,6 +162,10 @@ observed 86-to-134-second test phase from the compiler critical path without
 changing build inputs or granting evidence when either branch fails. The two
 reproducibility builds already run concurrently, and each build remains pinned
 to the four cores available on the current standard runner.
+Workflow concurrency is now mode-scoped: fast feedback no longer queues behind
+clean or reproducibility evidence, and a newer fast request cancels only an
+older fast request. Clean validation and reproducibility never cancel one
+another and retain separate isolated runners and roots.
 
 The current CMake-stable primary cache is now proved at exact source.
 Migration run `29680686426` completed in 4 minutes 14 seconds and populated the
