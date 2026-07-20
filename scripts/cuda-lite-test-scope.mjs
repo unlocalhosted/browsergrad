@@ -188,6 +188,7 @@ export const scopeRules = [
     id: "real-world-verifier-scripts",
     reason: "real-world verifier wiring changed",
     matches: [
+      /^scripts\/real-world-cuda-browser-shard-evidence\.mjs$/u,
       /^scripts\/verify-real-world-cuda\.mjs$/u,
       /^scripts\/test-verify-real-world-cuda-cli\.mjs$/u,
       /^scripts\/verify-release\.mjs$/u,

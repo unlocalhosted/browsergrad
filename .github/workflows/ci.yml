@@ -208,6 +208,7 @@ jobs:
           --skip-fetch
           --require-webgpu
           --bundle=${{ matrix.bundle }}
+          --browser-shards=2
           --timing-json=.tmp/real-world-cuda-timing-${{ matrix.bundle }}.json
 
       - name: Upload real-world CUDA timing attribution

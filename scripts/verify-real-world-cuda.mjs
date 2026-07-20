@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseAutoCorpusSmokeProfile } from "./cuda-lite-webgpu-cli.mjs";
@@ -8,10 +9,12 @@ import {
   cudaLiteCorpora,
   cudaLiteCorpusExecutionFixtures,
 } from "./cuda-lite-corpus-registry.mjs";
+import { aggregateBrowserShardReports } from "./real-world-cuda-browser-shard-evidence.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "..");
 const CAPTURED_OUTPUT_BYTE_LIMIT = 2 * 1024 * 1024;
+const BROWSER_SHARD_LIMIT = 8;
 
 export function parseVerifyRealWorldCudaArgs(args) {
   const options = {
@@ -32,6 +35,7 @@ export function parseVerifyRealWorldCudaArgs(args) {
     preparedRatioMax: undefined,
     preparedScalarRatioMax: undefined,
     preparedReadbackRatioMax: undefined,
+    browserShards: 1,
     timingJson: undefined,
   };
   for (let index = 0; index < args.length; index++) {
@@ -171,6 +175,14 @@ export function parseVerifyRealWorldCudaArgs(args) {
       options.preparedReadbackRatioMax = parsePositiveNumber(arg.slice("--expect-prepared-readback-ratio-max=".length), "--expect-prepared-readback-ratio-max");
       continue;
     }
+    if (arg === "--browser-shards") {
+      options.browserShards = parseBrowserShardCount(args[++index]);
+      continue;
+    }
+    if (arg?.startsWith("--browser-shards=")) {
+      options.browserShards = parseBrowserShardCount(arg.slice("--browser-shards=".length));
+      continue;
+    }
     if (arg === "--timing-json") {
       options.timingJson = parseOutputPath(args[++index], "--timing-json");
       continue;
@@ -180,7 +192,7 @@ export function parseVerifyRealWorldCudaArgs(args) {
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--require-webgpu] [--allow-missing-webgpu] [--forbid-skips] [--limit N] [--only CORPUS[,CORPUS...]] [--corpus CORPUS[,CORPUS...]] [--bundle src|dist|both] [--auto-corpus-smoke-limit N] [--auto-corpus-smoke-mode reference|dispatch] [--auto-corpus-smoke-profile fast|full] [--auto-corpus-smoke-features subgroups] [--case-timeout-ms N] [--benchmark-webgpu] [--benchmark-runs N] [--benchmark-warmup N] [--benchmark-length N] [--expect-prepared-ratio-max N] [--expect-prepared-scalar-ratio-max N] [--expect-prepared-readback-ratio-max N] [--timing-json PATH]");
+      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--require-webgpu] [--allow-missing-webgpu] [--forbid-skips] [--limit N] [--only CORPUS[,CORPUS...]] [--corpus CORPUS[,CORPUS...]] [--bundle src|dist|both] [--auto-corpus-smoke-limit N] [--auto-corpus-smoke-mode reference|dispatch] [--auto-corpus-smoke-profile fast|full] [--auto-corpus-smoke-features subgroups] [--case-timeout-ms N] [--browser-shards N] [--benchmark-webgpu] [--benchmark-runs N] [--benchmark-warmup N] [--benchmark-length N] [--expect-prepared-ratio-max N] [--expect-prepared-scalar-ratio-max N] [--expect-prepared-readback-ratio-max N] [--timing-json PATH]");
       process.exit(0);
     }
     throw new Error(`unexpected argument: ${arg}`);
@@ -188,10 +200,9 @@ export function parseVerifyRealWorldCudaArgs(args) {
   return options;
 }
 
-export function verifyRealWorldCudaPlan(options) {
-  const selectedCorpusIds = options.only.length === 0
-    ? cudaLiteCorpora.map((corpus) => corpus.id)
-    : [...new Set(options.only)];
+export function verifyRealWorldCudaPlan(options, context = {}) {
+  const selectedCorpusIds = selectedCorpora(options.only);
+  const browserReportDir = context.browserReportDir ?? path.join(root, ".tmp", "real-world-cuda-browser-plan");
   const steps = selectedCorpusIds.map((id) => ({
     label: `real-world CUDA compile/codegen audit (${id})`,
     parallelGroup: "compile-codegen-audits",
@@ -204,31 +215,53 @@ export function verifyRealWorldCudaPlan(options) {
       String(options.limit),
     ],
   }));
+  const browserShardCount = effectiveBrowserShardCount(options);
   for (const bundle of browserBundles(options.bundle)) {
-    steps.push({
-      label: `real-world CUDA browser fixture e2e (${bundle})`,
-      args: [
-        path.join(scriptDir, "e2e-cuda-lite-webgpu.mjs"),
-        "--require-corpus-fixtures",
-        "--forbid-skips",
-        "--summary-only",
-        "--bundle",
+    for (let shardIndex = 1; shardIndex <= browserShardCount; shardIndex++) {
+      const expectedFixtureCases = browserShardFixtureCases(options.only, shardIndex, browserShardCount);
+      const expectedOutputFixtureCases = expectedFixtureCases.filter((caseName) =>
+        fixtureByCaseName(caseName)?.expectedOutput !== undefined);
+      const reportPath = path.join(browserReportDir, `${bundle}-${shardIndex}-of-${browserShardCount}.json`);
+      steps.push({
+        kind: "browser-e2e",
+        label: `real-world CUDA browser fixture e2e (${bundle}, shard ${shardIndex}/${browserShardCount})`,
+        ...(browserShardCount > 1 ? { parallelGroup: `browser-e2e-${bundle}` } : {}),
         bundle,
-        ...scopedCaseFilterArgs(options.only, options.autoCorpusSmokeLimit),
-        "--auto-corpus-smoke-limit",
-        String(options.autoCorpusSmokeLimit),
-        "--auto-corpus-smoke-mode",
-        options.autoCorpusSmokeMode,
-        "--auto-corpus-smoke-profile",
-        options.autoCorpusSmokeProfile,
-        "--auto-corpus-smoke-features",
-        options.autoCorpusSmokeFeatures.join(","),
-        ...autoCorpusSmokeCorporaArgs(options.only, options.autoCorpusSmokeLimit),
-        "--case-timeout-ms",
-        String(options.caseTimeoutMs),
-        ...(options.allowMissingWebGpu ? [] : ["--require-webgpu"]),
-      ],
-    });
+        shardIndex,
+        shardCount: browserShardCount,
+        requireWebGpu: !options.allowMissingWebGpu,
+        forbidSkips: true,
+        caseTimeoutMs: options.caseTimeoutMs,
+        reportPath,
+        expectedFixtureCases,
+        expectedOutputFixtureCases,
+        args: [
+          path.join(scriptDir, "e2e-cuda-lite-webgpu.mjs"),
+          "--require-corpus-fixtures",
+          "--forbid-skips",
+          "--summary-only",
+          "--json",
+          reportPath,
+          "--bundle",
+          bundle,
+          ...browserShardCaseFilterArgs(options.only, options.autoCorpusSmokeLimit, shardIndex, browserShardCount),
+          "--auto-corpus-smoke-limit",
+          String(options.autoCorpusSmokeLimit),
+          "--auto-corpus-smoke-mode",
+          options.autoCorpusSmokeMode,
+          "--auto-corpus-smoke-profile",
+          options.autoCorpusSmokeProfile,
+          "--auto-corpus-smoke-features",
+          options.autoCorpusSmokeFeatures.join(","),
+          "--auto-corpus-smoke-shard",
+          `${shardIndex}/${browserShardCount}`,
+          ...autoCorpusSmokeCorporaArgs(options.only, options.autoCorpusSmokeLimit),
+          "--case-timeout-ms",
+          String(options.caseTimeoutMs),
+          ...(options.allowMissingWebGpu ? [] : ["--require-webgpu"]),
+        ],
+      });
+    }
     if (options.benchmarkWebGpu) {
       steps.push({
         label: `real-world CUDA browser perf gate (${bundle})`,
@@ -285,6 +318,36 @@ function browserBundles(bundle) {
   return bundle === "both" ? ["src", "dist"] : [bundle];
 }
 
+function selectedCorpora(only) {
+  return only.length === 0
+    ? cudaLiteCorpora.map((corpus) => corpus.id)
+    : [...new Set(only)];
+}
+
+function selectedFixtureCases(only) {
+  const corpusIds = new Set(selectedCorpora(only));
+  return cudaLiteCorpusExecutionFixtures
+    .filter((fixture) => corpusIds.has(fixture.corpusId))
+    .map((fixture) => fixture.caseName);
+}
+
+function fixtureByCaseName(caseName) {
+  return cudaLiteCorpusExecutionFixtures.find((fixture) => fixture.caseName === caseName);
+}
+
+function effectiveBrowserShardCount(options) {
+  const workItems = selectedFixtureCases(options.only).length + options.autoCorpusSmokeLimit;
+  return Math.min(options.browserShards, Math.max(1, workItems));
+}
+
+function parseBrowserShardCount(raw) {
+  const value = parsePositiveInt(raw, "--browser-shards");
+  if (value > BROWSER_SHARD_LIMIT) {
+    throw new Error(`--browser-shards must not exceed ${BROWSER_SHARD_LIMIT}`);
+  }
+  return value;
+}
+
 function parseLimit(raw, flag = "--limit") {
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 0) {
@@ -320,14 +383,18 @@ function ratioArg(flag, value) {
   return value === undefined ? [] : [flag, String(value)];
 }
 
-function scopedCaseFilterArgs(only, autoCorpusSmokeLimit) {
-  const corpusIds = only.length === 0 ? cudaLiteCorpora.map((corpus) => corpus.id) : only;
-  const filters = corpusIds.flatMap((id) => [
-    ...cudaLiteCorpusExecutionFixtures
-      .filter((fixture) => fixture.corpusId === id)
-      .map((fixture) => fixture.caseName),
-    ...(autoCorpusSmokeLimit > 0 ? [`auto-corpus:${id}:`] : []),
-  ]);
+function browserShardFixtureCases(only, shardIndex, shardCount) {
+  return selectedFixtureCases(only)
+    .filter((_, index) => index % shardCount === shardIndex - 1);
+}
+
+function browserShardCaseFilterArgs(only, autoCorpusSmokeLimit, shardIndex, shardCount) {
+  const filters = [
+    ...browserShardFixtureCases(only, shardIndex, shardCount),
+    ...(autoCorpusSmokeLimit > 0
+      ? selectedCorpora(only).map((id) => `auto-corpus:${id}:`)
+      : []),
+  ];
   return ["--cases", filters.join(",")];
 }
 
@@ -421,7 +488,7 @@ export async function executePlan(steps, runStep = run) {
   return timings;
 }
 
-function timingReport(options, timings, totalMs) {
+function timingReport(options, timings, totalMs, browserEvidence) {
   return Object.freeze({
     kind: "browsergrad-real-world-cuda-timing",
     version: 1,
@@ -429,9 +496,11 @@ function timingReport(options, timings, totalMs) {
     selectedCorpora: options.only.length === 0
       ? cudaLiteCorpora.map((corpus) => corpus.id)
       : [...new Set(options.only)],
-    ok: timings.every((timing) => timing.ok),
+    browserShards: options.browserShards,
+    ok: timings.every((timing) => timing.ok) && browserEvidence.ok,
     totalMs: Math.round(totalMs * 1000) / 1000,
     steps: timings,
+    browserEvidence,
   });
 }
 
@@ -443,18 +512,25 @@ function writeTimingReport(outputPath, report) {
 
 async function main() {
   const options = parseVerifyRealWorldCudaArgs(process.argv.slice(2));
+  const browserReportDir = mkdtempSync(path.join(os.tmpdir(), "browsergrad-real-world-cuda-browser-"));
   const startedNs = process.hrtime.bigint();
-  const timings = await executePlan(verifyRealWorldCudaPlan(options));
-  const totalMs = Number(process.hrtime.bigint() - startedNs) / 1_000_000;
-  const report = timingReport(options, timings, totalMs);
-  console.log(`\n${JSON.stringify(report, null, 2)}`);
-  if (options.timingJson !== undefined) writeTimingReport(options.timingJson, report);
-  const failure = timings.find((timing) => !timing.ok);
-  if (failure !== undefined) {
-    process.exitCode = failure.exitCode || 1;
-    return;
+  try {
+    const plan = verifyRealWorldCudaPlan(options, { browserReportDir });
+    const timings = await executePlan(plan);
+    const browserEvidence = aggregateBrowserShardReports(plan);
+    const totalMs = Number(process.hrtime.bigint() - startedNs) / 1_000_000;
+    const report = timingReport(options, timings, totalMs, browserEvidence);
+    console.log(`\n${JSON.stringify(report, null, 2)}`);
+    if (options.timingJson !== undefined) writeTimingReport(options.timingJson, report);
+    const failure = timings.find((timing) => !timing.ok);
+    if (failure !== undefined || !browserEvidence.ok) {
+      process.exitCode = failure?.exitCode || 1;
+      return;
+    }
+    console.log("\nreal-world CUDA verification passed");
+  } finally {
+    rmSync(browserReportDir, { recursive: true, force: true });
   }
-  console.log("\nreal-world CUDA verification passed");
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

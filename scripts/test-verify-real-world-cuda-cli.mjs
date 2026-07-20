@@ -8,12 +8,14 @@ import {
   parseVerifyRealWorldCudaArgs,
   verifyRealWorldCudaPlan,
 } from "./verify-real-world-cuda.mjs";
+import { aggregateBrowserShardReports } from "./real-world-cuda-browser-shard-evidence.mjs";
 import { cudaLiteCorpusExecutionFixtures } from "./cuda-lite-corpus-registry.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const defaults = parseVerifyRealWorldCudaArgs([]);
 assert.equal(defaults.autoCorpusSmokeProfile, "fast");
+assert.equal(defaults.browserShards, 1);
 
 const defaultPlan = verifyRealWorldCudaPlan(defaults);
 const defaultAuditSteps = defaultPlan.filter((step) =>
@@ -27,6 +29,8 @@ const defaultBrowserSteps = defaultPlan.filter((step) => step.label.startsWith("
 assert.equal(defaultBrowserSteps.length, 2);
 for (const step of defaultBrowserSteps) {
   assert.equal(argAfter(step.args, "--auto-corpus-smoke-profile"), "fast");
+  assert.equal(argAfter(step.args, "--auto-corpus-smoke-shard"), "1/1");
+  assert.equal(argAfter(step.args, "--json"), step.reportPath);
   assert.ok(step.args.includes("--forbid-skips"));
   const cases = argAfter(step.args, "--cases").split(",");
   assert.ok(cudaLiteCorpusExecutionFixtures.every((fixture) => cases.includes(fixture.caseName)));
@@ -57,6 +61,52 @@ assert.equal(argAfter(fullBrowserStep.args, "--auto-corpus-smoke-profile"), "ful
 assert.ok(fullBrowserStep.args.includes("--summary-only"));
 assert.ok(fullBrowserStep.args.includes("--forbid-skips"));
 assert.equal(fullBrowserStep.args.includes("--require-webgpu"), false);
+
+const sharded = parseVerifyRealWorldCudaArgs([
+  "--bundle=src",
+  "--browser-shards=2",
+  "--case-timeout-ms=9000",
+]);
+assert.equal(sharded.browserShards, 2);
+const shardedPlan = verifyRealWorldCudaPlan(sharded, { browserReportDir: "/tmp/browsergrad-plan-test" });
+const shardedBrowserSteps = shardedPlan.filter((step) => step.kind === "browser-e2e");
+assert.equal(shardedBrowserSteps.length, 2);
+assert.deepEqual(shardedBrowserSteps.map((step) => step.shardIndex), [1, 2]);
+assert.ok(shardedBrowserSteps.every((step) => step.shardCount === 2));
+assert.ok(shardedBrowserSteps.every((step) => step.parallelGroup === "browser-e2e-src"));
+assert.ok(shardedBrowserSteps.every((step) => step.args.includes("--require-webgpu")));
+assert.ok(shardedBrowserSteps.every((step) => step.args.includes("--forbid-skips")));
+assert.ok(shardedBrowserSteps.every((step) => argAfter(step.args, "--case-timeout-ms") === "9000"));
+assert.deepEqual(
+  shardedBrowserSteps.map((step) => argAfter(step.args, "--auto-corpus-smoke-shard")),
+  ["1/2", "2/2"],
+);
+const plannedFixtureCases = shardedBrowserSteps.flatMap((step) => step.expectedFixtureCases);
+assert.equal(new Set(plannedFixtureCases).size, cudaLiteCorpusExecutionFixtures.length);
+assert.deepEqual(new Set(plannedFixtureCases), new Set(cudaLiteCorpusExecutionFixtures.map((fixture) => fixture.caseName)));
+assert.deepEqual(
+  shardedBrowserSteps[0].expectedFixtureCases,
+  cudaLiteCorpusExecutionFixtures.filter((_, index) => index % 2 === 0).map((fixture) => fixture.caseName),
+);
+assert.deepEqual(
+  shardedBrowserSteps[1].expectedFixtureCases,
+  cudaLiteCorpusExecutionFixtures.filter((_, index) => index % 2 === 1).map((fixture) => fixture.caseName),
+);
+for (const step of shardedBrowserSteps) {
+  const cases = argAfter(step.args, "--cases").split(",");
+  assert.ok(step.expectedFixtureCases.every((caseName) => cases.includes(caseName)));
+  assert.ok(["cuda-120", "cuda-samples", "llm.c", "leetcuda"]
+    .every((id) => cases.includes(`auto-corpus:${id}:`)));
+}
+
+assert.throws(
+  () => parseVerifyRealWorldCudaArgs(["--browser-shards=0"]),
+  /--browser-shards expects a positive integer/u,
+);
+assert.throws(
+  () => parseVerifyRealWorldCudaArgs(["--browser-shards=9"]),
+  /--browser-shards must not exceed 8/u,
+);
 
 const scoped = parseVerifyRealWorldCudaArgs([
   "--skip-fetch",
@@ -121,6 +171,101 @@ assert.throws(
   () => parseVerifyRealWorldCudaArgs(["--only", "unknown-corpus"]),
   /unknown CUDA-lite corpus/u,
 );
+
+const fakeShardReports = new Map(shardedBrowserSteps.map((step) => {
+  const fixtureCases = step.expectedFixtureCases.map((name) => ({
+    name,
+    ok: true,
+    expectedOutputPinned: step.expectedOutputFixtureCases.includes(name),
+  }));
+  const autoCorpusCase = {
+    name: `auto-corpus:cuda-120:fixture-${step.shardIndex}`,
+    ok: true,
+  };
+  return [step.reportPath, {
+    bundle: step.bundle,
+    available: true,
+    cases: [...fixtureCases, autoCorpusCase],
+    passed: fixtureCases.length + 1,
+    failed: 0,
+    skipped: 0,
+    warmupFailed: 0,
+    autoCorpusSmokeCovered: 1,
+    autoCorpusSmokeExpectedCovered: 1,
+    autoCorpusSmokeShard: { index: step.shardIndex, count: step.shardCount },
+  }];
+}));
+const aggregateEvidence = aggregateBrowserShardReports(
+  shardedPlan,
+  (reportPath) => structuredClone(fakeShardReports.get(reportPath)),
+);
+assert.equal(aggregateEvidence.ok, true);
+assert.equal(aggregateEvidence.bundles.length, 1);
+assert.equal(aggregateEvidence.bundles[0].expectedFixtureCases, cudaLiteCorpusExecutionFixtures.length);
+assert.equal(aggregateEvidence.bundles[0].observedFixtureCases, cudaLiteCorpusExecutionFixtures.length);
+assert.equal(aggregateEvidence.bundles[0].expectedAutoCorpusSmokeCases, 2);
+assert.equal(aggregateEvidence.bundles[0].observedAutoCorpusSmokeCases, 2);
+assert.deepEqual(aggregateEvidence.bundles[0].failures, []);
+
+const missingFixtureReports = new Map(
+  [...fakeShardReports].map(([reportPath, report], index) => [
+    reportPath,
+    index === 0 ? { ...structuredClone(report), cases: report.cases.slice(1) } : structuredClone(report),
+  ]),
+);
+const missingFixtureEvidence = aggregateBrowserShardReports(
+  shardedPlan,
+  (reportPath) => missingFixtureReports.get(reportPath),
+);
+assert.equal(missingFixtureEvidence.ok, false);
+assert.equal(missingFixtureEvidence.bundles[0].missingFixtureCases.length, 1);
+
+const unexpectedOutputReports = new Map(
+  [...fakeShardReports].map(([reportPath, report], index) => {
+    const cloned = structuredClone(report);
+    if (index === 0) {
+      cloned.cases.push({
+        name: "corpus:unexpected:output-threshold",
+        ok: true,
+        expectedOutputPinned: true,
+      });
+      cloned.passed += 1;
+    }
+    return [reportPath, cloned];
+  }),
+);
+const unexpectedOutputEvidence = aggregateBrowserShardReports(
+  shardedPlan,
+  (reportPath) => unexpectedOutputReports.get(reportPath),
+);
+assert.equal(unexpectedOutputEvidence.ok, false);
+assert.deepEqual(
+  unexpectedOutputEvidence.bundles[0].unexpectedOutputPinnedFixtureCases,
+  ["corpus:unexpected:output-threshold"],
+);
+
+const duplicateAutoReports = new Map(
+  [...fakeShardReports].map(([reportPath, report]) => {
+    const cloned = structuredClone(report);
+    cloned.cases.at(-1).name = "auto-corpus:cuda-120:duplicate";
+    return [reportPath, cloned];
+  }),
+);
+const duplicateAutoEvidence = aggregateBrowserShardReports(
+  shardedPlan,
+  (reportPath) => duplicateAutoReports.get(reportPath),
+);
+assert.equal(duplicateAutoEvidence.ok, false);
+assert.deepEqual(duplicateAutoEvidence.bundles[0].duplicateAutoCorpusCases, ["auto-corpus:cuda-120:duplicate"]);
+
+const unavailableAllowedEvidence = aggregateBrowserShardReports(fullPlan, () => ({
+  bundle: "src",
+  available: false,
+  reason: "navigator.gpu undefined",
+  cases: [],
+}));
+assert.equal(unavailableAllowedEvidence.ok, true);
+assert.equal(unavailableAllowedEvidence.bundles[0].coverageEvaluated, false);
 
 const schedulerEvents = [];
 let activeParallelSteps = 0;
@@ -220,6 +365,7 @@ for (const contract of workflowContracts) {
 const ciWorkflow = readFileSync(path.join(repositoryRoot, ".github/workflows/ci.yml"), "utf8");
 assert.ok(ciWorkflow.includes("bundle: [src, dist]"));
 assert.ok(ciWorkflow.includes("--bundle=${{ matrix.bundle }}"));
+assert.ok(ciWorkflow.includes("--browser-shards=2"));
 assert.ok(ciWorkflow.includes("--timing-json=.tmp/real-world-cuda-timing-${{ matrix.bundle }}.json"));
 assert.ok(ciWorkflow.includes("Upload real-world CUDA timing attribution"));
 
