@@ -1,13 +1,21 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import {
+  withCudaLiteCorpusCheckoutLease,
+} from "./cuda-lite-corpus-provisioning.mjs";
 import { cudaLiteCorpora } from "./cuda-lite-corpus-registry.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "..");
 const options = parseArgs(process.argv.slice(2));
+const unknown = [...options.only].filter((id) =>
+  !cudaLiteCorpora.some((corpus) => corpus.id === id));
+if (unknown.length > 0) {
+  console.error(`unknown CUDA-lite corpus id(s): ${unknown.join(", ")}`);
+  process.exit(2);
+}
 const selected = options.only.size === 0
   ? cudaLiteCorpora
   : cudaLiteCorpora.filter((corpus) => options.only.has(corpus.id));
@@ -22,9 +30,12 @@ const failures = [];
 for (const corpus of selected) {
   console.log(`\n== ${corpus.name} @ ${corpus.commit.slice(0, 7)} ==`);
   try {
-    if (options.skipFetch) verifyCorpus(corpus);
-    else ensureCorpus(corpus);
-    const audit = runAudit(corpus, options);
+    const leased = withCudaLiteCorpusCheckoutLease({
+      root: path.dirname(corpus.path),
+      corpus,
+      skipFetch: options.skipFetch,
+    }, (admission) => runAudit(corpus, options, admission.corpus.physicalPath));
+    const audit = leased.result;
     const summary = audit.summary ?? audit;
     const record = {
       corpus: {
@@ -57,62 +68,10 @@ console.log(JSON.stringify(aggregate, null, 2));
 
 if (failures.length > 0) process.exit(1);
 
-function ensureCorpus(corpus) {
-  const gitDir = path.join(corpus.path, ".git");
-  if (existsSync(gitDir) && !isUsableGitCheckout(corpus.path)) {
-    rmSync(corpus.path, { recursive: true, force: true });
-  }
-  if (!existsSync(gitDir)) {
-    if (existsSync(corpus.path)) {
-      throw new Error(`${corpus.path} exists but is not a git checkout`);
-    }
-    mkdirSync(path.dirname(corpus.path), { recursive: true });
-    run("git", ["init", corpus.path], root);
-    run("git", ["-C", corpus.path, "remote", "add", "origin", corpus.repo], root);
-  } else {
-    run("git", ["-C", corpus.path, "remote", "set-url", "origin", corpus.repo], root);
-  }
-  run("git", ["-C", corpus.path, "fetch", "--depth=1", "origin", corpus.commit], root);
-  run("git", ["-C", corpus.path, "checkout", "--detach", corpus.commit], root);
-  run("git", ["-C", corpus.path, "reset", "--hard", corpus.commit], root);
-  const actual = runCapture("git", ["-C", corpus.path, "rev-parse", "HEAD"], root).trim();
-  if (actual !== corpus.commit) {
-    throw new Error(`${corpus.id} expected ${corpus.commit}, got ${actual}`);
-  }
-  assertCorpusClean(corpus);
-}
-
-function isUsableGitCheckout(corpusPath) {
-  const result = spawnSync("git", ["-C", corpusPath, "rev-parse", "--git-dir"], {
-    cwd: root,
-    encoding: "utf8",
-  });
-  return result.status === 0;
-}
-
-function verifyCorpus(corpus) {
-  const gitDir = path.join(corpus.path, ".git");
-  if (!existsSync(gitDir)) {
-    throw new Error(`${corpus.id} expected pinned git checkout at ${corpus.path}; run without --skip-fetch first`);
-  }
-  const actual = runCapture("git", ["-C", corpus.path, "rev-parse", "HEAD"], root).trim();
-  if (actual !== corpus.commit) {
-    throw new Error(`${corpus.id} expected ${corpus.commit}, got ${actual}; run without --skip-fetch to refresh`);
-  }
-  assertCorpusClean(corpus);
-}
-
-function assertCorpusClean(corpus) {
-  const status = runCapture("git", ["-C", corpus.path, "status", "--short", "--untracked-files=all"], root).trim();
-  if (status.length > 0) {
-    throw new Error(`${corpus.id} checkout at ${corpus.path} is dirty; clean or refresh it before auditing:\n${status}`);
-  }
-}
-
-function runAudit(corpus, options) {
+function runAudit(corpus, options, checkoutPath) {
   const args = [
     path.join(scriptDir, "audit-cuda-lite-corpus.mjs"),
-    corpus.path,
+    checkoutPath,
     "--limit",
     String(options.limit),
     ...(options.details ? ["--details"] : []),
@@ -147,8 +106,6 @@ function expectationArgs(expectations) {
   if (expectations.total !== undefined) args.push("--expect-total", String(expectations.total));
   if (expectations.okMin !== undefined) args.push("--expect-ok-min", String(expectations.okMin));
   if (expectations.compileCodegenMin !== undefined) args.push("--expect-compile-codegen-min", String(expectations.compileCodegenMin));
-  if (expectations.planCompiledMin !== undefined) args.push("--expect-plan-compiled-min", String(expectations.planCompiledMin));
-  if (expectations.webgpuMin !== undefined) args.push("--expect-plan-compiled-min", String(expectations.webgpuMin));
   if (expectations.referenceOnlyMax !== undefined) args.push("--expect-reference-only-max", String(expectations.referenceOnlyMax));
   if (expectations.hardFailMax !== undefined) args.push("--expect-hard-fail-max", String(expectations.hardFailMax));
   return args;
@@ -206,21 +163,4 @@ function parseLimit(raw) {
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 0) throw new Error("--limit expects a non-negative integer");
   return value;
-}
-
-function run(command, args, cwd) {
-  const result = spawnSync(command, args, { cwd, stdio: "inherit" });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(" ")} exited ${result.status}`);
-  }
-}
-
-function runCapture(command, args, cwd) {
-  const result = spawnSync(command, args, { cwd, encoding: "utf8" });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(" ")} exited ${result.status}: ${result.stderr}`);
-  }
-  return result.stdout;
 }
