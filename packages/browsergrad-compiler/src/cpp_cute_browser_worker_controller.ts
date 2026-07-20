@@ -38,6 +38,13 @@ import {
   CPP_CUTE_BROWSER_WORKER_TRANSFER_PROTOCOL,
   type CppCuteBrowserWorkerTransferMessage,
 } from "./cpp_cute_browser_worker_transfer.js";
+import { unwrapVerifiedCppCuteBrowserVfsInstallation } from
+  "./cpp_cute_browser_asset_installation.js";
+import {
+  executeCppCuteBrowserPackageWasmVerifier,
+  inspectObservedCppCuteBrowserPackageWasmConformance,
+  unwrapObservedCppCuteBrowserPackageWasmConformance,
+} from "./cpp_cute_browser_wasm_verifier_controller.js";
 
 export { CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL };
 export type {
@@ -82,12 +89,14 @@ export interface ObservedCppCuteBrowserWorkerExecution {
   readonly requestId: string;
   readonly workerModuleSha256: string;
   readonly invocationNonceSha256: string;
+  readonly verifierEvidenceRegionSha256: string;
   readonly hostElapsedMicroseconds: WireU64;
   readonly acceptedTerminalMessages: "1";
   readonly workerExecutionObserved: true;
   readonly workerLifecycle: "terminate-called-not-reused-next-invocation-creates-replacement";
   readonly blobUrlRevoked: true;
   readonly loweringAuthorityMinted: false;
+  readonly releaseReady: false;
 }
 
 export interface ObservedCppCuteBrowserWorkerExecutionRecord {
@@ -118,6 +127,11 @@ export interface CppCuteBrowserWorkerTestSimulation {
 export interface ExecuteCppCuteBrowserWorkerOptions {
   readonly signal?: AbortSignal;
 }
+
+export type ExecuteCppCuteBrowserWorkerInput = Omit<
+  PrepareCppCuteBrowserPackageInvocationInput,
+  "observedWasmConformance"
+>;
 
 export type CppCuteBrowserWorkerControllerErrorCode =
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-INVALID"
@@ -165,6 +179,7 @@ interface InvocationAdapter {
   readonly profileHash: string;
   readonly requestId: string;
   readonly invocationNonceSha256: string;
+  readonly verifierEvidenceRegionSha256: string;
   readonly workerModuleSha256: string;
   readonly workerModuleByteLength: number;
   readonly maxWallTimeMs: number;
@@ -182,6 +197,7 @@ interface LaunchCopies {
   readonly invocationBytes: Uint8Array;
   readonly profileRegionBytes: Uint8Array;
   readonly requestRegionBytes: Uint8Array;
+  readonly verifierEvidenceRegionBytes: Uint8Array;
   readonly assetManifestBytes: Uint8Array;
   readonly assets: readonly { readonly assetId: string; readonly bytes: Uint8Array }[];
   readonly sourceSnapshots: readonly { readonly virtualPath: string; readonly bytes: Uint8Array }[];
@@ -213,7 +229,7 @@ const TEST_EXECUTIONS = new WeakMap<object, CppCuteBrowserWorkerTestSimulationRe
  * it cannot supply JavaScript bytes or platform callbacks.
  */
 export async function executeCppCuteBrowserWorker(
-  input: PrepareCppCuteBrowserPackageInvocationInput,
+  input: ExecuteCppCuteBrowserWorkerInput,
   options: ExecuteCppCuteBrowserWorkerOptions = {},
 ): Promise<ObservedCppCuteBrowserWorkerExecution> {
   const platform = getCppCuteBrowserCapturedPlatform();
@@ -225,7 +241,22 @@ export async function executeCppCuteBrowserWorker(
   }
   const signal = normalizeOptions(options);
   throwIfAborted(signal);
-  const prepared = await prepareCppCuteBrowserPackageInvocation(input);
+  const values = exactDataRecord(input, "$.input", [
+    "profile", "assetManifest", "vfsInstallation", "request", "runtimeAbiAsset",
+  ]) as unknown as ExecuteCppCuteBrowserWorkerInput;
+  const installation = unwrapVerifiedCppCuteBrowserVfsInstallation(values.vfsInstallation);
+  const observedWasmConformance = await executeCppCuteBrowserPackageWasmVerifier(
+    {
+      assetSet: installation.assetSet,
+      runtimeAbiAsset: values.runtimeAbiAsset,
+    },
+    signal === undefined ? {} : { signal },
+  );
+  throwIfAborted(signal);
+  const prepared = await prepareCppCuteBrowserPackageInvocation({
+    ...values,
+    observedWasmConformance,
+  });
   return executeWithPlatform(
     packageInvocationAdapter(prepared),
     platform,
@@ -255,6 +286,7 @@ export interface PrepareCppCuteBrowserWorkerControllerTestInvocationInput {
   readonly invocationBytes: Uint8Array;
   readonly profileRegionBytes: Uint8Array;
   readonly requestRegionBytes: Uint8Array;
+  readonly verifierEvidenceRegionBytes: Uint8Array;
   readonly assetManifestBytes: Uint8Array;
   readonly assets: readonly { readonly assetId: string; readonly bytes: Uint8Array }[];
   readonly sourceSnapshots: readonly { readonly virtualPath: string; readonly bytes: Uint8Array }[];
@@ -275,7 +307,8 @@ export async function __prepareCppCuteBrowserWorkerControllerInvocationForTest(
 ): Promise<PreparedCppCuteBrowserWorkerControllerTestInvocation> {
   const values = exactDataRecord(input, "$.input", [
     "invocationId", "profileHash", "requestId", "invocationNonceSha256", "workerModuleBytes",
-    "invocationBytes", "profileRegionBytes", "requestRegionBytes", "assetManifestBytes", "assets",
+    "invocationBytes", "profileRegionBytes", "requestRegionBytes",
+    "verifierEvidenceRegionBytes", "assetManifestBytes", "assets",
     "sourceSnapshots", "maxWallTimeMs", "expectedControlBytes", "expectedArtifactBytes",
   ]);
   const invocationId = pattern(values["invocationId"], INVOCATION_ID, "$.input.invocationId");
@@ -288,6 +321,10 @@ export async function __prepareCppCuteBrowserWorkerControllerInvocationForTest(
     invocationBytes: snapshotBytes(values["invocationBytes"], "$.input.invocationBytes"),
     profileRegionBytes: snapshotBytes(values["profileRegionBytes"], "$.input.profileRegionBytes"),
     requestRegionBytes: snapshotBytes(values["requestRegionBytes"], "$.input.requestRegionBytes"),
+    verifierEvidenceRegionBytes: snapshotBytes(
+      values["verifierEvidenceRegionBytes"],
+      "$.input.verifierEvidenceRegionBytes",
+    ),
     assetManifestBytes: snapshotBytes(
       values["assetManifestBytes"],
       "$.input.assetManifestBytes",
@@ -299,6 +336,9 @@ export async function __prepareCppCuteBrowserWorkerControllerInvocationForTest(
   const expectedArtifact = snapshotBytes(values["expectedArtifactBytes"], "$.input.expectedArtifactBytes");
   const maxWallTimeMs = positiveInteger(values["maxWallTimeMs"], "$.input.maxWallTimeMs");
   const workerModuleSha256 = await sha256Hex(workerModuleBytes);
+  const verifierEvidenceRegionSha256 = await sha256Hex(
+    launchCopies.verifierEvidenceRegionBytes,
+  );
   let started = false;
   let consumed = false;
   const adapter: InvocationAdapter = Object.freeze({
@@ -307,6 +347,7 @@ export async function __prepareCppCuteBrowserWorkerControllerInvocationForTest(
     profileHash,
     requestId,
     invocationNonceSha256: nonce,
+    verifierEvidenceRegionSha256,
     workerModuleSha256,
     workerModuleByteLength: workerModuleBytes.byteLength,
     maxWallTimeMs,
@@ -371,6 +412,7 @@ function packageInvocationAdapter(
     profileHash: prepared.profileHash,
     requestId: prepared.requestId,
     invocationNonceSha256: prepared.invocationNonceSha256,
+    verifierEvidenceRegionSha256: prepared.verifierEvidenceRegionSha256,
     workerModuleSha256: prepared.workerModuleSha256,
     workerModuleByteLength: prepared.workerModuleByteLength,
     maxWallTimeMs: prepared.maxWallTimeMs,
@@ -584,9 +626,18 @@ async function executeWithPlatform(
             const frame = packageRecord.validatedResultFrame;
             const lineage = packageRecord.lineage;
             const packageInvocation = lineage.invocation;
+            let verifierInspection: ReturnType<
+              typeof inspectObservedCppCuteBrowserPackageWasmConformance
+            >;
             let frameRecord: ReturnType<typeof unwrapValidatedCppCuteBrowserWorkerResultFrame>;
             try {
               frameRecord = unwrapValidatedCppCuteBrowserWorkerResultFrame(frame);
+              verifierInspection = inspectObservedCppCuteBrowserPackageWasmConformance(
+                lineage.observedWasmConformance,
+              );
+              unwrapObservedCppCuteBrowserPackageWasmConformance(
+                lineage.observedWasmConformance,
+              );
             } catch (cause) {
               throw controllerError(
                 "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL",
@@ -611,6 +662,11 @@ async function executeWithPlatform(
                 packageInvocation.profileHash !== invocation.profileHash ||
                 packageInvocation.requestId !== invocation.requestId ||
                 packageInvocation.invocationNonceSha256 !== invocation.invocationNonceSha256 ||
+                packageInvocation.verifierEvidenceId !== lineage.verifierEvidenceId ||
+                packageInvocation.verifierEvidenceRegionSha256 !==
+                  lineage.verifierEvidenceRegionSha256 ||
+                verifierInspection.evidenceId !== lineage.verifierEvidenceId ||
+                verifierInspection.releaseReady !== false ||
                 packageInvocation.worker.moduleSha256 !== invocation.workerModuleSha256 ||
                 packageInvocation.worker.moduleByteLength !== String(invocation.workerModuleByteLength) ||
                 lineage.workerBundle.sha256 !== invocation.workerModuleSha256 ||
@@ -649,6 +705,8 @@ async function executeWithPlatform(
               workerModuleSha256: invocation.workerModuleSha256,
               invocationNonceSha256: invocation.invocationNonceSha256,
               validationId: validated.validationId,
+              verifierEvidenceId: lineage.verifierEvidenceId,
+              verifierEvidenceRegionSha256: lineage.verifierEvidenceRegionSha256,
               hostElapsedMicroseconds: elapsed,
             });
             const execution = Object.freeze({
@@ -659,12 +717,14 @@ async function executeWithPlatform(
               requestId: invocation.requestId,
               workerModuleSha256: invocation.workerModuleSha256,
               invocationNonceSha256: invocation.invocationNonceSha256,
+              verifierEvidenceRegionSha256: lineage.verifierEvidenceRegionSha256,
               hostElapsedMicroseconds: elapsed,
               acceptedTerminalMessages: "1",
               workerExecutionObserved: true,
               workerLifecycle: "terminate-called-not-reused-next-invocation-creates-replacement",
               blobUrlRevoked: true,
               loweringAuthorityMinted: false,
+              releaseReady: false,
             }) as ObservedCppCuteBrowserWorkerExecution;
             LIVE_EXECUTIONS.set(execution, Object.freeze({
               validatedResultFrame: frame,
@@ -764,9 +824,11 @@ function createLaunchMessage(
     protocol: CPP_CUTE_BROWSER_WORKER_TRANSFER_PROTOCOL,
     invocationId: invocation.invocationId,
     invocationNonceSha256: invocation.invocationNonceSha256,
+    verifierEvidenceRegionSha256: invocation.verifierEvidenceRegionSha256,
     invocationBytes: launch.invocationBytes,
     profileRegionBytes: launch.profileRegionBytes,
     requestRegionBytes: launch.requestRegionBytes,
+    verifierEvidenceRegionBytes: launch.verifierEvidenceRegionBytes,
     assetManifestBytes: launch.assetManifestBytes,
     assets: launch.assets,
     sourceSnapshots: launch.sourceSnapshots,
@@ -778,6 +840,7 @@ function transferList(message: CppCuteBrowserWorkerTransferMessage): ArrayBuffer
     message.invocationBytes.buffer as ArrayBuffer,
     message.profileRegionBytes.buffer as ArrayBuffer,
     message.requestRegionBytes.buffer as ArrayBuffer,
+    message.verifierEvidenceRegionBytes.buffer as ArrayBuffer,
     message.assetManifestBytes.buffer as ArrayBuffer,
     ...message.assets.map((asset) => asset.bytes.buffer as ArrayBuffer),
     ...message.sourceSnapshots.map((source) => source.bytes.buffer as ArrayBuffer),
@@ -946,6 +1009,7 @@ function copyLaunch(value: LaunchCopies): LaunchCopies {
     invocationBytes: new Uint8Array(value.invocationBytes),
     profileRegionBytes: new Uint8Array(value.profileRegionBytes),
     requestRegionBytes: new Uint8Array(value.requestRegionBytes),
+    verifierEvidenceRegionBytes: new Uint8Array(value.verifierEvidenceRegionBytes),
     assetManifestBytes: new Uint8Array(value.assetManifestBytes),
     assets: value.assets.map((asset) => ({
       assetId: asset.assetId,

@@ -51,6 +51,7 @@ interface MockInvocationValue {
   readonly invocationNonceSha256: string;
   readonly profileHash: string;
   readonly requestId: string;
+  readonly verifierEvidenceRegionSha256: string;
 }
 
 interface MockInvocationRecord {
@@ -67,8 +68,10 @@ interface MockInvocationRecord {
   readonly invocationBytes: Uint8Array;
   readonly profileBytes: Uint8Array;
   readonly requestBytes: Uint8Array;
+  readonly verifierEvidenceBytes: Uint8Array;
   readonly clangWasmBytes: Uint8Array;
-  readonly rawWasmConformance: {
+  readonly verifierEvidence: {
+    readonly wasmAssetId: string;
     readonly wasmSha256: string;
     readonly wasmByteLength: number;
   };
@@ -96,6 +99,7 @@ const downstream = vi.hoisted(() => ({
   createImports: vi.fn<(mount: object) => object>(),
   prepareInputFrame: vi.fn<(invocation: object) => Promise<object>>(),
   nextMountOrdinal: 1,
+  rawInspectorCalls: 0,
 }));
 
 function required<T>(map: WeakMap<object, T>, value: unknown, label: string): T {
@@ -230,6 +234,10 @@ vi.mock("../../src/cpp_cute_browser_worker_protocol.js", async (importOriginal) 
       new Uint8Array(required(downstream.invocationRecords, invocation, "invocation").profileBytes),
     canonicalCppCuteBrowserWorkerRequestRegionBytes: (invocation: object) =>
       new Uint8Array(required(downstream.invocationRecords, invocation, "invocation").requestBytes),
+    canonicalCppCuteBrowserWorkerVerifierEvidenceRegionBytes: (invocation: object) =>
+      new Uint8Array(
+        required(downstream.invocationRecords, invocation, "invocation").verifierEvidenceBytes,
+      ),
     copyCppCuteBrowserWorkerClangWasmBytes: (invocation: object) =>
       new Uint8Array(required(downstream.invocationRecords, invocation, "invocation").clangWasmBytes),
     copyCppCuteBrowserWorkerSourceSnapshots: (invocation: object) =>
@@ -247,7 +255,8 @@ vi.mock("../../src/cpp_cute_browser_worker_protocol.js", async (importOriginal) 
           readonly profileHash: string;
           readonly sourceFileCount: number;
         };
-        readonly rawWasmConformance: {
+        readonly verifierEvidence: {
+          readonly wasmAssetId: string;
           readonly wasmSha256: string;
           readonly wasmByteLength: number;
         };
@@ -292,8 +301,9 @@ vi.mock("../../src/cpp_cute_browser_worker_protocol.js", async (importOriginal) 
         requestBytes: canonicalJsonBytes(
           required(downstream.requestRecords, input.request, "request").request,
         ),
+        verifierEvidenceBytes: new Uint8Array(0),
         clangWasmBytes: new Uint8Array(clangWasmBytes),
-        rawWasmConformance: input.rawWasmConformance,
+        verifierEvidence: input.verifierEvidence,
       });
       return invocation;
     },
@@ -403,10 +413,34 @@ vi.mock("../../src/cpp_cute_browser_wasm_inspection.js", async (importOriginal) 
   return {
     ...actual,
     // Deliberate boundary mock: no pinned, reviewed Clang Wasm exists yet.
-    verifyCppCuteBrowserWasmConformance: async (bytes: Uint8Array) => Object.freeze({
-      wasmSha256: await sha256Hex(bytes),
-      wasmByteLength: bytes.byteLength,
-    }),
+    verifyCppCuteBrowserWasmConformance: async () => {
+      downstream.rawInspectorCalls += 1;
+      throw new Error("Worker reconstruction must not rerun the raw Wasm inspector");
+    },
+  };
+});
+
+vi.mock("../../src/cpp_cute_browser_wasm_verifier_evidence.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../src/cpp_cute_browser_wasm_verifier_evidence.js")
+  >();
+  return {
+    ...actual,
+    decodeCppCuteBrowserWasmVerifierEvidence: async (
+      bytes: Uint8Array,
+      _binding: unknown,
+      expectedRegionSha256: string,
+    ) => {
+      if (expectedRegionSha256 !== VERIFIER_EVIDENCE_REGION_SHA256) {
+        throw new Error("mock verifier evidence region hash mismatch");
+      }
+      const value = parseJsonBytes(bytes);
+      return Object.freeze({
+        wasmAssetId: "clang-wasm",
+        wasmSha256: String(value["wasmSha256"]),
+        wasmByteLength: Number(value["wasmByteLength"]),
+      });
+    },
   };
 });
 
@@ -445,6 +479,10 @@ const INVOCATION_ID = `bg.cpp.browser-worker-invocation.sha256.${INVOCATION_HASH
 const REQUEST_ID = `bg.cpp.frontend-request.sha256.${REQUEST_HASH}`;
 const SOURCE_BYTES = new TextEncoder().encode("auto layout = make_layout(Int<2>{});");
 const CLANG_WASM_BYTES = Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0, 17);
+const CLANG_WASM_SHA256 =
+  "404172d9edfce5205698e862ceff83120d628a4c4fb43d5371b11c6b9b4a146e";
+const VERIFIER_EVIDENCE_REGION_SHA256 =
+  "034e9ba4024a4d5d411c4ca7c0fd94cbdacda6fdd32686383ceb28385b1db04b";
 const HEADER_PACK_BYTES = Uint8Array.of(66, 71, 86, 70, 83, 1, 2, 3);
 const INPUT_FRAME_BYTES = new TextEncoder().encode("BGCCABI1-worker-transfer-integration");
 
@@ -469,6 +507,7 @@ beforeEach(async () => {
     frameByteLength: INPUT_FRAME_BYTES.byteLength,
   }));
   downstream.nextMountOrdinal = 1;
+  downstream.rawInspectorCalls = 0;
 });
 
 describe("C++/CuTe browser Worker transfer boundary", () => {
@@ -573,7 +612,7 @@ describe("C++/CuTe browser Worker transfer boundary", () => {
     const taken = takeCppCuteBrowserWorkerTransfer(prepared);
     const views = messageByteViews(taken.message);
 
-    expect(taken.transferList).toHaveLength(4 + 2 + 1);
+    expect(taken.transferList).toHaveLength(5 + 2 + 1);
     expect(new Set(taken.transferList).size).toBe(taken.transferList.length);
     expect(taken.transferList).toEqual(views.map((view) => view.buffer));
     for (const view of views) {
@@ -597,10 +636,11 @@ describe("C++/CuTe browser Worker transfer boundary", () => {
     );
   });
 
-  it("reconstructs and adopts local authorities with raw-Wasm conformance mocked, not execution proof", async () => {
+  it("reconstructs host verifier evidence without rerunning the raw-Wasm inspector", async () => {
     const taken = takeEnvironment();
     const transferredViews = messageByteViews(taken.message);
     const realmInput = await reconstructCppCuteBrowserWorkerTransfer(taken.message);
+    expect(downstream.rawInspectorCalls).toBe(0);
 
     expect(transferredViews.every((view) => view.byteLength === 0)).toBe(true);
     expect(realmInput).toMatchObject({
@@ -997,6 +1037,7 @@ function createEnvironment(): TestEnvironment {
     invocationNonceSha256: NONCE,
     profileHash: PROFILE_HASH,
     requestId: REQUEST_ID,
+    verifierEvidenceRegionSha256: VERIFIER_EVIDENCE_REGION_SHA256,
   };
   const sourceSnapshots = [{
     virtualPath: "/src/main.cu",
@@ -1046,9 +1087,14 @@ function createEnvironment(): TestEnvironment {
     invocationBytes: canonicalJsonBytes(invocationValue as unknown as JsonValue),
     profileBytes: canonicalJsonBytes(profileValue),
     requestBytes: canonicalJsonBytes(requestValue),
+    verifierEvidenceBytes: canonicalJsonBytes({
+      wasmSha256: CLANG_WASM_SHA256,
+      wasmByteLength: CLANG_WASM_BYTES.byteLength,
+    }),
     clangWasmBytes: new Uint8Array(CLANG_WASM_BYTES),
-    rawWasmConformance: {
-      wasmSha256: "d".repeat(64),
+    verifierEvidence: {
+      wasmAssetId: "clang-wasm",
+      wasmSha256: CLANG_WASM_SHA256,
       wasmByteLength: CLANG_WASM_BYTES.byteLength,
     },
   });
@@ -1071,9 +1117,11 @@ function mutableMessage(
     protocol: message.protocol,
     invocationId: message.invocationId,
     invocationNonceSha256: message.invocationNonceSha256,
+    verifierEvidenceRegionSha256: message.verifierEvidenceRegionSha256,
     invocationBytes: new Uint8Array(message.invocationBytes),
     profileRegionBytes: new Uint8Array(message.profileRegionBytes),
     requestRegionBytes: new Uint8Array(message.requestRegionBytes),
+    verifierEvidenceRegionBytes: new Uint8Array(message.verifierEvidenceRegionBytes),
     assetManifestBytes: new Uint8Array(message.assetManifestBytes),
     assets: message.assets.map((asset) => ({
       assetId: asset.assetId,
@@ -1091,6 +1139,7 @@ function messageByteViews(message: CppCuteBrowserWorkerTransferMessage): Uint8Ar
     message.invocationBytes,
     message.profileRegionBytes,
     message.requestRegionBytes,
+    message.verifierEvidenceRegionBytes,
     message.assetManifestBytes,
     ...message.assets.map((asset) => asset.bytes),
     ...message.sourceSnapshots.map((source) => source.bytes),

@@ -163,6 +163,7 @@ async function prepareTestInvocation(
     invocationBytes: new Uint8Array([10]),
     profileRegionBytes: new Uint8Array([11]),
     requestRegionBytes: new Uint8Array([12]),
+    verifierEvidenceRegionBytes: new Uint8Array([16]),
     assetManifestBytes: new Uint8Array([13]),
     assets: [{ assetId: "clang-wasm", bytes: new Uint8Array([14]) }],
     sourceSnapshots: [{ virtualPath: "/main.cu", bytes: new Uint8Array([15]) }],
@@ -278,7 +279,7 @@ describe("C++/CuTe host-owned browser Worker controller", () => {
       bytes: new Uint8Array([14]),
     });
     expect(launch.sourceSnapshots[0]?.bytes).toEqual(new Uint8Array([15]));
-    expect(harness.worker.transfer).toHaveLength(6);
+    expect(harness.worker.transfer).toHaveLength(7);
 
     harness.worker.emitMessage(terminalMessage());
     harness.worker.emitMessage(terminalMessage());

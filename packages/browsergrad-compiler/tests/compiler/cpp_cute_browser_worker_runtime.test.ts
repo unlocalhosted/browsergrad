@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 interface InvocationState {
   record: {
     readonly profile: object;
-    readonly rawWasmConformance: {
+    readonly verifierEvidence: {
       readonly wasmSha256: string;
       readonly wasmByteLength: number;
     };
@@ -48,7 +48,7 @@ interface RealmInputRecord {
   readonly request: object;
   readonly vfsInstallation: object;
   readonly runtimeAbiAsset: object;
-  readonly rawWasmConformance: object;
+  readonly verifierEvidence: object;
   readonly invocation: object;
   readonly inputFrame: object;
   readonly vfsMount: object;
@@ -403,7 +403,7 @@ async function runtimeFixture(
   const invocationState: InvocationState = {
     record: {
       profile: activeProfileAuthority,
-      rawWasmConformance: {
+      verifierEvidence: {
         wasmSha256: expectedClangWasmSha256,
         wasmByteLength: CLANG_WASM_BYTES.byteLength,
       },
@@ -448,7 +448,7 @@ async function runtimeFixture(
     request: Object.freeze({}),
     vfsInstallation: Object.freeze({}),
     runtimeAbiAsset: Object.freeze({}),
-    rawWasmConformance: Object.freeze({}),
+    verifierEvidence: Object.freeze({}),
     invocation,
     inputFrame,
     vfsMount,

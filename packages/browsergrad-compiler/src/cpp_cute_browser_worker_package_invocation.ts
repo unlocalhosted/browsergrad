@@ -27,6 +27,17 @@ import {
 import { unwrapPreparedCppCuteFrontendRequest } from "./cpp_cute_frontend_request.js";
 import { unwrapPreparedCppCuteFrontendRequestBinding } from "./cpp_cute_frontend_request_binding.js";
 import { unwrapPreparedCppCuteBrowserFrontendProfile } from "./cpp_cute_frontend_profile.js";
+import {
+  unwrapVerifiedCppCuteBrowserVfsInstallation,
+} from "./cpp_cute_browser_asset_installation.js";
+import {
+  prepareCppCuteBrowserWasmVerifierEvidence,
+} from "./cpp_cute_browser_wasm_verifier_evidence.js";
+import {
+  inspectObservedCppCuteBrowserPackageWasmConformance,
+  unwrapObservedCppCuteBrowserPackageWasmConformance,
+  type ObservedCppCuteBrowserPackageWasmConformance,
+} from "./cpp_cute_browser_wasm_verifier_controller.js";
 
 const INPUT_KEYS = Object.freeze([
   "profile",
@@ -34,7 +45,7 @@ const INPUT_KEYS = Object.freeze([
   "vfsInstallation",
   "request",
   "runtimeAbiAsset",
-  "rawWasmConformance",
+  "observedWasmConformance",
 ] as const);
 const NATIVE_GET_OWN_PROPERTY_DESCRIPTORS = Object.getOwnPropertyDescriptors;
 const NATIVE_GET_PROTOTYPE_OF = Object.getPrototypeOf;
@@ -51,8 +62,10 @@ const VALIDATED_PACKAGE_RESULTS =
 
 export type PrepareCppCuteBrowserPackageInvocationInput = Omit<
   PrepareCppCuteBrowserWorkerInvocationInput,
-  "workerModuleBytes"
->;
+  "workerModuleBytes" | "verifierEvidence"
+> & {
+  readonly observedWasmConformance: ObservedCppCuteBrowserPackageWasmConformance;
+};
 
 declare const preparedPackageInvocationBrand: unique symbol;
 
@@ -67,6 +80,7 @@ export interface PreparedCppCuteBrowserPackageInvocation {
   readonly profileHash: string;
   readonly requestId: string;
   readonly invocationNonceSha256: string;
+  readonly verifierEvidenceRegionSha256: string;
   readonly workerModuleSha256: string;
   readonly workerModuleByteLength: number;
   readonly maxWallTimeMs: number;
@@ -87,6 +101,9 @@ export interface CppCuteBrowserPackageInvocationLineage {
   readonly invocationHash: string;
   readonly invocation: CppCuteBrowserWorkerInvocationV1;
   readonly workerBundle: CppCuteBrowserWorkerBundleInspection;
+  readonly observedWasmConformance: ObservedCppCuteBrowserPackageWasmConformance;
+  readonly verifierEvidenceId: string;
+  readonly verifierEvidenceRegionSha256: string;
 }
 
 declare const validatedPackageResultBrand: unique symbol;
@@ -156,10 +173,24 @@ export async function prepareCppCuteBrowserPackageInvocation(
     ...profileRecord.profile.extractionLimits,
     ...requestRecord.request.limits,
   };
+  const installation = unwrapVerifiedCppCuteBrowserVfsInstallation(values.vfsInstallation);
+  const verifierEvidence = await prepareCppCuteBrowserWasmVerifierEvidence(
+    values.observedWasmConformance,
+    {
+      assetSet: installation.assetSet,
+      assetManifest: values.assetManifest,
+      runtimeAbiAsset: values.runtimeAbiAsset,
+    },
+  );
   const bundle = await verifyCppCuteBrowserWorkerBundle();
   const inspection = inspectVerifiedCppCuteBrowserWorkerBundle(bundle);
   const invocation = await prepareCppCuteBrowserWorkerInvocation({
-    ...values,
+    profile: values.profile,
+    assetManifest: values.assetManifest,
+    vfsInstallation: values.vfsInstallation,
+    request: values.request,
+    runtimeAbiAsset: values.runtimeAbiAsset,
+    verifierEvidence,
     workerModuleBytes: copyVerifiedCppCuteBrowserWorkerBundleBytes(bundle),
   });
   const invocationRecord = unwrapPreparedCppCuteBrowserWorkerInvocation(invocation);
@@ -167,6 +198,9 @@ export async function prepareCppCuteBrowserPackageInvocation(
     invocationHash: invocation.invocationHash,
     invocation: invocationRecord.invocation,
     workerBundle: inspection,
+    observedWasmConformance: values.observedWasmConformance,
+    verifierEvidenceId: verifierEvidence.sourceEvidenceId,
+    verifierEvidenceRegionSha256: verifierEvidence.regionSha256,
   }) as CppCuteBrowserPackageInvocationLineage;
   let transfer: PreparedCppCuteBrowserWorkerTransfer;
   try {
@@ -181,6 +215,7 @@ export async function prepareCppCuteBrowserPackageInvocation(
     profileHash: invocation.profileHash,
     requestId: invocation.requestId,
     invocationNonceSha256: invocationRecord.invocation.invocationNonceSha256,
+    verifierEvidenceRegionSha256: invocationRecord.invocation.verifierEvidenceRegionSha256,
     workerModuleSha256: inspection.sha256,
     workerModuleByteLength: inspection.byteLength,
     maxWallTimeMs: effectiveLimits.maxWallTimeMs,
@@ -325,7 +360,7 @@ function exactInput(
   if (!validKeys) {
     invalid(
       "$.input",
-      "expected exactly fields profile, assetManifest, vfsInstallation, request, runtimeAbiAsset, rawWasmConformance",
+      "expected exactly fields profile, assetManifest, vfsInstallation, request, runtimeAbiAsset, observedWasmConformance",
     );
   }
   const result = nativeObjectCreate(null) as Record<string, unknown>;
@@ -383,6 +418,23 @@ function validateProtocolResultLineage(
   const worker = lineage.workerBundle;
   const manifest = frameRecord.assetManifest;
   const request = requestBindingRecord.request;
+  let observedInspection: ReturnType<
+    typeof inspectObservedCppCuteBrowserPackageWasmConformance
+  >;
+  try {
+    observedInspection = inspectObservedCppCuteBrowserPackageWasmConformance(
+      lineage.observedWasmConformance,
+    );
+    unwrapObservedCppCuteBrowserPackageWasmConformance(
+      lineage.observedWasmConformance,
+    );
+  } catch (cause) {
+    invalid(
+      "$.lineage.observedWasmConformance",
+      "package lineage lost its exact host verifier authority",
+      { cause },
+    );
+  }
   requireLineage(
     invocationRecord.invocation === invocation,
     "$.lineage.invocation",
@@ -433,6 +485,13 @@ function validateProtocolResultLineage(
     invocation.invocationNonceSha256 === prepared.invocationNonceSha256,
     "$.lineage.invocation.invocationNonceSha256",
     "compact invocation nonce differs from the package invocation",
+  );
+  requireLineage(
+    invocation.verifierEvidenceId === lineage.verifierEvidenceId &&
+      invocation.verifierEvidenceRegionSha256 === lineage.verifierEvidenceRegionSha256 &&
+      observedInspection.evidenceId === lineage.verifierEvidenceId,
+    "$.lineage.invocation.verifierEvidenceId",
+    "compact invocation verifier evidence differs from the exact host authority",
   );
   requireLineage(
     manifest.profileHash === invocation.profileHash &&

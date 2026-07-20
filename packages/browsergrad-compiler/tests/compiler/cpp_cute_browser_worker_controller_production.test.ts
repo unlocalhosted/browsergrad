@@ -11,6 +11,9 @@ const production = vi.hoisted(() => {
   const manifestId = `bg.cpp.browser-asset-manifest.sha256.${"9".repeat(64)}`;
   const manifestSha256 = "a".repeat(64);
   const assetSetSha256 = "b".repeat(64);
+  const verifierEvidenceId =
+    `bg.cpp.browser-wasm-verifier-conformance.sha256.${"c".repeat(64)}`;
+  const verifierEvidenceRegionSha256 = "d".repeat(64);
   const workerBytes = new TextEncoder().encode("export {}; // package Worker fixture");
   const listeners = {
     message: new Set<(event: { readonly data: unknown }) => void>(),
@@ -21,12 +24,18 @@ const production = vi.hoisted(() => {
     invocationId,
     nonce,
     workerBytes,
+    assetSet: Object.freeze({ assetSet: true }),
+    observedWasmConformance: Object.freeze({
+      evidenceId: verifierEvidenceId,
+      releaseReady: false,
+    }),
     prepared: Object.freeze({
       authority: "package-owned-worker-invocation",
       invocationId,
       profileHash,
       requestId,
       invocationNonceSha256: nonce,
+      verifierEvidenceRegionSha256,
       workerModuleSha256: "",
       workerModuleByteLength: workerBytes.byteLength,
       maxWallTimeMs: 10_000,
@@ -55,6 +64,8 @@ const production = vi.hoisted(() => {
     manifestId,
     manifestSha256,
     assetSetSha256,
+    verifierEvidenceId,
+    verifierEvidenceRegionSha256,
     clonePackageResult: false,
     lineageMismatch: false,
     issuedPrepared: null as object | null,
@@ -62,6 +73,8 @@ const production = vi.hoisted(() => {
     lineage: null as Readonly<Record<string, unknown>> | null,
     listeners,
     prepareCalls: 0,
+    verifierCalls: 0,
+    packageInput: null as Record<string, unknown> | null,
     takeCalls: 0,
     validateCalls: 0,
     discards: [] as string[],
@@ -77,7 +90,7 @@ vi.mock("../../src/cpp_cute_browser_worker_package_invocation.js", async () => {
   return {
     prepareCppCuteBrowserPackageInvocation: async (input: Record<string, unknown>) => {
       production.prepareCalls += 1;
-      void input;
+      production.packageInput = input;
       const workerModuleSha256 = await sha256Hex(production.workerBytes);
       const prepared = Object.freeze({
         ...production.prepared,
@@ -91,6 +104,8 @@ vi.mock("../../src/cpp_cute_browser_worker_package_invocation.js", async () => {
         assetManifestSha256: production.manifestSha256,
         assetSetSha256: production.assetSetSha256,
         requestId: production.prepared.requestId,
+        verifierEvidenceId: production.verifierEvidenceId,
+        verifierEvidenceRegionSha256: production.verifierEvidenceRegionSha256,
         worker: Object.freeze({
           moduleSha256: workerModuleSha256,
           moduleByteLength: String(production.workerBytes.byteLength),
@@ -110,6 +125,9 @@ vi.mock("../../src/cpp_cute_browser_worker_package_invocation.js", async () => {
           workerExecutionObserved: false,
           releaseReady: false,
         }),
+        observedWasmConformance: production.observedWasmConformance,
+        verifierEvidenceId: production.verifierEvidenceId,
+        verifierEvidenceRegionSha256: production.verifierEvidenceRegionSha256,
       });
       production.packageResult = Object.freeze({
         authority: "package-owned-worker-result-validation",
@@ -137,9 +155,11 @@ vi.mock("../../src/cpp_cute_browser_worker_package_invocation.js", async () => {
             protocol: "browsergrad.compiler.cpp-cute.browser-worker-transfer@1",
             invocationId: production.invocationId,
             invocationNonceSha256: production.nonce,
+            verifierEvidenceRegionSha256: production.verifierEvidenceRegionSha256,
             invocationBytes: Uint8Array.of(1),
             profileRegionBytes: Uint8Array.of(2),
             requestRegionBytes: Uint8Array.of(3),
+            verifierEvidenceRegionBytes: Uint8Array.of(5),
             assetManifestBytes: Uint8Array.of(4),
             assets: Object.freeze([]),
             sourceSnapshots: Object.freeze([]),
@@ -240,6 +260,34 @@ vi.mock("../../src/cpp_cute_browser_worker_platform.js", () => ({
   }),
 }));
 
+vi.mock("../../src/cpp_cute_browser_asset_installation.js", () => ({
+  unwrapVerifiedCppCuteBrowserVfsInstallation: () => ({
+    assetSet: production.assetSet,
+  }),
+}));
+
+vi.mock("../../src/cpp_cute_browser_wasm_verifier_controller.js", () => ({
+  executeCppCuteBrowserPackageWasmVerifier: async (input: Record<string, unknown>) => {
+    production.verifierCalls += 1;
+    if (input["assetSet"] !== production.assetSet) {
+      throw new Error("compiler verifier did not use the exact VFS asset set");
+    }
+    return production.observedWasmConformance;
+  },
+  inspectObservedCppCuteBrowserPackageWasmConformance: (value: unknown) => {
+    if (value !== production.observedWasmConformance) {
+      throw new Error("unregistered observed verifier authority");
+    }
+    return value;
+  },
+  unwrapObservedCppCuteBrowserPackageWasmConformance: (value: unknown) => {
+    if (value !== production.observedWasmConformance) {
+      throw new Error("unregistered observed verifier authority");
+    }
+    return Object.freeze({});
+  },
+}));
+
 import {
   executeCppCuteBrowserWorker,
   unwrapObservedCppCuteBrowserWorkerExecution,
@@ -247,6 +295,8 @@ import {
 
 beforeEach(() => {
   production.prepareCalls = 0;
+  production.verifierCalls = 0;
+  production.packageInput = null;
   production.takeCalls = 0;
   production.validateCalls = 0;
   production.discards.length = 0;
@@ -272,7 +322,6 @@ describe("production package Worker controller composition", () => {
       vfsInstallation: Object.freeze({}),
       request: Object.freeze({}),
       runtimeAbiAsset: Object.freeze({}),
-      rawWasmConformance: Object.freeze({}),
     });
     const execution = await executeCppCuteBrowserWorker(input as never);
 
@@ -285,9 +334,13 @@ describe("production package Worker controller composition", () => {
       workerLifecycle: "terminate-called-not-reused-next-invocation-creates-replacement",
       blobUrlRevoked: true,
       loweringAuthorityMinted: false,
+      releaseReady: false,
     });
     expect(execution.evidenceId).toMatch(/^bg\.cpp\.browser-worker-execution\.sha256\.[0-9a-f]{64}$/u);
     expect(production.prepareCalls).toBe(1);
+    expect(production.verifierCalls).toBe(1);
+    expect(production.packageInput?.["observedWasmConformance"])
+      .toBe(production.observedWasmConformance);
     expect(production.takeCalls).toBe(1);
     expect(production.validateCalls).toBe(1);
     expect(production.discards).toEqual([]);
@@ -299,7 +352,8 @@ describe("production package Worker controller composition", () => {
     expect(record.validatedPackageResult).toBe(production.packageResult);
     expect(record.packageInvocationLineage).toBe(production.lineage);
     expect(Object.keys(record.packageInvocationLineage)).toEqual([
-      "invocationHash", "invocation", "workerBundle",
+      "invocationHash", "invocation", "workerBundle", "observedWasmConformance",
+      "verifierEvidenceId", "verifierEvidenceRegionSha256",
     ]);
     expect(record.packageInvocationLineage).not.toHaveProperty("profile");
     expect(record.packageInvocationLineage).not.toHaveProperty("assetManifest");
@@ -320,7 +374,6 @@ describe("production package Worker controller composition", () => {
       vfsInstallation: Object.freeze({}),
       request: Object.freeze({}),
       runtimeAbiAsset: Object.freeze({}),
-      rawWasmConformance: Object.freeze({}),
     } as never)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL",
       path: "$.validatedPackageResult",
@@ -335,10 +388,32 @@ describe("production package Worker controller composition", () => {
       vfsInstallation: Object.freeze({}),
       request: Object.freeze({}),
       runtimeAbiAsset: Object.freeze({}),
-      rawWasmConformance: Object.freeze({}),
     } as never)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-TERMINAL",
       path: "$.validatedResultFrame",
     });
+  });
+
+  it("rejects caller raw-Wasm or verifier evidence before running either Worker", async () => {
+    const base = {
+      profile: Object.freeze({}),
+      assetManifest: Object.freeze({}),
+      vfsInstallation: Object.freeze({}),
+      request: Object.freeze({}),
+      runtimeAbiAsset: Object.freeze({}),
+    };
+    for (const injected of [
+      { rawWasmConformance: Object.freeze({}) },
+      { observedWasmConformance: production.observedWasmConformance },
+      { verifierEvidence: Object.freeze({}) },
+    ]) {
+      await expect(executeCppCuteBrowserWorker({ ...base, ...injected } as never))
+        .rejects.toMatchObject({
+          code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-INVALID",
+          path: "$.input",
+        });
+    }
+    expect(production.verifierCalls).toBe(0);
+    expect(production.prepareCalls).toBe(0);
   });
 });

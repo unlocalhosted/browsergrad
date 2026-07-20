@@ -218,12 +218,12 @@ export async function prepareCppCuteBrowserWorkerRuntimeBinding(
         inputFrameSha256 !== realmInput.inputFrameSha256) {
       mismatch("$.input.inputFrame", "copied input-frame bytes differ from the opaque frame authority");
     }
-    if (!nativeRegexTest(SHA256_HEX, invocationRecord.rawWasmConformance.wasmSha256) ||
-        clangWasmBytes.byteLength !== invocationRecord.rawWasmConformance.wasmByteLength ||
-        clangWasmSha256 !== invocationRecord.rawWasmConformance.wasmSha256 ||
+    if (!nativeRegexTest(SHA256_HEX, invocationRecord.verifierEvidence.wasmSha256) ||
+        clangWasmBytes.byteLength !== invocationRecord.verifierEvidence.wasmByteLength ||
+        clangWasmSha256 !== invocationRecord.verifierEvidence.wasmSha256 ||
         clangWasmBytes.byteLength !== realmInput.clangWasmByteLength ||
         clangWasmSha256 !== realmInput.clangWasmSha256) {
-      mismatch("$.input.invocation.clangWasmBytes", "copied Clang-Wasm bytes differ from raw-Wasm conformance authority");
+      mismatch("$.input.invocation.clangWasmBytes", "copied Clang-Wasm bytes differ from host verifier evidence");
     }
 
     // Hashing yields. Recheck every live opaque authority before minting the

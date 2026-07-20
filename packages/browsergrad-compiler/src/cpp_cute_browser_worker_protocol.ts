@@ -36,9 +36,10 @@ import {
   type PreparedCppCuteBrowserRuntimeAbiManifest,
 } from "./cpp_cute_browser_runtime_abi.js";
 import {
-  unwrapPreparedCppCuteBrowserWasmConformance,
-  type PreparedCppCuteBrowserWasmConformance,
-} from "./cpp_cute_browser_wasm_inspection.js";
+  canonicalCppCuteBrowserWasmVerifierEvidenceBytes,
+  unwrapPreparedCppCuteBrowserWasmVerifierEvidence,
+  type PreparedCppCuteBrowserWasmVerifierEvidence,
+} from "./cpp_cute_browser_wasm_verifier_evidence.js";
 import {
   canonicalCppCuteFrontendArtifactResourceBytes,
   decodeCppCuteFrontendArtifact,
@@ -89,7 +90,8 @@ const INVOCATION_ID = /^bg\.cpp\.browser-worker-invocation\.sha256\.[0-9a-f]{64}
 const ASSET_MANIFEST_ID = /^bg\.cpp\.browser-assets\.sha256\.[0-9a-f]{64}$/u;
 const VFS_INSTALLATION_ID = /^bg\.cpp\.browser-vfs-installation\.sha256\.[0-9a-f]{64}$/u;
 const RUNTIME_ABI_MANIFEST_ID = /^bg\.cpp\.browser-runtime-abi\.sha256\.[0-9a-f]{64}$/u;
-const RAW_WASM_CONFORMANCE_ID = /^bg\.cpp\.browser-wasm-conformance\.sha256\.[0-9a-f]{64}$/u;
+const VERIFIER_EVIDENCE_ID =
+  /^bg\.cpp\.browser-wasm-verifier-conformance\.sha256\.[0-9a-f]{64}$/u;
 const FRONTEND_REQUEST_ID = /^bg\.cpp\.frontend-request\.sha256\.[0-9a-f]{64}$/u;
 const ENTRY_REQUEST_ID = /^bg\.cpp\.entry-request\.sha256\.[0-9a-f]{64}$/u;
 const ARTIFACT_ID = /^bg\.artifact\.cpp-cute-frontend\.sha256\.[0-9a-f]{64}$/u;
@@ -117,7 +119,8 @@ export interface CppCuteBrowserWorkerInvocationV1 extends JsonObject {
   readonly runtimeAbiManifestId: string;
   readonly runtimeAbiResourceSha256: string;
   readonly runtimeAbiContractSha256: string;
-  readonly rawWasmConformanceId: string;
+  readonly verifierEvidenceId: string;
+  readonly verifierEvidenceRegionSha256: string;
   readonly clangWasmSha256: string;
   readonly clangWasmByteLength: WireU64;
   readonly worker: JsonObject & {
@@ -150,7 +153,7 @@ export interface PreparedCppCuteBrowserWorkerInvocation {
   readonly profileHash: string;
   readonly requestId: string;
   readonly entryRequestId: string;
-  readonly rawWasmConformanceId: string;
+  readonly verifierEvidenceId: string;
 }
 
 export interface PrepareCppCuteBrowserWorkerInvocationInput {
@@ -159,7 +162,7 @@ export interface PrepareCppCuteBrowserWorkerInvocationInput {
   readonly vfsInstallation: VerifiedCppCuteBrowserVfsInstallation;
   readonly request: PreparedCppCuteFrontendRequest;
   readonly runtimeAbiAsset: VerifiedCppCuteBrowserRuntimeAbiAsset;
-  readonly rawWasmConformance: PreparedCppCuteBrowserWasmConformance;
+  readonly verifierEvidence: PreparedCppCuteBrowserWasmVerifierEvidence;
   /** Package-owned bytes; remote asset manifests cannot supply executable JS. */
   readonly workerModuleBytes: Uint8Array;
 }
@@ -175,7 +178,7 @@ export interface DecodeCppCuteBrowserWorkerInvocationInput {
   readonly vfsInstallation: VerifiedCppCuteBrowserVfsInstallation;
   readonly request: PreparedCppCuteFrontendRequest;
   readonly runtimeAbiAsset: VerifiedCppCuteBrowserRuntimeAbiAsset;
-  readonly rawWasmConformance: PreparedCppCuteBrowserWasmConformance;
+  readonly verifierEvidence: PreparedCppCuteBrowserWasmVerifierEvidence;
 }
 
 export interface PreparedCppCuteBrowserWorkerInvocationRecord {
@@ -185,7 +188,7 @@ export interface PreparedCppCuteBrowserWorkerInvocationRecord {
   readonly request: PreparedCppCuteFrontendRequest;
   readonly runtimeAbiAsset: VerifiedCppCuteBrowserRuntimeAbiAsset;
   readonly runtimeAbi: PreparedCppCuteBrowserRuntimeAbiManifest;
-  readonly rawWasmConformance: PreparedCppCuteBrowserWasmConformance;
+  readonly verifierEvidence: PreparedCppCuteBrowserWasmVerifierEvidence;
   readonly invocation: CppCuteBrowserWorkerInvocationV1;
 }
 
@@ -395,7 +398,7 @@ export async function prepareCppCuteBrowserWorkerInvocation(
 ): Promise<PreparedCppCuteBrowserWorkerInvocation> {
   const values = exactDataRecord(input, "$.input", [
     "profile", "assetManifest", "vfsInstallation", "request", "runtimeAbiAsset",
-    "rawWasmConformance", "workerModuleBytes",
+    "verifierEvidence", "workerModuleBytes",
   ]);
   return prepareWorkerInvocationAuthority(
     workerInvocationAuthorityInputs(values),
@@ -423,7 +426,7 @@ export async function decodeCppCuteBrowserWorkerInvocation(
   const decodedInvocation = parseCanonicalInvocation(canonicalBytes);
   const values = exactDataRecord(input, "$.input", [
     "profile", "assetManifest", "vfsInstallation", "request", "runtimeAbiAsset",
-    "rawWasmConformance",
+    "verifierEvidence",
   ]);
   return prepareWorkerInvocationAuthority(
     workerInvocationAuthorityInputs(values),
@@ -437,7 +440,7 @@ interface WorkerInvocationAuthorityInputs {
   readonly vfsInstallation: VerifiedCppCuteBrowserVfsInstallation;
   readonly request: PreparedCppCuteFrontendRequest;
   readonly runtimeAbiAsset: VerifiedCppCuteBrowserRuntimeAbiAsset;
-  readonly rawWasmConformance: PreparedCppCuteBrowserWasmConformance;
+  readonly verifierEvidence: PreparedCppCuteBrowserWasmVerifierEvidence;
 }
 
 type WorkerInvocationPreparationSource =
@@ -460,8 +463,8 @@ function workerInvocationAuthorityInputs(
     vfsInstallation: values["vfsInstallation"] as VerifiedCppCuteBrowserVfsInstallation,
     request: values["request"] as PreparedCppCuteFrontendRequest,
     runtimeAbiAsset: values["runtimeAbiAsset"] as VerifiedCppCuteBrowserRuntimeAbiAsset,
-    rawWasmConformance:
-      values["rawWasmConformance"] as PreparedCppCuteBrowserWasmConformance,
+    verifierEvidence:
+      values["verifierEvidence"] as PreparedCppCuteBrowserWasmVerifierEvidence,
   });
 }
 
@@ -475,7 +478,7 @@ async function prepareWorkerInvocationAuthority(
     vfsInstallation,
     request,
     runtimeAbiAsset,
-    rawWasmConformance,
+    verifierEvidence,
   } = input;
   const profileRecord = unwrapPreparedCppCuteBrowserFrontendProfile(profile);
   const manifestRecord = unwrapPreparedCppCuteBrowserAssetManifest(assetManifest);
@@ -484,7 +487,9 @@ async function prepareWorkerInvocationAuthority(
   const runtimeAbiAssetRecord = unwrapVerifiedCppCuteBrowserRuntimeAbiAsset(runtimeAbiAsset);
   const runtimeAbi = runtimeAbiAssetRecord.runtimeAbi;
   const runtimeAbiRecord = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(runtimeAbi);
-  unwrapPreparedCppCuteBrowserWasmConformance(rawWasmConformance);
+  const verifierEvidenceRecord = unwrapPreparedCppCuteBrowserWasmVerifierEvidence(
+    verifierEvidence,
+  );
   if (manifestRecord.profile !== profile || requestRecord.profile !== profile) {
     mismatch("$.profile", "manifest and request must derive from the exact prepared browser profile");
   }
@@ -510,9 +515,16 @@ async function prepareWorkerInvocationAuthority(
       runtimeManifest.body.runtimeAbiId !== deployment.compilerRuntime.runtimeAbiId) {
     mismatch("$.runtimeAbi", "runtime-ABI authority differs from the exact browser deployment profile");
   }
-  if (rawWasmConformance.runtimeAbiManifestId !== runtimeAbi.manifestId ||
-      rawWasmConformance.runtimeAbiContractSha256 !== runtimeAbi.contractSha256) {
-    mismatch("$.rawWasmConformance", "raw-Wasm conformance authority differs from the exact runtime ABI");
+  if (verifierEvidenceRecord.assetSet !== installationRecord.assetSet ||
+      verifierEvidenceRecord.assetManifest !== assetManifest ||
+      verifierEvidenceRecord.runtimeAbiAsset !== runtimeAbiAsset ||
+      verifierEvidenceRecord.runtimeAbi !== runtimeAbi) {
+    mismatch("$.verifierEvidence", "verifier evidence belongs to different exact input authorities");
+  }
+  if (verifierEvidence.runtimeAbiManifestId !== runtimeAbi.manifestId ||
+      verifierEvidence.runtimeAbiContractSha256 !== runtimeAbi.contractSha256 ||
+      verifierEvidence.runtimeAbiResourceSha256 !== runtimeAbi.resourceSha256) {
+    mismatch("$.verifierEvidence", "verifier evidence differs from the exact runtime ABI");
   }
   const profileRegionBytes = canonicalWorkerInputRegionBytes(
     profileRecord.profile,
@@ -531,9 +543,10 @@ async function prepareWorkerInvocationAuthority(
   );
   const clangAsset = manifestRecord.manifest.body.assets.find((asset) => asset.kind === "clang-extractor-wasm");
   if (clangAsset === undefined) mismatch("$.assetManifest", "asset manifest has no Clang-Wasm extractor");
-  if (clangAsset.sha256 !== rawWasmConformance.wasmSha256 ||
-      clangAsset.byteLength !== String(rawWasmConformance.wasmByteLength)) {
-    mismatch("$.rawWasmConformance", "raw-Wasm conformance authority differs from the exact manifest asset");
+  if (clangAsset.assetId !== verifierEvidence.wasmAssetId ||
+      clangAsset.sha256 !== verifierEvidence.wasmSha256 ||
+      clangAsset.byteLength !== String(verifierEvidence.wasmByteLength)) {
+    mismatch("$.verifierEvidence", "verifier evidence differs from the exact manifest asset");
   }
   const clangWasmBytes = copyVerifiedCppCuteBrowserAssetBytes(installationRecord.assetSet, clangAsset.assetId);
   if (await hashBytes(clangWasmBytes, "$.clangWasmBytes") !== clangAsset.sha256 ||
@@ -562,16 +575,7 @@ async function prepareWorkerInvocationAuthority(
   const invocationNonceSha256 = source.kind === "worker-decoded"
     ? source.decodedInvocation.invocationNonceSha256
     : await hashBytes(createSingleUseInvocationNonce(), "$.invocationNonce");
-  const rawWasmConformanceHash = await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.browser-wasm-conformance-identity.v1",
-    wasmSha256: rawWasmConformance.wasmSha256,
-    wasmByteLength: String(rawWasmConformance.wasmByteLength),
-    observedProjectionSha256: rawWasmConformance.observedProjectionSha256,
-    runtimeAbiManifestId: rawWasmConformance.runtimeAbiManifestId,
-    runtimeAbiContractSha256: rawWasmConformance.runtimeAbiContractSha256,
-  });
-  const rawWasmConformanceId =
-    `bg.cpp.browser-wasm-conformance.sha256.${rawWasmConformanceHash}`;
+  const verifierEvidenceId = verifierEvidence.sourceEvidenceId;
   const invocationBody = {
     schema: CPP_CUTE_BROWSER_WORKER_INVOCATION_SCHEMA,
     version: {
@@ -588,7 +592,8 @@ async function prepareWorkerInvocationAuthority(
     runtimeAbiManifestId: runtimeAbi.manifestId,
     runtimeAbiResourceSha256: runtimeAbi.resourceSha256,
     runtimeAbiContractSha256: runtimeAbi.contractSha256,
-    rawWasmConformanceId,
+    verifierEvidenceId,
+    verifierEvidenceRegionSha256: verifierEvidence.regionSha256,
     clangWasmSha256: clangAsset.sha256,
     clangWasmByteLength: clangAsset.byteLength,
     worker: {
@@ -630,7 +635,7 @@ async function prepareWorkerInvocationAuthority(
     profileHash: profile.profileHash,
     requestId: request.requestId,
     entryRequestId: request.entryRequestId,
-    rawWasmConformanceId,
+    verifierEvidenceId,
   }) as PreparedCppCuteBrowserWorkerInvocation;
   PREPARED_INVOCATIONS.set(prepared, {
     state: "pending",
@@ -641,7 +646,7 @@ async function prepareWorkerInvocationAuthority(
       request,
       runtimeAbiAsset,
       runtimeAbi,
-      rawWasmConformance,
+      verifierEvidence,
       invocation,
       canonicalBytes,
       profileRegionBytes,
@@ -672,7 +677,7 @@ export function unwrapPreparedCppCuteBrowserWorkerInvocation(
     request: stored.request,
     runtimeAbiAsset: stored.runtimeAbiAsset,
     runtimeAbi: stored.runtimeAbi,
-    rawWasmConformance: stored.rawWasmConformance,
+    verifierEvidence: stored.verifierEvidence,
     invocation: stored.invocation,
   });
 }
@@ -689,6 +694,15 @@ export function canonicalCppCuteBrowserWorkerRequestRegionBytes(
   invocation: PreparedCppCuteBrowserWorkerInvocation,
 ): Uint8Array {
   return new Uint8Array(activeStoredInvocation(invocation).requestRegionBytes);
+}
+
+/** Canonical bounded host-verifier evidence region; caller owns the copy. */
+export function canonicalCppCuteBrowserWorkerVerifierEvidenceRegionBytes(
+  invocation: PreparedCppCuteBrowserWorkerInvocation,
+): Uint8Array {
+  return canonicalCppCuteBrowserWasmVerifierEvidenceBytes(
+    activeStoredInvocation(invocation).verifierEvidence,
+  );
 }
 
 export function copyCppCuteBrowserWorkerModuleBytes(
@@ -1111,7 +1125,8 @@ function parseInvocation(value: JsonValue): CppCuteBrowserWorkerInvocationV1 {
     "schema", "version", "invocationId", "invocationNonceSha256", "profileHash",
     "compilationContractHash", "assetManifestId", "assetManifestSha256",
     "assetSetSha256", "vfsInstallationId", "runtimeAbiManifestId",
-    "runtimeAbiResourceSha256", "runtimeAbiContractSha256", "rawWasmConformanceId",
+    "runtimeAbiResourceSha256", "runtimeAbiContractSha256", "verifierEvidenceId",
+    "verifierEvidenceRegionSha256",
     "clangWasmSha256", "clangWasmByteLength", "worker", "requestId", "requestHash",
     "sourceSnapshotSetSha256", "entry",
   ], path);
@@ -1184,7 +1199,15 @@ function parseInvocation(value: JsonValue): CppCuteBrowserWorkerInvocationV1 {
     runtimeAbiManifestId: patternString(field(root, "runtimeAbiManifestId", path), RUNTIME_ABI_MANIFEST_ID, `${path}.runtimeAbiManifestId`),
     runtimeAbiResourceSha256: sha256(field(root, "runtimeAbiResourceSha256", path), `${path}.runtimeAbiResourceSha256`),
     runtimeAbiContractSha256: sha256(field(root, "runtimeAbiContractSha256", path), `${path}.runtimeAbiContractSha256`),
-    rawWasmConformanceId: patternString(field(root, "rawWasmConformanceId", path), RAW_WASM_CONFORMANCE_ID, `${path}.rawWasmConformanceId`),
+    verifierEvidenceId: patternString(
+      field(root, "verifierEvidenceId", path),
+      VERIFIER_EVIDENCE_ID,
+      `${path}.verifierEvidenceId`,
+    ),
+    verifierEvidenceRegionSha256: sha256(
+      field(root, "verifierEvidenceRegionSha256", path),
+      `${path}.verifierEvidenceRegionSha256`,
+    ),
     clangWasmSha256: sha256(field(root, "clangWasmSha256", path), `${path}.clangWasmSha256`),
     clangWasmByteLength: wire(field(root, "clangWasmByteLength", path), `${path}.clangWasmByteLength`),
     worker: {

@@ -20,7 +20,6 @@ import {
   decodeAcquiredCppCuteBrowserRuntimeAbiAsset,
   installCppCuteBrowserVfs,
   unwrapVerifiedCppCuteBrowserAssetSet,
-  unwrapVerifiedCppCuteBrowserRuntimeAbiAsset,
   unwrapVerifiedCppCuteBrowserVfsInstallation,
   verifyTransferredCppCuteBrowserAssetSet,
   type CppCuteBrowserTransferredAssetInput,
@@ -38,6 +37,7 @@ import {
   canonicalCppCuteBrowserWorkerInvocationBytes,
   canonicalCppCuteBrowserWorkerProfileRegionBytes,
   canonicalCppCuteBrowserWorkerRequestRegionBytes,
+  canonicalCppCuteBrowserWorkerVerifierEvidenceRegionBytes,
   decodeCppCuteBrowserWorkerInvocation,
   discardCppCuteBrowserWorkerInvocation,
   unwrapPreparedCppCuteBrowserWorkerInvocation,
@@ -63,9 +63,10 @@ import {
   type PreparedCppCuteBrowserVfsMount,
 } from "./cpp_cute_browser_vfs_session.js";
 import {
-  verifyCppCuteBrowserWasmConformance,
-  type PreparedCppCuteBrowserWasmConformance,
-} from "./cpp_cute_browser_wasm_inspection.js";
+  CPP_CUTE_BROWSER_WASM_VERIFIER_EVIDENCE_BYTE_LIMIT,
+  decodeCppCuteBrowserWasmVerifierEvidence,
+  type PreparedCppCuteBrowserWasmVerifierEvidence,
+} from "./cpp_cute_browser_wasm_verifier_evidence.js";
 
 export const CPP_CUTE_BROWSER_WORKER_TRANSFER_PROTOCOL =
   "browsergrad.compiler.cpp-cute.browser-worker-transfer@1";
@@ -144,9 +145,11 @@ export interface CppCuteBrowserWorkerTransferMessage {
   readonly protocol: typeof CPP_CUTE_BROWSER_WORKER_TRANSFER_PROTOCOL;
   readonly invocationId: string;
   readonly invocationNonceSha256: string;
+  readonly verifierEvidenceRegionSha256: string;
   readonly invocationBytes: Uint8Array;
   readonly profileRegionBytes: Uint8Array;
   readonly requestRegionBytes: Uint8Array;
+  readonly verifierEvidenceRegionBytes: Uint8Array;
   readonly assetManifestBytes: Uint8Array;
   readonly assets: readonly CppCuteBrowserTransferredAssetInput[];
   readonly sourceSnapshots: readonly CppCuteBrowserWorkerTransferSourceSnapshot[];
@@ -203,7 +206,7 @@ export interface CppCuteBrowserWorkerRealmInputRecord {
   readonly request: PreparedCppCuteFrontendRequest;
   readonly vfsInstallation: VerifiedCppCuteBrowserVfsInstallation;
   readonly runtimeAbiAsset: VerifiedCppCuteBrowserRuntimeAbiAsset;
-  readonly rawWasmConformance: PreparedCppCuteBrowserWasmConformance;
+  readonly verifierEvidence: PreparedCppCuteBrowserWasmVerifierEvidence;
   readonly invocation: PreparedCppCuteBrowserWorkerInvocation;
   readonly inputFrame: PreparedCppCuteBrowserInputFrame;
   readonly vfsMount: PreparedCppCuteBrowserVfsMount;
@@ -358,6 +361,7 @@ export function takeCppCuteBrowserWorkerTransfer(
     protocol: CPP_CUTE_BROWSER_WORKER_TRANSFER_PROTOCOL,
     invocationId: invocation.invocationId,
     invocationNonceSha256: invocationRecord.invocationNonceSha256,
+    verifierEvidenceRegionSha256: invocationRecord.verifierEvidenceRegionSha256,
     invocationBytes: standaloneCopy(
       canonicalCppCuteBrowserWorkerInvocationBytes(invocation),
       "$.invocationBytes",
@@ -369,6 +373,10 @@ export function takeCppCuteBrowserWorkerTransfer(
     requestRegionBytes: standaloneCopy(
       canonicalCppCuteBrowserWorkerRequestRegionBytes(invocation),
       "$.requestRegionBytes",
+    ),
+    verifierEvidenceRegionBytes: standaloneCopy(
+      canonicalCppCuteBrowserWorkerVerifierEvidenceRegionBytes(invocation),
+      "$.verifierEvidenceRegionBytes",
     ),
     assetManifestBytes: standaloneCopy(
       canonicalCppCuteBrowserAssetManifestBytes(record.assetManifest),
@@ -472,12 +480,10 @@ export async function reconstructCppCuteBrowserWorkerTransfer(
     if (clangAsset === undefined) {
       mismatch("$.assets", "transferred manifest has no Clang-Wasm asset");
     }
-    const clangWasmBytes = copyVerifiedCppCuteBrowserAssetBytes(assetSet, clangAsset.assetId);
-    const runtimeAbi = unwrapVerifiedCppCuteBrowserRuntimeAbiAsset(runtimeAbiAsset).runtimeAbi;
-    const rawWasmConformance = await verifyCppCuteBrowserWasmConformance(
-      clangWasmBytes,
-      runtimeAbi,
-      signal === undefined ? {} : { signal },
+    const verifierEvidence = await decodeCppCuteBrowserWasmVerifierEvidence(
+      owned.verifierEvidenceRegionBytes,
+      { assetSet, assetManifest, runtimeAbiAsset },
+      owned.verifierEvidenceRegionSha256,
     );
     throwIfAborted(signal);
 
@@ -489,7 +495,7 @@ export async function reconstructCppCuteBrowserWorkerTransfer(
         vfsInstallation,
         request,
         runtimeAbiAsset,
-        rawWasmConformance,
+        verifierEvidence,
       },
     );
     throwIfAborted(signal);
@@ -519,7 +525,7 @@ export async function reconstructCppCuteBrowserWorkerTransfer(
       profileHash: invocation.profileHash,
       inputFrameSha256: inputFrame.frameSha256,
       inputFrameByteLength: inputFrame.frameByteLength,
-      clangWasmSha256: rawWasmConformance.wasmSha256,
+      clangWasmSha256: verifierEvidence.wasmSha256,
       clangWasmByteLength: copiedClangWasm.byteLength,
       vfsMountOrdinal: mount.mountOrdinal,
       networkAuthorityGranted: false,
@@ -532,7 +538,7 @@ export async function reconstructCppCuteBrowserWorkerTransfer(
       request,
       vfsInstallation,
       runtimeAbiAsset,
-      rawWasmConformance,
+      verifierEvidence,
       invocation,
       inputFrame,
       vfsMount: mount,
@@ -656,8 +662,9 @@ function consumeTransferMessage(value: unknown): CppCuteBrowserWorkerTransferMes
 function inspectTransferMessage(value: unknown): CppCuteBrowserWorkerTransferMessage {
   const root = exactDataRecord(value, "$.message", [
     "kind", "version", "protocol", "invocationId", "invocationNonceSha256",
+    "verifierEvidenceRegionSha256",
     "invocationBytes", "profileRegionBytes", "requestRegionBytes",
-    "assetManifestBytes", "assets", "sourceSnapshots",
+    "verifierEvidenceRegionBytes", "assetManifestBytes", "assets", "sourceSnapshots",
   ]);
   if (root["kind"] !== "browsergrad-cpp-cute-worker-transfer" ||
       root["protocol"] !== CPP_CUTE_BROWSER_WORKER_TRANSFER_PROTOCOL) {
@@ -673,6 +680,11 @@ function inspectTransferMessage(value: unknown): CppCuteBrowserWorkerTransferMes
     root["invocationNonceSha256"],
     SHA256_HEX,
     "$.message.invocationNonceSha256",
+  );
+  const verifierEvidenceRegionSha256 = pattern(
+    root["verifierEvidenceRegionSha256"],
+    SHA256_HEX,
+    "$.message.verifierEvidenceRegionSha256",
   );
   const seenBuffers = new NATIVE_WEAK_SET<ArrayBuffer>();
   const takeBytes = (entry: unknown, path: string, maximum: number): Uint8Array => {
@@ -697,6 +709,11 @@ function inspectTransferMessage(value: unknown): CppCuteBrowserWorkerTransferMes
     root["requestRegionBytes"],
     "$.message.requestRegionBytes",
     CPP_CUTE_BROWSER_WORKER_TRANSFER_REGION_BYTE_LIMIT,
+  );
+  const verifierEvidenceRegionBytes = takeBytes(
+    root["verifierEvidenceRegionBytes"],
+    "$.message.verifierEvidenceRegionBytes",
+    CPP_CUTE_BROWSER_WASM_VERIFIER_EVIDENCE_BYTE_LIMIT,
   );
   const assetManifestBytes = takeBytes(
     root["assetManifestBytes"],
@@ -773,9 +790,11 @@ function inspectTransferMessage(value: unknown): CppCuteBrowserWorkerTransferMes
     protocol: CPP_CUTE_BROWSER_WORKER_TRANSFER_PROTOCOL,
     invocationId,
     invocationNonceSha256,
+    verifierEvidenceRegionSha256,
     invocationBytes,
     profileRegionBytes,
     requestRegionBytes,
+    verifierEvidenceRegionBytes,
     assetManifestBytes,
     assets: NATIVE_OBJECT_FREEZE(assets),
     sourceSnapshots: NATIVE_OBJECT_FREEZE(sourceSnapshots),
@@ -787,6 +806,10 @@ function transferBuffers(message: CppCuteBrowserWorkerTransferMessage): ArrayBuf
     standaloneBuffer(message.invocationBytes, "$.invocationBytes"),
     standaloneBuffer(message.profileRegionBytes, "$.profileRegionBytes"),
     standaloneBuffer(message.requestRegionBytes, "$.requestRegionBytes"),
+    standaloneBuffer(
+      message.verifierEvidenceRegionBytes,
+      "$.verifierEvidenceRegionBytes",
+    ),
     standaloneBuffer(message.assetManifestBytes, "$.assetManifestBytes"),
   ];
   for (let index = 0; index < message.assets.length; index += 1) {
@@ -1025,6 +1048,7 @@ function zeroTransferMessage(message: CppCuteBrowserWorkerTransferMessage): void
   zeroBytes(message.invocationBytes);
   zeroBytes(message.profileRegionBytes);
   zeroBytes(message.requestRegionBytes);
+  zeroBytes(message.verifierEvidenceRegionBytes);
   zeroBytes(message.assetManifestBytes);
   for (let index = 0; index < message.assets.length; index += 1) {
     const asset = message.assets[index];

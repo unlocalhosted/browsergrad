@@ -7,6 +7,9 @@ const harness = vi.hoisted(() => {
   const requestId = `bg.cpp.frontend-request.sha256.${"3".repeat(64)}`;
   const workerModuleSha256 = "4".repeat(64);
   const invocationNonceSha256 = "5".repeat(64);
+  const verifierEvidenceId =
+    `bg.cpp.browser-wasm-verifier-conformance.sha256.${"e".repeat(64)}`;
+  const verifierEvidenceRegionSha256 = "f".repeat(64);
   const manifestId = `bg.cpp.browser-asset-manifest.sha256.${"6".repeat(64)}`;
   const manifestSha256 = "7".repeat(64);
   const assetSetSha256 = "8".repeat(64);
@@ -22,6 +25,8 @@ const harness = vi.hoisted(() => {
     assetManifestSha256: manifestSha256,
     assetSetSha256,
     requestId,
+    verifierEvidenceId,
+    verifierEvidenceRegionSha256,
     worker: Object.freeze({
       moduleSha256: workerModuleSha256,
       moduleByteLength: String(workerBytes.byteLength),
@@ -76,6 +81,15 @@ const harness = vi.hoisted(() => {
     requestBinding,
     artifact,
     workerBytes,
+    assetSet: Object.freeze({ assetSet: true }),
+    observedWasmConformance: Object.freeze({
+      evidenceId: verifierEvidenceId,
+      releaseReady: false,
+    }),
+    verifierEvidence: Object.freeze({
+      sourceEvidenceId: verifierEvidenceId,
+      regionSha256: verifierEvidenceRegionSha256,
+    }),
     preparedInput: null as null | Record<string, unknown>,
     manifestMismatch: false,
     crossWireAuthority: null as null | "profile" | "manifest" | "request",
@@ -97,6 +111,34 @@ vi.mock("../../src/cpp_cute_browser_worker_bundle.js", () => ({
   },
   inspectVerifiedCppCuteBrowserWorkerBundle: () => harness.bundleInspection,
   copyVerifiedCppCuteBrowserWorkerBundleBytes: () => new Uint8Array(harness.workerBytes),
+}));
+
+vi.mock("../../src/cpp_cute_browser_asset_installation.js", () => ({
+  unwrapVerifiedCppCuteBrowserVfsInstallation: () => ({ assetSet: harness.assetSet }),
+}));
+
+vi.mock("../../src/cpp_cute_browser_wasm_verifier_evidence.js", () => ({
+  prepareCppCuteBrowserWasmVerifierEvidence: async (observed: unknown) => {
+    if (observed !== harness.observedWasmConformance) {
+      throw new Error("unregistered observed verifier authority");
+    }
+    return harness.verifierEvidence;
+  },
+}));
+
+vi.mock("../../src/cpp_cute_browser_wasm_verifier_controller.js", () => ({
+  inspectObservedCppCuteBrowserPackageWasmConformance: (observed: unknown) => {
+    if (observed !== harness.observedWasmConformance) {
+      throw new Error("unregistered observed verifier authority");
+    }
+    return observed;
+  },
+  unwrapObservedCppCuteBrowserPackageWasmConformance: (observed: unknown) => {
+    if (observed !== harness.observedWasmConformance) {
+      throw new Error("unregistered observed verifier authority");
+    }
+    return Object.freeze({});
+  },
 }));
 
 vi.mock("../../src/cpp_cute_browser_worker_protocol.js", () => ({
@@ -249,7 +291,7 @@ describe("package-owned browser Worker invocation composition", () => {
     expect(harness.verifyCalls).toBe(1);
     expect(Object.keys(harness.preparedInput ?? {})).toEqual([
       "profile", "assetManifest", "vfsInstallation", "request",
-      "runtimeAbiAsset", "rawWasmConformance", "workerModuleBytes",
+      "runtimeAbiAsset", "verifierEvidence", "workerModuleBytes",
     ]);
     expect(harness.preparedInput?.["workerModuleBytes"]).toEqual(harness.workerBytes);
     expect(harness.preparedInput?.["workerModuleBytes"]).not.toBe(harness.workerBytes);
@@ -292,7 +334,8 @@ describe("package-owned browser Worker invocation composition", () => {
     expect(record.lineage.invocation).toBe(harness.invocationBody);
     expect(record.lineage.workerBundle).toBe(harness.bundleInspection);
     expect(Object.keys(record.lineage)).toEqual([
-      "invocationHash", "invocation", "workerBundle",
+      "invocationHash", "invocation", "workerBundle", "observedWasmConformance",
+      "verifierEvidenceId", "verifierEvidenceRegionSha256",
     ]);
     expect(Object.values(record.lineage).some((value) => value instanceof Uint8Array))
       .toBe(false);
@@ -423,6 +466,11 @@ describe("package-owned browser Worker invocation composition", () => {
       path: "$.input",
     });
 
+    await expect(prepareCppCuteBrowserPackageInvocation({
+      ...fixture(),
+      observedWasmConformance: { ...harness.observedWasmConformance },
+    } as never)).rejects.toThrow(/unregistered observed verifier authority/u);
+
     expect(() => takeCppCuteBrowserPackageInvocation({
       authority: "package-owned-worker-invocation",
     } as never)).toThrowError(CppCuteBrowserPackageInvocationError);
@@ -448,6 +496,6 @@ function fixture() {
       limits: Object.freeze({ maxWallTimeMs: 7_000, maxOutputBytes: 4_096 }),
     }) as TestRequest,
     runtimeAbiAsset: Object.freeze({ runtimeAbiAsset: true }),
-    rawWasmConformance: Object.freeze({ rawWasmConformance: true }),
+    observedWasmConformance: harness.observedWasmConformance,
   };
 }

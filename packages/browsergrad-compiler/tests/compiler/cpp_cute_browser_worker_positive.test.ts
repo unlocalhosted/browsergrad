@@ -15,7 +15,7 @@ const authorities = vi.hoisted(() => ({
   assetSets: new WeakMap<object, unknown>(),
   installations: new WeakMap<object, unknown>(),
   runtimeAbiAssets: new WeakMap<object, unknown>(),
-  wasmConformance: new WeakMap<object, unknown>(),
+  verifierEvidence: new WeakMap<object, unknown>(),
   assetBytes: new WeakMap<object, ReadonlyMap<string, Uint8Array>>(),
   assetCopyCalls: 0,
 }));
@@ -81,13 +81,15 @@ vi.mock("../../src/cpp_cute_browser_asset_installation.js", async (importOrigina
   };
 });
 
-vi.mock("../../src/cpp_cute_browser_wasm_inspection.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/cpp_cute_browser_wasm_inspection.js")>();
+vi.mock("../../src/cpp_cute_browser_wasm_verifier_evidence.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../src/cpp_cute_browser_wasm_verifier_evidence.js")
+  >();
   return {
     ...actual,
-    unwrapPreparedCppCuteBrowserWasmConformance: (value: object) => {
-      const record = authorities.wasmConformance.get(value);
-      if (record === undefined) throw new Error("unregistered test Wasm-conformance authority");
+    unwrapPreparedCppCuteBrowserWasmVerifierEvidence: (value: object) => {
+      const record = authorities.verifierEvidence.get(value);
+      if (record === undefined) throw new Error("unregistered test verifier-evidence authority");
       return record;
     },
   };
@@ -651,12 +653,16 @@ async function createEnvironment(
   const assetSet = Object.freeze({ assetSetSha256: profileInput.deployment.assetSetSha256 });
   const installation = Object.freeze({ installationId: `bg.cpp.browser-vfs.sha256.${hash}` });
   const runtimeAbiAsset = Object.freeze({ runtimeAbiManifestId: runtimeAbi.manifestId });
-  const rawWasmConformance = Object.freeze({
+  const verifierEvidence = Object.freeze({
+    sourceEvidenceId: `bg.cpp.browser-wasm-verifier-conformance.sha256.${"c".repeat(64)}`,
+    regionSha256: "e".repeat(64),
+    wasmAssetId: "clang-wasm",
     wasmSha256: clangSha256,
     wasmByteLength: clangBytes.byteLength,
     observedProjectionSha256: "b".repeat(64),
     runtimeAbiManifestId: runtimeAbi.manifestId,
     runtimeAbiContractSha256: runtimeAbi.contractSha256,
+    runtimeAbiResourceSha256: runtimeAbi.resourceSha256,
   });
   const payload = outcome === "accepted" ? accepted.payload : rejected.payload;
   authorities.manifests.set(assetManifest, {
@@ -683,7 +689,12 @@ async function createEnvironment(
     })),
   });
   authorities.runtimeAbiAssets.set(runtimeAbiAsset, { assetSet, runtimeAbi });
-  authorities.wasmConformance.set(rawWasmConformance, {});
+  authorities.verifierEvidence.set(verifierEvidence, {
+    assetSet,
+    assetManifest,
+    runtimeAbiAsset,
+    runtimeAbi,
+  });
   authorities.assetBytes.set(assetSet, new Map([["clang-wasm", clangBytes]]));
   const sha256Calls = hashControl.sha256Calls;
   const invocation = await prepareCppCuteBrowserWorkerInvocation({
@@ -692,7 +703,7 @@ async function createEnvironment(
     vfsInstallation: installation as never,
     request,
     runtimeAbiAsset: runtimeAbiAsset as never,
-    rawWasmConformance: rawWasmConformance as never,
+    verifierEvidence: verifierEvidence as never,
     workerModuleBytes: workerBytes,
   }).finally(() => {
     hashControl.lastInvocationSha256Calls = hashControl.sha256Calls - sha256Calls;
