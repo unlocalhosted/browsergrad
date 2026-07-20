@@ -20,6 +20,7 @@ export default defineConfig({
       "tests/compiler/cpp_cute_browser_wasm_inspection.test.ts",
       "tests/compiler/cpp_cute_browser_wasm_verifier_bundle.test.ts",
       "tests/compiler/cpp_cute_browser_wasm_verifier_controller.test.ts",
+      "tests/compiler/cpp_cute_browser_wasm_verifier_controller_production.test.ts",
       "tests/compiler/cpp_cute_browser_wasm_verifier_entry.test.ts",
       "tests/compiler/cpp_cute_browser_wasm_verifier_entry_success.test.ts",
       "tests/compiler/cpp_cute_browser_worker_bundle.test.ts",

@@ -8,10 +8,27 @@ import {
   type JsonValue,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
+  copyVerifiedCppCuteBrowserAssetBytes,
+  unwrapVerifiedCppCuteBrowserAssetSet,
+  unwrapVerifiedCppCuteBrowserRuntimeAbiAsset,
+  type VerifiedCppCuteBrowserAssetSet,
+  type VerifiedCppCuteBrowserRuntimeAbiAsset,
+} from "./cpp_cute_browser_asset_installation.js";
+import type {
+  PreparedCppCuteBrowserAssetManifest,
+} from "./cpp_cute_browser_assets.js";
+import {
   canonicalCppCuteBrowserRuntimeAbiManifestBytes,
   unwrapPreparedCppCuteBrowserRuntimeAbiManifest,
   type PreparedCppCuteBrowserRuntimeAbiManifest,
 } from "./cpp_cute_browser_runtime_abi.js";
+import {
+  copyVerifiedCppCuteBrowserWasmVerifierBundleBytes,
+  inspectVerifiedCppCuteBrowserWasmVerifierBundle,
+  verifyCppCuteBrowserWasmVerifierBundle,
+  type CppCuteBrowserWasmVerifierBundleInspection,
+  type VerifiedCppCuteBrowserWasmVerifierBundle,
+} from "./cpp_cute_browser_wasm_verifier_bundle.js";
 import {
   CPP_CUTE_BROWSER_WASM_BASE_OPERATIONS,
   CPP_CUTE_BROWSER_WASM_MAX_BYTE_LENGTH,
@@ -29,12 +46,14 @@ import {
   type CppCuteBrowserWasmVerifierSuccessMessage,
   type CppCuteBrowserWasmVerifierTerminalMessage,
 } from "./cpp_cute_browser_wasm_verifier_messages.js";
+import { getCppCuteBrowserCapturedPlatform } from "./cpp_cute_browser_worker_platform.js";
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const ASSET_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const ABI_ID = /^bg\.cpp\.browser-runtime-abi\.sha256\.[0-9a-f]{64}$/u;
 const FAILURE_CODE = /^BG-[A-Z0-9-]+$/u;
 const VERIFIER_MODULE_MAX_BYTE_LENGTH = 8 * 1024 * 1024;
+const PRODUCTION_MAX_WALL_TIME_MS = 60_000;
 const NONCE_BYTE_LENGTH = 32;
 const NATIVE_REFLECT_APPLY = Reflect.apply;
 const NATIVE_WEAK_MAP_GET = WeakMap.prototype.get;
@@ -44,6 +63,20 @@ const NATIVE_GET_OWN_PROPERTY_DESCRIPTORS = Object.getOwnPropertyDescriptors;
 const NATIVE_GET_PROTOTYPE_OF = Object.getPrototypeOf;
 const NATIVE_REFLECT_OWN_KEYS = Reflect.ownKeys;
 const NATIVE_HAS_OWN_PROPERTY = Object.prototype.hasOwnProperty;
+const NATIVE_OBJECT_FREEZE = Object.freeze;
+const NATIVE_OBJECT_KEYS = Object.keys;
+const NATIVE_OBJECT_CREATE = Object.create;
+const NATIVE_OBJECT_ENTRIES = Object.entries;
+const NATIVE_ARRAY_IS_ARRAY = Array.isArray;
+const NATIVE_NUMBER_IS_FINITE = Number.isFinite;
+const NATIVE_NUMBER_IS_SAFE_INTEGER = Number.isSafeInteger;
+const CAPTURED_OBJECT = Object;
+const CAPTURED_OBJECT_PROTOTYPE = Object.prototype;
+const CAPTURED_REFLECT = Reflect;
+const CAPTURED_BIG_INT = BigInt;
+const CAPTURED_NUMBER = Number;
+const CAPTURED_PROMISE = Promise;
+const CAPTURED_AGGREGATE_ERROR = AggregateError;
 const CAPTURED_UINT8_ARRAY = Uint8Array;
 const CAPTURED_UINT8_ARRAY_PROTOTYPE = Uint8Array.prototype;
 const CAPTURED_ARRAY_BUFFER_PROTOTYPE = ArrayBuffer.prototype;
@@ -68,7 +101,7 @@ const CAPTURED_ABORTED_GETTER = CAPTURED_ABORT_SIGNAL === undefined
   ? undefined
   : NATIVE_REFLECT_APPLY(
       NATIVE_GET_OWN_PROPERTY_DESCRIPTOR,
-      Object,
+      CAPTURED_OBJECT,
       [CAPTURED_ABORT_SIGNAL.prototype, "aborted"],
     )?.get;
 const CAPTURED_EVENT_TARGET = typeof EventTarget === "function" ? EventTarget : undefined;
@@ -87,7 +120,7 @@ const CAPTURED_REMOVE_EVENT_LISTENER = CAPTURED_EVENT_TARGET === undefined
       [CAPTURED_EVENT_TARGET.prototype, "removeEventListener"],
     )?.value as ((...arguments_: never[]) => unknown) | undefined;
 
-const REPORT_DECODE_LIMITS: DecodeLimits = Object.freeze({
+const REPORT_DECODE_LIMITS: DecodeLimits = freeze({
   maxDocumentBytes: CPP_CUTE_BROWSER_WASM_VERIFIER_REPORT_BYTE_LIMIT,
   maxDepth: 4,
   maxNodes: 64,
@@ -233,6 +266,66 @@ export interface ExecuteCppCuteBrowserWasmVerifierCandidateOptions {
   readonly signal?: AbortSignal;
 }
 
+export interface ExecuteCppCuteBrowserPackageWasmVerifierInput {
+  readonly assetSet: VerifiedCppCuteBrowserAssetSet;
+  readonly runtimeAbiAsset: VerifiedCppCuteBrowserRuntimeAbiAsset;
+}
+
+declare const observedPackageWasmConformanceBrand: unique symbol;
+
+/**
+ * Host-realm authority minted only after the exact package verifier Worker
+ * validates the unique verified Clang Wasm asset and completes cleanup.
+ */
+export interface ObservedCppCuteBrowserPackageWasmConformance {
+  readonly [observedPackageWasmConformanceBrand]: true;
+  readonly authority: "host-owned-package-wasm-verifier-conformance";
+  readonly evidenceId: string;
+  readonly requestId: string;
+  readonly invocationNonceSha256: string;
+  readonly verifierBundleId: string;
+  readonly verifierModuleSha256: string;
+  readonly verifierModuleByteLength: number;
+  readonly assetManifestId: string;
+  readonly assetSetSha256: string;
+  readonly wasmAssetId: string;
+  readonly wasmSha256: string;
+  readonly wasmByteLength: number;
+  readonly runtimeAbiManifestId: string;
+  readonly runtimeAbiContractSha256: string;
+  readonly runtimeAbiResourceSha256: string;
+  readonly observedProjectionSha256: string;
+  readonly reportSha256: string;
+  readonly reportByteLength: number;
+  readonly acceptedTerminalMessages: "1";
+  readonly verifierWorkerExecutionObserved: true;
+  readonly workerLifecycle: "terminate-called-and-blob-url-revoked";
+  readonly rawWasmVerified: true;
+  readonly exactInterfaceConformanceObserved: true;
+  readonly packageOwnedVerifier: true;
+  readonly productionConformanceAuthorityMinted: true;
+  readonly compilerWorkerExecutionObserved: false;
+  readonly loweringAuthorityMinted: false;
+  readonly releaseReady: false;
+}
+
+export type CppCuteBrowserPackageWasmConformanceInspection = Omit<
+  ObservedCppCuteBrowserPackageWasmConformance,
+  typeof observedPackageWasmConformanceBrand
+>;
+
+export interface ObservedCppCuteBrowserPackageWasmConformanceRecord {
+  readonly assetSet: VerifiedCppCuteBrowserAssetSet;
+  readonly assetManifest: PreparedCppCuteBrowserAssetManifest;
+  readonly runtimeAbiAsset: VerifiedCppCuteBrowserRuntimeAbiAsset;
+  readonly runtimeAbi: PreparedCppCuteBrowserRuntimeAbiManifest;
+  readonly verifierBundle: VerifiedCppCuteBrowserWasmVerifierBundle;
+  readonly verifierBundleInspection: CppCuteBrowserWasmVerifierBundleInspection;
+  readonly reportSummary: CppCuteBrowserWasmVerifierReportSummary;
+  readonly productionAuthority: true;
+  readonly detachedLargeBuffersRetained: false;
+}
+
 export type CppCuteBrowserWasmVerifierControllerErrorCode =
   | "BG-COMPILER-CPP-CUTE-BROWSER-WASM-VERIFIER-CONTROLLER-INVALID"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WASM-VERIFIER-CONTROLLER-CAPABILITY"
@@ -277,6 +370,480 @@ const SIMULATIONS = new WeakMap<
   object,
   CppCuteBrowserWasmVerifierCandidateSimulationRecord
 >();
+const PRODUCTION_CONFORMANCE = new WeakMap<
+  object,
+  StoredProductionConformance
+>();
+
+interface VerifierReportBinding {
+  readonly verifierModuleSha256: string;
+  readonly verifierModuleByteLength: number;
+  readonly wasmAssetId: string;
+  readonly expectedWasmSha256: string;
+  readonly expectedWasmByteLength: number;
+  readonly runtimeAbiManifestId: string;
+  readonly runtimeAbiContractSha256: string;
+  readonly runtimeAbiResourceSha256: string;
+}
+
+interface ProductionVerifierContext extends VerifierReportBinding {
+  readonly assetSet: VerifiedCppCuteBrowserAssetSet;
+  readonly assetManifest: PreparedCppCuteBrowserAssetManifest;
+  readonly runtimeAbiAsset: VerifiedCppCuteBrowserRuntimeAbiAsset;
+  readonly runtimeAbi: PreparedCppCuteBrowserRuntimeAbiManifest;
+  readonly verifierBundle: VerifiedCppCuteBrowserWasmVerifierBundle;
+  readonly verifierBundleInspection: CppCuteBrowserWasmVerifierBundleInspection;
+  readonly verifierModuleBytes: Uint8Array;
+  readonly wasmBytes: Uint8Array;
+  readonly runtimeAbiManifestBytes: Uint8Array;
+  readonly maxWallTimeMs: number;
+  readonly maxOperations: number;
+}
+
+interface StoredProductionConformance {
+  readonly inspection: CppCuteBrowserPackageWasmConformanceInspection;
+  readonly record: ObservedCppCuteBrowserPackageWasmConformanceRecord;
+}
+
+type VerifierRunMode =
+  | {
+      readonly kind: "candidate";
+      readonly candidate: PreparedCppCuteBrowserWasmVerifierCandidate;
+    }
+  | {
+      readonly kind: "production";
+      readonly context: ProductionVerifierContext;
+    };
+
+/**
+ * Executes only the package verifier bundle over the unique Clang Wasm bytes
+ * held by exact opaque asset authorities. No executable bytes or effects are
+ * accepted from the caller.
+ */
+export async function executeCppCuteBrowserPackageWasmVerifier(
+  input: ExecuteCppCuteBrowserPackageWasmVerifierInput,
+  options: ExecuteCppCuteBrowserWasmVerifierCandidateOptions = {},
+): Promise<ObservedCppCuteBrowserPackageWasmConformance> {
+  const platform = getCppCuteBrowserCapturedPlatform();
+  if (platform === undefined) {
+    capability(
+      "$.runtime",
+      "module-captured verifier Worker, entropy, Blob URL, clock, and timer effects are unavailable",
+    );
+  }
+  const signal = normalizeOptions(options);
+  throwIfAborted(signal);
+  const context = await prepareProductionVerifierContext(input);
+  throwIfAborted(signal);
+  return executeProductionVerifierContext(context, platform, signal);
+}
+
+export function inspectObservedCppCuteBrowserPackageWasmConformance(
+  observed: ObservedCppCuteBrowserPackageWasmConformance,
+): CppCuteBrowserPackageWasmConformanceInspection {
+  return storedProductionConformance(observed).inspection;
+}
+
+export function unwrapObservedCppCuteBrowserPackageWasmConformance(
+  observed: ObservedCppCuteBrowserPackageWasmConformance,
+): ObservedCppCuteBrowserPackageWasmConformanceRecord {
+  return storedProductionConformance(observed).record;
+}
+
+async function prepareProductionVerifierContext(
+  input: ExecuteCppCuteBrowserPackageWasmVerifierInput,
+): Promise<ProductionVerifierContext> {
+  const values = exactDataRecord(input, "$.input", ["assetSet", "runtimeAbiAsset"]);
+  const assetSet = values["assetSet"] as VerifiedCppCuteBrowserAssetSet;
+  const runtimeAbiAsset = values["runtimeAbiAsset"] as VerifiedCppCuteBrowserRuntimeAbiAsset;
+  let assetSetRecord: ReturnType<typeof unwrapVerifiedCppCuteBrowserAssetSet>;
+  let runtimeAbiAssetRecord: ReturnType<typeof unwrapVerifiedCppCuteBrowserRuntimeAbiAsset>;
+  try {
+    assetSetRecord = unwrapVerifiedCppCuteBrowserAssetSet(assetSet);
+  } catch (cause) {
+    unverified("$.input.assetSet", "expected opaque verified browser asset set", { cause });
+  }
+  try {
+    runtimeAbiAssetRecord = unwrapVerifiedCppCuteBrowserRuntimeAbiAsset(runtimeAbiAsset);
+  } catch (cause) {
+    unverified(
+      "$.input.runtimeAbiAsset",
+      "expected opaque verified runtime-ABI asset authority",
+      { cause },
+    );
+  }
+  if (runtimeAbiAssetRecord.assetSet !== assetSet ||
+      runtimeAbiAsset.assetManifestId !== assetSet.manifestId ||
+      runtimeAbiAsset.assetSetSha256 !== assetSet.assetSetSha256) {
+    unverified(
+      "$.input.runtimeAbiAsset",
+      "runtime-ABI authority does not belong to the exact input asset set",
+    );
+  }
+  let clangAssetRecord: (typeof assetSetRecord.assets)[number] | undefined;
+  for (let index = 0; index < assetSetRecord.assets.length; index += 1) {
+    const entry = assetSetRecord.assets[index]!;
+    if (entry.asset.kind !== "clang-extractor-wasm") continue;
+    if (clangAssetRecord !== undefined) {
+      unverified("$.input.assetSet", "verified asset set must contain one unique Clang Wasm asset");
+    }
+    clangAssetRecord = entry;
+  }
+  if (clangAssetRecord === undefined) {
+    unverified("$.input.assetSet", "verified asset set must contain one unique Clang Wasm asset");
+  }
+  const clangAsset = clangAssetRecord.asset;
+  let expectedWasmByteLengthBigInt: bigint;
+  try {
+    expectedWasmByteLengthBigInt = CAPTURED_BIG_INT(clangAsset.byteLength);
+  } catch (cause) {
+    unverified(
+      "$.input.assetSet.clangWasm.byteLength",
+      "Clang Wasm asset length is not a canonical verified integer",
+      { cause },
+    );
+  }
+  if (expectedWasmByteLengthBigInt <= 0n ||
+      expectedWasmByteLengthBigInt > CAPTURED_BIG_INT(CPP_CUTE_BROWSER_WASM_MAX_BYTE_LENGTH)) {
+    invalid(
+      "$.input.assetSet.clangWasm.byteLength",
+      "Clang Wasm asset length exceeds the verifier safety profile",
+    );
+  }
+  const expectedWasmByteLength = CAPTURED_NUMBER(expectedWasmByteLengthBigInt);
+  let wasmBytes: Uint8Array;
+  try {
+    wasmBytes = copyVerifiedCppCuteBrowserAssetBytes(assetSet, clangAsset.assetId);
+  } catch (cause) {
+    unverified(
+      "$.input.assetSet.clangWasm",
+      "unique Clang Wasm bytes are unavailable from the verified asset authority",
+      { cause },
+    );
+  }
+  if (wasmBytes.byteLength !== expectedWasmByteLength ||
+      await hashBytes(wasmBytes, "$.input.assetSet.clangWasm") !== clangAsset.sha256) {
+    unverified(
+      "$.input.assetSet.clangWasm",
+      "copied Clang Wasm bytes differ from their verified asset binding",
+    );
+  }
+
+  const runtimeAbi = runtimeAbiAssetRecord.runtimeAbi;
+  let runtimeAbiManifestBytes: Uint8Array;
+  let runtimeAbiRecord: ReturnType<typeof unwrapPreparedCppCuteBrowserRuntimeAbiManifest>;
+  try {
+    runtimeAbiRecord = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(runtimeAbi);
+    runtimeAbiManifestBytes = canonicalCppCuteBrowserRuntimeAbiManifestBytes(runtimeAbi);
+  } catch (cause) {
+    unverified(
+      "$.input.runtimeAbiAsset",
+      "verified runtime-ABI asset lost its prepared manifest authority",
+      { cause },
+    );
+  }
+  if (runtimeAbiAsset.runtimeAbiManifestId !== runtimeAbi.manifestId ||
+      runtimeAbiAsset.runtimeAbiResourceSha256 !== runtimeAbi.resourceSha256 ||
+      runtimeAbiRecord.manifest.manifestId !== runtimeAbi.manifestId) {
+    unverified(
+      "$.input.runtimeAbiAsset",
+      "runtime-ABI public identities differ from the prepared authority",
+    );
+  }
+
+  const verifierBundle = await verifyCppCuteBrowserWasmVerifierBundle();
+  const verifierBundleInspection = inspectVerifiedCppCuteBrowserWasmVerifierBundle(
+    verifierBundle,
+  );
+  if (verifierBundleInspection.packageOwned !== true ||
+      verifierBundleInspection.exactBytesVerified !== true ||
+      verifierBundleInspection.selfContainedModuleGraph !== true ||
+      verifierBundleInspection.staticImportCount !== 0 ||
+      verifierBundleInspection.dynamicImportCount !== 0 ||
+      verifierBundleInspection.verifierWorkerExecutionObserved !== false ||
+      verifierBundleInspection.productionConformanceAuthorityMinted !== false ||
+      verifierBundleInspection.releaseReady !== false) {
+    moduleMismatch(
+      "$.verifierBundle",
+      "package verifier bundle inspection does not preserve its pre-execution authority boundary",
+    );
+  }
+  const verifierModuleBytes = copyVerifiedCppCuteBrowserWasmVerifierBundleBytes(verifierBundle);
+  if (verifierModuleBytes.byteLength !== verifierBundleInspection.byteLength ||
+      await hashBytes(verifierModuleBytes, "$.verifierBundle") !==
+        verifierBundleInspection.sha256) {
+    moduleMismatch(
+      "$.verifierBundle",
+      "copied package verifier bytes differ from the exact verified bundle identity",
+    );
+  }
+  const maxOperations = derivedMaxOperations(expectedWasmByteLength);
+  return freeze({
+    assetSet,
+    assetManifest: assetSetRecord.manifest,
+    runtimeAbiAsset,
+    runtimeAbi,
+    verifierBundle,
+    verifierBundleInspection,
+    verifierModuleBytes,
+    wasmBytes,
+    runtimeAbiManifestBytes,
+    verifierModuleSha256: verifierBundleInspection.sha256,
+    verifierModuleByteLength: verifierBundleInspection.byteLength,
+    wasmAssetId: clangAsset.assetId,
+    expectedWasmSha256: clangAsset.sha256,
+    expectedWasmByteLength,
+    runtimeAbiManifestId: runtimeAbi.manifestId,
+    runtimeAbiContractSha256: runtimeAbi.contractSha256,
+    runtimeAbiResourceSha256: runtimeAbi.resourceSha256,
+    maxWallTimeMs: PRODUCTION_MAX_WALL_TIME_MS,
+    maxOperations,
+  });
+}
+
+async function executeProductionVerifierContext(
+  context: ProductionVerifierContext,
+  effects: CppCuteBrowserWasmVerifierControllerPlatform,
+  signal: AbortSignal | undefined,
+): Promise<ObservedCppCuteBrowserPackageWasmConformance> {
+  let nonceBytes: Uint8Array;
+  try {
+    nonceBytes = exactRandomBytes(effects.randomBytes(NONCE_BYTE_LENGTH));
+  } catch (cause) {
+    capability("$.randomBytes", "captured platform could not produce a fresh 32-byte nonce", {
+      cause,
+    });
+  }
+  let invocationNonceSha256: string;
+  let requestHash: string;
+  try {
+    invocationNonceSha256 = await sha256Hex(nonceBytes);
+    requestHash = await hashCanonicalJson({
+      domain: "browsergrad.compiler.cpp-cute.package-wasm-verifier-request.v1",
+      invocationNonceSha256,
+      verifierBundleId: context.verifierBundleInspection.bundleId,
+      verifierModuleSha256: context.verifierModuleSha256,
+      verifierModuleByteLength: context.verifierModuleByteLength,
+      assetManifestId: context.assetSet.manifestId,
+      assetSetSha256: context.assetSet.assetSetSha256,
+      wasmAssetId: context.wasmAssetId,
+      expectedWasmSha256: context.expectedWasmSha256,
+      expectedWasmByteLength: context.expectedWasmByteLength,
+      runtimeAbiManifestId: context.runtimeAbiManifestId,
+      runtimeAbiContractSha256: context.runtimeAbiContractSha256,
+      runtimeAbiResourceSha256: context.runtimeAbiResourceSha256,
+    });
+  } catch (cause) {
+    hashUnavailable("$.requestId", "package verifier request binding could not be hashed", {
+      cause,
+    });
+  }
+  const requestId = `bg.cpp.browser-wasm-verifier-request.sha256.${requestHash}`;
+
+  const moduleHash = await hashBytes(context.verifierModuleBytes, "$.verifierBundle");
+  if (context.verifierModuleBytes.byteLength !== context.verifierModuleByteLength ||
+      moduleHash !== context.verifierModuleSha256) {
+    moduleMismatch(
+      "$.verifierBundle",
+      "exact package verifier bytes changed before Blob Worker creation",
+    );
+  }
+  throwIfAborted(signal);
+
+  const runtimeAbiManifestBytes =
+    context.runtimeAbiManifestBytes as Uint8Array<ArrayBuffer>;
+  const wasmBytes = context.wasmBytes as Uint8Array<ArrayBuffer>;
+  const launch: CppCuteBrowserWasmVerifierLaunchMessage = freeze({
+    kind: "browsergrad-cpp-cute-wasm-verifier-launch",
+    version: freeze({
+      major: CPP_CUTE_BROWSER_WASM_VERIFIER_MAJOR,
+      minor: CPP_CUTE_BROWSER_WASM_VERIFIER_MINOR,
+    }),
+    protocol: CPP_CUTE_BROWSER_WASM_VERIFIER_PROTOCOL,
+    requestId,
+    invocationNonceSha256,
+    wasmAssetId: context.wasmAssetId,
+    expectedWasmSha256: context.expectedWasmSha256,
+    expectedWasmByteLength: context.expectedWasmByteLength,
+    expectedRuntimeAbiManifestId: context.runtimeAbiManifestId,
+    expectedRuntimeAbiContractSha256: context.runtimeAbiContractSha256,
+    expectedRuntimeAbiResourceSha256: context.runtimeAbiResourceSha256,
+    maxOperations: context.maxOperations,
+    runtimeAbiManifestBytes,
+    wasmBytes,
+  });
+
+  let start: number;
+  try {
+    start = checkedNow(effects.monotonicNowMilliseconds(), "$.hostTime.start");
+  } catch (cause) {
+    throw asControllerError(cause, "$.hostTime.start");
+  }
+  let blobUrl: string | undefined;
+  let worker: CppCuteBrowserWasmVerifierPlatformWorker | undefined;
+  try {
+    blobUrl = effects.createModuleBlobUrl(
+      new CAPTURED_UINT8_ARRAY(context.verifierModuleBytes),
+    );
+    if (typeof blobUrl !== "string" || blobUrl.length === 0) {
+      capability("$.blobUrl", "package verifier Blob URL creation returned no URL");
+    }
+    worker = checkedWorker(effects.createModuleWorker(
+      blobUrl,
+      `browsergrad-package-wasm-verifier-${requestId.slice(-16)}`,
+    ));
+  } catch (cause) {
+    if (blobUrl !== undefined) {
+      try {
+        effects.revokeModuleBlobUrl(blobUrl);
+      } catch (cleanupCause) {
+        throw controllerError(
+          "BG-COMPILER-CPP-CUTE-BROWSER-WASM-VERIFIER-CONTROLLER-CLEANUP",
+          "$.blobUrl",
+          "package verifier Worker creation and Blob URL revocation both failed",
+          new CAPTURED_AGGREGATE_ERROR(
+            [cause, cleanupCause],
+            "creation and revocation failed",
+          ),
+        );
+      }
+    }
+    if (cause instanceof CppCuteBrowserWasmVerifierControllerError) throw cause;
+    capability("$.worker", "package verifier Blob module Worker creation failed", { cause });
+  }
+
+  return runOwnedWorker({
+    binding: context,
+    maxWallTimeMs: context.maxWallTimeMs,
+    mode: freeze({ kind: "production", context }),
+    effects,
+    worker,
+    blobUrl,
+    launch,
+    requestId,
+    invocationNonceSha256,
+    start,
+    signal,
+  }) as Promise<ObservedCppCuteBrowserPackageWasmConformance>;
+}
+
+async function mintProductionConformance(
+  context: ProductionVerifierContext,
+  summary: CppCuteBrowserWasmVerifierReportSummary,
+  terminalMessage: CppCuteBrowserWasmVerifierSuccessMessage,
+  requestId: string,
+  invocationNonceSha256: string,
+  effects: CppCuteBrowserWasmVerifierControllerPlatform,
+  signal: AbortSignal | undefined,
+  start: number,
+  maxWallTimeMs: number,
+): Promise<ObservedCppCuteBrowserPackageWasmConformance> {
+  const evidenceHash = await hashCanonicalJson({
+    domain: "browsergrad.compiler.cpp-cute.package-wasm-verifier-conformance.v1",
+    requestId,
+    invocationNonceSha256,
+    verifierBundleId: context.verifierBundleInspection.bundleId,
+    verifierModuleSha256: context.verifierModuleSha256,
+    verifierModuleByteLength: context.verifierModuleByteLength,
+    assetManifestId: context.assetSet.manifestId,
+    assetSetSha256: context.assetSet.assetSetSha256,
+    wasmAssetId: context.wasmAssetId,
+    wasmSha256: summary.wasmSha256,
+    wasmByteLength: summary.wasmByteLength,
+    runtimeAbiManifestId: summary.runtimeAbiManifestId,
+    runtimeAbiContractSha256: summary.runtimeAbiContractSha256,
+    runtimeAbiResourceSha256: context.runtimeAbiResourceSha256,
+    observedProjectionSha256: summary.observedProjectionSha256,
+    reportSha256: terminalMessage.reportSha256,
+    reportByteLength: terminalMessage.reportByteLength,
+  });
+  throwIfAborted(signal);
+  let authorityTime: number;
+  try {
+    authorityTime = checkedNow(
+      effects.monotonicNowMilliseconds(),
+      "$.hostTime.authority",
+    );
+  } catch (cause) {
+    throw asControllerError(cause, "$.hostTime.authority");
+  }
+  if (authorityTime < start || authorityTime - start >= maxWallTimeMs) {
+    throw controllerError(
+      "BG-COMPILER-CPP-CUTE-BROWSER-WASM-VERIFIER-CONTROLLER-TIMEOUT",
+      "$.hostTime.authority",
+      "production verifier authority missed the absolute wall-time deadline",
+    );
+  }
+  const inspection = freeze({
+    authority: "host-owned-package-wasm-verifier-conformance",
+    evidenceId: `bg.cpp.browser-wasm-verifier-conformance.sha256.${evidenceHash}`,
+    requestId,
+    invocationNonceSha256,
+    verifierBundleId: context.verifierBundleInspection.bundleId,
+    verifierModuleSha256: context.verifierModuleSha256,
+    verifierModuleByteLength: context.verifierModuleByteLength,
+    assetManifestId: context.assetSet.manifestId,
+    assetSetSha256: context.assetSet.assetSetSha256,
+    wasmAssetId: context.wasmAssetId,
+    wasmSha256: summary.wasmSha256,
+    wasmByteLength: summary.wasmByteLength,
+    runtimeAbiManifestId: summary.runtimeAbiManifestId,
+    runtimeAbiContractSha256: summary.runtimeAbiContractSha256,
+    runtimeAbiResourceSha256: context.runtimeAbiResourceSha256,
+    observedProjectionSha256: summary.observedProjectionSha256,
+    reportSha256: terminalMessage.reportSha256,
+    reportByteLength: terminalMessage.reportByteLength,
+    acceptedTerminalMessages: "1",
+    verifierWorkerExecutionObserved: true,
+    workerLifecycle: "terminate-called-and-blob-url-revoked",
+    rawWasmVerified: true,
+    exactInterfaceConformanceObserved: true,
+    packageOwnedVerifier: true,
+    productionConformanceAuthorityMinted: true,
+    compilerWorkerExecutionObserved: false,
+    loweringAuthorityMinted: false,
+    releaseReady: false,
+  } as const) as CppCuteBrowserPackageWasmConformanceInspection;
+  const observed = freeze({
+    ...inspection,
+  }) as ObservedCppCuteBrowserPackageWasmConformance;
+  const reportSummary = freeze({
+    ...summary,
+    mismatches: freeze([]) as readonly [],
+  });
+  const record = freeze({
+    assetSet: context.assetSet,
+    assetManifest: context.assetManifest,
+    runtimeAbiAsset: context.runtimeAbiAsset,
+    runtimeAbi: context.runtimeAbi,
+    verifierBundle: context.verifierBundle,
+    verifierBundleInspection: context.verifierBundleInspection,
+    reportSummary,
+    productionAuthority: true,
+    detachedLargeBuffersRetained: false,
+  } as const);
+  weakMapSet(PRODUCTION_CONFORMANCE, observed, freeze({ inspection, record }));
+  return observed;
+}
+
+function storedProductionConformance(
+  observed: ObservedCppCuteBrowserPackageWasmConformance,
+): StoredProductionConformance {
+  if (typeof observed !== "object" || observed === null) {
+    unverified("$.observed", "expected opaque package Wasm conformance authority");
+  }
+  const stored = weakMapGet(PRODUCTION_CONFORMANCE, observed as object);
+  if (stored === undefined || observed.productionConformanceAuthorityMinted !== true ||
+      observed.verifierWorkerExecutionObserved !== true ||
+      observed.rawWasmVerified !== true ||
+      observed.exactInterfaceConformanceObserved !== true ||
+      observed.packageOwnedVerifier !== true ||
+      observed.compilerWorkerExecutionObserved !== false ||
+      observed.loweringAuthorityMinted !== false || observed.releaseReady !== false) {
+    unverified("$.observed", "package Wasm conformance authority is forged or mutated");
+  }
+  return stored;
+}
 
 export async function prepareCppCuteBrowserWasmVerifierCandidate(
   input: PrepareCppCuteBrowserWasmVerifierCandidateInput,
@@ -344,10 +911,7 @@ export async function prepareCppCuteBrowserWasmVerifierCandidate(
     );
   }
   const maxOperations = data["maxOperations"] === undefined
-    ? Math.min(
-        CPP_CUTE_BROWSER_WASM_MAX_OPERATIONS,
-        Math.max(CPP_CUTE_BROWSER_WASM_BASE_OPERATIONS, expectedWasmByteLength * 2),
-      )
+    ? derivedMaxOperations(expectedWasmByteLength)
     : boundedPositiveInteger(
         data["maxOperations"],
         CPP_CUTE_BROWSER_WASM_MAX_OPERATIONS,
@@ -371,7 +935,7 @@ export async function prepareCppCuteBrowserWasmVerifierCandidate(
     unverified("$.input.runtimeAbi", "prepared runtime-ABI public identity is inconsistent");
   }
 
-  const candidate = Object.freeze({
+  const candidate = freeze({
     verifierModuleSha256: expectedVerifierModuleSha256,
     verifierModuleByteLength: expectedVerifierModuleByteLength,
     wasmAssetId: pattern(data["wasmAssetId"], ASSET_ID, "$.input.wasmAssetId"),
@@ -469,9 +1033,9 @@ export async function __executeCppCuteBrowserWasmVerifierCandidateWithPlatformFo
 
   const runtimeAbiManifestBytes = takenBytes.runtimeAbiManifestBytes as Uint8Array<ArrayBuffer>;
   const wasmBytes = takenBytes.wasmBytes as Uint8Array<ArrayBuffer>;
-  const launch: CppCuteBrowserWasmVerifierLaunchMessage = Object.freeze({
+  const launch: CppCuteBrowserWasmVerifierLaunchMessage = freeze({
     kind: "browsergrad-cpp-cute-wasm-verifier-launch",
-    version: Object.freeze({
+    version: freeze({
       major: CPP_CUTE_BROWSER_WASM_VERIFIER_MAJOR,
       minor: CPP_CUTE_BROWSER_WASM_VERIFIER_MINOR,
     }),
@@ -498,7 +1062,7 @@ export async function __executeCppCuteBrowserWasmVerifierCandidateWithPlatformFo
   let blobUrl: string | undefined;
   let worker: CppCuteBrowserWasmVerifierPlatformWorker | undefined;
   try {
-    blobUrl = effects.createModuleBlobUrl(new Uint8Array(verifierModuleBytes));
+    blobUrl = effects.createModuleBlobUrl(new CAPTURED_UINT8_ARRAY(verifierModuleBytes));
     if (typeof blobUrl !== "string" || blobUrl.length === 0) {
       capability("$.blobUrl", "Blob URL creation returned no URL");
     }
@@ -515,7 +1079,10 @@ export async function __executeCppCuteBrowserWasmVerifierCandidateWithPlatformFo
           "BG-COMPILER-CPP-CUTE-BROWSER-WASM-VERIFIER-CONTROLLER-CLEANUP",
           "$.blobUrl",
           "Worker creation failed and Blob URL revocation also failed",
-          new AggregateError([cause, cleanupCause], "creation and revocation failed"),
+          new CAPTURED_AGGREGATE_ERROR(
+            [cause, cleanupCause],
+            "creation and revocation failed",
+          ),
         );
       }
     }
@@ -524,8 +1091,9 @@ export async function __executeCppCuteBrowserWasmVerifierCandidateWithPlatformFo
   }
 
   return runOwnedWorker({
-    candidate,
-    stored,
+    binding: candidate,
+    maxWallTimeMs: stored.maxWallTimeMs,
+    mode: freeze({ kind: "candidate", candidate }),
     effects,
     worker,
     blobUrl,
@@ -534,7 +1102,7 @@ export async function __executeCppCuteBrowserWasmVerifierCandidateWithPlatformFo
     invocationNonceSha256,
     start,
     signal,
-  });
+  }) as Promise<CppCuteBrowserWasmVerifierCandidateSimulation>;
 }
 
 export function __unwrapCppCuteBrowserWasmVerifierCandidateSimulationForTest(
@@ -547,12 +1115,12 @@ export function __unwrapCppCuteBrowserWasmVerifierCandidateSimulationForTest(
   if (stored === undefined) {
     unverified("$.simulation", "candidate verifier simulation is forged or copied");
   }
-  return Object.freeze({
-    reportedSummary: Object.freeze({
+  return freeze({
+    reportedSummary: freeze({
       ...stored.reportedSummary,
-      workerReportedMismatches: Object.freeze([]) as readonly [],
+      workerReportedMismatches: freeze([]) as readonly [],
     }),
-    reportBytes: new Uint8Array(stored.reportBytes),
+    reportBytes: new CAPTURED_UINT8_ARRAY(stored.reportBytes),
     reportedClaimOnly: true,
     rawWasmAuthority: false,
     interfaceConformanceAuthority: false,
@@ -562,8 +1130,9 @@ export function __unwrapCppCuteBrowserWasmVerifierCandidateSimulationForTest(
 }
 
 interface RunOwnedWorkerInput {
-  readonly candidate: PreparedCppCuteBrowserWasmVerifierCandidate;
-  readonly stored: StoredCandidate;
+  readonly binding: VerifierReportBinding;
+  readonly maxWallTimeMs: number;
+  readonly mode: VerifierRunMode;
   readonly effects: CppCuteBrowserWasmVerifierControllerPlatform;
   readonly worker: CppCuteBrowserWasmVerifierPlatformWorker;
   readonly blobUrl: string;
@@ -576,12 +1145,15 @@ interface RunOwnedWorkerInput {
 
 function runOwnedWorker(
   input: RunOwnedWorkerInput,
-): Promise<CppCuteBrowserWasmVerifierCandidateSimulation> {
+): Promise<
+  CppCuteBrowserWasmVerifierCandidateSimulation |
+  ObservedCppCuteBrowserPackageWasmConformance
+> {
   const {
-    candidate, stored, effects, worker, blobUrl, launch, requestId,
+    binding, maxWallTimeMs, mode, effects, worker, blobUrl, launch, requestId,
     invocationNonceSha256, start, signal,
   } = input;
-  return new Promise((resolve, reject) => {
+  return new CAPTURED_PROMISE((resolve, reject) => {
     type Settlement =
       | { readonly kind: "failure"; readonly error: CppCuteBrowserWasmVerifierControllerError }
       | {
@@ -671,8 +1243,23 @@ function runOwnedWorker(
         reject(new CppCuteBrowserWasmVerifierReportedFailureError(terminalMessage));
         return;
       }
-      void validateSuccessReport(terminalMessage, candidate)
+      void validateSuccessReport(terminalMessage, binding)
         .then(async ({ summary, reportBytes }) => {
+          if (mode.kind === "production") {
+            resolve(await mintProductionConformance(
+              mode.context,
+              summary,
+              terminalMessage,
+              requestId,
+              invocationNonceSha256,
+              effects,
+              signal,
+              start,
+              maxWallTimeMs,
+            ));
+            return;
+          }
+          const candidate = mode.candidate;
           const simulationHash = await hashCanonicalJson({
             domain: "browsergrad.compiler.cpp-cute.browser-wasm-verifier-candidate-simulation.v1",
             requestId,
@@ -687,7 +1274,7 @@ function runOwnedWorker(
             reportSha256: terminalMessage.reportSha256,
             reportByteLength: terminalMessage.reportByteLength,
           });
-          const simulation = Object.freeze({
+          const simulation = freeze({
             authority: "test-platform-disposable-verifier-worker-candidate-simulation",
             simulationId: `bg.cpp.browser-wasm-verifier-candidate-simulation.sha256.${simulationHash}`,
             requestId,
@@ -712,9 +1299,9 @@ function runOwnedWorker(
             productionConformanceAuthorityMinted: false,
             releaseReady: false,
           }) as CppCuteBrowserWasmVerifierCandidateSimulation;
-          weakMapSet(SIMULATIONS, simulation, Object.freeze({
+          weakMapSet(SIMULATIONS, simulation, freeze({
             reportedSummary: reportedClaim(summary),
-            reportBytes: new Uint8Array(reportBytes),
+            reportBytes: new CAPTURED_UINT8_ARRAY(reportBytes),
             reportedClaimOnly: true,
             rawWasmAuthority: false,
             interfaceConformanceAuthority: false,
@@ -738,7 +1325,7 @@ function runOwnedWorker(
     const requestFailure = (error: CppCuteBrowserWasmVerifierControllerError): void => {
       if (settlementSourceClaimed) return;
       settlementSourceClaimed = true;
-      requestSettlement(Object.freeze({ kind: "failure", error }));
+      requestSettlement(freeze({ kind: "failure", error }));
     };
 
     const flushSetupSettlement = (): boolean => {
@@ -756,8 +1343,8 @@ function runOwnedWorker(
       let end: number;
       try {
         end = checkedNow(effects.monotonicNowMilliseconds(), "$.hostTime.terminal");
-        if (end < start || end - start > stored.maxWallTimeMs) {
-          requestSettlement(Object.freeze({ kind: "failure", error: controllerError(
+        if (end < start || end - start >= maxWallTimeMs) {
+          requestSettlement(freeze({ kind: "failure", error: controllerError(
             "BG-COMPILER-CPP-CUTE-BROWSER-WASM-VERIFIER-CONTROLLER-TIMEOUT",
             "$.hostTime.terminal",
             "verifier terminal arrived after the absolute wall-time deadline",
@@ -766,10 +1353,10 @@ function runOwnedWorker(
         }
         terminal = parseTerminal(event.data, requestId, invocationNonceSha256);
       } catch (cause) {
-        requestSettlement(Object.freeze({ kind: "failure", error: asTerminalError(cause) }));
+        requestSettlement(freeze({ kind: "failure", error: asTerminalError(cause) }));
         return;
       }
-      requestSettlement(Object.freeze({ kind: "terminal", terminal }));
+      requestSettlement(freeze({ kind: "terminal", terminal }));
     };
     const onError = (): void => requestFailure(controllerError(
       "BG-COMPILER-CPP-CUTE-BROWSER-WASM-VERIFIER-CONTROLLER-WORKER-ERROR",
@@ -825,19 +1412,34 @@ function runOwnedWorker(
       }
       if (flushSetupSettlement()) return;
     }
+    let remainingWallTimeMs = maxWallTimeMs;
+    if (mode.kind === "production") {
+      try {
+        remainingWallTimeMs = checkedRemainingWallTime(
+          effects.monotonicNowMilliseconds(),
+          start,
+          maxWallTimeMs,
+          "$.hostTime.launch",
+        );
+      } catch (cause) {
+        requestFailure(asControllerError(cause, "$.hostTime.launch"));
+        if (flushSetupSettlement()) return;
+        return;
+      }
+    }
     try {
       timer = effects.setHostTimeout(() => requestFailure(controllerError(
         "BG-COMPILER-CPP-CUTE-BROWSER-WASM-VERIFIER-CONTROLLER-TIMEOUT",
         "$.hostTimer",
         "host timer reached the verifier wall-time ceiling",
-      )), stored.maxWallTimeMs);
+      )), remainingWallTimeMs);
       if (timer === undefined) invalid("$.hostTimer", "platform returned no timer handle");
     } catch (cause) {
       requestFailure(setupWorkerError("$.hostTimer", "host timer registration failed", cause));
     }
     if (flushSetupSettlement()) return;
     try {
-      worker.postMessage(launch, Object.freeze([
+      worker.postMessage(launch, freeze([
         launch.runtimeAbiManifestBytes.buffer as ArrayBuffer,
         launch.wasmBytes.buffer as ArrayBuffer,
       ]));
@@ -894,7 +1496,7 @@ function parseTerminal(
     if (typeof data["failurePath"] !== "string" || !validPath(data["failurePath"])) {
       terminal("$.terminal.failurePath", "expected bounded diagnostic path");
     }
-    return Object.freeze({
+    return freeze({
       kind,
       version: CPP_CUTE_BROWSER_WASM_VERIFIER_MAJOR,
       protocol: CPP_CUTE_BROWSER_WASM_VERIFIER_PROTOCOL,
@@ -923,7 +1525,7 @@ function parseTerminal(
   if (reportBytes.byteLength !== reportByteLength) {
     terminal("$.terminal.reportBytes", "report byte length differs from terminal binding");
   }
-  return Object.freeze({
+  return freeze({
     kind,
     version: CPP_CUTE_BROWSER_WASM_VERIFIER_MAJOR,
     protocol: CPP_CUTE_BROWSER_WASM_VERIFIER_PROTOCOL,
@@ -941,7 +1543,7 @@ function parseTerminal(
 
 async function validateSuccessReport(
   terminalMessage: CppCuteBrowserWasmVerifierSuccessMessage,
-  candidate: PreparedCppCuteBrowserWasmVerifierCandidate,
+  binding: VerifierReportBinding,
 ): Promise<{
   readonly summary: CppCuteBrowserWasmVerifierReportSummary;
   readonly reportBytes: Uint8Array;
@@ -970,10 +1572,10 @@ async function validateSuccessReport(
   literal(report["rawWasmVerified"], true, "$.report.rawWasmVerified");
   literal(report["workerExecutionReady"], false, "$.report.workerExecutionReady");
   literal(report["releaseReady"], false, "$.report.releaseReady");
-  if (!Array.isArray(report["mismatches"]) || report["mismatches"].length !== 0) {
+  if (!NATIVE_ARRAY_IS_ARRAY(report["mismatches"]) || report["mismatches"].length !== 0) {
     reportMismatch("$.report.mismatches", "conforming report must have no ABI mismatches");
   }
-  const summary: CppCuteBrowserWasmVerifierReportSummary = Object.freeze({
+  const summary: CppCuteBrowserWasmVerifierReportSummary = freeze({
     authority: "review-observation-only",
     wasmSha256: pattern(report["wasmSha256"], SHA256_HEX, "$.report.wasmSha256"),
     wasmByteLength: boundedPositiveInteger(
@@ -997,24 +1599,27 @@ async function validateSuccessReport(
       "$.report.runtimeAbiContractSha256",
     ),
     exactInterfaceConformance: true,
-    mismatches: Object.freeze([]) as readonly [],
+    mismatches: freeze([]) as readonly [],
     rawWasmVerified: true,
     workerExecutionReady: false,
     releaseReady: false,
   });
-  if (summary.wasmSha256 !== candidate.expectedWasmSha256 ||
-      summary.wasmByteLength !== candidate.expectedWasmByteLength ||
-      summary.runtimeAbiManifestId !== candidate.runtimeAbiManifestId ||
-      summary.runtimeAbiContractSha256 !== candidate.runtimeAbiContractSha256) {
-    reportMismatch("$.report", "copy-safe report differs from the prepared candidate binding");
+  if (summary.wasmSha256 !== binding.expectedWasmSha256 ||
+      summary.wasmByteLength !== binding.expectedWasmByteLength ||
+      summary.runtimeAbiManifestId !== binding.runtimeAbiManifestId ||
+      summary.runtimeAbiContractSha256 !== binding.runtimeAbiContractSha256) {
+    reportMismatch("$.report", "copy-safe report differs from the prepared verifier binding");
   }
-  return Object.freeze({ summary, reportBytes: new Uint8Array(terminalMessage.reportBytes) });
+  return freeze({
+    summary,
+    reportBytes: new CAPTURED_UINT8_ARRAY(terminalMessage.reportBytes),
+  });
 }
 
 function reportedClaim(
   summary: CppCuteBrowserWasmVerifierReportSummary,
 ): CppCuteBrowserWasmVerifierReportedClaim {
-  return Object.freeze({
+  return freeze({
     workerReportedAuthority: summary.authority,
     wasmSha256: summary.wasmSha256,
     wasmByteLength: summary.wasmByteLength,
@@ -1022,7 +1627,7 @@ function reportedClaim(
     runtimeAbiManifestId: summary.runtimeAbiManifestId,
     runtimeAbiContractSha256: summary.runtimeAbiContractSha256,
     workerReportedExactInterfaceConformance: true,
-    workerReportedMismatches: Object.freeze([]) as readonly [],
+    workerReportedMismatches: freeze([]) as readonly [],
     workerReportedRawWasmVerified: true,
     workerReportedWorkerExecutionReady: false,
     workerReportedReleaseReady: false,
@@ -1049,14 +1654,14 @@ function storedCandidate(
  * The WeakMap retains only empty buffers after the one permitted start.
  */
 function takeCandidateBytes(stored: StoredCandidate): TakenCandidateBytes {
-  const taken = Object.freeze({
+  const taken = freeze({
     verifierModuleBytes: stored.verifierModuleBytes,
     wasmBytes: stored.wasmBytes,
     runtimeAbiManifestBytes: stored.runtimeAbiManifestBytes,
   });
-  stored.verifierModuleBytes = new Uint8Array(0);
-  stored.wasmBytes = new Uint8Array(0);
-  stored.runtimeAbiManifestBytes = new Uint8Array(0);
+  stored.verifierModuleBytes = new CAPTURED_UINT8_ARRAY(0);
+  stored.wasmBytes = new CAPTURED_UINT8_ARRAY(0);
+  stored.runtimeAbiManifestBytes = new CAPTURED_UINT8_ARRAY(0);
   return taken;
 }
 
@@ -1065,7 +1670,7 @@ function exactPlatform(value: unknown): CppCuteBrowserWasmVerifierControllerPlat
     "randomBytes", "createModuleBlobUrl", "createModuleWorker", "revokeModuleBlobUrl",
     "monotonicNowMilliseconds", "setHostTimeout", "clearHostTimeout",
   ]);
-  for (const [key, member] of Object.entries(data)) {
+  for (const [key, member] of NATIVE_OBJECT_ENTRIES(data)) {
     if (typeof member !== "function") invalid(`$.platform.${key}`, "platform member must be a function");
   }
   return data as unknown as CppCuteBrowserWasmVerifierControllerPlatform;
@@ -1099,7 +1704,10 @@ function checkedWorker(value: unknown): CppCuteBrowserWasmVerifierPlatformWorker
       throw cleanupFailure(
         "$.worker",
         "Worker method snapshotting failed and termination also failed",
-        new AggregateError([cause, cleanupCause], "snapshot and termination failed"),
+        new CAPTURED_AGGREGATE_ERROR(
+          [cause, cleanupCause],
+          "snapshot and termination failed",
+        ),
       );
     }
     throw cause;
@@ -1122,7 +1730,7 @@ function checkedWorker(value: unknown): CppCuteBrowserWasmVerifierPlatformWorker
   ): void => {
     NATIVE_REFLECT_APPLY(removeEventListener, receiver, [type, listener]);
   }) as CppCuteBrowserWasmVerifierPlatformWorker["removeEventListener"];
-  return Object.freeze({
+  return freeze({
     postMessage: capturedPostMessage,
     addEventListener: capturedAddEventListener,
     removeEventListener: capturedRemoveEventListener,
@@ -1142,7 +1750,7 @@ function snapshotCallable(
   while (owner !== null && depth < 32) {
     const descriptor = NATIVE_REFLECT_APPLY(
       NATIVE_GET_OWN_PROPERTY_DESCRIPTOR,
-      Object,
+      CAPTURED_OBJECT,
       [owner, key],
     ) as PropertyDescriptor | undefined;
     if (descriptor !== undefined) {
@@ -1151,7 +1759,11 @@ function snapshotCallable(
       }
       return descriptor.value as (...arguments_: never[]) => unknown;
     }
-    owner = NATIVE_REFLECT_APPLY(NATIVE_GET_PROTOTYPE_OF, Object, [owner]) as object | null;
+    owner = NATIVE_REFLECT_APPLY(
+      NATIVE_GET_PROTOTYPE_OF,
+      CAPTURED_OBJECT,
+      [owner],
+    ) as object | null;
     depth += 1;
   }
   capability(path, "Worker instance lacks a bounded getter-free callable method");
@@ -1181,13 +1793,14 @@ function failurePhase(value: unknown): CppCuteBrowserWasmVerifierFailurePhase {
 
 function exactDataRecordAtLeastKind(value: unknown, path: string): unknown {
   if (typeof value !== "object" || value === null ||
-      (NATIVE_REFLECT_APPLY(NATIVE_GET_PROTOTYPE_OF, Object, [value]) !== Object.prototype &&
-       NATIVE_REFLECT_APPLY(NATIVE_GET_PROTOTYPE_OF, Object, [value]) !== null)) {
+      (NATIVE_REFLECT_APPLY(NATIVE_GET_PROTOTYPE_OF, CAPTURED_OBJECT, [value]) !==
+        CAPTURED_OBJECT_PROTOTYPE &&
+       NATIVE_REFLECT_APPLY(NATIVE_GET_PROTOTYPE_OF, CAPTURED_OBJECT, [value]) !== null)) {
     terminal(path, "expected plain terminal object");
   }
   const descriptor = NATIVE_REFLECT_APPLY(
     NATIVE_GET_OWN_PROPERTY_DESCRIPTOR,
-    Object,
+    CAPTURED_OBJECT,
     [value, "kind"],
   ) as PropertyDescriptor | undefined;
   if (descriptor === undefined || descriptor.enumerable !== true || !("value" in descriptor)) {
@@ -1201,14 +1814,40 @@ function exactJsonObject(
   path: string,
   keys: readonly string[],
 ): Readonly<Record<string, JsonValue>> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (typeof value !== "object" || value === null || NATIVE_ARRAY_IS_ARRAY(value)) {
     reportMismatch(path, "expected JSON object");
   }
-  const actual = Object.keys(value);
-  if (actual.length !== keys.length || actual.some((key) => !keys.includes(key))) {
+  const actual = NATIVE_OBJECT_KEYS(value);
+  if (actual.length !== keys.length || containsUnexpectedKey(actual, keys)) {
     reportMismatch(path, `expected exactly report fields ${keys.join(", ")}`);
   }
   return value as JsonObject;
+}
+
+function containsUnexpectedKey(actual: readonly string[], expected: readonly string[]): boolean {
+  for (let actualIndex = 0; actualIndex < actual.length; actualIndex += 1) {
+    const key = actual[actualIndex]!;
+    let found = false;
+    for (let expectedIndex = 0; expectedIndex < expected.length; expectedIndex += 1) {
+      if (key === expected[expectedIndex]) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) return true;
+  }
+  return false;
+}
+
+function containsUnexpectedPropertyKey(
+  actual: readonly PropertyKey[],
+  expected: readonly string[],
+): boolean {
+  for (let index = 0; index < actual.length; index += 1) {
+    const key = actual[index]!;
+    if (typeof key !== "string" || containsUnexpectedKey([key], expected)) return true;
+  }
+  return false;
 }
 
 function exactDataRecord(
@@ -1217,21 +1856,25 @@ function exactDataRecord(
   keys: readonly string[],
 ): Readonly<Record<string, unknown>> {
   if (typeof value !== "object" || value === null ||
-      (NATIVE_REFLECT_APPLY(NATIVE_GET_PROTOTYPE_OF, Object, [value]) !== Object.prototype &&
-       NATIVE_REFLECT_APPLY(NATIVE_GET_PROTOTYPE_OF, Object, [value]) !== null)) {
+      (NATIVE_REFLECT_APPLY(NATIVE_GET_PROTOTYPE_OF, CAPTURED_OBJECT, [value]) !==
+        CAPTURED_OBJECT_PROTOTYPE &&
+       NATIVE_REFLECT_APPLY(NATIVE_GET_PROTOTYPE_OF, CAPTURED_OBJECT, [value]) !== null)) {
     invalid(path, "expected plain data object");
   }
-  const ownKeys = NATIVE_REFLECT_APPLY(NATIVE_REFLECT_OWN_KEYS, Reflect, [value]) as PropertyKey[];
-  if (ownKeys.length !== keys.length ||
-      ownKeys.some((key) => typeof key !== "string" || !keys.includes(key))) {
+  const ownKeys = NATIVE_REFLECT_APPLY(
+    NATIVE_REFLECT_OWN_KEYS,
+    CAPTURED_REFLECT,
+    [value],
+  ) as PropertyKey[];
+  if (ownKeys.length !== keys.length || containsUnexpectedPropertyKey(ownKeys, keys)) {
     invalid(path, `expected exactly data fields ${keys.join(", ")}`);
   }
   const descriptors = NATIVE_REFLECT_APPLY(
     NATIVE_GET_OWN_PROPERTY_DESCRIPTORS,
-    Object,
+    CAPTURED_OBJECT,
     [value],
   ) as Record<PropertyKey, PropertyDescriptor>;
-  const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  const result = NATIVE_OBJECT_CREATE(null) as Record<string, unknown>;
   for (const key of keys) {
     const descriptor = descriptors[key];
     if (descriptor === undefined || descriptor.enumerable !== true || !("value" in descriptor)) {
@@ -1239,12 +1882,12 @@ function exactDataRecord(
     }
     result[key] = descriptor.value;
   }
-  return Object.freeze(result);
+  return freeze(result);
 }
 
 function snapshotBytesWithinLimit(value: unknown, path: string, limit: number): Uint8Array {
   if (typeof value !== "object" || value === null ||
-      NATIVE_REFLECT_APPLY(NATIVE_GET_PROTOTYPE_OF, Object, [value]) !==
+      NATIVE_REFLECT_APPLY(NATIVE_GET_PROTOTYPE_OF, CAPTURED_OBJECT, [value]) !==
         CAPTURED_UINT8_ARRAY_PROTOTYPE ||
       CAPTURED_TYPED_ARRAY_BYTE_LENGTH_GETTER === undefined ||
       CAPTURED_TYPED_ARRAY_BUFFER_GETTER === undefined) {
@@ -1262,7 +1905,7 @@ function snapshotBytesWithinLimit(value: unknown, path: string, limit: number): 
   } catch (cause) {
     invalid(path, "Uint8Array intrinsic inspection failed", { cause });
   }
-  if (NATIVE_REFLECT_APPLY(NATIVE_GET_PROTOTYPE_OF, Object, [buffer]) !==
+  if (NATIVE_REFLECT_APPLY(NATIVE_GET_PROTOTYPE_OF, CAPTURED_OBJECT, [buffer]) !==
       CAPTURED_ARRAY_BUFFER_PROTOTYPE) {
     invalid(path, "expected unshared plain ArrayBuffer-backed bytes");
   }
@@ -1333,15 +1976,47 @@ function removeCapturedAbortListener(signal: AbortSignal, listener: () => void):
 }
 
 function checkedNow(value: number, path: string): number {
-  if (!Number.isFinite(value) || value < 0) invalid(path, "host time must be finite and nonnegative");
+  if (!NATIVE_NUMBER_IS_FINITE(value) || value < 0) {
+    invalid(path, "host time must be finite and nonnegative");
+  }
   return value;
 }
 
+function checkedRemainingWallTime(
+  value: number,
+  start: number,
+  maxWallTimeMs: number,
+  path: string,
+): number {
+  const now = checkedNow(value, path);
+  if (now < start) invalid(path, "host monotonic time regressed during verifier setup");
+  const elapsed = now - start;
+  if (elapsed >= maxWallTimeMs) {
+    throw controllerError(
+      "BG-COMPILER-CPP-CUTE-BROWSER-WASM-VERIFIER-CONTROLLER-TIMEOUT",
+      path,
+      "verifier setup exhausted the absolute wall-time deadline before launch",
+    );
+  }
+  return maxWallTimeMs - elapsed;
+}
+
 function boundedPositiveInteger(value: unknown, maximum: number, path: string): number {
-  if (!Number.isSafeInteger(value) || (value as number) <= 0 || (value as number) > maximum) {
+  if (!NATIVE_NUMBER_IS_SAFE_INTEGER(value) ||
+      (value as number) <= 0 || (value as number) > maximum) {
     invalid(path, `expected positive safe integer no greater than ${maximum}`);
   }
   return value as number;
+}
+
+function derivedMaxOperations(byteLength: number): number {
+  const scaled = byteLength * 2;
+  if (scaled < CPP_CUTE_BROWSER_WASM_BASE_OPERATIONS) {
+    return CPP_CUTE_BROWSER_WASM_BASE_OPERATIONS;
+  }
+  return scaled > CPP_CUTE_BROWSER_WASM_MAX_OPERATIONS
+    ? CPP_CUTE_BROWSER_WASM_MAX_OPERATIONS
+    : scaled;
 }
 
 function pattern(value: unknown, expected: RegExp, path: string): string {
@@ -1371,6 +2046,18 @@ function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
     difference |= left[index]! ^ right[index]!;
   }
   return difference === 0;
+}
+
+async function hashBytes(bytes: Uint8Array, path: string): Promise<string> {
+  try {
+    return await sha256Hex(bytes);
+  } catch (cause) {
+    hashUnavailable(path, "SHA-256 is unavailable for exact verifier binding", { cause });
+  }
+}
+
+function freeze<T>(value: T): T {
+  return NATIVE_REFLECT_APPLY(NATIVE_OBJECT_FREEZE, undefined, [value]) as T;
 }
 
 function weakMapGet<K extends object, V>(map: WeakMap<K, V>, key: K): V | undefined {
@@ -1429,7 +2116,9 @@ function asTerminalError(cause: unknown): CppCuteBrowserWasmVerifierControllerEr
 
 function asReportError(cause: unknown): CppCuteBrowserWasmVerifierControllerError {
   if (cause instanceof CppCuteBrowserWasmVerifierControllerError &&
-      cause.code === "BG-COMPILER-CPP-CUTE-BROWSER-WASM-VERIFIER-CONTROLLER-REPORT-MISMATCH") {
+      (cause.code === "BG-COMPILER-CPP-CUTE-BROWSER-WASM-VERIFIER-CONTROLLER-REPORT-MISMATCH" ||
+       cause.code === "BG-COMPILER-CPP-CUTE-BROWSER-WASM-VERIFIER-CONTROLLER-CANCELLED" ||
+       cause.code === "BG-COMPILER-CPP-CUTE-BROWSER-WASM-VERIFIER-CONTROLLER-TIMEOUT")) {
     return cause;
   }
   return controllerError(
