@@ -14,7 +14,10 @@ import {
   resolveDecodeLimits,
   type DecodeLimits,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
-import { unwrapVerifiedCppCuteFrontendArtifact } from "./cpp_cute_frontend_artifact.js";
+import {
+  unwrapVerifiedCppCuteFrontendArtifact,
+  type VerifiedCppCuteFrontendArtifact,
+} from "./cpp_cute_frontend_artifact.js";
 import {
   unwrapAuthorizedCppCuteFrontendArtifact,
   type AuthorizedCppCuteFrontendArtifact,
@@ -43,6 +46,21 @@ export interface LowerAuthorizedCppCuteLayoutEntryRequest {
 export interface LowerAuthorizedCppCuteLayoutEntryOptions {
   readonly limits?: Partial<DecodeLimits>;
   readonly signal?: AbortSignal;
+}
+
+/**
+ * Non-authoritative semantic preparation over one already verified Artifact V3.
+ * It proves compatibility with the shared layout seam, but cannot authorize a
+ * backend or substitute for producer authorization.
+ */
+export interface PreparedVerifiedCppCuteLayoutSemantics {
+  readonly artifact: VerifiedCppCuteFrontendArtifact;
+  readonly preparedLayout: PreparedLayoutExpression;
+  readonly entry: Extract<CppCuteFrontendEntryV1, { readonly kind: "layout" }>;
+  readonly fact: CppCuteAffineLayoutFactV1;
+  readonly originSpanRecords: readonly CppCuteSourceSpanV1[];
+  readonly macroExpansionRecords: readonly CppCuteMacroExpansionV1[];
+  readonly loweringAuthorityMinted: false;
 }
 
 /**
@@ -110,6 +128,35 @@ class LoweredCppCuteLayoutEntryValue {
 }
 
 /**
+ * Prepares one verified static layout through semantic-core without minting
+ * producer, lowering, backend-execution, or release authority.
+ */
+export async function prepareVerifiedCppCuteLayoutSemantics(
+  artifact: VerifiedCppCuteFrontendArtifact,
+  request: LowerAuthorizedCppCuteLayoutEntryRequest,
+  options: LowerAuthorizedCppCuteLayoutEntryOptions = {},
+): Promise<PreparedVerifiedCppCuteLayoutSemantics> {
+  const verified = unwrapVerifiedCppCuteFrontendArtifact(artifact);
+  const normalizedOptions = normalizeOptions(options);
+  throwIfAborted(normalizedOptions.signal);
+  const entryId = validateRequest(request);
+  const prepared = await prepareLayoutSemantics(
+    verified.envelope.payload,
+    entryId,
+    normalizedOptions,
+  );
+  return Object.freeze({
+    artifact,
+    preparedLayout: prepared.preparedLayout,
+    entry: prepared.entry,
+    fact: prepared.fact,
+    originSpanRecords: prepared.origin.spans,
+    macroExpansionRecords: prepared.origin.macroExpansions,
+    loweringAuthorityMinted: false,
+  });
+}
+
+/**
  * Lowers one explicitly selected, producer-authorized CuTe layout entry
  * through semantic-core. No merely verified/raw artifact overload exists.
  */
@@ -123,71 +170,12 @@ export async function lowerAuthorizedCppCuteLayoutEntry(
   throwIfAborted(normalizedOptions.signal);
   const entryId = validateRequest(request);
   const artifact = unwrapVerifiedCppCuteFrontendArtifact(authorized.artifact);
-  const payload = artifact.envelope.payload;
-  const selectedIds = payload.outcome.kind === "accepted" ? payload.outcome.selectedEntryIds : [];
-  if (payload.outcome.kind !== "accepted") {
-    failure("BG-COMPILER-CPP-CUTE-LAYOUT-UNSUPPORTED-ENTRY", "$.artifact.outcome", "rejected frontend artifacts cannot enter layout lowering");
-  }
-  if (selectedIds.length !== 1 || selectedIds[0] !== entryId) {
-    failure(
-      "BG-COMPILER-CPP-CUTE-LAYOUT-UNSUPPORTED-ENTRY",
-      "$.artifact.outcome.selectedEntryIds",
-      "initial layout lowering requires exactly the explicitly requested selected entry",
-    );
-  }
-  const entry = payload.entries.find((candidate) => candidate.entryId === entryId);
-  if (entry === undefined) inconsistent("$.request.entryId", `selected entry ${entryId} disappeared from the verified artifact`);
-  if (entry.kind !== "layout") {
-    failure(
-      "BG-COMPILER-CPP-CUTE-LAYOUT-UNSUPPORTED-ENTRY",
-      "$.request.entryId",
-      "layout lowering does not accept tensor/view-copy entries",
-    );
-  }
-  const fact = payload.facts.find((candidate) => candidate.factId === entry.layoutFactId);
-  if (fact?.kind !== "affine-layout") inconsistent("$.artifact.entries.layoutFactId", "selected layout fact disappeared or changed kind");
-  if (entry.selectedRootDeclarationIds.length !== 1 || entry.selectedRootDeclarationIds[0] !== fact.resultDeclarationId) {
-    inconsistent(
-      "$.artifact.entries.selectedRootDeclarationIds",
-      "selected entry does not own exactly its affine-layout result declaration",
-    );
-  }
-  const selectedRootFacts = payload.facts.filter((candidate) => (
-    "resultDeclarationId" in candidate && candidate.resultDeclarationId === fact.resultDeclarationId
-  ));
-  if (selectedRootFacts.length !== 1 || selectedRootFacts[0] !== fact) {
-    inconsistent(
-      "$.artifact.facts",
-      "selected layout result declaration has ambiguous layout/tensor ownership",
-    );
-  }
-
-  const layout = lowerLayoutFact(fact, normalizedOptions.limits);
-  throwIfAborted(normalizedOptions.signal);
-  let preparedLayout: PreparedLayoutExpression;
-  try {
-    preparedLayout = await prepareLayoutExpression({
-      symbols: [],
-      constraints: [],
-      layout,
-    }, {
-      producer: { id: "browsergrad.compiler.cpp-cute-layout-lowering", version: "1" },
-      artifactId: "authorized-cpp-cute-layout",
-      limits: normalizedOptions.limits,
-    });
-  } catch (error) {
-    if (!(error instanceof SemanticSchemaError)) throw error;
-    failure(
-      error.diagnostic.code.endsWith("RESOURCE-LIMIT")
-        ? "BG-COMPILER-CPP-CUTE-LAYOUT-RESOURCE-LIMIT"
-        : "BG-COMPILER-CPP-CUTE-LAYOUT-UNSUPPORTED-LAYOUT",
-      "$.artifact.layoutFact",
-      `shared layout verification rejected the selected CuTe layout: ${error.message}`,
-      { cause: error },
-    );
-  }
-  throwIfAborted(normalizedOptions.signal);
-  const origin = collectOriginClosure(payload, fact.origin);
+  const semantic = await prepareLayoutSemantics(
+    artifact.envelope.payload,
+    entryId,
+    normalizedOptions,
+  );
+  const { entry, fact, preparedLayout, origin } = semantic;
   let originHash: string;
   try {
     originHash = await hashCanonicalJson({
@@ -230,6 +218,93 @@ export async function lowerAuthorizedCppCuteLayoutEntry(
     originHash,
   });
   return new LoweredCppCuteLayoutEntryValue(record) as unknown as LoweredCppCuteLayoutEntry;
+}
+
+interface PreparedLayoutSemantics {
+  readonly preparedLayout: PreparedLayoutExpression;
+  readonly entry: Extract<CppCuteFrontendEntryV1, { readonly kind: "layout" }>;
+  readonly fact: CppCuteAffineLayoutFactV1;
+  readonly origin: {
+    readonly spans: readonly CppCuteSourceSpanV1[];
+    readonly macroExpansions: readonly CppCuteMacroExpansionV1[];
+  };
+}
+
+async function prepareLayoutSemantics(
+  payload: CppCuteFrontendPayloadV3,
+  entryId: string,
+  options: NormalizedOptions,
+): Promise<PreparedLayoutSemantics> {
+  const selectedIds = payload.outcome.kind === "accepted" ? payload.outcome.selectedEntryIds : [];
+  if (payload.outcome.kind !== "accepted") {
+    failure("BG-COMPILER-CPP-CUTE-LAYOUT-UNSUPPORTED-ENTRY", "$.artifact.outcome", "rejected frontend artifacts cannot enter layout lowering");
+  }
+  if (selectedIds.length !== 1 || selectedIds[0] !== entryId) {
+    failure(
+      "BG-COMPILER-CPP-CUTE-LAYOUT-UNSUPPORTED-ENTRY",
+      "$.artifact.outcome.selectedEntryIds",
+      "initial layout lowering requires exactly the explicitly requested selected entry",
+    );
+  }
+  const entry = payload.entries.find((candidate) => candidate.entryId === entryId);
+  if (entry === undefined) inconsistent("$.request.entryId", `selected entry ${entryId} disappeared from the verified artifact`);
+  if (entry.kind !== "layout") {
+    failure(
+      "BG-COMPILER-CPP-CUTE-LAYOUT-UNSUPPORTED-ENTRY",
+      "$.request.entryId",
+      "layout lowering does not accept tensor/view-copy entries",
+    );
+  }
+  const fact = payload.facts.find((candidate) => candidate.factId === entry.layoutFactId);
+  if (fact?.kind !== "affine-layout") inconsistent("$.artifact.entries.layoutFactId", "selected layout fact disappeared or changed kind");
+  if (entry.selectedRootDeclarationIds.length !== 1 || entry.selectedRootDeclarationIds[0] !== fact.resultDeclarationId) {
+    inconsistent(
+      "$.artifact.entries.selectedRootDeclarationIds",
+      "selected entry does not own exactly its affine-layout result declaration",
+    );
+  }
+  const selectedRootFacts = payload.facts.filter((candidate) => (
+    "resultDeclarationId" in candidate && candidate.resultDeclarationId === fact.resultDeclarationId
+  ));
+  if (selectedRootFacts.length !== 1 || selectedRootFacts[0] !== fact) {
+    inconsistent(
+      "$.artifact.facts",
+      "selected layout result declaration has ambiguous layout/tensor ownership",
+    );
+  }
+
+  const layout = lowerLayoutFact(fact, options.limits);
+  throwIfAborted(options.signal);
+  let preparedLayout: PreparedLayoutExpression;
+  try {
+    preparedLayout = await prepareLayoutExpression({
+      symbols: [],
+      constraints: [],
+      layout,
+    }, {
+      producer: { id: "browsergrad.compiler.cpp-cute-layout-lowering", version: "1" },
+      artifactId: "authorized-cpp-cute-layout",
+      limits: options.limits,
+    });
+  } catch (error) {
+    if (!(error instanceof SemanticSchemaError)) throw error;
+    failure(
+      error.diagnostic.code.endsWith("RESOURCE-LIMIT")
+        ? "BG-COMPILER-CPP-CUTE-LAYOUT-RESOURCE-LIMIT"
+        : "BG-COMPILER-CPP-CUTE-LAYOUT-UNSUPPORTED-LAYOUT",
+      "$.artifact.layoutFact",
+      `shared layout verification rejected the selected CuTe layout: ${error.message}`,
+      { cause: error },
+    );
+  }
+  throwIfAborted(options.signal);
+  const origin = collectOriginClosure(payload, fact.origin);
+  return Object.freeze({
+    preparedLayout,
+    entry,
+    fact,
+    origin,
+  });
 }
 
 export function traceLoweredCppCuteLayoutCoordinate(

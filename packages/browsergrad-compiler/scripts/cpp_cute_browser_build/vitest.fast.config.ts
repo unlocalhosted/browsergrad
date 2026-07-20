@@ -16,6 +16,7 @@ export default defineConfig({
       "tests/compiler/cpp_cute_browser_frontend_work_metrics.test.ts",
       "tests/compiler/cpp_cute_browser_generated_factory.test.ts",
       "tests/compiler/cpp_cute_browser_header_distribution_reproducibility.test.ts",
+      "tests/compiler/cpp_cute_browser_layout_candidate.test.ts",
       "tests/compiler/cpp_cute_browser_wasm_compiler.test.ts",
       "tests/compiler/cpp_cute_browser_wasm_inspection.test.ts",
       "tests/compiler/cpp_cute_browser_wasm_verifier_bundle.test.ts",

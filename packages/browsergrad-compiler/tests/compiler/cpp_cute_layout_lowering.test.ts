@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { unwrapVerifiedCppCuteFrontendArtifact } from "../../src/cpp_cute_frontend_artifact.js";
 import {
   lowerAuthorizedCppCuteLayoutEntry,
+  prepareVerifiedCppCuteLayoutSemantics,
   traceLoweredCppCuteLayoutCoordinate,
   unwrapLoweredCppCuteLayoutEntry,
   type LoweredCppCuteLayoutEntry,
@@ -63,6 +64,25 @@ function integer(value: string) {
 }
 
 describe("authorized C++/CuTe layout lowering", () => {
+  it("prepares verified layout semantics without manufacturing lowering authority", async () => {
+    const prepared = await prepareVerifiedCppCuteLayoutSemantics(
+      canonicalFixture.artifact,
+      { entryId: selectedEntryId() },
+    );
+    const authorized = await lower();
+
+    expect(prepared).toMatchObject({
+      artifact: canonicalFixture.artifact,
+      entry: { entryId: selectedEntryId(), kind: "layout" },
+      loweringAuthorityMinted: false,
+    });
+    expect(prepared.preparedLayout.layoutSemanticHash).toBe(authorized.layoutSemanticHash);
+    expect(prepared.preparedLayout.indexMapId).toBe(authorized.indexMapId);
+    expect(prepared.originSpanRecords).toHaveLength(1);
+    expect(prepared).not.toHaveProperty("authorization");
+    expect(prepared).not.toHaveProperty("backendExecutionAuthorized");
+  });
+
   it("lowers the selected layout fact through allocation-free shared semantics", async () => {
     const lowered = await lower();
     const record = unwrapLoweredCppCuteLayoutEntry(lowered);
@@ -251,7 +271,9 @@ describe("authorized C++/CuTe layout lowering", () => {
           ...structuredClone(original),
           factId: duplicateFactId,
         });
-        (payload.semanticPasses[0]?.factIds as string[]).push(duplicateFactId);
+        const firstPass = payload.semanticPasses[0];
+        if (firstPass === undefined) throw new Error("fixture lost first semantic pass");
+        (firstPass.factIds as string[]).push(duplicateFactId);
       },
     });
     await expect(lower(fixture.authorization)).rejects.toMatchObject({
