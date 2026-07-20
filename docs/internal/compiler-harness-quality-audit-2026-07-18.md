@@ -93,6 +93,56 @@ raw review reported zero mismatches. It produced a 31,641,377-byte module with
 SHA-256 `5fc425bbc051a2f5be588c2acbb164efb5e43f949afb48a373f3ed022c3b8758`.
 The repinned 30-file/338-test local gate completes in 24.7 seconds on Node 25.
 
+## 2026-07-20 corpus and Worker follow-up
+
+The ordinary workspace build is no longer a meaningful cold-path bottleneck.
+Main-branch CI `29768391553` passed all eight concurrent jobs at exact revision
+`6c6715591c64a9dc657c6431fc723ec292c1ba0a` in 4 minutes 4 seconds. The two
+real-world CUDA jobs built the whole workspace in 16 and 18 seconds, provisioned
+all pinned corpora in 14 and 15 seconds, and completed their authoritative
+source/distribution gates in 2 minutes 26 seconds and 2 minutes 35 seconds.
+Those are clean runner measurements, not warm local estimates.
+
+The corpus gate itself now emits versioned timing artifacts. Four independent
+compile/codegen audits execute concurrently and preserve the same corpus
+selection, limits, failure policy, and browser thresholds. In the successful
+run, the parallel audit group was bounded by `llm.c` at 33.55 seconds for source
+and 35.71 seconds for distribution; the browser/WebGPU phases remained serial
+at 111.91 and 118.20 seconds. A same-machine comparison measured 46.22 seconds
+serial versus 22.01 seconds parallel for the audit phase, a 52.4 percent wall
+time reduction. Browser case sharding is therefore the next speed target, not
+another build-cache workaround.
+
+Corpus provisioning is now an explicit gate rather than hidden verifier setup.
+It admits the pinned LeetCUDA gitlinks as non-audit metadata while binding their
+exact path, commit, and physical state; recovers only an unambiguous dead-owner
+lease; skips fetch/mutation for an already confirmed checkout; and probes a
+canonical Git/Python host-toolchain capability instead of assuming `/usr/bin`
+paths. The focused fixture provisions locally in about 0.44 seconds. These
+contracts close the CI gitlink failure, permanent post-`SIGKILL` busy state,
+unnecessary cached fetch, missing regression-gate, and undeclared host-tool
+layout findings.
+
+The production compiler controller now runs the exact package-owned raw-Wasm
+verifier before preparing the compiler Worker invocation. It transfers a
+canonical, hash-bound derivative evidence region, rejects caller-supplied raw
+conformance or verifier evidence, and rebinds the exact retained host verifier
+authority before minting Worker execution evidence. The regenerated zero-import
+compiler Worker bundle is 559,512 bytes with SHA-256
+`3fdc7d9a82fd91fa9eb61b0ac0b07fa95aed41cb89607a9cc8212e748c93468a`.
+The focused integration passes 9 files/94 tests; the fast harness passes 65
+files/597 tests in 10.92 seconds. This does not claim a valid compiler-Worker
+C++ compile, shared lowering authority, producer trust, legal approval, or
+release readiness.
+
+The harness is improved, not finished. The 1,870-line provisioning module
+still embeds several Python filesystem helpers, rereads corpus bytes across
+multiple admission/snapshot/cleanup passes, retains failure residue without a
+bounded reclamation policy, and has a final path-unlink interval after inode
+validation. The browser/WebGPU runner remains the dominant feedback cost.
+These are current quality findings, not reasons to weaken the semantic or
+real-device gates.
+
 ## Why feedback was slow
 
 The locked recipe originally performed a clean LLVM/Clang 22.1.8 build with
@@ -209,10 +259,10 @@ build to discover.
 | Locked input integrity | Good but incomplete | Exact LLVM archive, builder manifest/config, recipe, ABI, extractor source, and 26-file harness runtime closure are checked and content-bound in build evidence v2. Successful factory/Wasm identities and reviewed ABI projections remain unproven. | Complete a build under the v2 boundary, then bind reviewed outputs before distribution. |
 | Build isolation | Strong containment; new boundary not yet exercised by a completed build | No network, read-only root and declared inputs, private work mount, zero capabilities, and no-new-privileges are observed. Future runs mount only the sealed exact runtime/extractor closure instead of checkout or package trees. | Preserve the same closure in a successful validation and both reproducibility builds. |
 | Native semantic coverage | Good but incomplete | Exact Clang 22 pass integration plus native behavioral, UBSan, and ASan lanes are required in CI. | Keep the exact-version lane blocking and add executed-Wasm coverage. |
-| Evidence quality | Mixed | Bounded immutable logs, raw-Wasm inspection, authority-specific records, and a failure-only observation for available partial logs exist. | Complete successful and reproducible build evidence. |
-| Feedback speed | Good for local harness work; native link remains minutes | The canonical Node 25 gate passes 30 files/338 tests in 24.7 seconds at ABI 1.8. Exact-primary validation `29680831101` completed in 4 minutes 17 seconds, including 2 minutes 25 seconds for isolated compile/link; clean/reproducibility gates stay cache-free and authoritative. | Keep ordinary edits on the local/warm paths and reserve cache-free work for evidence checkpoints. |
-| Maintainability | Weak but improving | The build executor is down to 2,198 lines; native compile session is 2,121 lines; artifact writer is 1,784 lines. Existing compiler-core modules range from roughly 5,400 to 8,000 lines. Exact per-module ratchets prevent all named monoliths from growing. | Continue extracting effect boundaries and semantic subcomponents without creating parallel execution paths, lowering each ratchet as code moves out. |
-| Delivery truthfulness | Good | Production Worker/controller paths remain capability-blocked; CPU, parser, Wasm, Worker, and WebGPU claims are distinct. | Do not relax blockers until reviewed factory/Wasm bytes execute in the package Worker. |
+| Evidence quality | Good for narrow authorities; release incomplete | Bounded immutable logs, raw-Wasm inspection, build and subset-reproducibility records, host-observed verifier evidence, exact corpus admission, per-stage timing records, and failure-only observations remain separate. Full release-output reproducibility, producer trust, legal approval, valid compiler-Worker execution, and release are still false. | Complete only the missing independent authorities; do not collapse build, verifier, compiler-Worker, legal, producer-trust, backend, or release evidence. |
+| Feedback speed | Good for local harness work; browser corpus remains minutes | The current fast harness passes 65 files/597 tests in 10.92 seconds. Main CI `29768391553` passed eight concurrent jobs in 4 minutes 4 seconds; workspace builds took 16–18 seconds and the source/distribution real-world gates took 2 minutes 26 seconds and 2 minutes 35 seconds. Exact-primary Clang validation remains a separate roughly four-minute evidence lane; clean/reproducibility gates stay cache-free and authoritative. | Shard the 112–118-second browser case phase with aggregate coverage evidence. Keep ordinary edits on focused/fast paths and reserve cache-free proof for evidence checkpoints. |
+| Maintainability | Weak but improving | The build executor is down to 2,198 lines; native compile session is 2,121 lines; artifact writer is 1,784 lines; corpus provisioning is 1,870 lines with embedded helpers. Existing compiler-core modules range from roughly 5,400 to 8,000 lines. Exact per-module ratchets prevent the named compiler monoliths from growing. | Extract corpus filesystem/tool helpers and existing compiler effect/semantic boundaries without creating parallel execution paths, lowering each ratchet as code moves out. |
+| Delivery truthfulness | Good | The production verifier Worker is enabled only for exact package assets; the compiler Worker accepts only its hash-bound derivative evidence. Raw-Wasm verification, compiler execution, semantic lowering, producer trust, legal approval, and real-WebGPU evidence remain distinct claims. | Do not mint compiler/lowering authority until one valid exact request passes the retained host-verifier, Artifact V3, shared-semantic, and trust boundaries. |
 
 ## Findings closed during this audit
 
@@ -321,32 +371,35 @@ v2 build, independent raw-Wasm review, and two matching clean v2 builds.
 
 ## Open high-priority findings
 
-1. Complete and independently inspect one locked Clang-Wasm build.
-2. Compare the raw Wasm interface with the runtime ABI, then repin only the
-   independently observed exact imports, exports, tables, globals, tags, and
-   custom sections.
-3. Run two distinct clean builds and prove byte equality for the factory,
-   Wasm, link map, and admitted output set.
-4. Reconcile the pinned bundle with the active current-source clean factory,
-   then wire only a captured production platform adapter and package-owned
-   invocation issuer; do not accept caller-supplied code or ambient fetch authority.
-5. Execute one valid browser-local C++ request through the Worker, verified
-   Artifact V3, shared semantic lowering, and real WebGPU.
-6. Acquire the exact header packs and close per-file license and notice
-   review.
-7. Decompose the build executor, compile session, artifact writer, and the four
-   largest compiler-core modules along existing authority and semantic seams.
-8. Exercise the content-bound runtime closure in a successful validation and
-   both clean reproducibility builds before granting output-identity,
-   provenance, or release authority.
+1. Obtain external approval for the exact header-pack file map, notices, CUDA
+   index, and upstream evidence, then bind the approved identities into the
+   asset chain.
+2. Admit the browser-build signer through an independent package-owned trust
+   root and verify one external exact-build statement; synthetic package keys
+   remain insufficient.
+3. Execute one valid browser-local C++ request through the verifier Worker,
+   compiler Worker, verified Artifact V3, shared semantic lowering, and real
+   WebGPU.
+4. Complete the full release-output reproducibility set without widening the
+   already separated build, ABI, legal, producer-trust, or release authorities.
+5. Add bounded descriptor-relative reclamation for owned failure residue,
+   close or explicitly bound the final validated-inode unlink interval, and
+   reduce repeated corpus-byte passes with corpus-scale evidence.
+6. Shard the serial browser/WebGPU case phase while preserving aggregate case
+   coverage, skip policy, timeouts, and performance thresholds.
+7. Decompose the corpus provisioning module, build executor, compile session,
+   artifact writer, and the four largest compiler-core modules along existing
+   authority and semantic seams.
 
 ## Capability boundary after the audit
 
 The project can now fail fast on the known exception/RTTI/include wiring class,
 preserve actionable bounded failure causes, prevent the seven named monoliths
 from growing, run the owned native producer against exact Clang 22, enforce its
-sanitizer lanes, derive build-lock authoring identities, and distinguish
-validation from reproducibility. It still cannot honestly claim that the
-C++/CuTe frontend is available in the browser product. That claim begins only
-after the successful build, ABI, Worker, semantic-lowering, and real-WebGPU
-chain is complete.
+sanitizer lanes, derive build-lock authoring identities, distinguish validation
+from reproducibility, execute the package-owned verifier Worker, and provision
+exact real-world corpora through an explicit portable host-toolchain contract.
+It still cannot honestly claim that the C++/CuTe frontend is available in the
+browser product. That claim begins only after approved exact packs and producer
+trust feed one valid compiler-Worker C++ request through verified Artifact V3,
+shared lowering, and real WebGPU.
