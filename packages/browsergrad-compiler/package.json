@@ -107,6 +107,7 @@
     "e2e:webgpu:corpus": "node ../../scripts/run-cuda-lite-tool.mjs e2e:webgpu -- --forbid-skips --require-corpus-fixtures",
     "audit:corpus": "node ../../scripts/run-cuda-lite-tool.mjs audit:corpus",
     "audit:real-world-cuda": "node ../../scripts/run-cuda-lite-tool.mjs audit:real-world-cuda",
+    "provision:real-world-cuda": "node ../../scripts/provision-real-world-cuda-corpora.mjs",
     "verify:real-world-cuda": "node ../../scripts/run-cuda-lite-tool.mjs verify:real-world-cuda",
     "verify:compiler": "node scripts/verify_compiler.mjs",
     "audit:cuda-120": "node ../../scripts/run-cuda-lite-tool.mjs audit:cuda-120",

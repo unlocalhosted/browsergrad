@@ -114,9 +114,13 @@ jobs:
           path: semantic-view-copy-webgpu-evidence.log
           if-no-files-found: error
 
+      - name: Provision pinned real-world CUDA corpora (compiler release)
+        if: steps.parse.outputs.shortname == 'compiler'
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler provision:real-world-cuda
+
       - name: Real-world CUDA gate (compiler release)
         if: steps.parse.outputs.shortname == 'compiler'
-        run: pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --require-webgpu
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --skip-fetch --require-webgpu
 
       - name: Required compiler layout-binding WebGPU gate (compiler release)
         if: steps.parse.outputs.shortname == 'compiler'

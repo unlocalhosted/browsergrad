@@ -130,8 +130,11 @@ jobs:
           path: jit-semantic-permute-webgpu-evidence.log
           if-no-files-found: error
 
+      - name: Provision pinned real-world CUDA corpora
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler provision:real-world-cuda
+
       - name: Run compiler real-world CUDA gate
-        run: pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --require-webgpu
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --skip-fetch --require-webgpu
 
       - name: Stage immutable npm artifacts
         run: node scripts/publish-missing-npm.mjs --stage-dir npm-release-artifacts

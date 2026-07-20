@@ -197,10 +197,14 @@ jobs:
       - name: Install Playwright Chromium
         run: pnpm --filter @unlocalhosted/browsergrad-kernels exec playwright install --with-deps chromium
 
+      - name: Provision pinned real-world CUDA corpora
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler provision:real-world-cuda
+
       - name: Run complete real-world CUDA bundle gate
         run: >-
           pnpm --filter @unlocalhosted/browsergrad-compiler
           verify:real-world-cuda --
           --skip-build
+          --skip-fetch
           --require-webgpu
           --bundle=${{ matrix.bundle }}
