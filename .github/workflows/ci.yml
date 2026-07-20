@@ -208,3 +208,12 @@ jobs:
           --skip-fetch
           --require-webgpu
           --bundle=${{ matrix.bundle }}
+          --timing-json=.tmp/real-world-cuda-timing-${{ matrix.bundle }}.json
+
+      - name: Upload real-world CUDA timing attribution
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: real-world-cuda-timing-${{ matrix.bundle }}-${{ github.sha }}
+          path: .tmp/real-world-cuda-timing-${{ matrix.bundle }}.json
+          if-no-files-found: warn

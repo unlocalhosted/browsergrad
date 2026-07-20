@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseAutoCorpusSmokeProfile } from "./cuda-lite-webgpu-cli.mjs";
@@ -10,6 +11,7 @@ import {
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "..");
+const CAPTURED_OUTPUT_BYTE_LIMIT = 2 * 1024 * 1024;
 
 export function parseVerifyRealWorldCudaArgs(args) {
   const options = {
@@ -30,6 +32,7 @@ export function parseVerifyRealWorldCudaArgs(args) {
     preparedRatioMax: undefined,
     preparedScalarRatioMax: undefined,
     preparedReadbackRatioMax: undefined,
+    timingJson: undefined,
   };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -168,8 +171,16 @@ export function parseVerifyRealWorldCudaArgs(args) {
       options.preparedReadbackRatioMax = parsePositiveNumber(arg.slice("--expect-prepared-readback-ratio-max=".length), "--expect-prepared-readback-ratio-max");
       continue;
     }
+    if (arg === "--timing-json") {
+      options.timingJson = parseOutputPath(args[++index], "--timing-json");
+      continue;
+    }
+    if (arg?.startsWith("--timing-json=")) {
+      options.timingJson = parseOutputPath(arg.slice("--timing-json=".length), "--timing-json");
+      continue;
+    }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--require-webgpu] [--allow-missing-webgpu] [--forbid-skips] [--limit N] [--only CORPUS[,CORPUS...]] [--corpus CORPUS[,CORPUS...]] [--bundle src|dist|both] [--auto-corpus-smoke-limit N] [--auto-corpus-smoke-mode reference|dispatch] [--auto-corpus-smoke-profile fast|full] [--auto-corpus-smoke-features subgroups] [--case-timeout-ms N] [--benchmark-webgpu] [--benchmark-runs N] [--benchmark-warmup N] [--benchmark-length N] [--expect-prepared-ratio-max N] [--expect-prepared-scalar-ratio-max N] [--expect-prepared-readback-ratio-max N]");
+      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--require-webgpu] [--allow-missing-webgpu] [--forbid-skips] [--limit N] [--only CORPUS[,CORPUS...]] [--corpus CORPUS[,CORPUS...]] [--bundle src|dist|both] [--auto-corpus-smoke-limit N] [--auto-corpus-smoke-mode reference|dispatch] [--auto-corpus-smoke-profile fast|full] [--auto-corpus-smoke-features subgroups] [--case-timeout-ms N] [--benchmark-webgpu] [--benchmark-runs N] [--benchmark-warmup N] [--benchmark-length N] [--expect-prepared-ratio-max N] [--expect-prepared-scalar-ratio-max N] [--expect-prepared-readback-ratio-max N] [--timing-json PATH]");
       process.exit(0);
     }
     throw new Error(`unexpected argument: ${arg}`);
@@ -178,18 +189,21 @@ export function parseVerifyRealWorldCudaArgs(args) {
 }
 
 export function verifyRealWorldCudaPlan(options) {
-  const steps = [
-    {
-      label: "real-world CUDA compile/codegen audit",
-      args: [
-        path.join(scriptDir, "audit-real-world-cuda-corpora.mjs"),
-        ...(options.skipFetch ? ["--skip-fetch"] : []),
-        ...options.only.flatMap((id) => ["--only", id]),
-        "--limit",
-        String(options.limit),
-      ],
-    },
-  ];
+  const selectedCorpusIds = options.only.length === 0
+    ? cudaLiteCorpora.map((corpus) => corpus.id)
+    : [...new Set(options.only)];
+  const steps = selectedCorpusIds.map((id) => ({
+    label: `real-world CUDA compile/codegen audit (${id})`,
+    parallelGroup: "compile-codegen-audits",
+    args: [
+      path.join(scriptDir, "audit-real-world-cuda-corpora.mjs"),
+      ...(options.skipFetch ? ["--skip-fetch"] : []),
+      "--only",
+      id,
+      "--limit",
+      String(options.limit),
+    ],
+  }));
   for (const bundle of browserBundles(options.bundle)) {
     steps.push({
       label: `real-world CUDA browser fixture e2e (${bundle})`,
@@ -295,6 +309,13 @@ function parsePositiveNumber(raw, flag) {
   return value;
 }
 
+function parseOutputPath(raw, flag) {
+  if (typeof raw !== "string" || raw.length === 0 || raw.startsWith("-")) {
+    throw new Error(`${flag} expects a path`);
+  }
+  return raw;
+}
+
 function ratioArg(flag, value) {
   return value === undefined ? [] : [flag, String(value)];
 }
@@ -315,24 +336,127 @@ function autoCorpusSmokeCorporaArgs(only, autoCorpusSmokeLimit) {
   return ["--auto-corpus-smoke-corpora", only.join(",")];
 }
 
-function run(label, args) {
-  console.log(`\n== ${label} ==`);
-  const result = spawnSync(process.execPath, args, {
-    cwd: root,
-    stdio: "inherit",
+function run(step, captureOutput) {
+  console.log(`\n== ${step.label} ==`);
+  const startedNs = process.hrtime.bigint();
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, step.args, {
+      cwd: root,
+      stdio: captureOutput ? ["ignore", "pipe", "pipe"] : "inherit",
+    });
+    const stdout = { chunks: [], byteLength: 0, truncatedBytes: 0 };
+    const stderr = { chunks: [], byteLength: 0, truncatedBytes: 0 };
+    let spawnError;
+    child.stdout?.on("data", (chunk) => appendCapturedOutput(stdout, chunk));
+    child.stderr?.on("data", (chunk) => appendCapturedOutput(stderr, chunk));
+    child.on("error", (error) => { spawnError = error; });
+    child.on("close", (code, signal) => {
+      if (captureOutput) {
+        writeCapturedOutput(process.stdout, stdout, step.label, "stdout");
+        writeCapturedOutput(process.stderr, stderr, step.label, "stderr");
+      }
+      resolve(finishTiming(step, startedNs, code ?? 1, signal, spawnError));
+    });
   });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+}
+
+function appendCapturedOutput(capture, chunk) {
+  const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+  const remaining = CAPTURED_OUTPUT_BYTE_LIMIT - capture.byteLength;
+  if (remaining > 0) {
+    const retained = Buffer.from(
+      bytes.byteLength <= remaining ? bytes : bytes.subarray(0, remaining),
+    );
+    capture.chunks.push(retained);
+    capture.byteLength += retained.byteLength;
+  }
+  capture.truncatedBytes += Math.max(0, bytes.byteLength - Math.max(0, remaining));
+}
+
+function writeCapturedOutput(stream, capture, label, streamName) {
+  if (capture.byteLength > 0) stream.write(Buffer.concat(capture.chunks, capture.byteLength));
+  if (capture.truncatedBytes > 0) {
+    stream.write(
+      `\n[${label} ${streamName} truncated by ${capture.truncatedBytes} bytes after ` +
+        `${CAPTURED_OUTPUT_BYTE_LIMIT}-byte harness limit]\n`,
+    );
   }
 }
 
-function main() {
+function finishTiming(step, startedNs, exitCode, signal, error) {
+  const durationMs = Number(process.hrtime.bigint() - startedNs) / 1_000_000;
+  const record = Object.freeze({
+    label: step.label,
+    parallelGroup: step.parallelGroup ?? null,
+    durationMs: Math.round(durationMs * 1000) / 1000,
+    exitCode,
+    signal: signal ?? null,
+    ok: exitCode === 0 && (signal === undefined || signal === null) && error === undefined,
+    ...(error === undefined ? {} : { error: String(error.message ?? error) }),
+  });
+  console.log(`== timing: ${step.label}: ${record.durationMs.toFixed(3)} ms ==`);
+  return record;
+}
+
+export async function executePlan(steps, runStep = run) {
+  const timings = [];
+  for (let index = 0; index < steps.length;) {
+    const step = steps[index];
+    if (step.parallelGroup === undefined) {
+      const timing = await runStep(step, false);
+      timings.push(timing);
+      if (!timing.ok) return timings;
+      index += 1;
+      continue;
+    }
+    const group = [];
+    while (index < steps.length && steps[index].parallelGroup === step.parallelGroup) {
+      group.push(steps[index]);
+      index += 1;
+    }
+    const groupTimings = await Promise.all(group.map((item) => runStep(item, true)));
+    timings.push(...groupTimings);
+    if (groupTimings.some((timing) => !timing.ok)) return timings;
+  }
+  return timings;
+}
+
+function timingReport(options, timings, totalMs) {
+  return Object.freeze({
+    kind: "browsergrad-real-world-cuda-timing",
+    version: 1,
+    bundle: options.bundle,
+    selectedCorpora: options.only.length === 0
+      ? cudaLiteCorpora.map((corpus) => corpus.id)
+      : [...new Set(options.only)],
+    ok: timings.every((timing) => timing.ok),
+    totalMs: Math.round(totalMs * 1000) / 1000,
+    steps: timings,
+  });
+}
+
+function writeTimingReport(outputPath, report) {
+  const absolute = path.resolve(root, outputPath);
+  mkdirSync(path.dirname(absolute), { recursive: true });
+  writeFileSync(absolute, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+}
+
+async function main() {
   const options = parseVerifyRealWorldCudaArgs(process.argv.slice(2));
-  for (const step of verifyRealWorldCudaPlan(options)) run(step.label, step.args);
+  const startedNs = process.hrtime.bigint();
+  const timings = await executePlan(verifyRealWorldCudaPlan(options));
+  const totalMs = Number(process.hrtime.bigint() - startedNs) / 1_000_000;
+  const report = timingReport(options, timings, totalMs);
+  console.log(`\n${JSON.stringify(report, null, 2)}`);
+  if (options.timingJson !== undefined) writeTimingReport(options.timingJson, report);
+  const failure = timings.find((timing) => !timing.ok);
+  if (failure !== undefined) {
+    process.exitCode = failure.exitCode || 1;
+    return;
+  }
   console.log("\nreal-world CUDA verification passed");
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main();
+  await main();
 }
