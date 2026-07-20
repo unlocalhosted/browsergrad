@@ -33,6 +33,7 @@ const EXPECTED_INVOCATIONS = [
   "pnpm run test:verify-real-world-cli",
   "pnpm run test:tool-lock",
   "pnpm run test:audit-corpus:run",
+  "pnpm run test:corpus-provisioning:run",
 ];
 
 describe("verify:compiler bounded runner", () => {

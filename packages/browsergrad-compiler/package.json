@@ -79,6 +79,7 @@
     "verify:browser-clang-wasm:fast": "pnpm run build && pnpm run check:browser-clang-wasm-build-lock:run && pnpm run check:browser-worker-bundle && pnpm run test:browser-clang-wasm-build-plan:fast",
     "test:audit-corpus": "pnpm --dir ../.. --filter @unlocalhosted/browsergrad-kernels run build && pnpm run build && pnpm run test:audit-corpus:run",
     "test:audit-corpus:run": "node ../../scripts/test-cuda-lite-corpus-audit.mjs",
+    "test:corpus-provisioning:run": "node ../../scripts/test-cuda-lite-corpus-provisioning.mjs",
     "bench": "node ../../scripts/run-cuda-lite-tool.mjs bench",
     "bench:browser": "node ../../scripts/run-cuda-lite-tool.mjs bench:browser",
     "e2e:webgpu": "node ../../scripts/run-cuda-lite-tool.mjs e2e:webgpu",

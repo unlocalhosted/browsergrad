@@ -84,6 +84,7 @@ export function createVerifyCompilerPlan() {
         command("verify-real-world-cli", "run", "test:verify-real-world-cli"),
         command("tool-lock", "run", "test:tool-lock"),
         command("corpus-audit", "run", "test:audit-corpus:run"),
+        command("corpus-provisioning", "run", "test:corpus-provisioning:run"),
       ]),
     ]),
   });
