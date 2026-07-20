@@ -529,6 +529,17 @@ compiler gate before publishing, so corpus compile/codegen regressions and
 fixture-backed real GPU regressions fail hard instead of becoming audit notes.
 Pinned corpus checkouts must match the expected commit and be clean; dirty
 untracked or modified files fail both audit and browser fixture loading.
+Corpus provisioning resolves `git` and `python3` only from absolute `PATH`
+entries, canonicalizes their real paths, probes them once per process, and uses
+those pinned executables for every checkout operation. Hermetic runners can set
+`BROWSERGRAD_CUDA_GIT_EXECUTABLE` and
+`BROWSERGRAD_CUDA_PYTHON_EXECUTABLE` to explicit absolute paths instead.
+Provisioning fails closed with
+`BG-CUDA-LITE-CORPUS-PROVISION-HOST-TOOLCHAIN` unless Git, Python 3
+descriptor-relative/no-follow filesystem operations, and the host atomic
+no-replace primitive are available. The supported primitives are
+`renamex_np` on macOS and `renameat2` on Linux; no `/usr/bin` layout or silent
+fallback is assumed.
 
 ## Corpus Audit
 

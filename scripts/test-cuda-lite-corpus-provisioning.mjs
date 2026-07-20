@@ -18,17 +18,95 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   CudaLiteCorpusProvisioningError,
+  probeCudaLiteCorpusHostToolchain,
   provisionCudaLiteCorpusCheckout,
   verifyCudaLiteCorpusCheckout,
   withCudaLiteCorpusCheckoutLease,
 } from "./cuda-lite-corpus-provisioning.mjs";
 
 const testRoot = mkdtempSync(path.join(os.tmpdir(), "browsergrad-corpus-provisioning-test-"));
+const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
+const provisioningModuleUrl = new URL("./cuda-lite-corpus-provisioning.mjs", import.meta.url).href;
 
 try {
+  const hostToolchain = probeCudaLiteCorpusHostToolchain();
+  assert.equal(hostToolchain.kind, "browsergrad-cuda-lite-corpus-host-toolchain-capability");
+  assert.equal(hostToolchain.version, 1);
+  assert.equal(hostToolchain.platform, process.platform);
+  assert.equal(path.isAbsolute(hostToolchain.git.executable), true);
+  assert.equal(path.isAbsolute(hostToolchain.python.executable), true);
+  assert.match(hostToolchain.git.version, /^git version \S+/u);
+  assert.match(hostToolchain.python.version, /^\d+\.\d+\.\d+/u);
+  assert.equal(hostToolchain.descriptorRelativeIo, true);
+  assert.equal(hostToolchain.noFollowOpen, true);
+  assert.equal(
+    hostToolchain.atomicNoReplacePrimitive,
+    process.platform === "darwin" ? "renamex_np" : "renameat2",
+  );
+
   const source = path.join(testRoot, "local-source");
   initRepository(source);
   const firstCommit = commitFile(source, "kernel.cu", "__global__ void first() {}\n", "first");
+
+  const toolBin = path.join(testRoot, "host-toolchain-path");
+  mkdirSync(toolBin);
+  symlinkSync(hostToolchain.git.executable, path.join(toolBin, "git"));
+  symlinkSync(hostToolchain.python.executable, path.join(toolBin, "python3"));
+  const pathSelectedCheckout = path.join(testRoot, "path-selected-checkout");
+  const pathSelected = runHostToolchainChild(
+    hostToolchainEnvironment(toolBin),
+    {
+      root: testRoot,
+      corpus: corpus({ path: pathSelectedCheckout, repo: source, commit: firstCommit }),
+      gitStdio: "pipe",
+    },
+  );
+  assert.equal(pathSelected.ok, true, pathSelected.message);
+  assert.equal(pathSelected.capability.git.selection, "absolute-path-entry");
+  assert.equal(pathSelected.capability.python.selection, "absolute-path-entry");
+  assert.equal(pathSelected.capability.git.executable, hostToolchain.git.executable);
+  assert.equal(pathSelected.capability.python.executable, hostToolchain.python.executable);
+  assert.equal(pathSelected.admission.action, "created");
+  assert.deepEqual(pathSelected.admission.hostToolchainCapability, pathSelected.capability);
+  assert.equal(git(pathSelectedCheckout, ["rev-parse", "HEAD"]).trim(), firstCommit);
+
+  const emptyToolBin = path.join(testRoot, "empty-host-toolchain-path");
+  mkdirSync(emptyToolBin);
+  const explicitlySelected = runHostToolchainChild(hostToolchainEnvironment(emptyToolBin, {
+    BROWSERGRAD_CUDA_GIT_EXECUTABLE: hostToolchain.git.executable,
+    BROWSERGRAD_CUDA_PYTHON_EXECUTABLE: hostToolchain.python.executable,
+  }));
+  assert.equal(explicitlySelected.ok, true, explicitlySelected.message);
+  assert.equal(
+    explicitlySelected.capability.git.selection,
+    "BROWSERGRAD_CUDA_GIT_EXECUTABLE",
+  );
+  assert.equal(
+    explicitlySelected.capability.python.selection,
+    "BROWSERGRAD_CUDA_PYTHON_EXECUTABLE",
+  );
+
+  const absentTools = runHostToolchainChild(hostToolchainEnvironment(emptyToolBin));
+  assert.equal(absentTools.ok, false);
+  assert.equal(absentTools.code, "BG-CUDA-LITE-CORPUS-PROVISION-HOST-TOOLCHAIN");
+  assert.match(absentTools.message, /BROWSERGRAD_CUDA_GIT_EXECUTABLE/u);
+
+  const invalidGit = runHostToolchainChild(hostToolchainEnvironment(emptyToolBin, {
+    BROWSERGRAD_CUDA_GIT_EXECUTABLE: hostToolchain.python.executable,
+    BROWSERGRAD_CUDA_PYTHON_EXECUTABLE: hostToolchain.python.executable,
+  }));
+  assert.equal(invalidGit.ok, false);
+  assert.equal(invalidGit.code, "BG-CUDA-LITE-CORPUS-PROVISION-HOST-TOOLCHAIN");
+  assert.match(invalidGit.message, /Git capability probe failed/u);
+
+  const invalidPython = runHostToolchainChild(hostToolchainEnvironment(emptyToolBin, {
+    BROWSERGRAD_CUDA_GIT_EXECUTABLE: hostToolchain.git.executable,
+    BROWSERGRAD_CUDA_PYTHON_EXECUTABLE: hostToolchain.git.executable,
+  }));
+  assert.equal(invalidPython.ok, false);
+  assert.equal(invalidPython.code, "BG-CUDA-LITE-CORPUS-PROVISION-HOST-TOOLCHAIN");
+  assert.match(invalidPython.message, /Python host-helper capability probe failed/u);
+
   const checkoutPath = path.join(testRoot, "admitted-corpus");
   const firstCorpus = corpus({ path: checkoutPath, repo: source, commit: firstCommit });
 
@@ -45,6 +123,7 @@ try {
   });
   const createdMs = Number(process.hrtime.bigint() - createdStarted) / 1_000_000;
   assert.equal(created.action, "created");
+  assert.deepEqual(created.hostToolchainCapability, hostToolchain);
   assert.equal(created.corpus.repo, realpathSync(source));
   assert.equal(created.corpus.commit, firstCommit);
   assert.equal(created.configuredOriginUrlMatched, true);
@@ -643,7 +722,6 @@ try {
   rmSync(logicalRoot);
   symlinkSync(physicalRootA, logicalRoot, "dir");
 
-  const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
   for (const script of [
     "audit-real-world-cuda-corpora.mjs",
     "provision-real-world-cuda-corpora.mjs",
@@ -668,6 +746,44 @@ try {
   );
 } finally {
   rmSync(testRoot, { recursive: true, force: true });
+}
+
+function hostToolchainEnvironment(pathValue, overrides = {}) {
+  const environment = { ...process.env, PATH: pathValue };
+  delete environment.BROWSERGRAD_CUDA_GIT_EXECUTABLE;
+  delete environment.BROWSERGRAD_CUDA_PYTHON_EXECUTABLE;
+  return { ...environment, ...overrides };
+}
+
+function runHostToolchainChild(environment, provisionOptions) {
+  const source = `
+import {
+  probeCudaLiteCorpusHostToolchain,
+  provisionCudaLiteCorpusCheckout,
+} from ${JSON.stringify(provisioningModuleUrl)};
+try {
+  const capability = probeCudaLiteCorpusHostToolchain();
+  const admission = ${provisionOptions === undefined
+    ? "undefined"
+    : `provisionCudaLiteCorpusCheckout(${JSON.stringify(provisionOptions)})`};
+  console.log(JSON.stringify({ ok: true, capability, admission }));
+} catch (error) {
+  console.log(JSON.stringify({
+    ok: false,
+    code: error?.code ?? null,
+    message: error?.message ?? String(error),
+  }));
+}
+`;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", source], {
+    cwd: path.dirname(scriptsDir),
+    encoding: "utf8",
+    env: environment,
+    shell: false,
+  });
+  if (result.error) throw result.error;
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(result.stdout.trim());
 }
 
 function corpus({ path: checkoutPath, repo, commit }) {

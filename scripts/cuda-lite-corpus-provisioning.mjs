@@ -1,4 +1,5 @@
 import {
+  accessSync,
   closeSync,
   constants as fsConstants,
   fstatSync,
@@ -25,8 +26,8 @@ const RESERVATION_MARKER = ".browsergrad-owned-corpus-reservation";
 const FAILED_RESERVATION_MARKER = ".browsergrad-failed-corpus-reservation";
 const SNAPSHOT_MARKER = ".browsergrad-owned-audit-snapshot";
 const LEASE_MARKER = "owner-token";
-const GIT_EXECUTABLE = "/usr/bin/git";
-const PYTHON_EXECUTABLE = "/usr/bin/python3";
+const GIT_EXECUTABLE_ENV = "BROWSERGRAD_CUDA_GIT_EXECUTABLE";
+const PYTHON_EXECUTABLE_ENV = "BROWSERGRAD_CUDA_PYTHON_EXECUTABLE";
 const WITHOUT_AUDIT_SNAPSHOT = Symbol("without-audit-snapshot");
 const FORBIDDEN_LOCAL_CONFIG = /^(?:url\.|filter\.|protocol\.|credential\.|include(?:if)?\.|https?\.|core\.(?:hookspath|fsmonitor|sshcommand|attributesfile|excludesfile|gitproxy|usereplacerefs)|remote\.[^.]+\.(?:proxy|vcs|uploadpack|receivepack))/iu;
 const HIDDEN_GIT_STATES = [
@@ -41,6 +42,7 @@ const HIDDEN_GIT_STATES = [
   RESERVATION_MARKER,
   FAILED_RESERVATION_MARKER,
 ];
+let cachedHostToolchainCapability;
 
 export class CudaLiteCorpusProvisioningError extends Error {
   constructor(code, message, options) {
@@ -48,6 +50,110 @@ export class CudaLiteCorpusProvisioningError extends Error {
     this.name = "CudaLiteCorpusProvisioningError";
     this.code = code;
   }
+}
+
+/** Resolve, pin, and probe the host tools required by corpus provisioning. */
+export function probeCudaLiteCorpusHostToolchain() {
+  if (cachedHostToolchainCapability !== undefined) return cachedHostToolchainCapability;
+  if (process.platform !== "darwin" && process.platform !== "linux") {
+    fail(
+      "BG-CUDA-LITE-CORPUS-PROVISION-HOST-TOOLCHAIN",
+      `corpus provisioning requires a probed macOS or Linux host toolchain; ` +
+        `${process.platform} is unsupported`,
+    );
+  }
+
+  const git = resolveHostExecutable("git", GIT_EXECUTABLE_ENV);
+  const python = resolveHostExecutable("python3", PYTHON_EXECUTABLE_ENV);
+  const gitProbe = spawnSync(git.executable, ["--no-replace-objects", "--version"], {
+    encoding: "utf8",
+    env: safeGitEnvironment(),
+    maxBuffer: 64 * 1024,
+    shell: false,
+  });
+  if (gitProbe.error !== undefined || gitProbe.status !== 0 ||
+      !/^git version \S+/u.test(gitProbe.stdout?.trim() ?? "")) {
+    fail(
+      "BG-CUDA-LITE-CORPUS-PROVISION-HOST-TOOLCHAIN",
+      `Git capability probe failed for ${git.executable}: ` +
+        hostProbeFailureDetail(gitProbe),
+      gitProbe.error === undefined ? undefined : { cause: gitProbe.error },
+    );
+  }
+
+  const pythonProbeSource = `
+import ctypes, json, os, sys
+primitive = "renamex_np" if sys.platform == "darwin" else "renameat2" if sys.platform.startswith("linux") else None
+facts = {
+    "platform": sys.platform,
+    "pythonVersion": sys.version.split()[0],
+    "descriptorRelativeIo": hasattr(os, "fchdir") and all(
+        function in os.supports_dir_fd for function in (os.stat, os.open, os.unlink, os.rmdir)
+    ) and os.stat in os.supports_follow_symlinks,
+    "noFollowOpen": hasattr(os, "O_NOFOLLOW"),
+    "atomicNoReplacePrimitive": primitive,
+    "atomicNoReplaceSymbolAvailable": False,
+}
+if primitive is not None:
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        getattr(libc, primitive)
+        facts["atomicNoReplaceSymbolAvailable"] = True
+    except (AttributeError, OSError):
+        pass
+print(json.dumps(facts, sort_keys=True))
+`;
+  const pythonProbe = spawnSync(
+    python.executable,
+    ["-I", "-c", pythonProbeSource],
+    {
+      encoding: "utf8",
+      env: safeHelperEnvironment(),
+      maxBuffer: 64 * 1024,
+      shell: false,
+    },
+  );
+  let pythonFacts;
+  try {
+    pythonFacts = JSON.parse(pythonProbe.stdout?.trim() ?? "");
+  } catch {
+    pythonFacts = undefined;
+  }
+  const expectedPrimitive = process.platform === "darwin" ? "renamex_np" : "renameat2";
+  if (pythonProbe.error !== undefined || pythonProbe.status !== 0 ||
+      pythonFacts?.platform !== process.platform ||
+      pythonFacts?.descriptorRelativeIo !== true || pythonFacts?.noFollowOpen !== true ||
+      pythonFacts?.atomicNoReplacePrimitive !== expectedPrimitive ||
+      pythonFacts?.atomicNoReplaceSymbolAvailable !== true ||
+      typeof pythonFacts?.pythonVersion !== "string" || pythonFacts.pythonVersion.length === 0) {
+    fail(
+      "BG-CUDA-LITE-CORPUS-PROVISION-HOST-TOOLCHAIN",
+      `Python host-helper capability probe failed for ${python.executable}; required: ` +
+        `${process.platform}, descriptor-relative no-follow I/O, and libc.${expectedPrimitive}; ` +
+        hostProbeFailureDetail(pythonProbe),
+      pythonProbe.error === undefined ? undefined : { cause: pythonProbe.error },
+    );
+  }
+
+  cachedHostToolchainCapability = Object.freeze({
+    kind: "browsergrad-cuda-lite-corpus-host-toolchain-capability",
+    version: 1,
+    platform: process.platform,
+    git: Object.freeze({
+      executable: git.executable,
+      selection: git.selection,
+      version: gitProbe.stdout.trim(),
+    }),
+    python: Object.freeze({
+      executable: python.executable,
+      selection: python.selection,
+      version: pythonFacts.pythonVersion,
+    }),
+    descriptorRelativeIo: true,
+    noFollowOpen: true,
+    atomicNoReplacePrimitive: expectedPrimitive,
+  });
+  return cachedHostToolchainCapability;
 }
 
 /** Verify one exact checkout under a short cooperative lease. */
@@ -75,6 +181,7 @@ export function withCudaLiteCorpusCheckoutLease(options, consume) {
   if (typeof consume !== "function") {
     fail("BG-CUDA-LITE-CORPUS-PROVISION-INVALID", "lease consumer must be a function");
   }
+  const hostToolchain = probeCudaLiteCorpusHostToolchain();
   const skipFetch = options?.skipFetch === true;
   const input = normalizeInput(options?.root, options?.corpus, {
     allowLocalFixtureRepo: options?.allowLocalFixtureRepo === true ||
@@ -84,6 +191,7 @@ export function withCudaLiteCorpusCheckoutLease(options, consume) {
     testOnlyAfterDestinationReservation: options?.testOnlyAfterDestinationReservation,
     testOnlyAfterExistingCheckoutPinned: options?.testOnlyAfterExistingCheckoutPinned,
     testOnlyBeforeAuditSnapshotCleanup: options?.testOnlyBeforeAuditSnapshotCleanup,
+    hostToolchain,
   });
   const stdio = normalizeGitStdio(options?.gitStdio ?? "inherit");
   const materializeAuditSnapshot = options?.[WITHOUT_AUDIT_SNAPSHOT] !== true;
@@ -805,7 +913,7 @@ if (str(named.st_dev), str(named.st_ino)) != (expected["rootIdentity"]["device"]
     sys.exit(47)
 os.rmdir(expected["basename"], dir_fd=4)
 `;
-    const result = spawnSync(PYTHON_EXECUTABLE, ["-I", "-c", helper], {
+    const result = spawnSync(input.hostToolchain.python.executable, ["-I", "-c", helper], {
       cwd: input.root,
       encoding: "utf8",
       env: safeHelperEnvironment(),
@@ -959,6 +1067,7 @@ function admissionRecord(input, action, inspection, snapshot) {
       physicalPathKind: "canonical-checkout",
     }),
     action,
+    hostToolchainCapability: input.hostToolchain,
     configuredOriginUrlMatched: true,
     exactCommitObserved: true,
     exactPhysicalHeadTreeObserved: true,
@@ -1083,6 +1192,7 @@ function normalizeInput(rootValue, corpusValue, options) {
     root: physicalRoot,
     path: path.join(physicalRoot, path.basename(displayPath)),
     rootIdentity: fileIdentity(physicalRootStat),
+    hostToolchain: options.hostToolchain,
     allowLocalFixtureRepo: options.allowLocalFixtureRepo,
     testOnlyBeforeDestinationReservation: options.testOnlyBeforeDestinationReservation,
     testOnlyAfterDestinationReservation: options.testOnlyAfterDestinationReservation,
@@ -1260,7 +1370,7 @@ if content != expected["markerText"]:
 os.unlink(expected["markerName"], dir_fd=3)
 os.rmdir(expected["basename"], dir_fd=4)
 `;
-    const result = spawnSync(PYTHON_EXECUTABLE, ["-I", "-c", helper], {
+    const result = spawnSync(input.hostToolchain.python.executable, ["-I", "-c", helper], {
       cwd: input.root,
       encoding: "utf8",
       env: safeHelperEnvironment(),
@@ -1362,7 +1472,7 @@ function moveReservationMarkerIntoGitDirectory(input, reservation) {
 
 function installOwnedReservation(input, reservation) {
   assertReservationHandleIdentity(input, reservation);
-  const result = runAtomicNoReplaceRename(reservation, input.path);
+  const result = runAtomicNoReplaceRename(input, reservation, input.path);
   if (result.error) throw result.error;
   if (result.status !== 0) {
     if (result.status === 17 || result.status === 39 ||
@@ -1437,7 +1547,7 @@ elif operation == "unlink":
 else:
     raise RuntimeError("unknown reservation helper operation")
 `;
-  const result = spawnSync(PYTHON_EXECUTABLE, [
+  const result = spawnSync(input.hostToolchain.python.executable, [
     "-I", "-c", helper,
     operation,
     reservation.markerRelative,
@@ -1461,13 +1571,7 @@ else:
   }
 }
 
-function runAtomicNoReplaceRename(reservation, destination) {
-  if (process.platform !== "darwin" && process.platform !== "linux") {
-    fail(
-      "BG-CUDA-LITE-CORPUS-PROVISION-UNSUPPORTED-PLATFORM",
-      `atomic no-replace corpus installation is unsupported on ${process.platform}`,
-    );
-  }
+function runAtomicNoReplaceRename(input, reservation, destination) {
   const helper = `
 import ctypes, os, sys
 source, destination, expected_dev, expected_ino = sys.argv[1:]
@@ -1493,7 +1597,7 @@ if result != 0:
     sys.stderr.write(os.strerror(code))
     sys.exit(code if 0 < code < 126 else 125)
 `;
-  return spawnSync(PYTHON_EXECUTABLE, [
+  return spawnSync(input.hostToolchain.python.executable, [
     "-I", "-c", helper,
     reservation.stagingPath,
     destination,
@@ -1556,15 +1660,16 @@ function spawnGit(input, args, options) {
     "-c", `protocol.${protocol}.allow=always`,
     ...args,
   ];
-  let command = GIT_EXECUTABLE;
+  let command = input.hostToolchain.git.executable;
   let commandArgs = safeArgs;
   let stdio = options.stdio;
   if (input.gitExtraFd !== undefined) {
-    command = PYTHON_EXECUTABLE;
+    command = input.hostToolchain.python.executable;
     commandArgs = [
       "-I", "-c",
-      `import os,sys; os.fchdir(3); os.execve(${JSON.stringify(GIT_EXECUTABLE)}, ` +
-        `[${JSON.stringify(GIT_EXECUTABLE)}, *sys.argv[1:]], os.environ)`,
+      `import os,sys; os.fchdir(3); ` +
+        `os.execve(${JSON.stringify(input.hostToolchain.git.executable)}, ` +
+        `[${JSON.stringify(input.hostToolchain.git.executable)}, *sys.argv[1:]], os.environ)`,
       ...safeArgs,
     ];
     stdio = stdio === "inherit"
@@ -1580,6 +1685,58 @@ function spawnGit(input, args, options) {
   });
 }
 
+function resolveHostExecutable(basename, overrideEnvironmentVariable) {
+  const override = process.env[overrideEnvironmentVariable];
+  if (override !== undefined) {
+    return pinHostExecutable(override, overrideEnvironmentVariable, true);
+  }
+  for (const directory of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!path.isAbsolute(directory) || hasControl(directory)) continue;
+    const pinned = pinHostExecutable(
+      path.join(directory, basename),
+      "absolute-path-entry",
+      false,
+    );
+    if (pinned !== undefined) return pinned;
+  }
+  fail(
+    "BG-CUDA-LITE-CORPUS-PROVISION-HOST-TOOLCHAIN",
+    `could not resolve executable ${basename} from absolute PATH entries; ` +
+      `set ${overrideEnvironmentVariable} to an explicit absolute executable path`,
+  );
+}
+
+function pinHostExecutable(candidate, selection, required) {
+  if (typeof candidate !== "string" || !path.isAbsolute(candidate) || hasControl(candidate)) {
+    if (!required) return undefined;
+    fail(
+      "BG-CUDA-LITE-CORPUS-PROVISION-HOST-TOOLCHAIN",
+      `${selection} must name an explicit absolute executable path`,
+    );
+  }
+  try {
+    const executable = realpathSync(candidate);
+    const executableStat = statSync(executable);
+    if (!executableStat.isFile()) throw new Error("resolved path is not a regular file");
+    accessSync(executable, fsConstants.X_OK);
+    return Object.freeze({ executable, selection });
+  } catch (cause) {
+    if (!required) return undefined;
+    fail(
+      "BG-CUDA-LITE-CORPUS-PROVISION-HOST-TOOLCHAIN",
+      `${selection} does not resolve to an executable regular file: ${candidate}`,
+      { cause },
+    );
+  }
+}
+
+function hostProbeFailureDetail(result) {
+  if (result.error !== undefined) return result.error.message;
+  const output = (result.stderr?.trim() || result.stdout?.trim() || "no diagnostic output")
+    .slice(0, 512);
+  return `status ${String(result.status)} (${output})`;
+}
+
 function safeGitEnvironment() {
   const environment = { ...process.env };
   for (const key of Object.keys(environment)) {
@@ -1589,6 +1746,8 @@ function safeGitEnvironment() {
     "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
     "http_proxy", "https_proxy", "all_proxy", "no_proxy",
   ]) delete environment[key];
+  delete environment[GIT_EXECUTABLE_ENV];
+  delete environment[PYTHON_EXECUTABLE_ENV];
   deleteDynamicLoaderEnvironment(environment);
   environment.GIT_CONFIG_NOSYSTEM = "1";
   environment.GIT_CONFIG_GLOBAL = "/dev/null";
@@ -1604,6 +1763,8 @@ function safeHelperEnvironment() {
   for (const key of Object.keys(environment)) {
     if (key.startsWith("PYTHON")) delete environment[key];
   }
+  delete environment[GIT_EXECUTABLE_ENV];
+  delete environment[PYTHON_EXECUTABLE_ENV];
   deleteDynamicLoaderEnvironment(environment);
   return environment;
 }
