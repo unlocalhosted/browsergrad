@@ -227,6 +227,9 @@ function provisionCheckoutUnderLease(input, stdio) {
   }
 
   const before = inspectExistingCheckout(input, { targetStat });
+  if (before.head === input.commit) {
+    return Object.freeze({ action: "confirmed", inspection: before });
+  }
   const pinned = openPinnedExistingCheckout(input, before.binding);
   try {
     input.testOnlyAfterExistingCheckoutPinned?.(input.path);
@@ -243,7 +246,7 @@ function provisionCheckoutUnderLease(input, stdio) {
     const inspection = inspectExistingCheckout(pinned.input);
     assertExactCommit(pinned.input, inspection.head);
     return Object.freeze({
-      action: before.head === input.commit ? "confirmed" : "refreshed",
+      action: "refreshed",
       inspection,
     });
   } finally {
@@ -361,14 +364,6 @@ function inspectExistingCheckout(input, options = {}) {
     );
   }
 
-  const status = gitCapture(input, [
-    "-C", gitCheckoutPath(input), "status", "--porcelain=v1", "--untracked-files=all",
-    "--ignored=matching",
-  ]).trim();
-  if (status.length > 0) {
-    dirty(input, status);
-  }
-
   const headResult = gitCapture(input, [
     "-C", gitCheckoutPath(input), "rev-parse", "--verify", "HEAD^{commit}",
   ], { returnResult: true });
@@ -382,6 +377,13 @@ function inspectExistingCheckout(input, options = {}) {
 
   assertNoHiddenIndexFlags(input);
   const binding = exactPhysicalTreeBinding(input, head, checkoutIdentity);
+  const status = gitCapture(input, [
+    "-C", gitCheckoutPath(input), "status", "--porcelain=v1", "--untracked-files=all",
+    "--ignored=matching",
+  ]).trim();
+  if (status.length > 0) {
+    dirty(input, status);
+  }
   assertSameFileIdentity(input.path, checkoutIdentity, input, "checkout root changed during admission");
   assertRootPin(input);
   return Object.freeze({ head, binding });
@@ -392,21 +394,52 @@ function exactPhysicalTreeBinding(input, head, checkoutIdentity) {
     "-C", gitCheckoutPath(input), "ls-tree", "-r", "-z", "--full-tree", head,
   ]);
   const expected = new Map();
+  const pinnedGitlinks = new Map();
   for (const raw of treeOutput.split("\0")) {
     if (raw.length === 0) continue;
     const tab = raw.indexOf("\t");
     const metadata = tab < 0 ? [] : raw.slice(0, tab).split(" ");
     const relative = tab < 0 ? "" : raw.slice(tab + 1);
     const [mode, type, objectId] = metadata;
-    if (metadata.length !== 3 || type !== "blob" || !FULL_GIT_COMMIT.test(objectId ?? "") ||
-        mode === "120000" || mode === "160000" || !safeRelativePath(relative) ||
-        expected.has(relative)) {
+    if (metadata.length !== 3 || !FULL_GIT_COMMIT.test(objectId ?? "") ||
+        !safeRelativePath(relative) || expected.has(relative) ||
+        pinnedGitlinks.has(relative) || mode === "120000") {
       fail(
         "BG-CUDA-LITE-CORPUS-PROVISION-UNSUPPORTED-GIT-STATE",
-        `${input.id} HEAD contains a symlink, submodule, or unsupported tree entry`,
+        `${input.id} HEAD contains a symlink or unsupported tree entry`,
       );
     }
-    expected.set(relative, Object.freeze({ mode, objectId }));
+    if (type === "blob" && mode !== "160000") {
+      expected.set(relative, Object.freeze({ mode, objectId }));
+      continue;
+    }
+    if (type === "commit" && mode === "160000") {
+      pinnedGitlinks.set(relative, Object.freeze({ mode, objectId }));
+      continue;
+    }
+    fail(
+      "BG-CUDA-LITE-CORPUS-PROVISION-UNSUPPORTED-GIT-STATE",
+      `${input.id} HEAD contains an unsupported tree entry at ${relative}`,
+    );
+  }
+
+  const pinnedGitlinkStates = [];
+  for (const [relative, entry] of [...pinnedGitlinks.entries()].sort(([left], [right]) =>
+    compareCodeUnits(left, right))) {
+    const absolute = path.join(input.path, relative);
+    const stat = lstatIfPresent(absolute);
+    let physicalState = "absent";
+    if (stat !== undefined) {
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+        dirty(input, `pinned gitlink path is not an absent or empty real directory: ${relative}`);
+      }
+      const children = readdirSync(absolute);
+      if (children.length > 0) {
+        dirty(input, `pinned gitlink path contains initialized or foreign content: ${relative}`);
+      }
+      physicalState = "empty-directory";
+    }
+    pinnedGitlinkStates.push(Object.freeze({ relative, ...entry, physicalState }));
   }
 
   const actualFiles = [];
@@ -420,8 +453,10 @@ function exactPhysicalTreeBinding(input, head, checkoutIdentity) {
 
   let auditVisibleFileCount = 0;
   const manifestHash = createHash("sha256");
+  const pinnedGitlinkHash = createHash("sha256");
   manifestHash.update("browsergrad.cuda-lite.corpus-physical-tree.v1\0");
   manifestHash.update(`${head}\0`);
+  pinnedGitlinkHash.update("browsergrad.cuda-lite.pinned-gitlinks.v1\0");
   for (const relative of actualFiles.sort(compareCodeUnits)) {
     const treeEntry = expected.get(relative);
     if (treeEntry === undefined) dirty(input, `untracked or ignored physical file: ${relative}`);
@@ -439,11 +474,20 @@ function exactPhysicalTreeBinding(input, head, checkoutIdentity) {
     if (AUDIT_SOURCE.test(relative)) auditVisibleFileCount += 1;
     manifestHash.update(`${treeEntry.mode}\0${treeEntry.objectId}\0${relative}\0`);
   }
+  for (const gitlink of pinnedGitlinkStates) {
+    const record = `${gitlink.mode}\0${gitlink.objectId}\0${gitlink.relative}\0` +
+      `${gitlink.physicalState}\0`;
+    manifestHash.update(`gitlink\0${record}`);
+    pinnedGitlinkHash.update(record);
+  }
   return Object.freeze({
     head,
     physicalTreeSha256: manifestHash.digest("hex"),
     exactHeadFileCount: expected.size,
+    exactHeadTreeEntryCount: expected.size + pinnedGitlinkStates.length,
     auditVisibleFileCount,
+    pinnedSubmoduleCount: pinnedGitlinkStates.length,
+    pinnedSubmoduleBindingSha256: pinnedGitlinkHash.digest("hex"),
     checkoutDevice: checkoutIdentity.device,
     checkoutInode: checkoutIdentity.inode,
     entries: Object.freeze([...expected.entries()].map(([relative, entry]) =>
@@ -888,7 +932,8 @@ function assertExactCommit(input, actual) {
 
 function assertSameBinding(before, after, input) {
   for (const key of [
-    "head", "physicalTreeSha256", "exactHeadFileCount", "auditVisibleFileCount",
+    "head", "physicalTreeSha256", "exactHeadFileCount", "exactHeadTreeEntryCount",
+    "auditVisibleFileCount", "pinnedSubmoduleCount", "pinnedSubmoduleBindingSha256",
     "checkoutDevice", "checkoutInode",
   ]) {
     if (before[key] !== after[key]) {
@@ -919,7 +964,10 @@ function admissionRecord(input, action, inspection, snapshot) {
     exactPhysicalHeadTreeObserved: true,
     physicalTreeSha256: inspection.binding.physicalTreeSha256,
     exactHeadFileCount: inspection.binding.exactHeadFileCount,
+    exactHeadTreeEntryCount: inspection.binding.exactHeadTreeEntryCount,
     auditVisibleFileCount: inspection.binding.auditVisibleFileCount,
+    pinnedSubmoduleCount: inspection.binding.pinnedSubmoduleCount,
+    pinnedSubmoduleBindingSha256: inspection.binding.pinnedSubmoduleBindingSha256,
     auditConsumerSnapshotMaterialized: snapshot !== undefined,
     auditSnapshotFileCount: snapshot?.binding.fileCount ?? 0,
     auditSnapshotByteCount: snapshot?.binding.byteCount ?? 0,
@@ -1089,6 +1137,14 @@ function acquireLease(input) {
     mkdirSync(leasePath, { mode: 0o700 });
   } catch (cause) {
     if (cause?.code === "EEXIST") {
+      if (recoverProvablyStaleLease(input, leasePath)) {
+        try {
+          mkdirSync(leasePath, { mode: 0o700 });
+          return finishLeaseAcquisition(input, leasePath);
+        } catch (retryCause) {
+          if (retryCause?.code !== "EEXIST") throw retryCause;
+        }
+      }
       fail(
         "BG-CUDA-LITE-CORPUS-PROVISION-BUSY",
         `${input.id} checkout already has an active provisioning/audit lease`,
@@ -1096,11 +1152,16 @@ function acquireLease(input) {
     }
     throw cause;
   }
+  return finishLeaseAcquisition(input, leasePath);
+}
+
+function finishLeaseAcquisition(input, leasePath) {
   const identity = fileIdentity(lstatSync(leasePath, { bigint: true }));
   const token = randomBytes(32).toString("hex");
   const markerPath = path.join(leasePath, LEASE_MARKER);
+  const markerText = leaseMarkerText(process.pid, token);
   try {
-    writeFileSync(markerPath, `${token}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    writeFileSync(markerPath, markerText, { encoding: "utf8", flag: "wx", mode: 0o600 });
   } catch (cause) {
     try {
       assertSameFileIdentity(
@@ -1116,7 +1177,9 @@ function acquireLease(input) {
     throw cause;
   }
   const markerIdentity = fileIdentity(lstatSync(markerPath, { bigint: true }));
-  return Object.freeze({ leasePath, markerPath, identity, markerIdentity, token });
+  return Object.freeze({
+    leasePath, markerPath, identity, markerIdentity, token, markerText,
+  });
 }
 
 function releaseLease(input, lease) {
@@ -1124,7 +1187,7 @@ function releaseLease(input, lease) {
   assertSameFileIdentity(lease.markerPath, lease.markerIdentity, input, "lease marker identity changed");
   const markerStat = lstatSync(lease.markerPath);
   if (!markerStat.isFile() || markerStat.isSymbolicLink() ||
-      readFileSync(lease.markerPath, "utf8") !== `${lease.token}\n`) {
+      readFileSync(lease.markerPath, "utf8") !== lease.markerText) {
     fail(
       "BG-CUDA-LITE-CORPUS-PROVISION-UNSAFE-CLEANUP",
       `${input.id} lease marker no longer proves ownership`,
@@ -1132,6 +1195,100 @@ function releaseLease(input, lease) {
   }
   rmSync(lease.markerPath, { force: false });
   rmdirSync(lease.leasePath);
+}
+
+function recoverProvablyStaleLease(input, leasePath) {
+  let directoryStat;
+  let markerStat;
+  let markerText;
+  let marker;
+  const markerPath = path.join(leasePath, LEASE_MARKER);
+  try {
+    directoryStat = lstatSync(leasePath, { bigint: true });
+    markerStat = lstatSync(markerPath, { bigint: true });
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink() ||
+        !markerStat.isFile() || markerStat.isSymbolicLink() ||
+        readdirSync(leasePath).length !== 1 || readdirSync(leasePath)[0] !== LEASE_MARKER) {
+      return false;
+    }
+    markerText = readFileSync(markerPath, "utf8");
+    marker = JSON.parse(markerText);
+  } catch {
+    return false;
+  }
+  if (marker?.kind !== "browsergrad-corpus-lease-owner" || marker.version !== 1 ||
+      !Number.isSafeInteger(marker.pid) || marker.pid <= 0 ||
+      typeof marker.token !== "string" || !/^[0-9a-f]{64}$/u.test(marker.token) ||
+      markerText !== leaseMarkerText(marker.pid, marker.token)) {
+    return false;
+  }
+
+  const directoryIdentity = fileIdentity(directoryStat);
+  const markerIdentity = fileIdentity(markerStat);
+  const leaseFd = openSync(leasePath, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY);
+  const rootFd = openSync(input.root, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY);
+  try {
+    const helper = `
+import json, os, sys
+expected = json.load(sys.stdin)
+opened = os.fstat(3)
+if (str(opened.st_dev), str(opened.st_ino)) != (expected["directory"]["device"], expected["directory"]["inode"]):
+    sys.exit(20)
+named = os.stat(expected["basename"], dir_fd=4, follow_symlinks=False)
+if (str(named.st_dev), str(named.st_ino)) != (expected["directory"]["device"], expected["directory"]["inode"]):
+    sys.exit(20)
+try:
+    os.kill(expected["pid"], 0)
+    sys.exit(21)
+except ProcessLookupError:
+    pass
+except PermissionError:
+    sys.exit(21)
+os.fchdir(3)
+if os.listdir(".") != [expected["markerName"]]:
+    sys.exit(22)
+item = os.stat(expected["markerName"], dir_fd=3, follow_symlinks=False)
+if (str(item.st_dev), str(item.st_ino)) != (expected["marker"]["device"], expected["marker"]["inode"]):
+    sys.exit(22)
+descriptor = os.open(expected["markerName"], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=3)
+try:
+    content = os.read(descriptor, 4096).decode()
+finally:
+    os.close(descriptor)
+if content != expected["markerText"]:
+    sys.exit(22)
+os.unlink(expected["markerName"], dir_fd=3)
+os.rmdir(expected["basename"], dir_fd=4)
+`;
+    const result = spawnSync(PYTHON_EXECUTABLE, ["-I", "-c", helper], {
+      cwd: input.root,
+      encoding: "utf8",
+      env: safeHelperEnvironment(),
+      input: JSON.stringify({
+        basename: path.basename(leasePath),
+        directory: directoryIdentity,
+        marker: markerIdentity,
+        markerName: LEASE_MARKER,
+        markerText,
+        pid: marker.pid,
+      }),
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe", leaseFd, rootFd],
+    });
+    return result.error === undefined && result.status === 0;
+  } finally {
+    closeSync(leaseFd);
+    closeSync(rootFd);
+  }
+}
+
+function leaseMarkerText(pid, token) {
+  return `${JSON.stringify({
+    kind: "browsergrad-corpus-lease-owner",
+    version: 1,
+    pid,
+    token,
+  })}\n`;
 }
 
 function reserveDestination(input) {

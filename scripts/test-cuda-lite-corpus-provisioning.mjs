@@ -71,12 +71,18 @@ try {
 
   const exact = verifyCudaLiteCorpusCheckout({ root: testRoot, corpus: firstCorpus });
   assert.equal(exact.action, "verified");
+  let confirmedMutationHookCalled = false;
   const confirmed = provisionCudaLiteCorpusCheckout({
     root: testRoot,
     corpus: firstCorpus,
     gitStdio: "pipe",
+    testOnlyAfterExistingCheckoutPinned: () => {
+      confirmedMutationHookCalled = true;
+      throw new Error("confirmed checkout must not enter the Git mutation/network seam");
+    },
   });
   assert.equal(confirmed.action, "confirmed");
+  assert.equal(confirmedMutationHookCalled, false);
 
   const secondCommit = commitFile(
     source,
@@ -103,7 +109,7 @@ try {
   assertProvisioningError(
     () => provisionCudaLiteCorpusCheckout({
       root: testRoot,
-      corpus: refreshedCorpus,
+      corpus: firstCorpus,
       gitStdio: "pipe",
       testOnlyAfterExistingCheckoutPinned: (physicalTarget) => {
         renameSync(physicalTarget, movedExistingCheckout);
@@ -118,6 +124,13 @@ try {
     "must receive zero writes\n");
   rmSync(checkoutPath, { recursive: true });
   renameSync(movedExistingCheckout, checkoutPath);
+  assert.equal(git(checkoutPath, ["rev-parse", "HEAD"]).trim(), firstCommit);
+  const restoredAfterReplacementRace = provisionCudaLiteCorpusCheckout({
+    root: testRoot,
+    corpus: refreshedCorpus,
+    gitStdio: "pipe",
+  });
+  assert.equal(restoredAfterReplacementRace.action, "refreshed");
   assert.equal(git(checkoutPath, ["rev-parse", "HEAD"]).trim(), secondCommit);
 
   git(checkoutPath, ["update-index", "--skip-worktree", "kernel.cu"]);
@@ -214,19 +227,66 @@ try {
   git(submoduleSource, ["commit", "--quiet", "-am", "submodule"]);
   const submoduleCommit = git(submoduleSource, ["rev-parse", "HEAD"]).trim();
   const submodulePath = path.join(testRoot, "submodule-checkout");
-  assertProvisioningError(
-    () => provisionCudaLiteCorpusCheckout({
-      root: testRoot,
-      corpus: corpus({
-        path: submodulePath,
-        repo: submoduleSource,
-        commit: submoduleCommit,
-      }),
-      gitStdio: "pipe",
-    }),
-    "BG-CUDA-LITE-CORPUS-PROVISION-UNSUPPORTED-GIT-STATE",
+  const submoduleCorpus = corpus({
+    path: submodulePath,
+    repo: submoduleSource,
+    commit: submoduleCommit,
+  });
+  const submoduleAdmission = provisionCudaLiteCorpusCheckout({
+    root: testRoot,
+    corpus: submoduleCorpus,
+    gitStdio: "pipe",
+  });
+  assert.equal(submoduleAdmission.pinnedSubmoduleCount, 1);
+  assert.match(submoduleAdmission.pinnedSubmoduleBindingSha256, /^[0-9a-f]{64}$/u);
+  assert.equal(
+    submoduleAdmission.exactHeadTreeEntryCount,
+    submoduleAdmission.exactHeadFileCount + 1,
   );
-  assert.equal(existsSync(submodulePath), false);
+  const verifiedSubmodule = verifyCudaLiteCorpusCheckout({
+    root: testRoot,
+    corpus: submoduleCorpus,
+  });
+  assert.equal(
+    verifiedSubmodule.pinnedSubmoduleBindingSha256,
+    submoduleAdmission.pinnedSubmoduleBindingSha256,
+  );
+  assert.equal(verifiedSubmodule.physicalTreeSha256, submoduleAdmission.physicalTreeSha256);
+
+  const nestedGitlink = path.join(submodulePath, "nested");
+  const nestedInitiallyPresent = existsSync(nestedGitlink);
+  if (!nestedInitiallyPresent) mkdirSync(nestedGitlink);
+  writeFileSync(path.join(nestedGitlink, "FOREIGN.cu"), "must be rejected\n");
+  assertProvisioningError(
+    () => verifyCudaLiteCorpusCheckout({ root: testRoot, corpus: submoduleCorpus }),
+    "BG-CUDA-LITE-CORPUS-PROVISION-DIRTY",
+  );
+  rmSync(path.join(nestedGitlink, "FOREIGN.cu"));
+  if (!nestedInitiallyPresent) rmSync(nestedGitlink, { recursive: true });
+
+  if (existsSync(nestedGitlink)) rmSync(nestedGitlink, { recursive: true });
+  symlinkSync(wrongOrigin, nestedGitlink, "dir");
+  assertProvisioningError(
+    () => verifyCudaLiteCorpusCheckout({ root: testRoot, corpus: submoduleCorpus }),
+    "BG-CUDA-LITE-CORPUS-PROVISION-DIRTY",
+  );
+  rmSync(nestedGitlink);
+  if (nestedInitiallyPresent) mkdirSync(nestedGitlink);
+
+  assertProvisioningError(
+    () => withCudaLiteCorpusCheckoutLease({
+      root: testRoot,
+      corpus: submoduleCorpus,
+      skipFetch: true,
+      gitStdio: "pipe",
+    }, () => {
+      if (nestedInitiallyPresent) rmSync(nestedGitlink, { recursive: true });
+      else mkdirSync(nestedGitlink);
+    }),
+    "BG-CUDA-LITE-CORPUS-PROVISION-DIRTY",
+  );
+  if (nestedInitiallyPresent) mkdirSync(nestedGitlink);
+  else rmSync(nestedGitlink, { recursive: true });
 
   const environmentKeys = [
     "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
@@ -347,6 +407,39 @@ try {
     return "lease-held";
   });
   assert.equal(competing.result, "lease-held");
+
+  const snapshotResiduesBeforeCrash = readdirSync(testRoot)
+    .filter((entry) => entry.startsWith(".browsergrad-corpus-snapshot-"));
+  const crashModuleUrl = new URL("./cuda-lite-corpus-provisioning.mjs", import.meta.url).href;
+  const abruptLeaseOwner = spawnSync(process.execPath, [
+    "--input-type=module", "-e", `
+      import { withCudaLiteCorpusCheckoutLease } from ${JSON.stringify(crashModuleUrl)};
+      const options = JSON.parse(process.argv[1]);
+      withCudaLiteCorpusCheckoutLease(options, () => process.kill(process.pid, "SIGKILL"));
+    `,
+    JSON.stringify({
+      root: testRoot,
+      corpus: refreshedCorpus,
+      skipFetch: true,
+      gitStdio: "pipe",
+    }),
+  ], { encoding: "utf8", shell: false });
+  assert.equal(abruptLeaseOwner.status, null);
+  assert.equal(abruptLeaseOwner.signal, "SIGKILL");
+  const snapshotResiduesAfterCrash = readdirSync(testRoot)
+    .filter((entry) => entry.startsWith(".browsergrad-corpus-snapshot-"));
+  assert.equal(snapshotResiduesAfterCrash.length, snapshotResiduesBeforeCrash.length + 1);
+  const recoveredAfterCrash = verifyCudaLiteCorpusCheckout({
+    root: testRoot,
+    corpus: refreshedCorpus,
+  });
+  assert.equal(recoveredAfterCrash.action, "verified");
+  assert.deepEqual(
+    readdirSync(testRoot).filter((entry) =>
+      entry.startsWith(".browsergrad-corpus-snapshot-")),
+    snapshotResiduesAfterCrash,
+    "stale lease recovery must preserve ambiguous crash-created snapshot residue",
+  );
 
   const kernelPath = path.join(checkoutPath, "kernel.cu");
   assertProvisioningError(
