@@ -148,6 +148,14 @@ grad, leading-axis vmap, and direct ONNX export. Integer and bool inputs fail
 before execution instead of realizing a dtype different from the graph. Their
 tensor-plan/WebGPU profile is also an explicit refusal.
 
+`Tensor.clamp()` emits typed `CLAMP` for finite floating bounds and
+float16/32/64 tensors. Bounds are normalized without invoking arbitrary scalar
+conversion hooks; CPU returns an owning dtype-preserving array; closure and
+symbolic gradients use the same inclusive-bound mask; vmap and ONNX `Clip`
+consume the closed contract. `clip()` and `clamp_min()` reuse the same typed
+builder. Integer inputs and hostile/non-finite bounds fail before execution,
+and tensor-plan/WebGPU remain explicit refusals.
+
 `bg.framework_operation_support()` returns the versioned public decision table
 for framework operations admitted to typed execution. The table is generated
 from the same package registry that binds executable validators at CPU,

@@ -52,7 +52,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_COS, OP_SIGN, OP_SIN, OP_CMP,
+    OP_ABS, OP_CLAMP, OP_COS, OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -74,6 +74,7 @@ from ._ir import (
 from ._errors import JitNotImplementedError
 from ._framework_contracts import (
     validate_broadcast_to_contract,
+    validate_clamp_contract,
     validate_typed_unary_contract,
 )
 
@@ -193,6 +194,19 @@ _VMAP_RULES[OP_ABS] = _vmap_typed_unary
 _VMAP_RULES[OP_COS] = _vmap_typed_unary
 _VMAP_RULES[OP_SIGN] = _vmap_typed_unary
 _VMAP_RULES[OP_SIN] = _vmap_typed_unary
+
+
+@register_vmap(OP_CLAMP)
+def _vmap_clamp(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    validate_clamp_contract(node)
+    inner = batched[id(node.inputs[0])]
+    return UOp(
+        op=OP_CLAMP,
+        inputs=(inner,),
+        shape=inner.shape,
+        dtype=node.dtype,
+        arg=node.arg,
+    )
 
 
 @register_vmap(OP_CAST)

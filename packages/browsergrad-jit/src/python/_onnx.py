@@ -48,7 +48,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_COS, OP_SIGN, OP_SIN, OP_CMP,
+    OP_ABS, OP_CLAMP, OP_COS, OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -67,6 +67,7 @@ from ._ir import (
 from ._errors import JitError
 from ._framework_contracts import (
     validate_broadcast_to_contract,
+    validate_clamp_contract,
     validate_typed_unary_contract,
 )
 
@@ -487,6 +488,31 @@ def export_inference(
                                    (len(target_shape),), shape_arr)
             )
             nodes.append(_emit_node(input_names + [shape_const_name], [out_name], nm, "Expand"))
+        elif node.op == OP_CLAMP:
+            minimum, maximum = validate_clamp_contract(node)
+            onnx_dtype = _dtype_or_die(node.dtype)
+            clip_inputs = list(input_names)
+            if minimum is not None:
+                min_name = f"const_clamp_min_{next_node_id - 1}"
+                initializers.append(_emit_tensor_proto(
+                    min_name,
+                    onnx_dtype,
+                    (1,),
+                    _initializer_bytes_for_scalar(minimum, node.dtype),
+                ))
+                clip_inputs.append(min_name)
+            elif maximum is not None:
+                clip_inputs.append("")
+            if maximum is not None:
+                max_name = f"const_clamp_max_{next_node_id - 1}"
+                initializers.append(_emit_tensor_proto(
+                    max_name,
+                    onnx_dtype,
+                    (1,),
+                    _initializer_bytes_for_scalar(maximum, node.dtype),
+                ))
+                clip_inputs.append(max_name)
+            nodes.append(_emit_node(clip_inputs, [out_name], nm, "Clip"))
         elif node.op == OP_CMP:
             cmp_op = node.arg["op"]
             onnx_op = _CMP_OP_MAP.get(cmp_op)
@@ -499,7 +525,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "
@@ -579,6 +605,11 @@ def _i64_initializer_for_shape(shape: Sequence[int]) -> bytes:
     """Pack a shape tuple as a little-endian int64 array for an
     ONNX shape initializer."""
     return b"".join(struct.pack("<q", int(d)) for d in shape)
+
+
+def _initializer_bytes_for_scalar(value: float, dtype: str) -> bytes:
+    import numpy as np
+    return np.asarray([value], dtype=np.dtype(dtype)).tobytes()
 
 
 def _np_array_for_const(value: Any, dtype: str) -> Any:

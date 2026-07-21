@@ -48,7 +48,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from ._ir import (
     UOp,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_COS, OP_SIGN, OP_SIN, OP_CAST,
+    OP_ABS, OP_CLAMP, OP_COS, OP_SIGN, OP_SIN, OP_CAST, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -65,6 +65,7 @@ from ._ir import (
 )
 from ._framework_contracts import (
     validate_broadcast_to_contract,
+    validate_clamp_contract,
     validate_real_numeric_unary_contract,
     validate_typed_unary_contract,
 )
@@ -262,6 +263,45 @@ def _vjp_sign(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[U
         arg={"value": 0},
     )
     return (_vjp_uop(OP_MUL, (dy, zero), x.shape, x.dtype, output),)
+
+
+@register_vjp(OP_CLAMP)
+def _vjp_clamp(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """Pass dy where x is inclusively inside the declared clamp bounds."""
+    minimum, maximum = validate_clamp_contract(output)
+    (x,) = inputs
+    masks = []
+    for comparison, bound in (("ge", minimum), ("le", maximum)):
+        if bound is None:
+            continue
+        scalar = _vjp_uop(
+            OP_CONST,
+            (),
+            (),
+            x.dtype,
+            output,
+            arg={"value": bound},
+        )
+        masks.append(_vjp_uop(
+            OP_CMP,
+            (x, scalar),
+            x.shape,
+            "bool",
+            output,
+            arg={"op": comparison},
+        ))
+    mask = masks[0]
+    if len(masks) == 2:
+        mask = _vjp_uop(OP_MUL, (masks[0], masks[1]), x.shape, "bool", output)
+    typed_mask = _vjp_uop(
+        OP_CAST,
+        (mask,),
+        x.shape,
+        x.dtype,
+        output,
+        arg={"dtype": x.dtype},
+    )
+    return (_vjp_uop(OP_MUL, (dy, typed_mask), x.shape, x.dtype, output),)
 
 
 @register_vjp(OP_SIN)

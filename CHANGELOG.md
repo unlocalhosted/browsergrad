@@ -30,6 +30,10 @@ Each package follows independent [SemVer](https://semver.org/).
   unary semantics, removing integer declared/realized dtype drift and enabling
   mutually typed closure/symbolic gradients, functional grad, vmap, and ONNX
   while retaining explicit tensor-plan/WebGPU refusal.
+- Migrates JIT `Tensor.clamp` to typed finite-bound semantics with hostile
+  scalar-coercion rejection, floating dtype preservation, inclusive typed VJP,
+  functional grad, vmap, and ONNX `Clip`; device planning remains an explicit
+  refusal.
 
 ## 2026-07 — semantic-core, kernels, compiler, and JIT semantic migration
 

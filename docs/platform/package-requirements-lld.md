@@ -147,8 +147,8 @@ evidence without claiming reproducibility of the still-incomplete distributed
 asset set.
 
 Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
-`Tensor.sign`, `Tensor.sin`, and `Tensor.cos` from the frozen opaque callback
-inventory. Expand emits the existing typed `BROADCAST_TO`
+`Tensor.sign`, `Tensor.sin`, `Tensor.cos`, and `Tensor.clamp` from the frozen
+opaque callback inventory. Expand emits the existing typed `BROADCAST_TO`
 primitive. One shared contract validates exact arity, closed shape arguments,
 output-shape identity, dtype preservation, rank direction, and broadcast
 compatibility at construction and again at CPU, VJP, vmap, ONNX, and
@@ -169,16 +169,20 @@ remain explicit refusals because this slice adds no portable kernel. `sin` and
 float16/32/64 shape and dtype, reject bool/integer inputs before execution,
 provide owning CPU results and typed symbolic derivatives, vmap across a
 leading batch axis, and emit direct ONNX unary nodes. Their plan/WebGPU profile
-also remains an explicit refusal. The opaque baseline is therefore narrowed to
-31 constructor calls and 34 operations under ADR-0002, ADR-0004, and ADR-0005.
-This is five migrated operations, not Gate 6
+also remains an explicit refusal. Clamp now emits typed `CLAMP` with closed
+finite optional bounds, floating dtype preservation, inclusive-bound closure
+and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
+lowering. Hostile scalar coercion and integer dtype drift fail before UOp
+construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
+is therefore narrowed to 30 constructor calls and 33 operations under ADR-0002
+and ADR-0004 through ADR-0006. This is six migrated operations, not Gate 6
 completion: remaining Grad view/dtype debt, runtime/profile consumption, and
 the remaining advertised opaque operations remain open.
 
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
-records bind `Tensor.abs`, `Tensor.cos`, `Tensor.expand`, `Tensor.sign`, and
-`Tensor.sin` to the same
+records bind `Tensor.abs`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
+`Tensor.sign`, and `Tensor.sin` to the same
 validators invoked by construction and every admitted execution, transform,
 export, or plan boundary. Import rejects duplicate keys,
 open fields, unknown decisions, invalid versions, duplicate identities, and
@@ -188,7 +192,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 34 still-opaque and five typed retirements. ADR-0003 records
+opaque IDs into 33 still-opaque and six typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only; completing
 the remaining operation families and making runtime/profile UI consume these
 records remain Gate 6 work.

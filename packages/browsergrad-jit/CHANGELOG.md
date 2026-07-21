@@ -20,13 +20,18 @@ contract in the README](README.md#compatibility-contract).
   float16/32/64 shape and dtype, reject bool/integer dtype drift, and support
   owning CPU realization, mutually typed closure/symbolic gradients,
   functional grad, vmap, direct ONNX export, and explicit plan/WebGPU refusal.
+- `Tensor.clamp` now emits typed `CLAMP` with finite closed optional bounds,
+  floating dtype preservation, owning CPU realization, inclusive closure and
+  symbolic gradients, functional grad, vmap, ONNX `Clip`, hostile-coercion
+  rejection, and explicit tensor-plan/WebGPU refusal.
 
 ### Added
 
 - Added the bounded v1 executable framework-operation registry and detached
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
-  current table contains `ABS`, `COS`, `BROADCAST_TO`, `SIGN`, and `SIN`.
+  current table contains `ABS`, `CLAMP`, `COS`, `BROADCAST_TO`, `SIGN`, and
+  `SIN`.
 
 ## [0.9.0] — 2026-07-15
 

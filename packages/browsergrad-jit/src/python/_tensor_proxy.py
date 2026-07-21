@@ -45,7 +45,7 @@ from ._ir import (
     UOp,
     OP_BUFFER,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_COS, OP_SIGN, OP_SIN, OP_CMP,
+    OP_ABS, OP_CLAMP, OP_COS, OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO,
 )
@@ -55,6 +55,18 @@ if TYPE_CHECKING:
     from ._buffer_table import BufferTable
 
 _GRAD_ENABLED = True
+_CLAMP_BOUND_TYPES = (
+    int,
+    float,
+    np.int8,
+    np.int16,
+    np.int32,
+    np.int64,
+    np.uint8,
+    np.float16,
+    np.float32,
+    np.float64,
+)
 
 
 class no_grad:
@@ -77,6 +89,23 @@ inference_mode = no_grad
 
 def _should_track(*proxies: "TensorProxy") -> bool:
     return _GRAD_ENABLED and any(p.requires_grad for p in proxies)
+
+
+def _normalize_clamp_bound(name: str, value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if type(value) not in _CLAMP_BOUND_TYPES:
+        raise TypeError(
+            f"clamp: {name} must be a built-in or NumPy real scalar, "
+            f"got {type(value).__name__}"
+        )
+    try:
+        normalized = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError(f"clamp: {name} cannot be represented as float") from exc
+    if not np.isfinite(normalized):
+        raise ValueError(f"clamp: {name} must be finite, got {normalized!r}")
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -692,20 +721,17 @@ class TensorProxy:
     def clamp(self, min: Any = None, max: Any = None) -> "TensorProxy":
         if min is None and max is None:
             raise ValueError("clamp: at least one of min or max must be provided")
-        min_value = None if min is None else float(min)
-        max_value = None if max is None else float(max)
+        min_value = _normalize_clamp_bound("min", min)
+        max_value = _normalize_clamp_bound("max", max)
         if min_value is not None and max_value is not None and min_value > max_value:
             raise ValueError(f"clamp: min {min_value} must be <= max {max_value}")
 
-        def _clamp_forward(x_arr: np.ndarray) -> np.ndarray:
-            return np.clip(x_arr, min_value, max_value)
-
         uop = UOp(
-            op=OP_CUSTOM,
+            op=OP_CLAMP,
             inputs=(self._uop,),
             shape=self._uop.shape,
             dtype=self._uop.dtype,
-            arg={"fn": _clamp_forward, "captures": (), "name": "clamp"},
+            arg={"min": min_value, "max": max_value},
         )
 
         def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:

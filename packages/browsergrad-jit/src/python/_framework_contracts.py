@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Tuple
@@ -64,6 +65,7 @@ _ENUMS = {
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
+        "supported-inclusive-bound-mask",
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
         "supported-unbroadcast-sum",
@@ -71,6 +73,7 @@ _ENUMS = {
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
+        "supported-inclusive-bound-mask",
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
         "supported-unbroadcast-sum",
@@ -79,6 +82,7 @@ _ENUMS = {
     "functionalGrad": frozenset({"supported-via-symbolic-vjp"}),
     "vmap": frozenset({"supported-leading-batch-axis"}),
     "onnxExport": frozenset({
+        "supported-opset17-clip-export-dtypes",
         "supported-opset17-direct-unary-export-dtypes",
         "supported-opset17-expand",
     }),
@@ -334,8 +338,49 @@ def _validate_typed_unary(node: Any, contract: FrameworkOperationContract) -> No
         )
 
 
+def _validate_clamp(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> Tuple[Optional[float], Optional[float]]:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = _require_single_input_tuple(node, contract.opcode)
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("CLAMP arg must be a plain dict")
+    fields = set(arg)
+    if not {"min", "max"}.issubset(fields) or not fields.issubset({"min", "max", "vjp_of"}):
+        raise ShapeError("CLAMP arg fields must be exactly 'min' and 'max' plus optional 'vjp_of'")
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("CLAMP arg.vjp_of must reference a UOp")
+    source = inputs[0]
+    if getattr(node, "shape", None) != getattr(source, "shape", None):
+        raise ShapeError("CLAMP must preserve its input shape")
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("CLAMP must preserve its input dtype")
+    if getattr(node, "dtype", None) not in _FLOATING_DTYPES:
+        raise ShapeError(
+            f"CLAMP supports floating dtypes only, got {getattr(node, 'dtype', None)!r}"
+        )
+    bounds: list[Optional[float]] = []
+    for name in ("min", "max"):
+        bound = arg[name]
+        if bound is not None and (type(bound) is not float or not math.isfinite(bound)):
+            raise ShapeError(f"CLAMP arg.{name} must be None or a finite float")
+        bounds.append(bound)
+    minimum, maximum = bounds
+    if minimum is None and maximum is None:
+        raise ShapeError("CLAMP requires at least one bound")
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise ShapeError(f"CLAMP min {minimum} must be <= max {maximum}")
+    return minimum, maximum
+
+
 _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = MappingProxyType({
     "browsergrad.jit.framework.tensor.abs.v1": _validate_typed_unary,
+    "browsergrad.jit.framework.tensor.clamp.v1": _validate_clamp,
     "browsergrad.jit.framework.tensor.cos.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.expand.v1": _validate_broadcast_to,
     "browsergrad.jit.framework.tensor.sign.v1": _validate_typed_unary,
@@ -372,6 +417,13 @@ def validate_broadcast_to_contract(node: Any) -> Tuple[int, ...]:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.expand.v1":
         raise ShapeError("BROADCAST_TO resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_clamp_contract(node: Any) -> Tuple[Optional[float], Optional[float]]:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.clamp.v1":
+        raise ShapeError("CLAMP resolved to the wrong framework-operation contract")
     return normalized
 
 
@@ -429,6 +481,7 @@ __all__ = [
     "has_framework_operation_contract",
     "validate_framework_operation_contract",
     "validate_broadcast_to_contract",
+    "validate_clamp_contract",
     "validate_real_numeric_unary_contract",
     "validate_typed_unary_contract",
 ]
