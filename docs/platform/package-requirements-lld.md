@@ -47,7 +47,15 @@ backend execution, distribution, and release remain false. Current tests use a
 synthetic key and policy, so no real production producer or valid
 browser-Worker lowering has been observed. Hostile view-copy graphs are checked
 with non-recursive, target-intrinsic cycle detection before any semantic
-authority can be minted. Two distinct cache-free builds now prove exact
+authority can be minted. Separately, one exact producer-neutral authorized
+`view-copy` entry can now lower genuine f32 ABI, tensor-engine, affine-layout,
+copy-effect, and explicit runtime-allocation facts into the canonical Gate 2
+layout/kernel artifacts. The initial profile is positive flat static rank 2,
+two distinct non-null global pointers, synchronous portable copy, reject on an
+invalid source, and forbid overlap. Its CPU reference proves the pinned
+transpose bit-for-bit with nonzero allocation offsets; browser candidate
+authorization and real WebGPU evidence for this path remain absent. Two
+distinct cache-free builds now prove exact
 extractor Wasm/factory reproducibility; the package binds their canonical v3
 evidence without claiming reproducibility of the still-incomplete distributed
 asset set.
@@ -178,20 +186,23 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 614 tests across 69 files covering the build plan, runtime ABI,
+clean, then runs 692 tests across 78 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
 package invocation, Worker entry, production controller, verifier evidence,
 observed layout-candidate preparation, independently admitted producer trust,
-producer-authorized local layout lowering, exact header-tree
+producer-authorized local layout lowering, authorized CuTe view-copy lowering,
+exact header-tree
 inventory/materialization, seven-archive admission, strict archive
 normalization/extraction, the reviewed builder identity, CUDA-index admission,
 the complete header distribution review input, distribution-notice
 verification, exact notice-output materialization, two-root distribution
 reproducibility, exact package admission of that evidence, browser build-subject
-syntax, and signature/build-subject binding. The current Node 25 focused Vitest
-phase passes 614 tests across the same 69 files in 10.58 seconds, and the whole
-fast command completes in 21.70 seconds. The complete local compiler suite
-passes 91 files and 1,573 tests in 10.82 seconds when run after the package
+syntax, and signature/build-subject binding. The fast configuration now uses
+family globs for all browser and C++/CuTe lowering tests instead of a drifting
+per-file browser allowlist. The current Node 25 focused Vitest phase passes 692
+tests across the same 78 files in 11.67 seconds, and the whole fast command
+completes in 22.78 seconds. The complete local compiler suite passes 92 files
+and 1,578 tests in 11.16 seconds when run after the package
 build. The local feedback loop remains measured in tens of seconds.
 Clean validation and two-build
 reproducibility still restore no cache and remain intentionally more expensive.
