@@ -1,4 +1,6 @@
 import { parseWireU64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import { layoutArtifactPayload } from "@unlocalhosted/browsergrad-semantic-core/layout";
+import { kernelArtifactPayload } from "@unlocalhosted/browsergrad-semantic-core/kernel";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const authorities = vi.hoisted(() => ({
@@ -127,6 +129,8 @@ import {
   attachCppCuteBrowserSemanticCandidate,
   createCppCuteBrowserSemanticAuthorityFixture,
 } from "./support/cpp_cute_browser_semantic_authorization_fixtures.js";
+import { CPP_CUTE_BROWSER_VIEW_COPY_CONVERGENCE_FIXTURE as convergence } from
+  "../fixtures/cpp_cute_browser_view_copy_convergence.js";
 
 const wire = (value: number) => parseWireU64(String(value));
 let fixture: CppCuteProvenanceFixture;
@@ -196,12 +200,27 @@ describe("browser Worker view-copy authorization", () => {
     expect(record.candidate).toBe(authorities.candidate);
     expect(record.producer).toBe(authorities.producer);
     expect(canonical.evidence.kind).toBe("browser-worker-build-producer");
+    expect(entryId).toBe(convergence.entryId);
     const first = await lowerAuthorizedCppCuteViewCopyEntry(record.authorization, {
       entryId,
-      sourceAllocationByteLength: wire(32),
-      destinationAllocationByteLength: wire(32),
-      sourceByteOffset: wire(4),
-      destinationByteOffset: wire(4),
+      sourceAllocationByteLength: parseWireU64(convergence.storage.sourceAllocationByteLength),
+      destinationAllocationByteLength: parseWireU64(
+        convergence.storage.destinationAllocationByteLength,
+      ),
+      sourceByteOffset: parseWireU64(convergence.storage.sourceByteOffset),
+      destinationByteOffset: parseWireU64(convergence.storage.destinationByteOffset),
+    });
+    expect(first.layoutSemanticHash).toBe(convergence.expected.layoutSemanticHash);
+    expect(first.kernelSemanticHash).toBe(convergence.expected.kernelSemanticHash);
+    expect(first.source).toEqual(convergence.expected.source);
+    expect(first.destination).toEqual(convergence.expected.destination);
+    expect(first.operationId).toBe(convergence.expected.operationId);
+    expect(layoutArtifactPayload(first.layout)).toEqual(convergence.expected.layoutPayload);
+    expect(kernelArtifactPayload(first.kernel)).toEqual(convergence.expected.kernelPayload);
+    expect(convergence.claims).toEqual({
+      productionBrowserCompileObserved: false,
+      backendExecutionAuthorizationMinted: false,
+      cudaLiteRunnerUsed: false,
     });
     const second = await lowerAuthorizedCppCuteViewCopyEntry(record.authorization, {
       entryId,

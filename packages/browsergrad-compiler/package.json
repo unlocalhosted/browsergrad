@@ -118,6 +118,8 @@
     "test:browser:layout-bindings:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_layout_bindings_webgpu.test.ts",
     "test:browser:view-copy-bindings": "vitest run --config vitest.browser.config.ts tests-browser/semantic_view_copy_bindings_webgpu.test.ts",
     "test:browser:view-copy-bindings:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_view_copy_bindings_webgpu.test.ts",
+    "test:browser:cpp-cute-view-copy": "vitest run --config vitest.browser.config.ts tests-browser/cpp_cute_browser_view_copy_webgpu.test.ts",
+    "test:browser:cpp-cute-view-copy:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/cpp_cute_browser_view_copy_webgpu.test.ts",
     "test:verify:view-copy-bindings-evidence": "vitest run tests/compiler/view_copy_conformance_fixtures.test.ts tests/compiler/semantic_view_copy_bindings_evidence.test.ts tests/compiler/semantic_view_copy_bindings_evidence_log.test.ts",
     "test:browser:open": "vitest --config vitest.browser.config.ts --watch --browser.headless=false",
     "lint": "oxlint src",
