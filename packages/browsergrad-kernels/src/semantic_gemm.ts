@@ -442,11 +442,11 @@ function authorizeCertificate(
       "exact-input certificate belongs to a different logical GEMM specialization",
     );
   }
-  if (payload.proof.guarantees.wgslF32Output !== "bit-exact-on-certified-inputs") {
+  if (payload.proof.guarantees.f32Output !== "bit-exact-on-certified-inputs") {
     fail(
       "BG-WEBGPU-GEMM-NUMERICAL-PROOF",
-      "$.certificate.proof.guarantees.wgslF32Output",
-      "certificate does not authorize bit-exact WGSL f32 output",
+      "$.certificate.proof.guarantees.f32Output",
+      "certificate does not prove bit-exact f32 output on the admitted input domain",
     );
   }
   return payload;

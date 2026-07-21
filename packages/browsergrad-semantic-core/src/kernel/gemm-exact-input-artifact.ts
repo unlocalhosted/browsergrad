@@ -57,7 +57,7 @@ type ExactnessProof = JsonObject & {
     readonly strictLogicalPolicy: "increasing-k-rne-separate-multiply-add-preserved";
     readonly contraction: "value-preserving-on-certified-inputs";
     readonly reassociation: "value-preserving-on-certified-inputs";
-    readonly wgslF32Output: "bit-exact-on-certified-inputs";
+    readonly f32Output: "bit-exact-on-certified-inputs";
   };
 };
 
@@ -256,7 +256,7 @@ export async function evaluateLogicalGemmExactF32Inputs(
         strictLogicalPolicy: "increasing-k-rne-separate-multiply-add-preserved",
         contraction: "value-preserving-on-certified-inputs",
         reassociation: "value-preserving-on-certified-inputs",
-        wgslF32Output: "bit-exact-on-certified-inputs",
+        f32Output: "bit-exact-on-certified-inputs",
       },
     },
   };
@@ -326,7 +326,7 @@ function parsePayload(value: JsonValue): LogicalGemmExactF32InputCertificatePayl
     invalid(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile, "$.payload.proof.exactIntegerLimit", "exact f32 input proof limit must be 2^24");
   }
   const guarantees = closedObject(field(proof, "guarantees", "$.payload.proof"), [
-    "inputs", "products", "partialSums", "strictLogicalPolicy", "contraction", "reassociation", "wgslF32Output",
+    "inputs", "products", "partialSums", "strictLogicalPolicy", "contraction", "reassociation", "f32Output",
   ], "$.payload.proof.guarantees");
   requireConstant(guarantees, "inputs", "finite-nonnegative-integer-f32-with-positive-zero", "$.payload.proof.guarantees");
   requireConstant(guarantees, "products", "every-product-exact-f32", "$.payload.proof.guarantees");
@@ -334,7 +334,7 @@ function parsePayload(value: JsonValue): LogicalGemmExactF32InputCertificatePayl
   requireConstant(guarantees, "strictLogicalPolicy", "increasing-k-rne-separate-multiply-add-preserved", "$.payload.proof.guarantees");
   requireConstant(guarantees, "contraction", "value-preserving-on-certified-inputs", "$.payload.proof.guarantees");
   requireConstant(guarantees, "reassociation", "value-preserving-on-certified-inputs", "$.payload.proof.guarantees");
-  requireConstant(guarantees, "wgslF32Output", "bit-exact-on-certified-inputs", "$.payload.proof.guarantees");
+  requireConstant(guarantees, "f32Output", "bit-exact-on-certified-inputs", "$.payload.proof.guarantees");
   return {
     logicalGemmSemanticHash: digest(field(object, "logicalGemmSemanticHash", "$.payload"), "$.payload.logicalGemmSemanticHash"),
     specializationHash: digest(field(object, "specializationHash", "$.payload"), "$.payload.specializationHash"),
@@ -355,7 +355,7 @@ function parsePayload(value: JsonValue): LogicalGemmExactF32InputCertificatePayl
         strictLogicalPolicy: "increasing-k-rne-separate-multiply-add-preserved",
         contraction: "value-preserving-on-certified-inputs",
         reassociation: "value-preserving-on-certified-inputs",
-        wgslF32Output: "bit-exact-on-certified-inputs",
+        f32Output: "bit-exact-on-certified-inputs",
       },
     },
   };

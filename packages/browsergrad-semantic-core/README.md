@@ -39,7 +39,7 @@ The initial `/kernel` numerical proof is the closed
 snapshots direct, fixed, unshared host allocation bytes and admits only finite
 nonnegative integer f32 inputs whose products and complete output sums remain
 at most 2^24. On that narrow domain every relevant f32 operation is exact, so
-WGSL contraction or reassociation cannot change the strict logical result.
+backend contraction or reassociation cannot change the strict logical result.
 Certificates retain private snapshots and return fresh copies for immediate
 upload; they do not authorize arbitrary or previously resident GPU buffers and
 make no general-f32 preservation claim.

@@ -105,7 +105,7 @@ describe("logical GEMM exact f32 input certificate", () => {
         strictLogicalPolicy: "increasing-k-rne-separate-multiply-add-preserved",
         contraction: "value-preserving-on-certified-inputs",
         reassociation: "value-preserving-on-certified-inputs",
-        wgslF32Output: "bit-exact-on-certified-inputs",
+        f32Output: "bit-exact-on-certified-inputs",
       },
     });
     expect(LOGICAL_GEMM_EXACT_F32_INTEGER_LIMIT).toBe(1n << 24n);
