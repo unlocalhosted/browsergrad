@@ -37,6 +37,7 @@ from ._ir import (
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM, OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX, OP_CUSTOM,
+    validate_broadcast_to_contract,
 )
 
 
@@ -250,6 +251,8 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
     step_index: Dict[int, int] = {id(node): i for i, node in enumerate(order)}
     last_use: Dict[int, int] = {id(node): i for i, node in enumerate(order)}
     for i, node in enumerate(order):
+        if node.op == OP_BROADCAST_TO:
+            validate_broadcast_to_contract(node)
         if node.op not in PRIMITIVE_GPU_IR_OPS and not (allow_custom and node.op == OP_CUSTOM):
             raise GpuPlanUnsupported(
                 f"GPU tensor plan does not support opcode {node.op!r}. "

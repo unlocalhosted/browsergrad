@@ -427,7 +427,7 @@ export function validateGradCompatibilityInventory(inventory, fixture, freeze, f
   const referenceContracts = new Set(["browsergrad-grad-explicit", "numpy-array-protocol", "pytorch-shaped-compatibility"]);
   const dtypeEffects = new Set(["coerces-float32", "preserves", "preserves-float32-otherwise-coerces-float32", "resolved-target", "substitutes-float32-token", "surface-dependent"]);
   const conditions = new Set(["all-inputs", "input-dtype-and-index-kind-dependent", "input-dtype-and-layout-dependent", "input-dtype-dependent", "no-requested-dtype", "requested-bf16-token", "requested-dtype-dependent", "requested-dtype-differs-from-storage-dtype", "requested-dtype-equals-storage-dtype", "surface-and-input-dependent", "torch-bfloat16-token", "unrecognized-string"]);
-  const failurePolicies = new Set(["delegate-invalid-broadcast-to-numpy", "delegate-invalid-dimension-to-numpy", "delegate-invalid-index-to-numpy", "delegate-invalid-input-to-python-or-numpy", "delegate-invalid-permutation-to-numpy", "delegate-invalid-shape-to-numpy", "no-dedicated-failure-path", "reject-invalid-dtype-after-numpy-delegation", "unrecognized-dtype-treated-as-device-noop"]);
+  const failurePolicies = new Set(["delegate-invalid-broadcast-to-numpy", "delegate-invalid-dimension-to-numpy", "delegate-invalid-index-to-numpy", "delegate-invalid-input-to-python-or-numpy", "delegate-invalid-permutation-to-numpy", "delegate-invalid-shape-to-numpy", "no-dedicated-failure-path", "reject-invalid-dtype-after-numpy-delegation", "reject-invalid-expand-shape-before-execution", "unrecognized-dtype-treated-as-device-noop"]);
   const aliasing = new Set(["conditional", "must-alias", "must-not-alias", "not-applicable", "same-object"]);
   const contiguity = new Set(["contiguous", "input-dependent", "not-applicable", "preserved"]);
   const materialization = new Set(["always", "conditional", "none", "not-applicable"]);
@@ -573,7 +573,14 @@ export function validateJitOpaqueOperationInventory(inventory, fixture, freeze, 
   const siteOperationIds = [];
   const sourceDefinitions = [];
   const labelBindings = new Set(["dynamic-reviewed-name", "static-name", "static-op-in-arg-record"]);
-  if (!Array.isArray(inventory.constructorSites) || inventory.constructorSites.length !== 36) failures.push(`${filename}.constructorSites must contain the 36 exact CUSTOM constructor calls`);
+  const frozenConstructorCounts = Object.values(freeze.constructorCounts ?? {});
+  const expectedConstructorCount = frozenConstructorCounts.every((count) => Number.isInteger(count) && count >= 0)
+    ? frozenConstructorCounts.reduce((total, count) => total + count, 0)
+    : -1;
+  if (expectedConstructorCount < 1) failures.push("JIT opaque-operation frozen constructor counts must contain positive integer total");
+  if (!Array.isArray(inventory.constructorSites) || inventory.constructorSites.length !== expectedConstructorCount) {
+    failures.push(`${filename}.constructorSites must contain the ${expectedConstructorCount} exact frozen CUSTOM constructor calls`);
+  }
   for (const [index, site] of (Array.isArray(inventory.constructorSites) ? inventory.constructorSites : []).entries()) {
     const label = `${filename}.constructorSites[${index}]`;
     exactKeys(label, site, siteKeys);

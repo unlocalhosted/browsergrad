@@ -7,6 +7,12 @@ contract in the README](README.md#compatibility-contract).
 
 ## [Unreleased]
 
+### Changed
+
+- `Tensor.expand` now emits typed `BROADCAST_TO` instead of `CUSTOM`, with
+  strict shape capture, shared contract revalidation, symbolic VJP, vmap,
+  ONNX `Expand`, and materializing/resident tensor-plan coverage.
+
 ## [0.9.0] — 2026-07-15
 
 ### Added

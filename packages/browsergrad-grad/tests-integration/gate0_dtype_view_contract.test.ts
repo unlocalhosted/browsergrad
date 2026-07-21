@@ -200,6 +200,12 @@ cases["grad.view.permute-float16-materializes-f32.v0"] = {
 expand_source = grad.Tensor(np.array([[1.0], [2.0]], dtype=np.float32), requires_grad=True)
 expanded = expand_source.expand(2, 3)
 expanded.sum().backward()
+def expand_error(call):
+    try:
+        call()
+        return "no_error"
+    except Exception as exc:
+        return type(exc).__name__
 cases["grad.materialization.expand-copy.v0"] = {
     "sharesMemory": bool(np.shares_memory(expand_source.data, expanded.data)),
     "cContiguous": bool(expanded.data.flags.c_contiguous),
@@ -207,12 +213,25 @@ cases["grad.materialization.expand-copy.v0"] = {
     "graphEdge": bool(expanded._ctx is not None),
     "parentIdentity": bool(expanded._ctx[0][0] is expand_source),
     "backwardGradient": expand_source.grad.tolist(),
+    "validMinusOneValues": expand_source.expand(-1, 3).tolist(),
+    "invalidShapeErrors": {
+        "float": expand_error(lambda: expand_source.expand(2, 3.0)),
+        "bool": expand_error(lambda: expand_source.expand(2, True)),
+        "leadingMinusOne": expand_error(lambda: grad.Tensor(np.array([1.0, 2.0], dtype=np.float32)).expand(-1, 2)),
+        "negative": expand_error(lambda: expand_source.expand(2, -2)),
+        "incompatible": expand_error(lambda: expand_source.expand(3, 3)),
+        "fewerDimensions": expand_error(lambda: expand_source.expand(2)),
+    },
 }
 float16_expand_source = grad.Tensor(np.array([[1.0], [2.0]], dtype=np.float16), dtype="float16")
 float16_expanded = float16_expand_source.expand(2, 3)
-cases["grad.materialization.expand-float16-to-f32.v0"] = {
-    "sourceDtype": float16_expand_source.dtype,
-    "resultDtype": float16_expanded.dtype,
+int32_expand_source = grad.Tensor(np.array([[1], [2]], dtype=np.int32), dtype="int32")
+int32_expanded = int32_expand_source.expand(2, 3)
+cases["grad.materialization.expand-dtype-preservation.v0"] = {
+    "float16SourceDtype": float16_expand_source.dtype,
+    "float16ResultDtype": float16_expanded.dtype,
+    "int32SourceDtype": int32_expand_source.dtype,
+    "int32ResultDtype": int32_expanded.dtype,
 }
 
 index_source = grad.Tensor(np.arange(6, dtype=np.float32).reshape(2, 3), requires_grad=True)

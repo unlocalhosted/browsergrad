@@ -68,6 +68,7 @@ from ._ir import (
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
     OP_PAD, OP_SLICE, OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
+    validate_broadcast_to_contract,
     OP_STORE,
 )
 from ._errors import JitNotImplementedError
@@ -587,6 +588,7 @@ for _op_name, _op in (
 def _vmap_broadcast_to(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
     """Same input-batched-or-not check as RESHAPE: if input is the
     un-batched pass-through, broadcast target stays as recorded."""
+    validate_broadcast_to_contract(node)
     inner = batched[id(node.inputs[0])]
     orig_input_ndim = len(node.inputs[0].shape)
     is_batched = len(inner.shape) > orig_input_ndim

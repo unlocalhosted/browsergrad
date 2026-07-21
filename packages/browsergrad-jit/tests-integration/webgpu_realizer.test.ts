@@ -1280,13 +1280,17 @@ arr = second.numpy()
     ]);
   });
 
-  it("realize_tensor_plan_webgpu handles reshape, permute, reduce, and broadcast plan ops", async () => {
+  it("realize_tensor_plan_webgpu handles reshape, permute, reduce, and public expand plan ops", async () => {
     const target = await getJitTarget();
     const result = await target.run<{
       reduce_diff: number;
       broadcast_diff: number;
       tensor_plan: number;
       tensor_plan_semantic: number;
+      tensor_plan_resident: number;
+      resident_materialized_before_numpy: boolean;
+      resident_materialized_after_numpy: boolean;
+      resident_broadcast_diff: number;
       ops: string[];
       semantic_request: {
         kind: string;
@@ -1298,8 +1302,6 @@ arr = second.numpy()
     }>(`
 import browsergrad_jit as bg
 import numpy as np
-from browsergrad_jit._ir import UOp, OP_BROADCAST_TO
-from browsergrad_jit._tensor_proxy import TensorProxy
 
 rng = np.random.RandomState(12)
 x_np = rng.uniform(-1, 1, size=(6,)).astype(np.float32)
@@ -1310,30 +1312,37 @@ reduced_ref = reduced.numpy()
 
 base_np = np.array([[1.0], [2.0]], dtype=np.float32)
 base = bg.from_numpy(base_np.copy())
-b_uop = UOp(
-    op=OP_BROADCAST_TO,
-    inputs=(base._uop,),
-    shape=(2, 3),
-    dtype="float32",
-    arg={"shape": (2, 3)},
-)
-broadcasted = TensorProxy(b_uop, session=base._get_session(), requires_grad=False)
+broadcasted = base.expand(2, 3)
 broadcast_gpu = bg.realize_tensor_plan_webgpu(broadcasted)
 broadcast_ref = broadcasted.numpy()
+
+resident = bg.realize_tensor_plan_webgpu_resident(base.expand(2, 3))
+resident_id = resident._uop.inputs[0].arg
+resident_materialized_before_numpy = base._get_session().buffer_table.is_materialized(resident_id)
+resident_arr = resident.numpy()
+resident_materialized_after_numpy = base._get_session().buffer_table.is_materialized(resident_id)
 plan = bg.gpu_plan_summary(reduced)
 {
     "reduce_diff": float(np.max(np.abs(reduced_gpu - reduced_ref))),
     "broadcast_diff": float(np.max(np.abs(broadcast_gpu - broadcast_ref))),
     "tensor_plan": _mock.tensor_plan_count,
     "tensor_plan_semantic": _mock.tensor_plan_semantic_count,
+    "tensor_plan_resident": _mock.tensor_plan_resident_count,
+    "resident_materialized_before_numpy": resident_materialized_before_numpy,
+    "resident_materialized_after_numpy": resident_materialized_after_numpy,
+    "resident_broadcast_diff": float(np.max(np.abs(resident_arr - broadcast_ref))),
     "ops": plan["ops"],
     "semantic_request": _mock.last_semantic_requests["requests"][0],
 }
 `);
     expect(result.reduce_diff).toBeLessThan(1e-6);
     expect(result.broadcast_diff).toBeLessThan(1e-6);
-    expect(result.tensor_plan).toBe(1);
+    expect(result.tensor_plan).toBe(2);
     expect(result.tensor_plan_semantic).toBe(1);
+    expect(result.tensor_plan_resident).toBe(1);
+    expect(result.resident_materialized_before_numpy).toBe(false);
+    expect(result.resident_materialized_after_numpy).toBe(true);
+    expect(result.resident_broadcast_diff).toBeLessThan(1e-6);
     expect(result.ops).toContain("RESHAPE");
     expect(result.ops).toContain("PERMUTE");
     expect(result.ops).toContain("REDUCE");

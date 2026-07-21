@@ -1,7 +1,7 @@
 # BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
 - **Status:** normative platform architecture; implementation status is not implied
-- **Last reviewed:** 2026-07-21
+- **Last reviewed:** 2026-07-22
 - **Implementation ledger:**
   [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
 - **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
@@ -13,10 +13,10 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
 describe requirement strength. They are used deliberately rather than as
 general emphasis.
 
-## Implementation Checkpoint — Active 2026-07-21
+## Implementation Checkpoint — Active 2026-07-22
 
-Gates 0 through 2 and Gate 4 are verified; Gate 3 remains active; Gate 5 is
-partial; Gates 6 and 7 have not started. Gate 4 is verified for its initial
+Gates 0 through 2 and Gates 4 through 5 are verified; Gate 3 remains active;
+Gate 6 is in progress; Gate 7 has not started. Gate 4 is verified for its initial
 closed portable profile only: dense row-major, 4-byte-aligned, certified exact-input `f32`
 GEMM. The strict native producer, pinned no-shell Clang-Wasm executor,
 isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
@@ -145,6 +145,25 @@ distinct cache-free builds now prove exact
 extractor Wasm/factory reproducibility; the package binds their canonical v3
 evidence without claiming reproducibility of the still-incomplete distributed
 asset set.
+
+Gate 6 has started by retiring public `Tensor.expand` from the frozen opaque
+callback inventory. The surface now emits the existing typed `BROADCAST_TO`
+primitive. One shared contract validates exact arity, closed shape arguments,
+output-shape identity, dtype preservation, rank direction, and broadcast
+compatibility at construction and again at CPU, VJP, vmap, ONNX, and
+tensor-plan boundaries so mutation of the legacy argument dictionary fails
+locally. Valid calls retain owning CPU materialization and closure autograd;
+symbolic VJP sums expanded axes, vmap keeps its batch axis outside the declared
+broadcast, ONNX emits `Expand`, and materializing/resident tensor-plan routes
+contain no `CUSTOM`. Grad eager `Tensor.expand` consumes the same cross-package
+shape/dtype conformance fixture, rejects the same invalid dimension classes
+before NumPy execution, preserves float16 and integer dtypes, and explicitly
+retains owning contiguous materialization rather than claiming PyTorch view
+aliasing. The opaque baseline is therefore narrowed to 35 constructor calls
+and 38 operations under ADR-0002. This is one migrated operation, not Gate 6
+completion: remaining Grad view/dtype debt, runtime/profile consumption, the
+remaining advertised opaque operations, and contract-generated public support
+tables remain open.
 
 Browser asset manifest v1.4 now binds one build-signature predicate, exact
 trust-store digest, and canonical builder allowlist into the profile-pinned

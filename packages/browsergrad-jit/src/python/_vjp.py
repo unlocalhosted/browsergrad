@@ -60,7 +60,7 @@ from ._ir import (
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
     OP_CONST, OP_BROADCAST_TO,
-    OP_ISNAN,
+    OP_ISNAN, validate_broadcast_to_contract,
 )
 
 
@@ -313,6 +313,14 @@ def _vjp_permute(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optiona
             arg={"axes": tuple(inverse)},
         ),
     )
+
+
+@register_vjp(OP_BROADCAST_TO)
+def _vjp_broadcast_to(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """The VJP of an explicit broadcast sums every expanded dimension."""
+    validate_broadcast_to_contract(output)
+    (x,) = inputs
+    return (_unbroadcast_uop(dy, x.shape, output),)
 
 
 @register_vjp(OP_CAST)

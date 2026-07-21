@@ -59,7 +59,7 @@ from ._ir import (
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
-    OP_WHERE, OP_BROADCAST_TO, OP_SGD_UPDATE,
+    OP_WHERE, OP_BROADCAST_TO, OP_SGD_UPDATE, validate_broadcast_to_contract,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
 )
@@ -457,11 +457,12 @@ def export_inference(
             attrs.append(_emit_attr_int("keepdims", 1 if keepdims else 0))
             nodes.append(_emit_node(input_names, [out_name], nm, _REDUCE_OP_MAP[op], attrs))
         elif node.op == OP_BROADCAST_TO:
-            shape_arr = _i64_initializer_for_shape(node.arg["shape"])
+            target_shape = validate_broadcast_to_contract(node)
+            shape_arr = _i64_initializer_for_shape(target_shape)
             shape_const_name = f"const_expand_{next_node_id - 1}"
             initializers.append(
                 _emit_tensor_proto(shape_const_name, DT_INT64,
-                                   (len(node.arg["shape"]),), shape_arr)
+                                   (len(target_shape),), shape_arr)
             )
             nodes.append(_emit_node(input_names + [shape_const_name], [out_name], nm, "Expand"))
         elif node.op == OP_CMP:

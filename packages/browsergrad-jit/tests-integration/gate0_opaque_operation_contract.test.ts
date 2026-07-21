@@ -286,7 +286,6 @@ a = leaf([[1.0, 2.0], [3.0, 1.0]]); check("cross_entropy", F.cross_entropy(a, co
 a = leaf([1.0, 2.0, 3.0]); check("cumsum", bg.cumsum(a, dim=0), a)
 np.random.seed(17)
 a = leaf([[1.0, 1.0], [1.0, 1.0]]); check("dropout", F.dropout(a, p=0.5, training=True), a)
-a = leaf([[1.0], [2.0]]); check("expand", a.expand(2, 3), a)
 a = leaf([1.0, 2.0, 3.0]); check("flip", a.flip(0), a)
 a = leaf([[1.0, 2.0], [3.0, 4.0]]); check("gather", a.gather(1, constant([[0, 1], [1, 0]], np.int64)), a)
 a = leaf([[[[2.0]]]]); check("interpolate", F.interpolate(a, size=(2, 2), mode="nearest"), a)

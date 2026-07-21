@@ -6,6 +6,7 @@ New methods: exp, log, transpose (axis-aware), reshape, view.
 """
 
 from __future__ import annotations
+import operator
 import numpy as np
 from typing import Callable, List, Optional, Tuple, Union
 from . import _device
@@ -730,21 +731,41 @@ def _clamp(a: Tensor, lo, hi) -> Tensor:
 
 
 def _expand(a: Tensor, shape: tuple) -> Tensor:
-    # PyTorch lets -1 mean "keep this dim". Resolve.
     in_shape = a.data.shape
     if len(shape) < len(in_shape):
         raise ValueError(f"expand: target {shape} has fewer dims than input {in_shape}")
-    # Pad input shape with 1s on the left to match output rank.
-    padded = (1,) * (len(shape) - len(in_shape)) + in_shape
+    leading = len(shape) - len(in_shape)
+    padded = (1,) * leading + in_shape
     resolved = []
-    for i, t in enumerate(shape):
-        if t == -1:
-            resolved.append(padded[i])
-        else:
-            resolved.append(t)
+    for axis, raw_dim in enumerate(shape):
+        if isinstance(raw_dim, (bool, np.bool_)):
+            raise ValueError(
+                f"expand: target dimension {axis} must be an integer, got bool"
+            )
+        try:
+            dim = operator.index(raw_dim)
+        except TypeError as exc:
+            raise ValueError(
+                f"expand: target dimension {axis} must be an integer, "
+                f"got {type(raw_dim).__name__}"
+            ) from exc
+        if dim == -1:
+            if axis < leading:
+                raise ValueError("expand: -1 is not allowed in a new leading dimension")
+            dim = padded[axis]
+        elif dim < 0:
+            raise ValueError(
+                f"expand: target dimension {axis} must be non-negative or -1, got {dim}"
+            )
+        source_dim = padded[axis]
+        if source_dim != 1 and source_dim != dim:
+            raise ValueError(
+                f"expand: input dimension {axis} has size {source_dim} and cannot expand to {dim}"
+            )
+        resolved.append(dim)
     resolved = tuple(resolved)
     out_data = np.broadcast_to(a.data.reshape(padded), resolved).copy()
-    out = Tensor(out_data)
+    out = Tensor(out_data, dtype=a.dtype)
     def backward(g):
         # Sum the gradient back over the broadcasted dimensions.
         grad = g.data

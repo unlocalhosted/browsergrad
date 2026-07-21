@@ -46,7 +46,7 @@ from ._ir import (
     OP_BUFFER,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
-    OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM,
+    OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO,
 )
 from ._errors import JitNotImplementedError, ShapeError, RealizationError
 
@@ -741,26 +741,53 @@ class TensorProxy:
 
     def expand(self, *shape: Any) -> "TensorProxy":
         if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
-            target_shape = tuple(shape[0])
+            requested_shape = tuple(shape[0])
         else:
-            target_shape = tuple(shape)
-        if len(target_shape) < self.ndim:
-            raise ShapeError(f"expand: target {target_shape} has fewer dims than input {self.shape}")
-        padded = (1,) * (len(target_shape) - self.ndim) + self.shape
-        resolved = tuple(
-            padded[i] if int(dim) == -1 else int(dim)
-            for i, dim in enumerate(target_shape)
-        )
+            requested_shape = tuple(shape)
+        if len(requested_shape) < self.ndim:
+            raise ShapeError(
+                f"expand: target {requested_shape} has fewer dims than input {self.shape}"
+            )
 
-        def _expand_forward(x_arr: np.ndarray) -> np.ndarray:
-            return np.broadcast_to(x_arr.reshape(padded), resolved).copy()
+        leading = len(requested_shape) - self.ndim
+        padded = (1,) * leading + self.shape
+        resolved_dims = []
+        for axis, raw_dim in enumerate(requested_shape):
+            if isinstance(raw_dim, (bool, np.bool_)):
+                raise ShapeError(
+                    f"expand: target dimension {axis} must be an integer, got bool"
+                )
+            try:
+                dim = operator.index(raw_dim)
+            except TypeError as exc:
+                raise ShapeError(
+                    f"expand: target dimension {axis} must be an integer, "
+                    f"got {type(raw_dim).__name__}"
+                ) from exc
+            if dim == -1:
+                if axis < leading:
+                    raise ShapeError(
+                        "expand: -1 is not allowed in a new leading dimension"
+                    )
+                dim = padded[axis]
+            elif dim < 0:
+                raise ShapeError(
+                    f"expand: target dimension {axis} must be non-negative or -1, got {dim}"
+                )
+            source_dim = padded[axis]
+            if source_dim != 1 and source_dim != dim:
+                raise ShapeError(
+                    f"expand: input dimension {axis} has size {source_dim} and cannot expand to {dim}"
+                )
+            resolved_dims.append(dim)
+        resolved = tuple(resolved_dims)
 
         uop = UOp(
-            op=OP_CUSTOM,
+            op=OP_BROADCAST_TO,
             inputs=(self._uop,),
             shape=resolved,
             dtype=self._uop.dtype,
-            arg={"fn": _expand_forward, "captures": (), "name": "expand"},
+            arg={"shape": resolved},
         )
 
         def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:

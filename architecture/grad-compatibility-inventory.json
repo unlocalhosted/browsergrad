@@ -270,14 +270,14 @@
       "observationStatus": "verified",
       "targetConformance": "compatibility-debt",
       "referenceContract": "pytorch-shaped-compatibility",
-      "dtypeEffect": "preserves-float32-otherwise-coerces-float32",
-      "condition": "input-dtype-dependent",
-      "failurePolicy": "delegate-invalid-broadcast-to-numpy",
+      "dtypeEffect": "preserves",
+      "condition": "all-inputs",
+      "failurePolicy": "reject-invalid-expand-shape-before-execution",
       "aliasing": "must-not-alias",
       "contiguity": "contiguous",
       "materialization": "always",
       "autograd": "graph-edge",
-      "truth": "Expand copies the NumPy broadcast result into independent storage instead of returning a zero-stride view; non-float32 input is converted to float32.",
+      "truth": "Expand validates integer extents and broadcast compatibility before execution, then copies the NumPy broadcast result into independent contiguous storage while preserving the input dtype.",
       "sourceDefinitions": [
         "tensor.py:Tensor.expand",
         "tensor.py:_expand",
@@ -285,7 +285,7 @@
       ],
       "fixtureCaseIds": [
         "grad.materialization.expand-copy.v0",
-        "grad.materialization.expand-float16-to-f32.v0"
+        "grad.materialization.expand-dtype-preservation.v0"
       ]
     },
     {

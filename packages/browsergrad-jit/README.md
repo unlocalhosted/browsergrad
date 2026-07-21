@@ -127,6 +127,13 @@ materialized result back to CPU buffers; `SGD.step(device="webgpu",
 resident=True)` keeps the updated parameter buffer resident, and resident
 Adam/AdamW keeps m/v state resident too.
 
+`Tensor.expand(...)` now emits the typed `BROADCAST_TO` primitive rather than
+an opaque NumPy callback. CPU realization returns an owning dtype-preserving
+array; closure backward and symbolic VJP both sum expanded axes; vmap and ONNX
+map the same node; and the materializing/resident tensor-plan routes accept its
+current f32 rank-at-most-four WebGPU profile. Invalid, non-integral, rank-
+reducing, or incompatible shapes fail before execution.
+
 ### Gradient control
 ```python
 with bg.no_grad():

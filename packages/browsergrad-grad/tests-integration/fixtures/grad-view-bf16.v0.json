@@ -173,14 +173,25 @@
         "requiresGrad": true,
         "graphEdge": true,
         "parentIdentity": true,
-        "backwardGradient": [[3], [3]]
+        "backwardGradient": [[3], [3]],
+        "validMinusOneValues": [[1, 1, 1], [2, 2, 2]],
+        "invalidShapeErrors": {
+          "float": "ValueError",
+          "bool": "ValueError",
+          "leadingMinusOne": "ValueError",
+          "negative": "ValueError",
+          "incompatible": "ValueError",
+          "fewerDimensions": "ValueError"
+        }
       }
     },
     {
-      "id": "grad.materialization.expand-float16-to-f32.v0",
+      "id": "grad.materialization.expand-dtype-preservation.v0",
       "expected": {
-        "sourceDtype": "float16",
-        "resultDtype": "float32"
+        "float16SourceDtype": "float16",
+        "float16ResultDtype": "float16",
+        "int32SourceDtype": "int32",
+        "int32ResultDtype": "int32"
       }
     },
     {

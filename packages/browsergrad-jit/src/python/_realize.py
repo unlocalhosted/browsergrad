@@ -48,7 +48,7 @@ from ._ir import (
     OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
-    OP_SCATTER_ADD, OP_BROADCAST_TO,
+    OP_SCATTER_ADD, OP_BROADCAST_TO, validate_broadcast_to_contract,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
@@ -965,7 +965,7 @@ def _h_broadcast_to(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     broadcast source in-place.
     """
     x = vt[id(node.inputs[0])]
-    target_shape = tuple(node.arg["shape"])
+    target_shape = validate_broadcast_to_contract(node)
     return np.broadcast_to(x, target_shape).copy()
 
 

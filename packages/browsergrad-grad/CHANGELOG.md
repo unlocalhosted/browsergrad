@@ -7,6 +7,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- `Tensor.expand` now rejects malformed dimensions before NumPy execution and
+  preserves float16 and integer dtypes while retaining its documented owning,
+  contiguous materialization behavior. Its valid and invalid shape contract is
+  shared with the lazy JIT surface.
+
 ## [0.5.2] — 2026-07-15
 
 ### Fixed
