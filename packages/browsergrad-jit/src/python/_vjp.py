@@ -48,7 +48,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from ._ir import (
     UOp,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_SIGN, OP_SIN, OP_CAST, OP_CMP,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_SIGN, OP_SIN, OP_CAST, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -67,6 +67,7 @@ from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_clamp_contract,
     validate_flip_contract,
+    validate_repeat_contract,
     validate_real_numeric_unary_contract,
     validate_typed_unary_contract,
 )
@@ -318,6 +319,45 @@ def _vjp_flip(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[U
         output,
         arg={"axis": axis},
     ),)
+
+
+@register_vjp(OP_REPEAT)
+def _vjp_repeat(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """Sum each tile block back into the original input shape."""
+    repeats, padded_shape = validate_repeat_contract(output)
+    (x,) = inputs
+    interleaved_shape = tuple(
+        extent
+        for factor, source_extent in zip(repeats, padded_shape)
+        for extent in (factor, source_extent)
+    )
+    cur = _vjp_uop(
+        OP_RESHAPE,
+        (dy,),
+        interleaved_shape,
+        x.dtype,
+        output,
+        arg={"new_shape": interleaved_shape},
+    )
+    repeat_axes = tuple(range(0, len(interleaved_shape), 2))
+    cur = _vjp_uop(
+        OP_REDUCE,
+        (cur,),
+        padded_shape,
+        x.dtype,
+        output,
+        arg={"op": "sum", "axis": repeat_axes, "keepdims": False},
+    )
+    if padded_shape != x.shape:
+        cur = _vjp_uop(
+            OP_RESHAPE,
+            (cur,),
+            x.shape,
+            x.dtype,
+            output,
+            arg={"new_shape": x.shape},
+        )
+    return (cur,)
 
 
 @register_vjp(OP_SIN)

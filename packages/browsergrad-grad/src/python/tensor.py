@@ -13,6 +13,19 @@ from . import _device
 
 Number = Union[int, float]
 ArrayLike = Union[Number, List, Tuple, "np.ndarray", "Tensor"]
+_REPEAT_FACTOR_MAX = 1 << 30
+_REPEAT_RANK_MAX = 32
+_EXACT_INTEGER_SCALAR_TYPES = (
+    int,
+    np.int8,
+    np.int16,
+    np.int32,
+    np.int64,
+    np.uint8,
+    np.uint16,
+    np.uint32,
+    np.uint64,
+)
 
 
 def _resolve_dtype(spec):
@@ -362,7 +375,7 @@ class Tensor:
 
     def repeat(self, *sizes) -> "Tensor":
         """Tile the tensor along each dimension."""
-        if len(sizes) == 1 and isinstance(sizes[0], (tuple, list)):
+        if len(sizes) == 1 and type(sizes[0]) in (tuple, list):
             sizes = tuple(sizes[0])
         return _repeat(self, tuple(sizes))
 
@@ -778,9 +791,33 @@ def _expand(a: Tensor, shape: tuple) -> Tensor:
 
 def _repeat(a: Tensor, sizes: tuple) -> Tensor:
     # np.tile semantics: sizes is the repeat count along each dim.
-    out_data = np.tile(a.data, sizes)
-    out = Tensor(out_data.astype(np.float32))
     in_shape = a.data.shape
+    if not sizes:
+        raise ValueError("repeat: expected at least one repeat size")
+    if len(sizes) < len(in_shape):
+        raise ValueError(
+            f"repeat: repeat rank {len(sizes)} cannot be shorter than input rank {len(in_shape)}"
+        )
+    if len(sizes) > _REPEAT_RANK_MAX:
+        raise ValueError(
+            f"repeat: repeat rank {len(sizes)} exceeds the {_REPEAT_RANK_MAX}-axis ceiling"
+        )
+    normalized_sizes = []
+    for axis, value in enumerate(sizes):
+        if type(value) not in _EXACT_INTEGER_SCALAR_TYPES:
+            raise ValueError(
+                f"repeat: size {axis} must be a built-in or NumPy integer scalar, "
+                f"got {type(value).__name__}"
+            )
+        factor = int(value)
+        if factor < 0 or factor > _REPEAT_FACTOR_MAX:
+            raise ValueError(
+                f"repeat: size {axis} must be in [0, {_REPEAT_FACTOR_MAX}], got {factor}"
+            )
+        normalized_sizes.append(factor)
+    sizes = tuple(normalized_sizes)
+    out_data = np.tile(a.data, sizes)
+    out = Tensor(np.array(out_data, copy=True), dtype=a.dtype)
     def backward(g):
         # Inverse of tile: sum the gradient over each tile-block back to
         # the original shape. We do this by reshaping into a higher-dim

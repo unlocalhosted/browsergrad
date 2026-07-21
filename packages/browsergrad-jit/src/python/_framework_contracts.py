@@ -21,6 +21,8 @@ from ._errors import ShapeError
 
 FRAMEWORK_OPERATION_SUPPORT_SCHEMA = "browsergrad.jit.framework-operation-contracts"
 FRAMEWORK_OPERATION_SUPPORT_VERSION = (1, 0)
+REPEAT_FACTOR_MAX = 1 << 30
+REPEAT_RANK_MAX = 32
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 16 * 1024
 _ROOT_FIELDS = frozenset({"schema", "version", "operations"})
@@ -54,6 +56,7 @@ _ENUMS = {
         "preserve-unary-input",
         "preserve-single-axis-reverse",
         "static-broadcast-with-existing-dim-minus-one",
+        "tile-multipliers-with-left-rank-padding",
     }),
     "dtypeContract": frozenset({
         "preserve-floating-input",
@@ -70,6 +73,7 @@ _ENUMS = {
         "supported-involutive-flip",
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
+        "supported-tile-block-sum",
         "supported-unbroadcast-sum",
         "supported-zero-derivative",
     }),
@@ -79,6 +83,7 @@ _ENUMS = {
         "supported-involutive-flip",
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
+        "supported-tile-block-sum",
         "supported-unbroadcast-sum",
         "supported-zero-derivative",
     }),
@@ -86,21 +91,25 @@ _ENUMS = {
     "vmap": frozenset({
         "supported-leading-batch-axis",
         "supported-leading-batch-axis-with-axis-shift",
+        "supported-leading-batch-axis-with-unit-repeat",
     }),
     "onnxExport": frozenset({
         "supported-opset17-clip-export-dtypes",
         "supported-opset17-direct-unary-export-dtypes",
         "supported-opset17-expand",
         "supported-opset17-slice-float32-int32-int64-bool",
+        "supported-opset17-tile-float32-int32-int64-bool",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
+        "refused-no-canonical-tile-layout-profile",
         "refused-no-portable-lowering",
         "supported-primitive",
     }),
     "webgpu": frozenset({
         "profile-nonempty-f32-rank-at-most-4",
         "refused-negative-stride-profile",
+        "refused-no-canonical-tile-layout-profile",
         "refused-no-tensor-plan-kernel",
     }),
     "residency": frozenset({"host-materialized", "supported-materializing-and-resident"}),
@@ -418,12 +427,66 @@ def _validate_flip(node: Any, contract: FrameworkOperationContract) -> int:
     return axis
 
 
+def _validate_repeat(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = _require_single_input_tuple(node, contract.opcode)
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("REPEAT arg must be a plain dict")
+    fields = set(arg)
+    if "repeats" not in fields or not fields.issubset({"repeats", "vjp_of"}):
+        raise ShapeError("REPEAT arg fields must be exactly 'repeats' plus optional 'vjp_of'")
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("REPEAT arg.vjp_of must reference a UOp")
+    source = inputs[0]
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("REPEAT must preserve its input dtype")
+    repeats = arg["repeats"]
+    if type(repeats) is not tuple:
+        raise ShapeError("REPEAT arg.repeats must be a canonical tuple")
+    source_shape = tuple(getattr(source, "shape", ()))
+    if not repeats:
+        raise ShapeError("REPEAT requires at least one repeat factor")
+    if len(repeats) < len(source_shape):
+        raise ShapeError(
+            f"REPEAT repeat rank {len(repeats)} cannot be shorter than input rank {len(source_shape)}"
+        )
+    if len(repeats) > REPEAT_RANK_MAX:
+        raise ShapeError(
+            f"REPEAT repeat rank {len(repeats)} exceeds the {REPEAT_RANK_MAX}-axis ceiling"
+        )
+    for axis, factor in enumerate(repeats):
+        if type(factor) is not int:
+            raise ShapeError(f"REPEAT arg.repeats[{axis}] must be a normalized integer")
+        if factor < 0 or factor > REPEAT_FACTOR_MAX:
+            raise ShapeError(
+                f"REPEAT arg.repeats[{axis}] must be in [0, {REPEAT_FACTOR_MAX}], got {factor}"
+            )
+    padded_shape = (1,) * (len(repeats) - len(source_shape)) + source_shape
+    expected_shape = tuple(
+        factor * extent for factor, extent in zip(repeats, padded_shape)
+    )
+    if getattr(node, "shape", None) != expected_shape:
+        raise ShapeError(
+            f"REPEAT declared shape {getattr(node, 'shape', None)!r} does not match "
+            f"derived shape {expected_shape!r}"
+        )
+    return repeats, padded_shape
+
+
 _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = MappingProxyType({
     "browsergrad.jit.framework.tensor.abs.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.clamp.v1": _validate_clamp,
     "browsergrad.jit.framework.tensor.cos.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.expand.v1": _validate_broadcast_to,
     "browsergrad.jit.framework.tensor.flip.v1": _validate_flip,
+    "browsergrad.jit.framework.tensor.repeat.v1": _validate_repeat,
     "browsergrad.jit.framework.tensor.sign.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.sin.v1": _validate_typed_unary,
 })
@@ -472,6 +535,13 @@ def validate_flip_contract(node: Any) -> int:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.flip.v1":
         raise ShapeError("FLIP resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_repeat_contract(node: Any) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.repeat.v1":
+        raise ShapeError("REPEAT resolved to the wrong framework-operation contract")
     return normalized
 
 
@@ -524,6 +594,8 @@ def framework_operation_support() -> dict[str, Any]:
 __all__ = [
     "FRAMEWORK_OPERATION_SUPPORT_SCHEMA",
     "FRAMEWORK_OPERATION_SUPPORT_VERSION",
+    "REPEAT_FACTOR_MAX",
+    "REPEAT_RANK_MAX",
     "FrameworkOperationContract",
     "framework_operation_support",
     "has_framework_operation_contract",
@@ -531,6 +603,7 @@ __all__ = [
     "validate_broadcast_to_contract",
     "validate_clamp_contract",
     "validate_flip_contract",
+    "validate_repeat_contract",
     "validate_real_numeric_unary_contract",
     "validate_typed_unary_contract",
 ]

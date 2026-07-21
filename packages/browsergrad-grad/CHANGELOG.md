@@ -13,6 +13,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   preserves float16 and integer dtypes while retaining its documented owning,
   contiguous materialization behavior. Its valid and invalid shape contract is
   shared with the lazy JIT surface.
+- `Tensor.repeat` now shares bounded exact multiplier conformance with the JIT
+  surface, rejects hostile/non-integral/rank-invalid requests before NumPy,
+  and preserves float16, integer, and boolean dtypes in owning results instead
+  of silently casting every repeat to float32.
 
 ## [0.5.2] — 2026-07-15
 

@@ -89,6 +89,7 @@ OP_ABS     = "ABS"
 OP_CLAMP   = "CLAMP"
 OP_COS     = "COS"
 OP_FLIP    = "FLIP"
+OP_REPEAT  = "REPEAT"
 OP_SIGN    = "SIGN"
 OP_SIN     = "SIN"
 OP_CMP     = "CMP"      # arg: {op: 'eq'|'lt'|'le'|'gt'|'ge'|'ne'}
@@ -162,7 +163,7 @@ OP_ADAM_UPDATE_PARAM = "ADAM_UPDATE_PARAM"  # inputs: (param, m_new, v_new), arg
 ALL_OPS: FrozenSet[str] = frozenset({
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_SIGN, OP_SIN, OP_CMP,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -183,7 +184,7 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 })
-assert len(ALL_OPS) == 61, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
+assert len(ALL_OPS) == 62, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -407,7 +408,7 @@ __all__ = [
     "OP_BUFFER", "OP_LOAD", "OP_STORE", "OP_CONST", "OP_RANDOM",
     "OP_CAST", "OP_ADD", "OP_MUL", "OP_DIV", "OP_NEG",
     "OP_EXP", "OP_LOG", "OP_ABS", "OP_CLAMP", "OP_COS", "OP_FLIP",
-    "OP_SIGN", "OP_SIN",
+    "OP_REPEAT", "OP_SIGN", "OP_SIN",
     "OP_CMP", "OP_MATMUL",
     "OP_CONV1D", "OP_CONV1D_BACKWARD_INPUT",
     "OP_CONV1D_BACKWARD_WEIGHT", "OP_CONV1D_BACKWARD_BIAS",

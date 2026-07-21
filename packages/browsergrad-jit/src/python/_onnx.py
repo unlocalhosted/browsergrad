@@ -13,12 +13,16 @@ Scope (v0):
     spec — emit the forward subgraph reachable from `output_uops`.
   * Caller declares which BUFFERs are inputs vs initializers via
     `input_buffers`. Everything else reachable becomes an initializer.
-  * 14 ops: ADD, MUL, DIV, NEG, EXP, LOG, MATMUL, REDUCE (sum/mean/max),
-    RESHAPE, PERMUTE, CAST, WHERE, CMP (→Equal/Greater/Less),
-    BROADCAST_TO (→Expand). Plus lifecycle (BUFFER/LOAD/CONST).
+  * Core arithmetic/shape export covers ADD, MUL, DIV, NEG, EXP, LOG, MATMUL,
+    REDUCE (sum/mean/max), RESHAPE, PERMUTE, CAST, WHERE, CMP
+    (→Equal/Greater/Less), and BROADCAST_TO (→Expand). Registry-admitted
+    framework operations additionally cover ABS, SIGN, SIN, COS, CLAMP
+    (→Clip), FLIP (→Slice), and REPEAT (→Tile). Plus lifecycle
+    (BUFFER/LOAD/CONST).
   * Opset 17 (axes as attribute on ReduceSum/Mean/Max — opset 18 made
     axes a runtime input, which would require initializer plumbing).
-  * fp32 + int64 dtypes only.
+  * float32, int32, int64, and bool graph dtypes only; each typed framework
+    contract may narrow that exporter profile further.
 
 Refusals (typed `OnnxUnmappableOp`):
   * OP_RANDOM (no runtime randomness in ONNX inference)
@@ -48,7 +52,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_SIGN, OP_SIN, OP_CMP,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -69,6 +73,7 @@ from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_clamp_contract,
     validate_flip_contract,
+    validate_repeat_contract,
     validate_typed_unary_contract,
 )
 
@@ -532,6 +537,17 @@ def export_inference(
                 ))
                 slice_inputs.append(initializer_name)
             nodes.append(_emit_node(slice_inputs, [out_name], nm, "Slice"))
+        elif node.op == OP_REPEAT:
+            repeats, _ = validate_repeat_contract(node)
+            _dtype_or_die(node.dtype)
+            repeats_name = f"const_repeat_{next_node_id - 1}"
+            initializers.append(_emit_tensor_proto(
+                repeats_name,
+                DT_INT64,
+                (len(repeats),),
+                _i64_initializer_for_shape(repeats),
+            ))
+            nodes.append(_emit_node(input_names + [repeats_name], [out_name], nm, "Tile"))
         elif node.op == OP_CMP:
             cmp_op = node.arg["op"]
             onnx_op = _CMP_OP_MAP.get(cmp_op)
@@ -544,7 +560,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_REPEAT, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

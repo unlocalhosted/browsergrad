@@ -5,9 +5,9 @@
     {
       "id": "jit.custom.shared-refusals.v0",
       "expected": {
-        "label": "repeat",
+        "label": "repeat_interleave",
         "labelField": "name",
-        "cpuValues": [-1, 2, -1, 2],
+        "cpuValues": [-1, -1, 2, 2],
         "cpuGradient": [2, 2],
         "symbolicVjpRegistered": false,
         "functionalGradError": "JitNotImplementedError",
@@ -92,7 +92,6 @@
           "nll_loss",
           "pad",
           "prod",
-          "repeat",
           "repeat_interleave",
           "smooth_l1_loss",
           "stack",
@@ -117,7 +116,6 @@
           "nll_loss",
           "pad",
           "prod",
-          "repeat",
           "repeat_interleave",
           "smooth_l1_loss",
           "stack",

@@ -52,7 +52,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_SIGN, OP_SIN, OP_CMP,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -76,6 +76,7 @@ from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_clamp_contract,
     validate_flip_contract,
+    validate_repeat_contract,
     validate_typed_unary_contract,
 )
 
@@ -220,6 +221,35 @@ def _vmap_flip(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
         shape=inner.shape,
         dtype=node.dtype,
         arg={"axis": axis + 1},
+    )
+
+
+@register_vmap(OP_REPEAT)
+def _vmap_repeat(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    repeats, padded_shape = validate_repeat_contract(node)
+    inner = batched[id(node.inputs[0])]
+    is_batched = len(inner.shape) > len(node.inputs[0].shape)
+    if is_batched:
+        if padded_shape != node.inputs[0].shape:
+            reshaped = (B,) + padded_shape
+            inner = UOp(
+                op=OP_RESHAPE,
+                inputs=(inner,),
+                shape=reshaped,
+                dtype=node.dtype,
+                arg={"new_shape": reshaped},
+            )
+        mapped_repeats = (1,) + repeats
+        mapped_shape = (B,) + node.shape
+    else:
+        mapped_repeats = repeats
+        mapped_shape = node.shape
+    return UOp(
+        op=OP_REPEAT,
+        inputs=(inner,),
+        shape=mapped_shape,
+        dtype=node.dtype,
+        arg={"repeats": mapped_repeats},
     )
 
 
@@ -666,9 +696,10 @@ def vmap(
       * `in_dims=0` only — batch must be the leading axis on every
         TensorProxy input. Other axes raise.
       * `out_dims=0` only — output's batch ends up at axis 0.
-      * Supported opcodes: BUFFER, LOAD, CONST, ADD, MUL, DIV, NEG,
-        EXP, LOG, CMP, WHERE, CAST, MATMUL, REDUCE, RESHAPE, PERMUTE,
-        BROADCAST_TO. Anything else raises with a pointer to PRD-014b.
+      * Supported opcodes include BUFFER, LOAD, CONST, ADD, MUL, DIV, NEG,
+        EXP, LOG, ABS, CLAMP, COS, FLIP, REPEAT, SIGN, SIN, CMP, WHERE, CAST,
+        MATMUL, REDUCE, RESHAPE, PERMUTE, and BROADCAST_TO. Anything else
+        raises with a pointer to PRD-014b.
     """
     if isinstance(in_dims, tuple):
         if not all(d == 0 for d in in_dims):

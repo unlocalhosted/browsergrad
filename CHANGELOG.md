@@ -37,6 +37,11 @@ Each package follows independent [SemVer](https://semver.org/).
 - Migrates JIT `Tensor.flip` to typed single-axis reversal with strict scalar
   admission, owning CPU materialization, involutive typed VJP, batch-safe
   vmap, ONNX `Slice`, and explicit negative-stride device refusal.
+- Migrates JIT `Tensor.repeat` to typed bounded tile semantics with owning
+  dtype-preserving CPU realization, reduction VJP, batch-safe vmap, ONNX
+  `Tile`, and explicit canonical-layout/device refusal. Grad repeat now shares
+  the same conformance fixture and no longer silently casts every result to
+  float32.
 
 ## 2026-07 — semantic-core, kernels, compiler, and JIT semantic migration
 

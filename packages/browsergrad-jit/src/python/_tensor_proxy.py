@@ -45,11 +45,12 @@ from ._ir import (
     UOp,
     OP_BUFFER,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_SIGN, OP_SIN, OP_CMP,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO,
 )
 from ._errors import JitNotImplementedError, ShapeError, RealizationError
+from ._framework_contracts import REPEAT_FACTOR_MAX, REPEAT_RANK_MAX
 
 if TYPE_CHECKING:
     from ._buffer_table import BufferTable
@@ -67,7 +68,7 @@ _CLAMP_BOUND_TYPES = (
     np.float32,
     np.float64,
 )
-_AXIS_TYPES = (
+_EXACT_INTEGER_SCALAR_TYPES = (
     int,
     np.int8,
     np.int16,
@@ -120,7 +121,7 @@ def _normalize_clamp_bound(name: str, value: Any) -> Optional[float]:
 
 
 def _normalize_single_axis(op_name: str, value: Any, rank: int) -> int:
-    if type(value) not in _AXIS_TYPES:
+    if type(value) not in _EXACT_INTEGER_SCALAR_TYPES:
         raise ShapeError(
             f"{op_name}: axis must be a built-in or NumPy integer scalar, "
             f"got {type(value).__name__}"
@@ -131,6 +132,33 @@ def _normalize_single_axis(op_name: str, value: Any, rank: int) -> int:
     if axis < 0 or axis >= rank:
         raise ShapeError(f"{op_name}: axis {value} out of range for rank {rank}")
     return axis
+
+
+def _normalize_repeat_sizes(values: Tuple[Any, ...], input_rank: int) -> Tuple[int, ...]:
+    if not values:
+        raise ShapeError("repeat: expected at least one repeat size")
+    if len(values) < input_rank:
+        raise ShapeError(
+            f"repeat: repeat rank {len(values)} cannot be shorter than input rank {input_rank}"
+        )
+    if len(values) > REPEAT_RANK_MAX:
+        raise ShapeError(
+            f"repeat: repeat rank {len(values)} exceeds the {REPEAT_RANK_MAX}-axis ceiling"
+        )
+    normalized = []
+    for axis, value in enumerate(values):
+        if type(value) not in _EXACT_INTEGER_SCALAR_TYPES:
+            raise ShapeError(
+                f"repeat: size {axis} must be a built-in or NumPy integer scalar, "
+                f"got {type(value).__name__}"
+            )
+        factor = int(value)
+        if factor < 0 or factor > REPEAT_FACTOR_MAX:
+            raise ShapeError(
+                f"repeat: size {axis} must be in [0, {REPEAT_FACTOR_MAX}], got {factor}"
+            )
+        normalized.append(factor)
+    return tuple(normalized)
 
 
 # ---------------------------------------------------------------------------
@@ -843,28 +871,20 @@ class TensorProxy:
                            requires_grad=requires, ctx=ctx)
 
     def repeat(self, *sizes: Any) -> "TensorProxy":
-        if len(sizes) == 1 and isinstance(sizes[0], (tuple, list)):
-            sizes_t = tuple(int(s) for s in sizes[0])
+        if len(sizes) == 1 and type(sizes[0]) in (tuple, list):
+            raw_sizes = tuple(sizes[0])
         else:
-            sizes_t = tuple(int(s) for s in sizes)
-        if len(sizes_t) == 0:
-            raise ShapeError("repeat: expected at least one repeat size")
-        padded_shape = (1,) * max(0, len(sizes_t) - self.ndim) + self.shape
-        if len(sizes_t) < len(padded_shape):
-            raise ShapeError(
-                f"repeat: repeat sizes {sizes_t} cannot be shorter than input shape {self.shape}"
-            )
+            raw_sizes = tuple(sizes)
+        sizes_t = _normalize_repeat_sizes(raw_sizes, self.ndim)
+        padded_shape = (1,) * (len(sizes_t) - self.ndim) + self.shape
         out_shape = tuple(rep * dim for rep, dim in zip(sizes_t, padded_shape))
 
-        def _repeat_forward(x_arr: np.ndarray) -> np.ndarray:
-            return np.tile(x_arr, sizes_t)
-
         uop = UOp(
-            op=OP_CUSTOM,
+            op=OP_REPEAT,
             inputs=(self._uop,),
             shape=out_shape,
             dtype=self._uop.dtype,
-            arg={"fn": _repeat_forward, "captures": (), "name": "repeat"},
+            arg={"repeats": sizes_t},
         )
 
         def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:

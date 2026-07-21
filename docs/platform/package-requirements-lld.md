@@ -147,9 +147,10 @@ evidence without claiming reproducibility of the still-incomplete distributed
 asset set.
 
 Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
-`Tensor.sign`, `Tensor.sin`, `Tensor.cos`, `Tensor.clamp`, and `Tensor.flip`
-from the frozen opaque callback inventory. Expand emits the existing typed
-`BROADCAST_TO` primitive. One shared contract validates exact arity, closed shape arguments,
+`Tensor.sign`, `Tensor.sin`, `Tensor.cos`, `Tensor.clamp`, `Tensor.flip`, and
+`Tensor.repeat` from the frozen opaque callback inventory. Expand emits the
+existing typed `BROADCAST_TO` primitive. One shared contract validates exact
+arity, closed shape arguments,
 output-shape identity, dtype preservation, rank direction, and broadcast
 compatibility at construction and again at CPU, VJP, vmap, ONNX, and
 tensor-plan boundaries so mutation of the legacy argument dictionary fails
@@ -174,22 +175,29 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 29 constructor calls and 32 operations under ADR-0002
-and ADR-0004 through ADR-0007. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 28 constructor calls and 31 operations under ADR-0002
+and ADR-0004 through ADR-0008. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
 floating, hostile-conversion, scalar-rank, and out-of-range axes before
 execution. Tensor-plan and WebGPU explicitly refuse its negative-stride
 profile, so this migration does not widen the Gate 2 positive-stride contract.
-This is seven migrated operations, not Gate 6 completion: remaining Grad
-view/dtype debt, runtime/profile consumption, and
-the remaining advertised opaque operations remain open.
+Repeat now emits typed `REPEAT` with bounded exact tile multipliers, owning
+dtype-preserving CPU realization, tile-block closure and symbolic reduction,
+batch-axis-preserving vmap, and ONNX `Tile` for the exact
+float32/int32/int64/bool exporter profile. Its tensor-plan/WebGPU profile
+explicitly refuses execution until canonical tile/index layout semantics
+exist. Grad consumes the same repeat conformance fixture, preserves input
+dtype, and rejects malformed multipliers before NumPy. This is eight migrated
+operations, not Gate 6 completion: remaining Grad view/dtype debt,
+runtime/profile consumption, and the remaining advertised opaque operations
+remain open.
 
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
 records bind `Tensor.abs`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
-`Tensor.flip`, `Tensor.sign`, and `Tensor.sin` to the same
+`Tensor.flip`, `Tensor.repeat`, `Tensor.sign`, and `Tensor.sin` to the same
 validators invoked by construction and every admitted execution, transform,
 export, or plan boundary. Import rejects duplicate keys,
 open fields, unknown decisions, invalid versions, duplicate identities, and
@@ -199,10 +207,10 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 32 still-opaque and seven typed retirements. ADR-0003 records
+opaque IDs into 31 still-opaque and eight typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
-completing the remaining operation families and making runtime/profile UI consume these
-records remain Gate 6 work.
+completing the remaining operation families and making runtime/profile UI
+consume these records remain Gate 6 work.
 
 Browser asset manifest v1.4 now binds one build-signature predicate, exact
 trust-store digest, and canonical builder allowlist into the profile-pinned

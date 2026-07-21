@@ -165,6 +165,13 @@ and ONNX emits a signed-int64 `Slice` for float32, int32, int64, and bool
 graphs. Other ONNX dtypes fail explicitly. Tensor-plan and WebGPU explicitly
 refuse the negative-stride profile rather than widening the portable view contract.
 
+`Tensor.repeat()` emits typed `REPEAT` for bounded exact integer tile
+multipliers. CPU realization returns an owning dtype-preserving array;
+closure and symbolic gradients sum interleaved tile blocks; vmap prepends a
+unit multiplier so it never repeats the batch axis. ONNX emits `Tile` for
+float32, int32, int64, and bool graphs. Tensor-plan and WebGPU explicitly
+refuse the operation until a canonical tile/index layout profile exists.
+
 `bg.framework_operation_support()` returns the versioned public decision table
 for framework operations admitted to typed execution. The table is generated
 from the same package registry that binds executable validators at CPU,
