@@ -32,6 +32,11 @@ contract in the README](README.md#compatibility-contract).
   owning dtype-preserving CPU realization, tile-block closure/symbolic VJP,
   functional grad, batch-safe vmap, exact ONNX `Tile`, and explicit refusal
   until canonical tile/index layout semantics exist.
+- `Tensor.repeat_interleave` now emits typed `REPEAT_INTERLEAVE` with bounded
+  exact repeat/axis scalars, owning dtype-preserving CPU realization,
+  selected-axis block-sum closure/symbolic VJP, functional grad, batch-safe
+  vmap, exact ONNX `Unsqueeze`/`Tile`/`Reshape`, and explicit refusal until
+  canonical selected-axis replication semantics exist.
 
 ### Added
 
@@ -39,7 +44,7 @@ contract in the README](README.md#compatibility-contract).
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
   current table contains `ABS`, `CLAMP`, `COS`, `BROADCAST_TO`, `FLIP`,
-  `REPEAT`, `SIGN`, and `SIN`.
+  `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, and `SIN`.
 
 ## [0.9.0] — 2026-07-15
 

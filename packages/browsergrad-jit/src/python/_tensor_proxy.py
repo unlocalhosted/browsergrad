@@ -45,7 +45,8 @@ from ._ir import (
     UOp,
     OP_BUFFER,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_SIGN, OP_SIN, OP_CMP,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO,
 )
@@ -1106,24 +1107,27 @@ class TensorProxy:
                            requires_grad=requires, ctx=ctx)
 
     def repeat_interleave(self, repeats: int, dim: int) -> "TensorProxy":
-        axis = int(dim) % self.ndim
+        axis = _normalize_single_axis("repeat_interleave", dim, self.ndim)
+        if type(repeats) not in _EXACT_INTEGER_SCALAR_TYPES:
+            raise ShapeError(
+                "repeat_interleave: repeats must be a built-in or NumPy integer scalar, "
+                f"got {type(repeats).__name__}"
+            )
         repeats_i = int(repeats)
+        if repeats_i < 0 or repeats_i > REPEAT_FACTOR_MAX:
+            raise ShapeError(
+                f"repeat_interleave: repeats must be in [0, {REPEAT_FACTOR_MAX}], "
+                f"got {repeats_i}"
+            )
         out_shape = list(self.shape)
         out_shape[axis] *= repeats_i
 
-        def _repeat_interleave_forward(x_arr: np.ndarray) -> np.ndarray:
-            return np.repeat(x_arr, repeats_i, axis=axis)
-
         uop = UOp(
-            op=OP_CUSTOM,
+            op=OP_REPEAT_INTERLEAVE,
             inputs=(self._uop,),
             shape=tuple(out_shape),
             dtype=self._uop.dtype,
-            arg={
-                "fn": _repeat_interleave_forward,
-                "captures": (),
-                "name": "repeat_interleave",
-            },
+            arg={"repeats": repeats_i, "axis": axis},
         )
 
         def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:

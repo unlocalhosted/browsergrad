@@ -17,8 +17,8 @@ Scope (v0):
     REDUCE (sum/mean/max), RESHAPE, PERMUTE, CAST, WHERE, CMP
     (→Equal/Greater/Less), and BROADCAST_TO (→Expand). Registry-admitted
     framework operations additionally cover ABS, SIGN, SIN, COS, CLAMP
-    (→Clip), FLIP (→Slice), and REPEAT (→Tile). Plus lifecycle
-    (BUFFER/LOAD/CONST).
+    (→Clip), FLIP (→Slice), REPEAT (→Tile), and REPEAT_INTERLEAVE
+    (→Unsqueeze/Tile/Reshape). Plus lifecycle (BUFFER/LOAD/CONST).
   * Opset 17 (axes as attribute on ReduceSum/Mean/Max — opset 18 made
     axes a runtime input, which would require initializer plumbing).
   * float32, int32, int64, and bool graph dtypes only; each typed framework
@@ -52,7 +52,8 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_SIGN, OP_SIN, OP_CMP,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -74,6 +75,7 @@ from ._framework_contracts import (
     validate_clamp_contract,
     validate_flip_contract,
     validate_repeat_contract,
+    validate_repeat_interleave_contract,
     validate_typed_unary_contract,
 )
 
@@ -548,6 +550,46 @@ def export_inference(
                 _i64_initializer_for_shape(repeats),
             ))
             nodes.append(_emit_node(input_names + [repeats_name], [out_name], nm, "Tile"))
+        elif node.op == OP_REPEAT_INTERLEAVE:
+            repeats, axis = validate_repeat_interleave_contract(node)
+            _dtype_or_die(node.dtype)
+            suffix = next_node_id - 1
+            axes_name = f"const_repeat_interleave_axes_{suffix}"
+            repeats_name = f"const_repeat_interleave_repeats_{suffix}"
+            shape_name = f"const_repeat_interleave_shape_{suffix}"
+            unsqueezed_name = f"repeat_interleave_unsqueezed_{suffix}"
+            tiled_name = f"repeat_interleave_tiled_{suffix}"
+            tile_repeats = [1] * (len(node.inputs[0].shape) + 1)
+            tile_repeats[axis + 1] = repeats
+            for name, values in (
+                (axes_name, (axis + 1,)),
+                (repeats_name, tuple(tile_repeats)),
+                (shape_name, node.shape),
+            ):
+                initializers.append(_emit_tensor_proto(
+                    name,
+                    DT_INT64,
+                    (len(values),),
+                    _i64_initializer_for_shape(values),
+                ))
+            nodes.append(_emit_node(
+                input_names + [axes_name],
+                [unsqueezed_name],
+                f"{nm}_unsqueeze",
+                "Unsqueeze",
+            ))
+            nodes.append(_emit_node(
+                [unsqueezed_name, repeats_name],
+                [tiled_name],
+                f"{nm}_tile",
+                "Tile",
+            ))
+            nodes.append(_emit_node(
+                [tiled_name, shape_name],
+                [out_name],
+                f"{nm}_reshape",
+                "Reshape",
+            ))
         elif node.op == OP_CMP:
             cmp_op = node.arg["op"]
             onnx_op = _CMP_OP_MAP.get(cmp_op)
@@ -560,7 +602,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_REPEAT, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

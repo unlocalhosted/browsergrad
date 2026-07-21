@@ -111,6 +111,27 @@
       "retiredOpaqueOperationId": "jit.custom.flip.v0"
     },
     {
+      "contractId": "browsergrad.jit.framework.tensor.repeat-interleave.v1",
+      "publicSurface": "Tensor.repeat_interleave",
+      "opcode": "REPEAT_INTERLEAVE",
+      "semanticState": "typed",
+      "shapeContract": "selected-axis-times-repeat-count",
+      "dtypeContract": "preserve-input",
+      "decisions": {
+        "cpu": "supported-numpy-owning-copy",
+        "closureAutograd": "supported-selected-axis-block-sum",
+        "symbolicVjp": "supported-selected-axis-block-sum",
+        "functionalGrad": "supported-via-symbolic-vjp",
+        "vmap": "supported-leading-batch-axis-with-axis-shift",
+        "onnxExport": "supported-opset17-unsqueeze-tile-reshape-float32-int32-int64-bool",
+        "tensorPlan": "refused-no-canonical-selected-axis-replication-profile",
+        "webgpu": "refused-no-canonical-selected-axis-replication-profile",
+        "residency": "host-materialized",
+        "materialization": "cpu-owning-copy"
+      },
+      "retiredOpaqueOperationId": "jit.custom.repeat-interleave.v0"
+    },
+    {
       "contractId": "browsergrad.jit.framework.tensor.repeat.v1",
       "publicSurface": "Tensor.repeat",
       "opcode": "REPEAT",

@@ -56,6 +56,7 @@ _ENUMS = {
         "preserve-unary-input",
         "preserve-single-axis-reverse",
         "static-broadcast-with-existing-dim-minus-one",
+        "selected-axis-times-repeat-count",
         "tile-multipliers-with-left-rank-padding",
     }),
     "dtypeContract": frozenset({
@@ -73,6 +74,7 @@ _ENUMS = {
         "supported-involutive-flip",
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
+        "supported-selected-axis-block-sum",
         "supported-tile-block-sum",
         "supported-unbroadcast-sum",
         "supported-zero-derivative",
@@ -83,6 +85,7 @@ _ENUMS = {
         "supported-involutive-flip",
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
+        "supported-selected-axis-block-sum",
         "supported-tile-block-sum",
         "supported-unbroadcast-sum",
         "supported-zero-derivative",
@@ -99,10 +102,12 @@ _ENUMS = {
         "supported-opset17-expand",
         "supported-opset17-slice-float32-int32-int64-bool",
         "supported-opset17-tile-float32-int32-int64-bool",
+        "supported-opset17-unsqueeze-tile-reshape-float32-int32-int64-bool",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
         "refused-no-canonical-tile-layout-profile",
+        "refused-no-canonical-selected-axis-replication-profile",
         "refused-no-portable-lowering",
         "supported-primitive",
     }),
@@ -110,6 +115,7 @@ _ENUMS = {
         "profile-nonempty-f32-rank-at-most-4",
         "refused-negative-stride-profile",
         "refused-no-canonical-tile-layout-profile",
+        "refused-no-canonical-selected-axis-replication-profile",
         "refused-no-tensor-plan-kernel",
     }),
     "residency": frozenset({"host-materialized", "supported-materializing-and-resident"}),
@@ -480,6 +486,58 @@ def _validate_repeat(
     return repeats, padded_shape
 
 
+def _validate_repeat_interleave(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> Tuple[int, int]:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = _require_single_input_tuple(node, contract.opcode)
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("REPEAT_INTERLEAVE arg must be a plain dict")
+    fields = set(arg)
+    if not {"axis", "repeats"}.issubset(fields) or not fields.issubset(
+        {"axis", "repeats", "vjp_of"}
+    ):
+        raise ShapeError(
+            "REPEAT_INTERLEAVE arg fields must be exactly 'axis' and 'repeats' "
+            "plus optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("REPEAT_INTERLEAVE arg.vjp_of must reference a UOp")
+    source = inputs[0]
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("REPEAT_INTERLEAVE must preserve its input dtype")
+    source_shape = tuple(getattr(source, "shape", ()))
+    axis = arg["axis"]
+    repeats = arg["repeats"]
+    if type(axis) is not int:
+        raise ShapeError("REPEAT_INTERLEAVE arg.axis must be a normalized integer")
+    if axis < 0 or axis >= len(source_shape):
+        raise ShapeError(
+            f"REPEAT_INTERLEAVE arg.axis {axis} out of range for rank {len(source_shape)}"
+        )
+    if type(repeats) is not int:
+        raise ShapeError("REPEAT_INTERLEAVE arg.repeats must be a normalized integer")
+    if repeats < 0 or repeats > REPEAT_FACTOR_MAX:
+        raise ShapeError(
+            f"REPEAT_INTERLEAVE arg.repeats must be in [0, {REPEAT_FACTOR_MAX}], "
+            f"got {repeats}"
+        )
+    expected_shape = list(source_shape)
+    expected_shape[axis] *= repeats
+    expected_shape_tuple = tuple(expected_shape)
+    if getattr(node, "shape", None) != expected_shape_tuple:
+        raise ShapeError(
+            f"REPEAT_INTERLEAVE declared shape {getattr(node, 'shape', None)!r} "
+            f"does not match derived shape {expected_shape_tuple!r}"
+        )
+    return repeats, axis
+
+
 _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = MappingProxyType({
     "browsergrad.jit.framework.tensor.abs.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.clamp.v1": _validate_clamp,
@@ -487,6 +545,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.expand.v1": _validate_broadcast_to,
     "browsergrad.jit.framework.tensor.flip.v1": _validate_flip,
     "browsergrad.jit.framework.tensor.repeat.v1": _validate_repeat,
+    "browsergrad.jit.framework.tensor.repeat-interleave.v1": _validate_repeat_interleave,
     "browsergrad.jit.framework.tensor.sign.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.sin.v1": _validate_typed_unary,
 })
@@ -542,6 +601,15 @@ def validate_repeat_contract(node: Any) -> Tuple[Tuple[int, ...], Tuple[int, ...
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.repeat.v1":
         raise ShapeError("REPEAT resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_repeat_interleave_contract(node: Any) -> Tuple[int, int]:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.repeat-interleave.v1":
+        raise ShapeError(
+            "REPEAT_INTERLEAVE resolved to the wrong framework-operation contract"
+        )
     return normalized
 
 
@@ -604,6 +672,7 @@ __all__ = [
     "validate_clamp_contract",
     "validate_flip_contract",
     "validate_repeat_contract",
+    "validate_repeat_interleave_contract",
     "validate_real_numeric_unary_contract",
     "validate_typed_unary_contract",
 ]

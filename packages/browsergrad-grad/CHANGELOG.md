@@ -17,6 +17,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   surface, rejects hostile/non-integral/rank-invalid requests before NumPy,
   and preserves float16, integer, and boolean dtypes in owning results instead
   of silently casting every repeat to float32.
+- `Tensor.repeat_interleave` now shares exact repeat/axis conformance with the
+  JIT surface, rejects hostile, non-integral, out-of-range, and oversized
+  requests before NumPy, and preserves input dtype in owning results and
+  gradients instead of silently casting them to float32.
 
 ## [0.5.2] — 2026-07-15
 

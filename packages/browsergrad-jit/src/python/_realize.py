@@ -33,7 +33,8 @@ from ._ir import (
     UOp, ALL_OPS, toposort,
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM,
     OP_CAST, OP_ADD, OP_MUL, OP_DIV, OP_NEG,
-    OP_EXP, OP_LOG, OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_SIGN, OP_SIN, OP_CMP, OP_MATMUL,
+    OP_EXP, OP_LOG, OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT,
+    OP_REPEAT_INTERLEAVE, OP_SIGN, OP_SIN, OP_CMP, OP_MATMUL,
     OP_CONV1D, OP_CONV1D_BACKWARD_INPUT, OP_CONV1D_BACKWARD_WEIGHT,
     OP_CONV1D_BACKWARD_BIAS, OP_CONV2D,
     OP_CONV2D_BACKWARD_INPUT, OP_CONV2D_BACKWARD_WEIGHT,
@@ -60,6 +61,7 @@ from ._framework_contracts import (
     validate_clamp_contract,
     validate_flip_contract,
     validate_repeat_contract,
+    validate_repeat_interleave_contract,
     validate_real_numeric_unary_contract,
     validate_typed_unary_contract,
 )
@@ -182,6 +184,12 @@ def _h_repeat(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     repeats, _ = validate_repeat_contract(node)
     tiled = np.tile(vt[id(node.inputs[0])], repeats)
     return np.array(tiled, dtype=np.dtype(node.dtype), copy=True)
+
+
+def _h_repeat_interleave(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    repeats, axis = validate_repeat_interleave_contract(node)
+    repeated = np.repeat(vt[id(node.inputs[0])], repeats, axis=axis)
+    return np.array(repeated, dtype=np.dtype(node.dtype), copy=True)
 
 
 def _h_sign(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
@@ -1230,6 +1238,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_COS:     _h_cos,
     OP_FLIP:    _h_flip,
     OP_REPEAT:  _h_repeat,
+    OP_REPEAT_INTERLEAVE: _h_repeat_interleave,
     OP_SIGN:    _h_sign,
     OP_SIN:     _h_sin,
     OP_CMP:     _h_cmp,

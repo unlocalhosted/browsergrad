@@ -42,6 +42,10 @@ Each package follows independent [SemVer](https://semver.org/).
   `Tile`, and explicit canonical-layout/device refusal. Grad repeat now shares
   the same conformance fixture and no longer silently casts every result to
   float32.
+- Migrates JIT `Tensor.repeat_interleave` to typed selected-axis replication
+  with strict scalar admission, block-sum VJP, batch-safe vmap, exact ONNX
+  `Unsqueeze`/`Tile`/`Reshape`, and explicit layout/device refusal. Grad now
+  shares its conformance fixture and preserves output and gradient dtype.
 
 ## 2026-07 — semantic-core, kernels, compiler, and JIT semantic migration
 

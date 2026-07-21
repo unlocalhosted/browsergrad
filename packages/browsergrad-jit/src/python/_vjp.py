@@ -48,7 +48,8 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from ._ir import (
     UOp,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_SIGN, OP_SIN, OP_CAST, OP_CMP,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_SIGN, OP_SIN, OP_CAST, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -68,6 +69,7 @@ from ._framework_contracts import (
     validate_clamp_contract,
     validate_flip_contract,
     validate_repeat_contract,
+    validate_repeat_interleave_contract,
     validate_real_numeric_unary_contract,
     validate_typed_unary_contract,
 )
@@ -358,6 +360,34 @@ def _vjp_repeat(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional
             arg={"new_shape": x.shape},
         )
     return (cur,)
+
+
+@register_vjp(OP_REPEAT_INTERLEAVE)
+def _vjp_repeat_interleave(
+    output: UOp,
+    inputs: Tuple[UOp, ...],
+    dy: UOp,
+) -> Tuple[Optional[UOp], ...]:
+    """Collapse each selected-axis repeat block back into its source element."""
+    repeats, axis = validate_repeat_interleave_contract(output)
+    (x,) = inputs
+    block_shape = x.shape[:axis] + (x.shape[axis], repeats) + x.shape[axis + 1:]
+    grouped = _vjp_uop(
+        OP_RESHAPE,
+        (dy,),
+        block_shape,
+        x.dtype,
+        output,
+        arg={"new_shape": block_shape},
+    )
+    return (_vjp_uop(
+        OP_REDUCE,
+        (grouped,),
+        x.shape,
+        x.dtype,
+        output,
+        arg={"op": "sum", "axis": (axis + 1,), "keepdims": False},
+    ),)
 
 
 @register_vjp(OP_SIN)

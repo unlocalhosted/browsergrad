@@ -1,0 +1,77 @@
+export const FRAMEWORK_REPEAT_INTERLEAVE_CONFORMANCE = Object.freeze({
+  schema: "browsergrad.framework-repeat-interleave-conformance@1",
+  valid: Object.freeze({
+    inputShape: Object.freeze([2, 2]),
+    inputValues: Object.freeze([1, 2, 3, 4]),
+    repeats: 2,
+    dim: 1,
+    outputShape: Object.freeze([2, 4]),
+    outputValues: Object.freeze([
+      Object.freeze([1, 1, 2, 2]),
+      Object.freeze([3, 3, 4, 4]),
+    ]),
+  }),
+  dtypeCases: Object.freeze([
+    Object.freeze({ dtype: "float16", expectedDtype: "float16" }),
+    Object.freeze({ dtype: "int32", expectedDtype: "int32" }),
+    Object.freeze({ dtype: "bool", expectedDtype: "bool" }),
+  ]),
+  invalid: Object.freeze([
+    Object.freeze({
+      id: "non-integral-repeat",
+      inputShape: Object.freeze([2, 2]),
+      repeats: 1.5,
+      dim: 1,
+      message: "repeats must be a built-in or NumPy integer scalar",
+    }),
+    Object.freeze({
+      id: "boolean-repeat",
+      inputShape: Object.freeze([2, 2]),
+      repeats: true,
+      dim: 1,
+      message: "repeats must be a built-in or NumPy integer scalar",
+    }),
+    Object.freeze({
+      id: "negative-repeat",
+      inputShape: Object.freeze([2, 2]),
+      repeats: -1,
+      dim: 1,
+      message: "repeats must be in [0, 1073741824]",
+    }),
+    Object.freeze({
+      id: "repeat-ceiling",
+      inputShape: Object.freeze([0, 1]),
+      repeats: 1073741825,
+      dim: 0,
+      message: "repeats must be in [0, 1073741824]",
+    }),
+    Object.freeze({
+      id: "non-integral-axis",
+      inputShape: Object.freeze([2, 2]),
+      repeats: 2,
+      dim: 0.5,
+      message: "axis must be a built-in or NumPy integer scalar",
+    }),
+    Object.freeze({
+      id: "boolean-axis",
+      inputShape: Object.freeze([2, 2]),
+      repeats: 2,
+      dim: true,
+      message: "axis must be a built-in or NumPy integer scalar",
+    }),
+    Object.freeze({
+      id: "axis-out-of-range",
+      inputShape: Object.freeze([2, 2]),
+      repeats: 2,
+      dim: 2,
+      message: "axis 2 out of range for rank 2",
+    }),
+    Object.freeze({
+      id: "scalar-axis",
+      inputShape: Object.freeze([]),
+      repeats: 2,
+      dim: 0,
+      message: "axis 0 out of range for rank 0",
+    }),
+  ]),
+});

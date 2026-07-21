@@ -172,6 +172,14 @@ unit multiplier so it never repeats the batch axis. ONNX emits `Tile` for
 float32, int32, int64, and bool graphs. Tensor-plan and WebGPU explicitly
 refuse the operation until a canonical tile/index layout profile exists.
 
+`Tensor.repeat_interleave()` emits typed `REPEAT_INTERLEAVE` for one bounded
+exact repeat count and normalized selected axis. CPU realization returns an
+owning dtype-preserving array; closure and symbolic gradients sum each
+selected-axis repeat block; vmap shifts the logical axis past its batch axis.
+ONNX emits an exact `Unsqueeze`/`Tile`/`Reshape` decomposition for float32,
+int32, int64, and bool graphs. Tensor-plan and WebGPU explicitly refuse the
+operation until a canonical selected-axis replication profile exists.
+
 `bg.framework_operation_support()` returns the versioned public decision table
 for framework operations admitted to typed execution. The table is generated
 from the same package registry that binds executable validators at CPU,

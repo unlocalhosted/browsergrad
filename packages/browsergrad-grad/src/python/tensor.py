@@ -1079,13 +1079,43 @@ def _gather(a: Tensor, dim: int, index) -> Tensor:
 
 
 def _repeat_interleave(a: Tensor, repeats: int, dim: int) -> Tensor:
-    out_data = np.repeat(a.data, int(repeats), axis=dim).astype(np.float32)
-    out = Tensor(out_data)
+    if type(dim) not in _EXACT_INTEGER_SCALAR_TYPES:
+        raise ValueError(
+            "repeat_interleave: axis must be a built-in or NumPy integer scalar, "
+            f"got {type(dim).__name__}"
+        )
+    axis = int(dim)
+    rank = a.data.ndim
+    if axis < 0:
+        axis += rank
+    if axis < 0 or axis >= rank:
+        raise ValueError(f"repeat_interleave: axis {dim} out of range for rank {rank}")
+    if type(repeats) not in _EXACT_INTEGER_SCALAR_TYPES:
+        raise ValueError(
+            "repeat_interleave: repeats must be a built-in or NumPy integer scalar, "
+            f"got {type(repeats).__name__}"
+        )
+    repeats_i = int(repeats)
+    if repeats_i < 0 or repeats_i > _REPEAT_FACTOR_MAX:
+        raise ValueError(
+            f"repeat_interleave: repeats must be in [0, {_REPEAT_FACTOR_MAX}], "
+            f"got {repeats_i}"
+        )
+    out_data = np.repeat(a.data, repeats_i, axis=axis)
+    out = Tensor(np.array(out_data, copy=True), dtype=a.dtype)
     a_shape = a.data.shape
     def backward(g):
         gd = g.data
-        new_shape = list(gd.shape[:dim]) + [a_shape[dim], repeats] + list(gd.shape[dim+1:])
-        return (gd.reshape(new_shape).sum(axis=dim+1).astype(np.float32),)
+        new_shape = (
+            list(gd.shape[:axis])
+            + [a_shape[axis], repeats_i]
+            + list(gd.shape[axis + 1:])
+        )
+        return (
+            gd.reshape(new_shape)
+            .sum(axis=axis + 1)
+            .astype(a.data.dtype, copy=False),
+        )
     return _build_ctx(out, (a,), backward)
 
 

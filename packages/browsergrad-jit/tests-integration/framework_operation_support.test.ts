@@ -133,6 +133,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.repeat.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.tensor.repeat-interleave.v1",
+      publicSurface: "Tensor.repeat_interleave",
+      opcode: "REPEAT_INTERLEAVE",
+      semanticState: "typed",
+      shapeContract: "selected-axis-times-repeat-count",
+      dtypeContract: "preserve-input",
+      decisions: {
+        cpu: "supported-numpy-owning-copy",
+        closureAutograd: "supported-selected-axis-block-sum",
+        symbolicVjp: "supported-selected-axis-block-sum",
+        functionalGrad: "supported-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-axis-shift",
+        onnxExport: "supported-opset17-unsqueeze-tile-reshape-float32-int32-int64-bool",
+        tensorPlan: "refused-no-canonical-selected-axis-replication-profile",
+        webgpu: "refused-no-canonical-selected-axis-replication-profile",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.repeat-interleave.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.sign.v1",
       publicSurface: "Tensor.sign",
       opcode: "SIGN",
@@ -174,7 +195,7 @@ const FRAMEWORK_SUPPORT = {
       },
       retiredOpaqueOperationId: "jit.custom.sin.v0",
     },
-  ],
+  ].sort((left, right) => left.contractId < right.contractId ? -1 : left.contractId > right.contractId ? 1 : 0),
 };
 
 describe("Gate 6 executable framework-operation support", () => {
@@ -215,7 +236,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(9);
+    expect(result.first.operations).toHaveLength(10);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");
