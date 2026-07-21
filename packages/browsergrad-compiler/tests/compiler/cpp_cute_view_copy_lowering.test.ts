@@ -19,11 +19,15 @@ import {
 } from "./support/cpp_cute_frontend_fixtures.js";
 import {
   mutateCppCutePayloadToViewCopy,
+  mutateCppCutePayloadToRank3ViewCopy,
+  mutateCppCutePayloadToRank4ViewCopy,
 } from "./support/cpp_cute_frontend_view_copy_fixtures.js";
 import {
   createAuthorizedCppCuteProvenanceFixture,
   type AuthorizedCppCuteProvenanceFixture,
 } from "./support/cpp_cute_provenance_fixtures.js";
+import { CPP_CUTE_BROWSER_VIEW_COPY_RANK3_CONVERGENCE_FIXTURE as rank3Convergence } from
+  "../fixtures/cpp_cute_browser_view_copy_convergence.js";
 
 const wire = (value: number) => parseWireU64(String(value));
 
@@ -113,6 +117,68 @@ describe("authorized C++/CuTe view-copy lowering", () => {
     ]);
     expect(trace).toMatchObject({ readElements: "6", bytesWritten: "24", filledElements: "0" });
     expect(Object.isFrozen(artifacts)).toBe(true);
+  });
+
+  it("executes the exact positive-affine rank-3 transpose on CPU without touching canaries", async () => {
+    const rank3 = await createAuthorizedCppCuteProvenanceFixture({
+      mutatePayload: mutateCppCutePayloadToRank3ViewCopy,
+    });
+    const artifacts = await lowerAuthorizedCppCuteViewCopyEntry(rank3.authorization, {
+      ...requestFor(rank3),
+      sourceAllocationByteLength: parseWireU64(
+        rank3Convergence.storage.sourceAllocationByteLength,
+      ),
+      destinationAllocationByteLength: parseWireU64(
+        rank3Convergence.storage.destinationAllocationByteLength,
+      ),
+    });
+    const cpu = await prepareViewCopyCpu(artifacts.layout, artifacts.kernel, {
+      operationId: artifacts.operationId,
+    });
+    const sourceWords = Uint32Array.from(rank3Convergence.expected.sourceWords);
+    const destinationWords = Uint32Array.from(
+      rank3Convergence.expected.initialDestinationWords,
+    );
+    const trace = cpu.execute({
+      source: new Uint8Array(sourceWords.buffer),
+      destination: new Uint8Array(destinationWords.buffer),
+    });
+
+    expect(artifacts.layoutSemanticHash).toBe(
+      rank3Convergence.expected.layoutSemanticHash,
+    );
+    expect(artifacts.kernelSemanticHash).toBe(
+      rank3Convergence.expected.kernelSemanticHash,
+    );
+    expect(layoutArtifactPayload(artifacts.layout)).toEqual(
+      rank3Convergence.expected.layoutPayload,
+    );
+    expect(kernelArtifactPayload(artifacts.kernel)).toEqual(
+      rank3Convergence.expected.kernelPayload,
+    );
+    expect(cpu.logicalShape).toEqual([2n, 3n, 4n]);
+    expect([...sourceWords]).toEqual(rank3Convergence.expected.sourceWords);
+    expect([...destinationWords]).toEqual(rank3Convergence.expected.destinationWords);
+    expect(destinationWords[0]).toBe(
+      rank3Convergence.expected.initialDestinationWords[0],
+    );
+    expect(destinationWords.at(-1)).toBe(
+      rank3Convergence.expected.initialDestinationWords.at(-1),
+    );
+    expect(trace).toMatchObject(rank3Convergence.expected.cpuTrace);
+  });
+
+  it("rejects an otherwise valid positive-affine rank-4 view-copy artifact", async () => {
+    const rank4 = await createAuthorizedCppCuteProvenanceFixture({
+      mutatePayload: mutateCppCutePayloadToRank4ViewCopy,
+    });
+    await expect(lowerAuthorizedCppCuteViewCopyEntry(
+      rank4.authorization,
+      requestFor(rank4),
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-VIEW-COPY-UNSUPPORTED-LAYOUT",
+      path: "$.artifact.entry",
+    });
   });
 
   it("keeps authorization opaque and refuses caller semantic IDs or implicit storage capacity", async () => {

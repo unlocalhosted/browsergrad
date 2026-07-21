@@ -119,7 +119,10 @@ import { prepareVerifiedCppCuteViewCopySemantics } from
   "../../src/cpp_cute_view_copy_semantics.js";
 import { unwrapVerifiedCppCuteFrontendArtifact } from
   "../../src/cpp_cute_frontend_artifact.js";
-import { mutateCppCutePayloadToViewCopy } from
+import {
+  mutateCppCutePayloadToRank3ViewCopy,
+  mutateCppCutePayloadToViewCopy,
+} from
   "./support/cpp_cute_frontend_view_copy_fixtures.js";
 import {
   createCppCuteProvenanceFixture,
@@ -129,7 +132,10 @@ import {
   attachCppCuteBrowserSemanticCandidate,
   createCppCuteBrowserSemanticAuthorityFixture,
 } from "./support/cpp_cute_browser_semantic_authorization_fixtures.js";
-import { CPP_CUTE_BROWSER_VIEW_COPY_CONVERGENCE_FIXTURE as convergence } from
+import {
+  CPP_CUTE_BROWSER_VIEW_COPY_CONVERGENCE_FIXTURE as convergence,
+  CPP_CUTE_BROWSER_VIEW_COPY_RANK3_CONVERGENCE_FIXTURE as rank3Convergence,
+} from
   "../fixtures/cpp_cute_browser_view_copy_convergence.js";
 
 const wire = (value: number) => parseWireU64(String(value));
@@ -150,14 +156,22 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  const base = createCppCuteBrowserSemanticAuthorityFixture(fixture);
-  const graph = attachCppCuteBrowserSemanticCandidate(base, fixture, {
+  installAuthorityFixture(fixture, entryId, semantics);
+});
+
+function installAuthorityFixture(
+  candidateFixture: CppCuteProvenanceFixture,
+  candidateEntryId: string,
+  candidateSemantics: Awaited<ReturnType<typeof prepareVerifiedCppCuteViewCopySemantics>>,
+): void {
+  const base = createCppCuteBrowserSemanticAuthorityFixture(candidateFixture);
+  const graph = attachCppCuteBrowserSemanticCandidate(base, candidateFixture, {
     authority: "observed-browser-worker-view-copy-semantic-candidate",
     candidateId: `bg.cpp.browser-worker-view-copy-candidate.sha256.${"6".repeat(64)}`,
-    entryId,
-    entrySubjectHash: semantics.entrySubjectHash,
+    entryId: candidateEntryId,
+    entrySubjectHash: candidateSemantics.entrySubjectHash,
     sharedViewCopySemanticsPrepared: true,
-  }, { semantics });
+  }, { semantics: candidateSemantics });
   authorities.candidate = graph.candidate;
   authorities.candidateRecord = graph.candidateRecord;
   authorities.producer = graph.producer;
@@ -172,9 +186,17 @@ beforeEach(() => {
   authorities.conformanceRecord = graph.conformanceRecord;
   authorities.workerBundle = graph.workerBundle;
   authorities.workerInspection = graph.workerInspection;
-  authorities.browserProfile = fixture.profile;
+  authorities.browserProfile = candidateFixture.profile;
   authorities.crossBindDifferentProfile = false;
-});
+}
+
+function selectedEntryId(candidateFixture: CppCuteProvenanceFixture): string {
+  const payload = unwrapVerifiedCppCuteFrontendArtifact(candidateFixture.artifact).envelope.payload;
+  if (payload.outcome.kind !== "accepted" || payload.outcome.selectedEntryIds[0] === undefined) {
+    throw new Error("fixture lost selected view-copy entry");
+  }
+  return payload.outcome.selectedEntryIds[0];
+}
 
 describe("browser Worker view-copy authorization", () => {
   it("reaches canonical lowering while storage remains later host geometry", async () => {
@@ -233,6 +255,56 @@ describe("browser Worker view-copy authorization", () => {
     expect(authorized.authorizationId).toMatch(
       /^bg\.cpp\.browser-view-copy-authorization\.sha256\.[0-9a-f]{64}$/u,
     );
+  });
+
+  it("authorizes and exactly lowers the static rank-3 semantic subject", async () => {
+    const rank3 = await createCppCuteProvenanceFixture({
+      mutatePayload: mutateCppCutePayloadToRank3ViewCopy,
+    });
+    const rank3EntryId = selectedEntryId(rank3);
+    const rank3Semantics = await prepareVerifiedCppCuteViewCopySemantics(
+      rank3.artifact,
+      { entryId: rank3EntryId },
+    );
+    installAuthorityFixture(rank3, rank3EntryId, rank3Semantics);
+    const authorized = await authorizeCppCuteBrowserViewCopyArtifact(
+      authorities.candidate as never,
+      authorities.producer as never,
+    );
+    const record = unwrapAuthorizedCppCuteBrowserViewCopyArtifact(authorized);
+    const lowered = await lowerAuthorizedCppCuteViewCopyEntry(record.authorization, {
+      entryId: rank3EntryId,
+      sourceAllocationByteLength: parseWireU64(
+        rank3Convergence.storage.sourceAllocationByteLength,
+      ),
+      destinationAllocationByteLength: parseWireU64(
+        rank3Convergence.storage.destinationAllocationByteLength,
+      ),
+      sourceByteOffset: parseWireU64(rank3Convergence.storage.sourceByteOffset),
+      destinationByteOffset: parseWireU64(rank3Convergence.storage.destinationByteOffset),
+    });
+
+    expect(authorized).toMatchObject({
+      workerExecutionObserved: true,
+      producerTrusted: true,
+      localSemanticLoweringAuthorized: true,
+      backendExecutionAuthorized: false,
+      distributionAuthorized: false,
+      releaseReady: false,
+    });
+    expect(rank3EntryId).toBe(rank3Convergence.entryId);
+    expect(lowered.layoutSemanticHash).toBe(rank3Convergence.expected.layoutSemanticHash);
+    expect(lowered.kernelSemanticHash).toBe(rank3Convergence.expected.kernelSemanticHash);
+    expect(lowered.source).toEqual(rank3Convergence.expected.source);
+    expect(lowered.destination).toEqual(rank3Convergence.expected.destination);
+    expect(lowered.operationId).toBe(rank3Convergence.expected.operationId);
+    expect(layoutArtifactPayload(lowered.layout)).toEqual(
+      rank3Convergence.expected.layoutPayload,
+    );
+    expect(kernelArtifactPayload(lowered.kernel)).toEqual(
+      rank3Convergence.expected.kernelPayload,
+    );
+    expect(rank3Convergence.claims.productionBrowserCompileObserved).toBe(false);
   });
 
   it("rejects structural copies at candidate, producer, and authorization boundaries", async () => {

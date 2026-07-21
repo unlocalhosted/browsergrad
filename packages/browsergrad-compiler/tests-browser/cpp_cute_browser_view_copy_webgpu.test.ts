@@ -33,7 +33,6 @@ import {
 import {
   CPP_CUTE_VIEW_COPY_WEBGPU_BACKEND_ID as BACKEND_ID,
   CPP_CUTE_VIEW_COPY_WEBGPU_CAPABILITY_ID as CAPABILITY_ID,
-  CPP_CUTE_VIEW_COPY_WEBGPU_CASE_ID,
   CPP_CUTE_VIEW_COPY_WEBGPU_COMPARISON_POLICY_ID as COMPARISON_POLICY_ID,
   CPP_CUTE_VIEW_COPY_WEBGPU_SUITE_ID as SUITE_ID,
   CPP_CUTE_VIEW_COPY_WEBGPU_TERMINAL_EXPECTATION,
@@ -41,7 +40,7 @@ import {
   type CppCuteViewCopyWebGpuCaseEvidence,
   type CppCuteViewCopyWebGpuTerminalEvidence,
 } from "./cpp_cute_view_copy_webgpu_evidence";
-import { CPP_CUTE_BROWSER_VIEW_COPY_CONVERGENCE_FIXTURE as convergence } from
+import { CPP_CUTE_BROWSER_VIEW_COPY_CONVERGENCE_FIXTURES as convergences } from
   "../tests/fixtures/cpp_cute_browser_view_copy_convergence";
 
 declare const __BG_COMPILER_VERSION__: string;
@@ -62,10 +61,8 @@ const PRODUCER_VERSIONS = Object.freeze({
   "@unlocalhosted/browsergrad-kernels": __BG_KERNELS_VERSION__,
   "@unlocalhosted/browsergrad-semantic-core": __BG_SEMANTIC_CORE_VERSION__,
 }) as JsonObject;
-const TERMINAL_EMITTER = createTerminalEvidenceEmitter(
-  EVIDENCE_PREFIX,
-  CPP_CUTE_VIEW_COPY_WEBGPU_TERMINAL_EXPECTATION,
-);
+type ConvergenceFixture = (typeof convergences)[number];
+type TerminalEmitter = ReturnType<typeof createTerminalEvidenceEmitter>;
 
 class EvidenceLaneError extends Error {
   constructor(readonly code: string, message: string) {
@@ -74,14 +71,22 @@ class EvidenceLaneError extends Error {
   }
 }
 
-it("converges the exact canonical CuTe view-copy fixture payload on required actual WebGPU", async (context) => {
+for (const convergence of convergences) {
+  it(`converges ${convergence.caseId} on required actual WebGPU`, async (context) => {
+  const terminalEmitter = createTerminalEvidenceEmitter(
+    EVIDENCE_PREFIX,
+    CPP_CUTE_VIEW_COPY_WEBGPU_TERMINAL_EXPECTATION,
+  );
+  const emitCaseTerminal = (
+    input: Parameters<typeof emitTerminal>[2],
+  ) => emitTerminal(convergence, terminalEmitter, input);
   const required = requiresWebGpuEvidence();
   const sourceWords = Uint32Array.from(convergence.expected.sourceWords);
   const initialDestinationWords = Uint32Array.from(
     convergence.expected.initialDestinationWords,
   );
   const [fixtureArtifactHash, inputHash, expectedDestinationHash] = await Promise.all([
-    fixtureArtifactHashFor(),
+    fixtureArtifactHashFor(convergence),
     hashWordsPair(sourceWords, initialDestinationWords),
     hashWords(Uint32Array.from(convergence.expected.destinationWords)),
   ]);
@@ -139,7 +144,7 @@ it("converges the exact canonical CuTe view-copy fixture payload on required act
         unavailableReason: acquisition.reason,
       });
       environmentId = await environmentIdFor(environment);
-      emitTerminal({
+      emitCaseTerminal({
         required,
         fixtureArtifactHash,
         inputHash,
@@ -249,7 +254,7 @@ it("converges the exact canonical CuTe view-copy fixture payload on required act
     const actualDestinationHash = await hashWords(result.destinationWords);
     expect(actualDestinationHash).toBe(expectedDestinationHash);
     caseEvidence = Object.freeze({
-      caseId: CPP_CUTE_VIEW_COPY_WEBGPU_CASE_ID,
+      caseId: convergence.caseId,
       fixtureArtifactHash,
       inputHash,
       expectedDestinationHash,
@@ -292,7 +297,7 @@ it("converges the exact canonical CuTe view-copy fixture payload on required act
         uncapturedErrors.join("; "),
       );
     }
-    emitTerminal({
+    emitCaseTerminal({
       required,
       fixtureArtifactHash,
       inputHash,
@@ -311,7 +316,7 @@ it("converges the exact canonical CuTe view-copy fixture payload on required act
   } catch (error) {
     if (!terminalEmitted) {
       const diagnostic = diagnosticCode(error, uncapturedErrors);
-      emitTerminal({
+      emitCaseTerminal({
         required,
         fixtureArtifactHash,
         inputHash,
@@ -334,11 +339,15 @@ it("converges the exact canonical CuTe view-copy fixture payload on required act
     kernelDevice?.clearCache();
     device?.destroy();
   }
-});
+  });
+}
 
-async function fixtureArtifactHashFor(): Promise<string> {
+async function fixtureArtifactHashFor(
+  convergence: ConvergenceFixture,
+): Promise<string> {
   return hashNamedComponents({
     schema: convergence.schema,
+    caseId: convergence.caseId,
     entryId: convergence.entryId,
     claims: convergence.claims,
     storage: convergence.storage,
@@ -351,7 +360,10 @@ async function fixtureArtifactHashFor(): Promise<string> {
   });
 }
 
-function emitTerminal(input: Readonly<{
+function emitTerminal(
+  convergence: ConvergenceFixture,
+  terminalEmitter: TerminalEmitter,
+  input: Readonly<{
   required: boolean;
   fixtureArtifactHash: string;
   inputHash: string;
@@ -366,7 +378,8 @@ function emitTerminal(input: Readonly<{
   caseEvidence?: CppCuteViewCopyWebGpuCaseEvidence;
   uncapturedErrors: readonly string[];
   error?: JsonObject;
-}>): void {
+  }>,
+): void {
   const unsigned = Object.freeze({
     schema: "browsergrad.execution-evidence@1",
     kind: "terminal",
@@ -390,6 +403,7 @@ function emitTerminal(input: Readonly<{
     environment: input.environment,
     artifactHashKind: "pinned-cpp-cute-view-copy-convergence-fixture",
     fixtureSchema: convergence.schema,
+    fixtureCaseId: convergence.caseId,
     inputHash: input.inputHash,
     expectedDestinationHash: input.expectedDestinationHash,
     ...(input.preparedBackendArtifactHash === undefined
@@ -405,9 +419,10 @@ function emitTerminal(input: Readonly<{
     uncapturedErrors: Object.freeze([...input.uncapturedErrors]),
     ...(input.error === undefined ? {} : { error: input.error }),
   }) as CppCuteViewCopyWebGpuTerminalEvidence;
-  TERMINAL_EMITTER.emit(finalizeCppCuteViewCopyWebGpuEvidence(unsigned, {
+  terminalEmitter.emit(finalizeCppCuteViewCopyWebGpuEvidence(unsigned, {
     expectedRequired: input.required,
     expectedFixtureSchema: convergence.schema,
+    expectedCaseId: convergence.caseId,
     expectedFixtureArtifactHash: input.fixtureArtifactHash,
     expectedInputHash: input.inputHash,
     expectedDestinationHash: input.expectedDestinationHash,

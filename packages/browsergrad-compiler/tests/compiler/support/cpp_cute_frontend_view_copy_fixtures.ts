@@ -77,6 +77,30 @@ export async function createCppCuteViewCopyArtifactInput(): Promise<Record<strin
   return boundArtifact as unknown as Record<string, unknown>;
 }
 
+/** Exact positive-affine rank-3 transpose fixture shared by lowering and browser authority tests. */
+export async function mutateCppCutePayloadToRank3ViewCopy(
+  payload: CppCuteFrontendPayloadV3,
+): Promise<void> {
+  await mutateCppCutePayloadToViewCopy(payload);
+  mutateCppCuteViewCopyFlatLayouts(payload, {
+    shape: [2, 3, 4],
+    sourceStrides: [1, 2, 6],
+    destinationStrides: [12, 4, 1],
+  });
+}
+
+/** Valid producer artifact used to prove that lowering rejects ranks above its explicit profile. */
+export async function mutateCppCutePayloadToRank4ViewCopy(
+  payload: CppCuteFrontendPayloadV3,
+): Promise<void> {
+  await mutateCppCutePayloadToViewCopy(payload);
+  mutateCppCuteViewCopyFlatLayouts(payload, {
+    shape: [2, 2, 2, 2],
+    sourceStrides: [1, 2, 4, 8],
+    destinationStrides: [8, 4, 2, 1],
+  });
+}
+
 export async function mutateCppCutePayloadToViewCopy(payload: CppCuteFrontendPayloadV3): Promise<void> {
   const baseInt = payload.types.find((type) => type.typeId === CPP_CUTE_FIXTURE_INT_TYPE_ID);
   if (baseInt === undefined || baseInt.kind !== "builtin") throw new Error("fixture lost int type");
@@ -506,4 +530,76 @@ export async function mutateCppCutePayloadToViewCopy(payload: CppCuteFrontendPay
   })));
   const boundPayload = unshareJsonTree<CppCuteFrontendPayloadV3>({ ...nextPayload, semanticPasses });
   Object.assign(payload, boundPayload);
+}
+
+function mutateCppCuteViewCopyFlatLayouts(
+  payload: CppCuteFrontendPayloadV3,
+  profile: {
+    readonly shape: readonly number[];
+    readonly sourceStrides: readonly number[];
+    readonly destinationStrides: readonly number[];
+  },
+): void {
+  const sourceTensor = payload.facts.find((fact) => (
+    fact.kind === "tensor" && fact.factId === CPP_CUTE_VIEW_COPY_SOURCE_TENSOR_FACT_ID
+  ));
+  const destinationTensor = payload.facts.find((fact) => (
+    fact.kind === "tensor" && fact.factId === CPP_CUTE_VIEW_COPY_DESTINATION_TENSOR_FACT_ID
+  ));
+  if (sourceTensor?.kind !== "tensor" || destinationTensor?.kind !== "tensor") {
+    throw new Error("fixture lost view-copy tensor facts");
+  }
+  const sourceLayout = payload.facts.find((fact) => fact.factId === sourceTensor.layoutFactId);
+  const destinationLayout = payload.facts.find((fact) => fact.factId === destinationTensor.layoutFactId);
+  if (sourceLayout?.kind !== "affine-layout" || destinationLayout?.kind !== "affine-layout") {
+    throw new Error("fixture lost view-copy affine-layout facts");
+  }
+  if (profile.shape.length !== profile.sourceStrides.length ||
+      profile.shape.length !== profile.destinationStrides.length) {
+    throw new Error("fixture flat layout shape/stride ranks must match");
+  }
+
+  const hierarchy = (values: readonly number[]) => ({
+    kind: "tuple" as const,
+    elements: values.map((value) => ({
+      kind: "scalar" as const,
+      value: { kind: "integer" as const, value: String(value) as never },
+    })),
+  });
+  const size = profile.shape.reduce((product, extent) => product * extent, 1);
+  const cosize = (strides: readonly number[]) => profile.shape.reduce(
+    (span, extent, index) => span + (extent - 1) * (strides[index] ?? 0),
+    1,
+  );
+  const mutateLayout = (
+    layout: typeof sourceLayout,
+    strides: readonly number[],
+  ) => Object.assign(layout, {
+    shape: hierarchy(profile.shape),
+    stride: hierarchy(strides),
+    rank: profile.shape.length,
+    leafRank: profile.shape.length,
+    size: { kind: "integer" as const, value: String(size) as never },
+    cosize: { kind: "integer" as const, value: String(cosize(strides)) as never },
+  });
+  mutateLayout(sourceLayout, profile.sourceStrides);
+  mutateLayout(destinationLayout, profile.destinationStrides);
+
+  const canonicalLayoutName = (strides: readonly number[]) => {
+    const shape = profile.shape.map((value) => `cute::Int<${value}>`).join(", ");
+    const stride = strides.map((value) => `cute::Int<${value}>`).join(", ");
+    return `cute::Layout<cute::Shape<${shape}>, cute::Stride<${stride}>>`;
+  };
+  const sourceLayoutType = payload.types.find((type) => type.typeId === CPP_CUTE_FIXTURE_LAYOUT_TYPE_ID);
+  const destinationLayoutType = payload.types.find((type) => (
+    type.typeId === CPP_CUTE_VIEW_COPY_DESTINATION_LAYOUT_TYPE_ID
+  ));
+  if (sourceLayoutType?.kind !== "template-specialization" ||
+      destinationLayoutType?.kind !== "template-specialization") {
+    throw new Error("fixture lost view-copy layout types");
+  }
+  (sourceLayoutType as { canonicalName: string }).canonicalName = canonicalLayoutName(profile.sourceStrides);
+  (destinationLayoutType as { canonicalName: string }).canonicalName = canonicalLayoutName(
+    profile.destinationStrides,
+  );
 }

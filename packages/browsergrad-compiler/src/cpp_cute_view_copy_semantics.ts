@@ -134,9 +134,14 @@ export async function prepareVerifiedCppCuteViewCopySemantics(
         : "BG-COMPILER-CPP-CUTE-VIEW-COPY-UNSUPPORTED-LAYOUT";
     cppCuteViewCopyFailure(code, cause.path, cause.message, { cause });
   }
-  const sourceSpanElements = positiveRank2SpanElements(sourceLayout, "$.artifact.source.layout");
-  const destinationSpanElements = positiveRank2SpanElements(
+  const sourceSpanElements = positiveAffineSpanElements(
+    sourceLayout,
+    sourceLayoutFact.rank,
+    "$.artifact.source.layout",
+  );
+  const destinationSpanElements = positiveAffineSpanElements(
     destinationLayout,
+    destinationLayoutFact.rank,
     "$.artifact.destination.layout",
   );
   throwIfCppCuteViewCopyAborted(normalizedOptions.signal);
@@ -309,8 +314,12 @@ function validateProfile(
   }
   validateF32Pointer(payload, source.engine.pointerDeclarationId, true, "$.artifact.source.engine");
   validateF32Pointer(payload, destination.engine.pointerDeclarationId, false, "$.artifact.destination.engine");
-  if (sourceLayout.rank !== 2 || destinationLayout.rank !== 2) {
-    unsupportedLayout("$.artifact.entry", "initial view-copy lowering requires rank-2 source and destination layouts");
+  if (sourceLayout.rank !== destinationLayout.rank ||
+      (sourceLayout.rank !== 2 && sourceLayout.rank !== 3)) {
+    unsupportedLayout(
+      "$.artifact.entry",
+      "view-copy lowering requires equal source and destination ranks of exactly 2 or 3",
+    );
   }
   if (intrinsic.operation.kind !== "copy" || intrinsic.operation.sourceSpace !== "global" ||
       intrinsic.operation.destinationSpace !== "global" || intrinsic.operation.transferBits !== 32 ||
@@ -342,25 +351,51 @@ function validateF32Pointer(
   }
 }
 
-function positiveRank2SpanElements(layout: LayoutExpr, path: string): bigint {
-  if (layout.kind !== "strided" || layout.shape.length !== 2 || layout.strides.length !== 2) {
-    unsupportedLayout(path, "initial view-copy lowering requires two flat static affine modes");
+function positiveAffineSpanElements(
+  layout: LayoutExpr,
+  expectedRank: number,
+  path: string,
+): bigint {
+  if (expectedRank !== 2 && expectedRank !== 3) {
+    inconsistent(path, "unsupported view-copy rank reached affine span projection");
   }
-  const values = [...layout.shape, ...layout.strides].map((expression, index) => {
+  if (layout.kind !== "strided" ||
+      layout.shape.length !== expectedRank || layout.strides.length !== expectedRank) {
+    unsupportedLayout(path, `view-copy lowering requires ${expectedRank} flat static affine modes`);
+  }
+
+  const positiveStaticValues = (
+    expressions: typeof layout.shape,
+    component: "shape" | "strides",
+  ): readonly bigint[] => expressions.map((expression, index) => {
     if (expression.kind !== "const") {
-      unsupportedLayout(`${path}.${index < 2 ? "shape" : "strides"}[${index % 2}]`, "initial view-copy layout shape and strides must be static");
+      unsupportedLayout(
+        `${path}.${component}[${index}]`,
+        "view-copy layout shape and strides must be static",
+      );
     }
     const value = wireIntegerToBigInt(expression.value);
     if (value <= 0n) {
-      unsupportedLayout(`${path}.${index < 2 ? "shape" : "strides"}[${index % 2}]`, "initial view-copy layout shape and strides must be positive");
+      unsupportedLayout(
+        `${path}.${component}[${index}]`,
+        "view-copy layout shape and strides must be positive",
+      );
     }
     return value;
   });
-  const [shape0, shape1, stride0, stride1] = values;
-  if (shape0 === undefined || shape1 === undefined || stride0 === undefined || stride1 === undefined) {
-    inconsistent(path, "positive rank-2 layout projection disappeared");
+
+  const shape = positiveStaticValues(layout.shape, "shape");
+  const strides = positiveStaticValues(layout.strides, "strides");
+  let spanElements = 1n;
+  for (let axis = 0; axis < expectedRank; axis += 1) {
+    const extent = shape[axis];
+    const stride = strides[axis];
+    if (extent === undefined || stride === undefined) {
+      inconsistent(path, `positive rank-${expectedRank} layout projection disappeared`);
+    }
+    spanElements += (extent - 1n) * stride;
   }
-  return (shape0 - 1n) * stride0 + (shape1 - 1n) * stride1 + 1n;
+  return spanElements;
 }
 
 function closedDataRecord(

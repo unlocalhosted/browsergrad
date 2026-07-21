@@ -6,6 +6,7 @@ import {
   CPP_CUTE_VIEW_COPY_WEBGPU_CAPABILITY_ID,
   CPP_CUTE_VIEW_COPY_WEBGPU_CASE_ID,
   CPP_CUTE_VIEW_COPY_WEBGPU_COMPARISON_POLICY_ID,
+  CPP_CUTE_VIEW_COPY_WEBGPU_RANK3_CASE_ID,
   CPP_CUTE_VIEW_COPY_WEBGPU_SUITE_ID,
   finalizeCppCuteViewCopyWebGpuEvidence,
   type CppCuteViewCopyWebGpuEvidenceExpectation,
@@ -17,6 +18,7 @@ const PRODUCERS = Object.freeze({ compiler: "0.2.0", kernels: "0.2.0" });
 const EXPECTED: CppCuteViewCopyWebGpuEvidenceExpectation = Object.freeze({
   expectedRequired: true,
   expectedFixtureSchema: "browsergrad.compiler.cpp-cute-browser-view-copy-convergence@1",
+  expectedCaseId: CPP_CUTE_VIEW_COPY_WEBGPU_CASE_ID,
   expectedFixtureArtifactHash: hash("1"),
   expectedInputHash: hash("2"),
   expectedDestinationHash: hash("3"),
@@ -33,6 +35,15 @@ describe("CuTe fixture-payload WebGPU terminal evidence", () => {
         completeDestinationBitComparisonPassed: true,
         nonzeroOffsetCanariesPreserved: true,
       } });
+    const rank3Expected = Object.freeze({
+      ...EXPECTED,
+      expectedCaseId: CPP_CUTE_VIEW_COPY_WEBGPU_RANK3_CASE_ID,
+    });
+    const rank3 = passingRecord(rank3Expected);
+    expect(finalizeCppCuteViewCopyWebGpuEvidence(rank3, rank3Expected))
+      .toMatchObject({ fixtureCaseId: CPP_CUTE_VIEW_COPY_WEBGPU_RANK3_CASE_ID });
+    expect(() => finalizeCppCuteViewCopyWebGpuEvidence(rank3, EXPECTED))
+      .toThrow(/fixture identity differs/u);
 
     expect(() => finalizeCppCuteViewCopyWebGpuEvidence({
       ...record,
@@ -56,12 +67,18 @@ describe("CuTe fixture-payload WebGPU terminal evidence", () => {
     }, EXPECTED)).toThrow(/exact payload hashes and canary comparison/u);
     expect(() => finalizeCppCuteViewCopyWebGpuEvidence({
       ...record,
+      case: { ...record.case!, caseId: CPP_CUTE_VIEW_COPY_WEBGPU_RANK3_CASE_ID },
+    }, EXPECTED)).toThrow(/exact payload hashes and canary comparison/u);
+    expect(() => finalizeCppCuteViewCopyWebGpuEvidence({
+      ...record,
       uncapturedErrors: ["late validation error"],
     }, EXPECTED)).toThrow(/clean complete observation/u);
   });
 });
 
-function passingRecord(): CppCuteViewCopyWebGpuTerminalEvidence {
+function passingRecord(
+  expected: CppCuteViewCopyWebGpuEvidenceExpectation = EXPECTED,
+): CppCuteViewCopyWebGpuTerminalEvidence {
   return {
     schema: EXECUTION_EVIDENCE_SCHEMA,
     kind: "terminal",
@@ -69,11 +86,11 @@ function passingRecord(): CppCuteViewCopyWebGpuTerminalEvidence {
     required: true,
     evidence: {
       capabilityId: CPP_CUTE_VIEW_COPY_WEBGPU_CAPABILITY_ID,
-      artifactHash: EXPECTED.expectedFixtureArtifactHash,
+      artifactHash: expected.expectedFixtureArtifactHash,
       backendId: CPP_CUTE_VIEW_COPY_WEBGPU_BACKEND_ID,
-      environmentId: EXPECTED.expectedEnvironmentId,
+      environmentId: expected.expectedEnvironmentId,
       producerVersions: PRODUCERS,
-      sourceRevision: EXPECTED.expectedSourceRevision,
+      sourceRevision: expected.expectedSourceRevision,
       deviceProfileHash: hash("6"),
       recordedAt: "2026-07-21T00:00:00.000Z",
       outcome: "passed",
@@ -91,20 +108,21 @@ function passingRecord(): CppCuteViewCopyWebGpuTerminalEvidence {
       negotiatedDeviceLimits: {},
     },
     artifactHashKind: "pinned-cpp-cute-view-copy-convergence-fixture",
-    fixtureSchema: EXPECTED.expectedFixtureSchema,
-    inputHash: EXPECTED.expectedInputHash,
-    expectedDestinationHash: EXPECTED.expectedDestinationHash,
+    fixtureSchema: expected.expectedFixtureSchema,
+    fixtureCaseId: expected.expectedCaseId,
+    inputHash: expected.expectedInputHash,
+    expectedDestinationHash: expected.expectedDestinationHash,
     preparedBackendArtifactHash: hash("7"),
     productionBrowserCompileObserved: false,
     actualWebGpuExecution: true,
     backendExecutionAuthorizationMinted: false,
     cudaLiteRunnerUsed: false,
     case: {
-      caseId: CPP_CUTE_VIEW_COPY_WEBGPU_CASE_ID,
-      fixtureArtifactHash: EXPECTED.expectedFixtureArtifactHash,
-      inputHash: EXPECTED.expectedInputHash,
-      expectedDestinationHash: EXPECTED.expectedDestinationHash,
-      actualDestinationHash: EXPECTED.expectedDestinationHash,
+      caseId: expected.expectedCaseId,
+      fixtureArtifactHash: expected.expectedFixtureArtifactHash,
+      inputHash: expected.expectedInputHash,
+      expectedDestinationHash: expected.expectedDestinationHash,
+      actualDestinationHash: expected.expectedDestinationHash,
       layoutSemanticHash: hash("8"),
       kernelSemanticHash: hash("9"),
       operationId: "bg.entity.kernel-operation.test",

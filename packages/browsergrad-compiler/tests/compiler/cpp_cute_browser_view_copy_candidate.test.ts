@@ -72,7 +72,10 @@ import {
 } from "../../src/cpp_cute_browser_view_copy_candidate.js";
 import { unwrapVerifiedCppCuteFrontendArtifact } from
   "../../src/cpp_cute_frontend_artifact.js";
-import { mutateCppCutePayloadToViewCopy } from
+import {
+  mutateCppCutePayloadToRank3ViewCopy,
+  mutateCppCutePayloadToViewCopy,
+} from
   "./support/cpp_cute_frontend_view_copy_fixtures.js";
 import {
   createCppCuteProvenanceFixture,
@@ -96,16 +99,28 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  const graph = createCppCuteBrowserSemanticAuthorityFixture(fixture);
+  installAuthorityFixture(fixture);
+});
+
+function installAuthorityFixture(candidateFixture: CppCuteProvenanceFixture): void {
+  const graph = createCppCuteBrowserSemanticAuthorityFixture(candidateFixture);
   authorities.execution = graph.execution;
   authorities.executionRecord = graph.executionRecord;
   authorities.frame = graph.frame;
   authorities.frameRecord = graph.frameRecord;
   authorities.conformance = graph.conformance;
   authorities.conformanceInspection = graph.conformanceInspection;
-  authorities.browserProfile = fixture.profile;
+  authorities.browserProfile = candidateFixture.profile;
   authorities.crossWiredRequest = false;
-});
+}
+
+function selectedEntryId(candidateFixture: CppCuteProvenanceFixture): string {
+  const payload = unwrapVerifiedCppCuteFrontendArtifact(candidateFixture.artifact).envelope.payload;
+  if (payload.outcome.kind !== "accepted" || payload.outcome.selectedEntryIds[0] === undefined) {
+    throw new Error("fixture lost selected view-copy entry");
+  }
+  return payload.outcome.selectedEntryIds[0];
+}
 
 describe("observed browser Worker view-copy semantic candidate", () => {
   it("prepares only the exact source-derived view-copy subject", async () => {
@@ -136,6 +151,35 @@ describe("observed browser Worker view-copy semantic candidate", () => {
     expect(record.artifact).toBe(fixture.artifact);
     expect(record.semantics.artifact).toBe(fixture.artifact);
     expect(record.semantics.loweringAuthorityMinted).toBe(false);
+  });
+
+  it("prepares the exact static rank-3 semantic subject without widening authority", async () => {
+    const rank3 = await createCppCuteProvenanceFixture({
+      mutatePayload: mutateCppCutePayloadToRank3ViewCopy,
+    });
+    const rank3EntryId = selectedEntryId(rank3);
+    installAuthorityFixture(rank3);
+    const candidate = await prepareObservedCppCuteBrowserViewCopyCandidate(
+      authorities.execution as never,
+      { entryId: rank3EntryId },
+    );
+    const record = unwrapObservedCppCuteBrowserViewCopyCandidate(candidate);
+
+    expect(candidate).toMatchObject({
+      entryId: rank3EntryId,
+      workerExecutionObserved: true,
+      sharedViewCopySemanticsPrepared: true,
+      producerTrusted: false,
+      loweringAuthorityMinted: false,
+      backendExecutionAuthorized: false,
+      releaseReady: false,
+    });
+    expect(record.semantics.sourceLayoutFact.rank).toBe(3);
+    expect(record.semantics.destinationLayoutFact.rank).toBe(3);
+    expect(record.semantics.sourceSpanElements).toBe(24n);
+    expect(record.semantics.destinationSpanElements).toBe(24n);
+    expect(candidate).not.toHaveProperty("sourceAllocationByteLength");
+    expect(candidate).not.toHaveProperty("destinationAllocationByteLength");
   });
 
   it("rejects structural execution and candidate copies", async () => {

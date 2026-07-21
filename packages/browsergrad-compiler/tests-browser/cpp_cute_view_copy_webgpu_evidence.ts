@@ -19,8 +19,12 @@ export const CPP_CUTE_VIEW_COPY_WEBGPU_BACKEND_ID =
   "browsergrad.backend.webgpu.core";
 export const CPP_CUTE_VIEW_COPY_WEBGPU_COMPARISON_POLICY_ID =
   "browsergrad.comparison.bit-exact-u32-complete-destination-with-canaries.v1";
-export const CPP_CUTE_VIEW_COPY_WEBGPU_CASE_ID =
+export const CPP_CUTE_VIEW_COPY_WEBGPU_RANK2_CASE_ID =
   "canonical-rank2-cute-view-copy-payload";
+export const CPP_CUTE_VIEW_COPY_WEBGPU_RANK3_CASE_ID =
+  "canonical-rank3-cute-view-copy-payload";
+export const CPP_CUTE_VIEW_COPY_WEBGPU_CASE_ID =
+  CPP_CUTE_VIEW_COPY_WEBGPU_RANK2_CASE_ID;
 
 export const CPP_CUTE_VIEW_COPY_WEBGPU_TERMINAL_EXPECTATION = Object.freeze({
   suiteId: CPP_CUTE_VIEW_COPY_WEBGPU_SUITE_ID,
@@ -31,7 +35,7 @@ export const CPP_CUTE_VIEW_COPY_WEBGPU_TERMINAL_EXPECTATION = Object.freeze({
 });
 
 export interface CppCuteViewCopyWebGpuCaseEvidence extends JsonObject {
-  readonly caseId: typeof CPP_CUTE_VIEW_COPY_WEBGPU_CASE_ID;
+  readonly caseId: string;
   readonly fixtureArtifactHash: string;
   readonly inputHash: string;
   readonly expectedDestinationHash: string;
@@ -60,6 +64,7 @@ export interface CppCuteViewCopyWebGpuTerminalEvidence extends JsonObject {
   readonly environment: EvidenceEnvironment;
   readonly artifactHashKind: "pinned-cpp-cute-view-copy-convergence-fixture";
   readonly fixtureSchema: string;
+  readonly fixtureCaseId: string;
   readonly inputHash: string;
   readonly expectedDestinationHash: string;
   readonly preparedBackendArtifactHash?: string;
@@ -75,6 +80,7 @@ export interface CppCuteViewCopyWebGpuTerminalEvidence extends JsonObject {
 export interface CppCuteViewCopyWebGpuEvidenceExpectation {
   readonly expectedRequired: boolean;
   readonly expectedFixtureSchema: string;
+  readonly expectedCaseId: string;
   readonly expectedFixtureArtifactHash: string;
   readonly expectedInputHash: string;
   readonly expectedDestinationHash: string;
@@ -108,6 +114,7 @@ export function validateCppCuteViewCopyWebGpuEvidence(
   if (
     record.artifactHashKind !== "pinned-cpp-cute-view-copy-convergence-fixture"
     || record.fixtureSchema !== expected.expectedFixtureSchema
+    || record.fixtureCaseId !== expected.expectedCaseId
   ) {
     invalid("fixture identity differs from the pinned convergence payload");
   }
@@ -165,7 +172,7 @@ export function validateCppCuteViewCopyWebGpuEvidence(
     invalid("passed case hashes must be full SHA-256 digests");
   }
   if (
-    observation.caseId !== CPP_CUTE_VIEW_COPY_WEBGPU_CASE_ID
+    observation.caseId !== expected.expectedCaseId
     || observation.fixtureArtifactHash !== expected.expectedFixtureArtifactHash
     || observation.inputHash !== expected.expectedInputHash
     || observation.expectedDestinationHash !== expected.expectedDestinationHash
