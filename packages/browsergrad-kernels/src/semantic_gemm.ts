@@ -132,6 +132,9 @@ export interface SemanticGemmWebGpuTrace {
   readonly wgslModuleHash: string;
   readonly backendProfile: typeof SEMANTIC_GEMM_WEBGPU_PROFILE;
   readonly backendVersion: typeof SEMANTIC_GEMM_WEBGPU_BACKEND_VERSION;
+  readonly executionTier: "portable-webgpu-core";
+  /** No CUDA/CuTe invocation schedule or native MMA facility is claimed. */
+  readonly preservationLevel: "portable-relegalized";
   readonly numericalInputProfile: string;
   readonly numericalPreservation: "bit-exact-on-certified-inputs";
   readonly m: WireU64;
@@ -711,6 +714,8 @@ function createTrace(
     wgslModuleHash: prepared.wgslModuleHash,
     backendProfile: prepared.backendProfile,
     backendVersion: prepared.backendVersion,
+    executionTier: "portable-webgpu-core",
+    preservationLevel: "portable-relegalized",
     numericalInputProfile,
     numericalPreservation: "bit-exact-on-certified-inputs",
     m: encodeWireU64(prepared.semantic.m),

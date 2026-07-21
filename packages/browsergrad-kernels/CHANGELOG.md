@@ -13,7 +13,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   verified layout, logical GEMM, physical schedule, and concrete-input
   certificate authorities. Cooperative scalar workgroup staging uses uniform
   barriers, zero-filled boundary loads, masked complete-root stores, and
-  deterministic logical/schedule/backend/WGSL trace identities.
+  deterministic logical/schedule/backend/WGSL trace identities. Execution
+  traces report `portable-webgpu-core` and `portable-relegalized`; they do not
+  imply a preserved CUDA/CuTe invocation schedule or native MMA facility.
 - The portable numerical profile is deliberately limited to semantic-core's
   exact nonnegative-integer f32 certificate. Host execution uploads only fresh
   authority-retained snapshots and compares complete destination bytes; raw

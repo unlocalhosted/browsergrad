@@ -73,6 +73,7 @@ describe("semantic GEMM WebGPU preparation", () => {
     expect(prepared8.backendPreparationHash).toBe(repeated8.backendPreparationHash);
     expect(prepared8.wgslModuleHash).toBe(repeated8.wgslModuleHash);
     expect(prepared8.wgslModuleHash).not.toBe(prepared16.wgslModuleHash);
+    expect(prepared8.backendProfile).toBe("browsergrad.webgpu.gemm.exact-f32@1");
     expect(prepared8.program.workgroupSize).toEqual([8, 8, 1]);
     expect(prepared16.program.workgroupSize).toEqual([16, 16, 1]);
     expect(prepared8.launch.dispatchCount).toEqual([24, 24, 1]);

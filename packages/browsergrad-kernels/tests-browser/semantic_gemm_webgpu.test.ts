@@ -71,6 +71,8 @@ interface CaseObservation extends JsonObject {
   readonly backendSpecializationHash: string;
   readonly inputCertificateSemanticHash: string;
   readonly wgslModuleHash: string;
+  readonly executionTier: "portable-webgpu-core";
+  readonly preservationLevel: "portable-relegalized";
   readonly physicalTile: JsonObject;
   readonly dispatchWorkgroups: JsonObject;
   readonly cpuComparison: "bit-exact-complete-destination";
@@ -256,6 +258,8 @@ it("emits required evidence for irregular semantic GEMM under two schedules", as
         backendSpecializationHash: result.trace.backendSpecializationHash,
         inputCertificateSemanticHash: result.trace.inputCertificateSemanticHash,
         wgslModuleHash: result.trace.wgslModuleHash,
+        executionTier: result.trace.executionTier,
+        preservationLevel: result.trace.preservationLevel,
         physicalTile: result.trace.physicalTile as JsonObject,
         dispatchWorkgroups: result.trace.dispatchWorkgroups as JsonObject,
         cpuComparison: "bit-exact-complete-destination",
@@ -328,6 +332,8 @@ function assertTrace(
     || trace.backendPreparationHash !== preparedCase.prepared.backendPreparationHash
     || trace.wgslModuleHash !== preparedCase.prepared.wgslModuleHash
     || trace.inputCertificateSemanticHash !== certificateHash
+    || trace.executionTier !== "portable-webgpu-core"
+    || trace.preservationLevel !== "portable-relegalized"
     || trace.numericalPreservation !== "bit-exact-on-certified-inputs"
   ) {
     throw new EvidenceLaneError(
