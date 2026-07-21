@@ -21,6 +21,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Explicit `/schedule` package export. Schedule verification rejects logical
   numerical policy and backend-specific fields rather than weakening or
   reconstructing the referenced kernel meaning.
+- Authority-bound schedule specialization composes one already-prepared logical
+  GEMM proof with multiple physical schedules, deriving bounded workgroup,
+  staging, and dispatch geometry without repeating logical address proof or
+  introducing device/numerical claims.
 - Allocation-free, authority-bound standalone layout preparation and coordinate
   tracing. The API verifies shared index semantics without inventing dtype,
   allocation, alias, byte-address, effect, or backend claims.

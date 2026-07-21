@@ -20,6 +20,7 @@ const MAX_CONFIGURABLE_EVALUATION_STEPS = 250_000_000;
 const DEFAULT_MAX_PREPARATION_MS = 5_000;
 const MAX_CONFIGURABLE_PREPARATION_MS = 60_000;
 const YIELD_INTERVAL_MS = 16;
+const PREPARED_LOGICAL_GEMM_TILES = new WeakSet<object>();
 
 export interface PrepareLogicalGemmTileSpecializationRequest {
   readonly operationId: string;
@@ -146,7 +147,7 @@ export async function prepareLogicalGemmTileSpecialization(
     },
   }, hashOptions);
   ensurePreparationActive(preparationStartedAt, maxPreparationMs, request.signal);
-  return Object.freeze({
+  const prepared = Object.freeze({
     operation: kernel.operation,
     bindings,
     lhs,
@@ -164,6 +165,21 @@ export async function prepareLogicalGemmTileSpecialization(
     outputElements,
     multiplyAdds,
   });
+  PREPARED_LOGICAL_GEMM_TILES.add(prepared);
+  return prepared;
+}
+
+/** @internal Shared authority check for semantic-core schedule composition. */
+export function requirePreparedLogicalGemmTileSpecialization(
+  prepared: PreparedLogicalGemmTileSpecialization,
+): void {
+  if (!PREPARED_LOGICAL_GEMM_TILES.has(prepared as object)) {
+    invalid(
+      KERNEL_DIAGNOSTIC_CODES.invalidBinding,
+      "$.logical",
+      "logical GEMM schedule requires an exact specialization produced by this semantic-core module instance",
+    );
+  }
 }
 
 function ensurePreparedContract(

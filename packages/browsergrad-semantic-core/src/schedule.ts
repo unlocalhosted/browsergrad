@@ -20,3 +20,8 @@ export {
   type CreateVerifiedLogicalGemmTileScheduleRequest,
   type LogicalGemmTileScheduleConstructionOptions,
 } from "./schedule/gemm-tile-construction.js";
+export {
+  prepareLogicalGemmTileSchedule,
+  type PreparedLogicalGemmTileSchedule,
+  type PrepareLogicalGemmTileScheduleRequest,
+} from "./schedule/gemm-tile-prepare.js";

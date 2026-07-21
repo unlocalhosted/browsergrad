@@ -67,6 +67,7 @@ export const SCHEDULE_DIAGNOSTIC_CODES = {
   unknownField: "BG-SCHEDULE-UNKNOWN-FIELD",
   kernelHashMismatch: "BG-SCHEDULE-KERNEL-HASH-MISMATCH",
   unsupportedProfile: "BG-SCHEDULE-UNSUPPORTED-PROFILE",
+  resourceLimit: "BG-SCHEDULE-RESOURCE-LIMIT",
 } as const;
 
 export type ScheduleDiagnosticCode =

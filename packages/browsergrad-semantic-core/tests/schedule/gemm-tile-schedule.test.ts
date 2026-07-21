@@ -4,17 +4,20 @@ import {
   LOGICAL_GEMM_TILE_ARTIFACT_SCHEMA,
   createVerifiedDenseLogicalGemmTileArtifacts,
   logicalGemmTileArtifactPayload,
+  prepareLogicalGemmTileSpecialization,
 } from "../../src/kernel";
 import {
   LOGICAL_GEMM_TILE_SCHEDULE_ARTIFACT_SCHEMA,
   createVerifiedLogicalGemmTileSchedule,
   decodeLogicalGemmTileScheduleArtifact,
   logicalGemmTileScheduleArtifactPayload,
+  prepareLogicalGemmTileSchedule,
   verifyLogicalGemmTileScheduleArtifact,
   type LogicalGemmTileScheduleArtifactPayloadV1,
 } from "../../src/schedule";
 import {
   SCHEDULE_DIAGNOSTIC_CODES,
+  KERNEL_DIAGNOSTIC_CODES,
   SCHEMA_DIAGNOSTIC_CODES,
   SemanticSchemaError,
   canonicalJsonBytes,
@@ -86,6 +89,113 @@ describe("logical GEMM tile schedule artifact", () => {
         masks: { lhsLoad: "zero-fill", rhsLoad: "zero-fill", destinationStore: "suppress" },
       },
     });
+  });
+
+  it("specializes two schedules from one authorized logical proof without reconstructing logical meaning", async () => {
+    const artifacts = await createVerifiedDenseLogicalGemmTileArtifacts({
+      m: wire("17"), n: wire("19"), k: wire("23"),
+      logicalTile: { m: wire("16"), n: wire("16"), k: wire("8") },
+    });
+    const logical = await prepareLogicalGemmTileSpecialization(
+      artifacts.layout,
+      artifacts.kernel,
+      { operationId: artifacts.operationId },
+    );
+    const schedule8Artifact = await createVerifiedLogicalGemmTileSchedule(artifacts.kernel, {
+      physicalTile: { m: wire("8"), n: wire("8"), k: wire("8") },
+    });
+    const schedule16Artifact = await createVerifiedLogicalGemmTileSchedule(artifacts.kernel, {
+      physicalTile: { m: wire("16"), n: wire("16"), k: wire("8") },
+    });
+    const schedule8 = await prepareLogicalGemmTileSchedule(
+      logical,
+      artifacts.kernel,
+      schedule8Artifact.artifact,
+    );
+    const schedule16 = await prepareLogicalGemmTileSchedule(
+      logical,
+      artifacts.kernel,
+      schedule16Artifact.artifact,
+    );
+
+    expect(schedule8.logical).toBe(logical);
+    expect(schedule16.logical).toBe(logical);
+    expect(schedule8.logicalGemmSemanticHash).toBe(logical.kernelSemanticHash);
+    expect(schedule16.logicalGemmSemanticHash).toBe(logical.kernelSemanticHash);
+    expect(schedule8).toMatchObject({
+      physicalM: 8n,
+      physicalN: 8n,
+      physicalK: 8n,
+      workgroupInvocations: 64n,
+      lhsStagingElements: 64n,
+      rhsStagingElements: 64n,
+      aggregateStagingElements: 128n,
+      dispatchX: 3n,
+      dispatchY: 3n,
+      dispatchZ: 1n,
+      dispatchWorkgroups: 9n,
+    });
+    expect(schedule16).toMatchObject({
+      physicalM: 16n,
+      physicalN: 16n,
+      physicalK: 8n,
+      workgroupInvocations: 256n,
+      lhsStagingElements: 128n,
+      rhsStagingElements: 128n,
+      aggregateStagingElements: 256n,
+      dispatchX: 2n,
+      dispatchY: 2n,
+      dispatchZ: 1n,
+      dispatchWorkgroups: 4n,
+    });
+    expect(schedule8.scheduleSemanticHash).not.toBe(schedule16.scheduleSemanticHash);
+    expect(schedule8.scheduleSpecializationHash).not.toBe(schedule16.scheduleSpecializationHash);
+    expect(JSON.stringify(schedule8.schedule)).not.toContain("rounding");
+  });
+
+  it("rejects copied logical proofs, artifact mismatches, and schedule resource overflow", async () => {
+    const first = await createVerifiedDenseLogicalGemmTileArtifacts({
+      m: wire("16"), n: wire("16"), k: wire("16"),
+      logicalTile: { m: wire("16"), n: wire("16"), k: wire("16") },
+    });
+    const second = await createVerifiedDenseLogicalGemmTileArtifacts({
+      m: wire("16"), n: wire("16"), k: wire("16"),
+      logicalTile: { m: wire("8"), n: wire("8"), k: wire("8") },
+    });
+    const logical = await prepareLogicalGemmTileSpecialization(
+      first.layout,
+      first.kernel,
+      { operationId: first.operationId },
+    );
+    const firstSchedule = await createVerifiedLogicalGemmTileSchedule(first.kernel, {
+      physicalTile: { m: wire("8"), n: wire("8"), k: wire("8") },
+    });
+    const secondSchedule = await createVerifiedLogicalGemmTileSchedule(second.kernel, {
+      physicalTile: { m: wire("8"), n: wire("8"), k: wire("8") },
+    });
+
+    expect((await diagnostic(() => prepareLogicalGemmTileSchedule(
+      { ...logical },
+      first.kernel,
+      firstSchedule.artifact,
+    ))).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.invalidBinding);
+    expect((await diagnostic(() => prepareLogicalGemmTileSchedule(
+      logical,
+      second.kernel,
+      secondSchedule.artifact,
+    ))).diagnostic.code).toBe(SCHEDULE_DIAGNOSTIC_CODES.kernelHashMismatch);
+    expect((await diagnostic(() => prepareLogicalGemmTileSchedule(
+      logical,
+      first.kernel,
+      firstSchedule.artifact,
+      { maxWorkgroupInvocations: 63 },
+    ))).diagnostic.code).toBe(SCHEDULE_DIAGNOSTIC_CODES.resourceLimit);
+    expect((await diagnostic(() => prepareLogicalGemmTileSchedule(
+      logical,
+      first.kernel,
+      firstSchedule.artifact,
+      { maxStagingElements: 127 },
+    ))).diagnostic.code).toBe(SCHEDULE_DIAGNOSTIC_CODES.resourceLimit);
   });
 
   it("keeps schedule hashes independent of transport metadata and separate from logical meaning", async () => {
