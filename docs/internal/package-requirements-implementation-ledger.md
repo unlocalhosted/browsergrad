@@ -3897,6 +3897,30 @@ whether any files may be left partially changed.
   14/15 seconds, parallel audit groups were bounded by 33.55/35.71 seconds,
   browser phases took 111.91/118.20 seconds, and complete real-world gates
   took 145.48/153.92 seconds.
+- `9e20a610` prepares an accepted layout from the exact retained
+  Worker/verifier/frame/artifact lineage through the shared Gate 2 semantic
+  seam. The opaque result remains an observed candidate with producer trust,
+  lowering authorization, backend execution, and release readiness false.
+- `3b400a86` keeps each source/dist job single-owner but runs two bounded browser
+  child shards after the four parallel audits. Exact-source CI `29769844668`
+  passed complete 159-case coverage as 80/79 in each bundle. Source shards took
+  96.57/96.69 seconds and distribution shards 96.48/97.10 seconds concurrently;
+  complete verifier times were 131.15/132.17 seconds. Aggregation rejects
+  missing, duplicate, failed, skipped, or unexpected outcomes.
+- `6e4901ca` reclaims only canonical self-owned interrupted corpus snapshots or
+  reservations for the same checkout target while holding its lease. Each
+  operation inspects at most 32 candidates, removes at most four, and traverses
+  at most 4,096 entries per candidate. Descriptor-relative no-follow traversal,
+  exact snapshot Git-blob identities, and UID/root/target/process binding retain
+  ambiguous state. A new test-scope rule ensures provisioning, ownership, and
+  reclamation changes select the focused regression gate automatically.
+- Current Node 25 proof passes the 66-file/600-test fast Vitest phase in 10.62
+  seconds and the full fast command in 21.80 seconds. The complete post-build
+  compiler suite passes 88 files/1,559 tests in 9.81 seconds. Corpus
+  provisioning/reclamation and scope tests, syntax, oxlint, and whitespace
+  checks pass locally. Exact-source CI `29802518928` passed all eight jobs in
+  about 3 minutes 46 seconds, including both Linux source/dist corpus gates,
+  Node 20/24/25, required-native checks, Chromium/WebGPU, and Pyodide.
 
 ## Quick Resume Checklist
 
@@ -3934,12 +3958,14 @@ The controller, package invocation, and package-owned raw-Wasm verifier are
 wired. The compiler-Worker invocation now binds the exact canonical derivative
 evidence region, while the execution-evidence boundary re-authenticates both
 the original host verifier authority and the exact protocol-issued result
-authority rather than accepting structural copies. The next Worker proof must
-instantiate only those host-verified current-ABI Wasm bytes, preserve the
-stable pre-bind VFS imports, bind exactly the exported unshared memory,
-exercise the allocator/result metrics synchronously, and keep lowering
-authority false until valid module observations satisfy the independent
-manifest and independently admitted producer trust.
+authority rather than accepting structural copies. That exact lineage can now
+prepare an accepted layout through shared semantics as an observed candidate;
+it cannot authorize lowering. The next Worker proof must instantiate only those
+host-verified current-ABI Wasm bytes, preserve the stable pre-bind VFS imports,
+bind exactly the exported unshared memory, exercise the allocator/result
+metrics synchronously, and keep lowering authority false until valid module
+observations satisfy the independent manifest and independently admitted
+producer trust.
 
 Submit the exact prepared file map, CUDA index, source evidence, and notice
 identities for external review. Once approval exists, bind the independently

@@ -1,7 +1,7 @@
 # BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
 - **Status:** normative platform architecture; implementation status is not implied
-- **Last reviewed:** 2026-07-19
+- **Last reviewed:** 2026-07-20
 - **Implementation ledger:**
   [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
 - **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
@@ -13,7 +13,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
 describe requirement strength. They are used deliberately rather than as
 general emphasis.
 
-## Implementation Checkpoint — Active 2026-07-19
+## Implementation Checkpoint — Active 2026-07-20
 
 Gates 0 through 2 remain verified; Gate 3 is active; Gates 4 through 7 have not
 started. The strict native producer, pinned no-shell Clang-Wasm executor,
@@ -21,22 +21,28 @@ isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
 are implemented on `main`. The current source additionally owns exact
 frontend-work instrumentation, the local Wasm C-ABI runner, and a canonical
 Worker result-control encoder. It now pins the current clean-built 27,125-byte
-generated factory inside one exact 584,954-byte package-owned Worker module
-with zero static or dynamic imports. The production controller captures its
-browser effects at module evaluation, composes only package-owned Worker bytes
-into a one-shot invocation, terminalizes every Worker/Blob/timer/listener
-effect before returning, and still mints no lowering authority. Immediately
-before minting execution evidence it re-unwraps the exact protocol-issued
-validated frame and cross-binds its invocation, request, profile,
-request-binding, and artifact identities; a structural copy cannot substitute
-for that authority. Validated terminal frames retain the exact
-observed-execution, invocation, request, profile, asset-manifest, VFS,
-runtime-ABI, and package-Worker authority chain;
-hostile view-copy graphs are checked with non-recursive, target-intrinsic cycle
-detection before any semantic authority can be minted. Two distinct
-cache-free builds now prove exact extractor Wasm/factory reproducibility; the
-package binds their canonical v3 evidence without claiming reproducibility of
-the still-incomplete distributed asset set.
+generated factory inside one exact 559,512-byte package-owned compiler Worker
+module and a separate exact 151,555-byte package-owned raw-Wasm verifier Worker;
+both have zero static or dynamic imports. The production controller captures
+browser effects at module evaluation, runs the exact verifier before preparing
+the compiler invocation, transfers only its bounded canonical derivative
+evidence, composes only package-owned Worker bytes, and terminalizes every
+Worker/Blob/timer/listener effect before returning. Caller-supplied verifier or
+conformance records cannot substitute for the retained host authority.
+Immediately before minting execution evidence the controller re-unwraps the
+exact protocol-issued validated frame and cross-binds its invocation, request,
+profile, request-binding, artifact, and verifier identities; a structural copy
+cannot substitute for that authority. Validated terminal frames retain the
+exact observed-execution, invocation, request, profile, asset-manifest, VFS,
+runtime-ABI, package-Worker, and verifier authority chain. An accepted layout
+from that exact chain can be prepared through the shared Gate 2 layout seam as
+an opaque observed semantic candidate, but preparation grants no producer
+trust, lowering, backend, or release authority. Hostile view-copy graphs are
+checked with non-recursive, target-intrinsic cycle detection before any
+semantic authority can be minted. Two distinct cache-free builds now prove
+exact extractor Wasm/factory reproducibility; the package binds their canonical
+v3 evidence without claiming reproducibility of the still-incomplete
+distributed asset set.
 
 Browser asset manifest v1.4 now binds one build-signature predicate, exact
 trust-store digest, and canonical builder allowlist into the profile-pinned
@@ -161,19 +167,20 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 510 tests across 56 files covering the build plan, runtime ABI,
+clean, then runs 600 tests across 66 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
-package invocation, Worker entry, production controller, exact header-tree
+package invocation, Worker entry, production controller, verifier evidence,
+observed layout-candidate preparation, exact header-tree
 inventory/materialization, seven-archive admission, strict archive
 normalization/extraction, the reviewed builder identity, CUDA-index admission,
 the complete header distribution review input, distribution-notice
 verification, exact notice-output materialization, two-root distribution
 reproducibility, exact package admission of that evidence, browser build-subject
 syntax, and signature/build-subject binding. The current Node 25 focused Vitest
-phase passes 510 tests across the same 56 files in 11.19 seconds. The complete
-local compiler suite passes 80 files and 1,501 tests in 12.51 seconds when run
-after the package build. The local feedback loop remains measured in tens of
-seconds.
+phase passes 600 tests across the same 66 files in 10.62 seconds, and the whole
+fast command completes in 21.80 seconds. The complete local compiler suite
+passes 88 files and 1,559 tests in 9.81 seconds when run after the package
+build. The local feedback loop remains measured in tens of seconds.
 Clean validation and two-build
 reproducibility still restore no cache and remain intentionally more expensive.
 
@@ -203,6 +210,27 @@ compared with about 6 minutes 14 seconds for pre-sharding run `29695555899`.
 Commands that clean or rewrite the same package build output remain mutually
 exclusive; parallelism is applied only where ownership and dependency edges
 are independent.
+
+The real-world verifier now also runs its four read-only compile/codegen corpus
+audits concurrently and divides the browser corpus into two bounded child
+processes inside each already-built source or distribution job. Exact-source CI
+`29769844668` passed both bundles with complete 159-case browser coverage split
+80/79 and no failed or skipped case. The source shards took 96.57 and 96.69
+seconds concurrently and the distribution shards took 96.48 and 97.10 seconds;
+complete verifier time was 131.15 and 132.17 seconds rather than the sum of the
+parallel stages. Shard evidence rejects missing, duplicate, or unexpected case
+outcomes before the gate can pass. Runner setup, dependency installation,
+workspace build, corpus ownership, and final aggregation remain intentionally
+single-owner operations.
+
+Corpus provisioning now uses target-scoped canonical ownership records for
+interrupted snapshots and reservations. While holding the same target lease, a
+later operation may inspect at most 32 candidates and reclaim at most four
+exact self-owned residues, each bounded to 4,096 entries. Descriptor-relative
+no-follow traversal, UID/root/target/process binding, exact snapshot Git-blob
+identity, and conservative retention protect foreign or ambiguous state. The
+remaining final leaf-unlink interval assumes cooperating same-UID writers honor
+the lease; no protection from hostile same-UID leaf replacement is claimed.
 
 Exact-source signature-binding run `29698350889` then passed the same complete
 graph in about 4 minutes 12 seconds, including Node 20/24/25, required-native,

@@ -107,21 +107,34 @@ The corpus gate itself now emits versioned timing artifacts. Four independent
 compile/codegen audits execute concurrently and preserve the same corpus
 selection, limits, failure policy, and browser thresholds. In the successful
 run, the parallel audit group was bounded by `llm.c` at 33.55 seconds for source
-and 35.71 seconds for distribution; the browser/WebGPU phases remained serial
-at 111.91 and 118.20 seconds. A same-machine comparison measured 46.22 seconds
-serial versus 22.01 seconds parallel for the audit phase, a 52.4 percent wall
-time reduction. Browser case sharding is therefore the next speed target, not
-another build-cache workaround.
+and 35.71 seconds for distribution. A same-machine comparison measured 46.22
+seconds serial versus 22.01 seconds parallel for the audit phase, a 52.4 percent
+wall-time reduction. Commit `3b400a86` then split the dominant browser corpus
+into two child processes without duplicating runner setup, install, workspace
+build, or provisioning. Exact-source CI `29769844668` passed all 159 cases as
+an 80/79 split for both source and distribution. The source shards overlapped
+at 96.57/96.69 seconds and the distribution shards at 96.48/97.10 seconds;
+complete verifier time was 131.15/132.17 seconds. The gate rejects incomplete,
+duplicate, failed, skipped, or unexpected shard outcomes before aggregation.
 
 Corpus provisioning is now an explicit gate rather than hidden verifier setup.
 It admits the pinned LeetCUDA gitlinks as non-audit metadata while binding their
 exact path, commit, and physical state; recovers only an unambiguous dead-owner
 lease; skips fetch/mutation for an already confirmed checkout; and probes a
 canonical Git/Python host-toolchain capability instead of assuming `/usr/bin`
-paths. The focused fixture provisions locally in about 0.44 seconds. These
+paths. The focused fixture provisions locally in about 0.44 to 0.48 seconds.
+Commit `6e4901ca` additionally gives interrupted snapshots and reservations
+canonical target-scoped ownership records and bounded reclamation: at most 32
+candidates inspected, four removed, and 4,096 entries considered per candidate
+under the target lease. Descriptor-relative no-follow traversal, exact Git-blob
+hashes, and UID/root/target/process binding keep ambiguous or foreign residue in
+place. These
 contracts close the CI gitlink failure, permanent post-`SIGKILL` busy state,
 unnecessary cached fetch, missing regression-gate, and undeclared host-tool
-layout findings.
+layout findings without claiming safety against hostile same-UID leaf swaps in
+the final unlink interval. Exact-source CI `29802518928` passed all eight jobs
+in about 3 minutes 46 seconds, including both Linux source/dist corpus gates,
+Node 20/24/25, required-native checks, Chromium/WebGPU, and Pyodide.
 
 The production compiler controller now runs the exact package-owned raw-Wasm
 verifier before preparing the compiler Worker invocation. It transfers a
@@ -130,18 +143,22 @@ conformance or verifier evidence, and rebinds the exact retained host verifier
 authority before minting Worker execution evidence. The regenerated zero-import
 compiler Worker bundle is 559,512 bytes with SHA-256
 `3fdc7d9a82fd91fa9eb61b0ac0b07fa95aed41cb89607a9cc8212e748c93468a`.
-The focused integration passes 9 files/94 tests; the fast harness passes 65
-files/597 tests in 10.92 seconds. This does not claim a valid compiler-Worker
-C++ compile, shared lowering authority, producer trust, legal approval, or
-release readiness.
+The focused integration passes 9 files/94 tests. The exact authenticated
+Worker/verifier/frame/artifact lineage can now prepare one accepted layout
+through the shared semantic seam as an opaque observed candidate, while keeping
+producer trust, lowering, backend, and release flags false. The current fast
+harness passes 66 files/600 tests in 10.62 seconds and completes end to end in
+21.80 seconds; the complete post-build compiler suite passes 88 files/1,559
+tests in 9.81 seconds. This does not claim a valid compiler-Worker C++ compile,
+shared lowering authority, producer trust, legal approval, or release readiness.
 
-The harness is improved, not finished. The 1,870-line provisioning module
-still embeds several Python filesystem helpers, rereads corpus bytes across
-multiple admission/snapshot/cleanup passes, retains failure residue without a
-bounded reclamation policy, and has a final path-unlink interval after inode
-validation. The browser/WebGPU runner remains the dominant feedback cost.
-These are current quality findings, not reasons to weaken the semantic or
-real-device gates.
+The harness is improved, not finished. Provisioning is now a 2,073-line module
+plus a 271-line descriptor-relative reclamation helper, still rereads corpus
+bytes across multiple admission/snapshot/cleanup passes, lacks a corpus-scale
+I/O budget/benchmark, and retains an unavoidable final stat-to-unlink interval
+under its cooperative same-UID threat model. Browser/WebGPU remains the
+dominant verifier cost even after sharding. These are current quality findings,
+not reasons to weaken the semantic or real-device gates.
 
 ## Why feedback was slow
 
