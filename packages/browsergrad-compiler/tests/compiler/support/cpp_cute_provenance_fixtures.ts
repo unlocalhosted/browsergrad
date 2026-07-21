@@ -89,7 +89,7 @@ export interface AuthorizedCppCuteProvenanceFixture extends CppCuteProvenanceFix
 }
 
 export interface CppCuteProvenanceFixtureOptions {
-  readonly mutatePayload?: (payload: CppCuteFrontendPayloadV3) => void;
+  readonly mutatePayload?: (payload: CppCuteFrontendPayloadV3) => void | Promise<void>;
 }
 
 export async function createCppCuteProvenanceFixture(

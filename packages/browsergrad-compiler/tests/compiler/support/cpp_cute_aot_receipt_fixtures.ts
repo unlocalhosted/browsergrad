@@ -99,7 +99,7 @@ export async function createCppCuteAotReceiptFixture(
   profile: PreparedCppCuteFrontendProfile,
   executionEnvironment: PreparedCppCuteAotExecutionEnvironment,
   outcome: "accepted" | "rejected" = "accepted",
-  mutatePayload?: (payload: CppCuteFrontendPayloadV3) => void,
+  mutatePayload?: (payload: CppCuteFrontendPayloadV3) => void | Promise<void>,
 ): Promise<CppCuteAotReceiptFixture> {
   const sourceBytes = cppCuteAotFixtureSourceBytes();
   const artifactInput = await createRealSourceBackedArtifact(
@@ -114,7 +114,7 @@ export async function createCppCuteAotReceiptFixture(
   const main = payload.inputs.files.find((file) => file.role === "main-source" && file.owner.kind === "source");
   if (main === undefined) throw new Error("fixture artifact lost main source");
   const sourceSnapshots = Object.freeze([{ virtualPath: main.virtualPath, bytes: sourceBytes }]);
-  const request = await createRequest(profile, main, sourceBytes);
+  const request = await createRequest(profile, payload, main, sourceBytes);
   const statement: CppCuteGitSourceReferenceStatementV1 = {
     schema: CPP_CUTE_GIT_SOURCE_REFERENCE_SCHEMA,
     version: { major: 1, minor: 0 },
@@ -220,6 +220,7 @@ export function cppCuteAotFixtureSourceBytes(): Uint8Array {
 
 async function createRequest(
   profile: PreparedCppCuteFrontendProfile,
+  payload: CppCuteFrontendPayloadV3,
   main: CppCuteFrontendPayloadV3["inputs"]["files"][number],
   bytes: Uint8Array,
 ): Promise<CppCuteFrontendRequestV1> {
@@ -237,10 +238,16 @@ async function createRequest(
     endByte: wire(bytes.byteLength),
     tokenSha256: await sha256Hex(bytes),
   };
+  const selectedEntryId = payload.outcome.kind === "accepted"
+    ? payload.outcome.selectedEntryIds[0]
+    : undefined;
+  const selectedEntry = payload.entries.find((entry) => entry.entryId === selectedEntryId);
+  const entryKind = selectedEntry?.kind === "view-copy"
+    ? { kind: "view-copy" as const, declarationKind: "function" as const }
+    : { kind: "layout" as const, declarationKind: "variable" as const };
   const entryBody = {
     requestId: `bg.cpp.entry-request.sha256.${"0".repeat(64)}`,
-    kind: "layout" as const,
-    declarationKind: "variable" as const,
+    ...entryKind,
     anchor,
   };
   const entry: CppCuteFrontendEntryRequestV1 = {
@@ -267,7 +274,7 @@ async function createRealSourceBackedArtifact(
   compilationContractHash: string,
   bytes: Uint8Array,
   outcome: "accepted" | "rejected",
-  mutatePayload?: (payload: CppCuteFrontendPayloadV3) => void,
+  mutatePayload?: (payload: CppCuteFrontendPayloadV3) => void | Promise<void>,
 ): Promise<CppCuteFrontendArtifactV3> {
   const artifact = await createCppCuteArtifactInput(compilationContractHash);
   const payload = structuredClone(artifact.payload) as CppCuteFrontendPayloadV3;
@@ -287,7 +294,7 @@ async function createRealSourceBackedArtifact(
   (rewritten as { contentSha256: string }).contentSha256 = body.contentSha256;
   (rewritten as { byteLength: WireU64 }).byteLength = body.byteLength;
   await rebindCppCuteFixtureSourceEntityIds(payload);
-  mutatePayload?.(payload);
+  await mutatePayload?.(payload);
   const hashes = await computeCppCuteInputHashes(payload);
   (payload.inputs as { sourceSetSha256: string }).sourceSetSha256 = hashes.sourceSetSha256;
   (payload.inputs as { headerSetSha256: string }).headerSetSha256 = hashes.headerSetSha256;

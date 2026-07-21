@@ -295,3 +295,10 @@ export {
   type AuthorizedCppCuteBrowserLayoutArtifactRecord,
   type CppCuteBrowserLayoutAuthorizationErrorCode,
 } from "./cpp_cute_browser_layout_authorization.js";
+export {
+  CppCuteViewCopyLoweringError,
+  lowerAuthorizedCppCuteViewCopyEntry,
+  type CppCuteViewCopyLoweringErrorCode,
+  type LowerAuthorizedCppCuteViewCopyEntryOptions,
+  type LowerAuthorizedCppCuteViewCopyEntryRequest,
+} from "./cpp_cute_view_copy_lowering.js";

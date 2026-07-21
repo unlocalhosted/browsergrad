@@ -149,7 +149,7 @@ export async function prepareCppCuteLayoutSemantics(
   if (selectedRootFacts.length !== 1 || selectedRootFacts[0] !== fact) {
     inconsistent("$.artifact.facts", "selected layout result declaration has ambiguous layout/tensor ownership");
   }
-  const layout = lowerLayoutFact(fact, options.limits);
+  const layout = lowerStaticCppCuteLayoutFact(fact, options.limits);
   throwIfCppCuteLayoutAborted(options.signal);
   let preparedLayout: PreparedLayoutExpression;
   try {
@@ -178,27 +178,31 @@ export async function prepareCppCuteLayoutSemantics(
   });
 }
 
-function lowerLayoutFact(fact: CppCuteAffineLayoutFactV1, limits: DecodeLimits): LayoutExpr {
-  if (!sameTopology(fact.shape, fact.stride)) inconsistent("$.artifact.layoutFact.stride", "shape/stride hierarchy topology drifted after verification");
+export function lowerStaticCppCuteLayoutFact(
+  fact: CppCuteAffineLayoutFactV1,
+  limits: DecodeLimits,
+  path = "$.artifact.layoutFact",
+): LayoutExpr {
+  if (!sameTopology(fact.shape, fact.stride)) inconsistent(`${path}.stride`, "shape/stride hierarchy topology drifted after verification");
   const shapeModes = topModes(fact.shape);
   const strideModes = topModes(fact.stride);
   if (fact.rank !== shapeModes.length || strideModes.length !== shapeModes.length) {
-    inconsistent("$.artifact.layoutFact.rank", "layout rank drifted after verification");
+    inconsistent(`${path}.rank`, "layout rank drifted after verification");
   }
-  const shapeByMode = shapeModes.map((mode, index) => staticLeaves(mode, `$.artifact.layoutFact.shape.mode[${index}]`, limits));
-  const strideByMode = strideModes.map((mode, index) => staticLeaves(mode, `$.artifact.layoutFact.stride.mode[${index}]`, limits));
+  const shapeByMode = shapeModes.map((mode, index) => staticLeaves(mode, `${path}.shape.mode[${index}]`, limits));
+  const strideByMode = strideModes.map((mode, index) => staticLeaves(mode, `${path}.stride.mode[${index}]`, limits));
   const shapeLeaves = shapeByMode.flat();
   const strideLeaves = strideByMode.flat();
   if (shapeLeaves.length !== fact.leafRank || strideLeaves.length !== fact.leafRank) {
-    inconsistent("$.artifact.layoutFact.leafRank", "layout leaf rank drifted after verification");
+    inconsistent(`${path}.leafRank`, "layout leaf rank drifted after verification");
   }
-  if (shapeLeaves.some((extent) => extent <= 0n)) unsupported("$.artifact.layoutFact.shape", "layout lowering requires positive static shape extents");
-  const size = staticValue(fact.size, "$.artifact.layoutFact.size", limits);
-  const cosize = staticValue(fact.cosize, "$.artifact.layoutFact.cosize", limits);
+  if (shapeLeaves.some((extent) => extent <= 0n)) unsupported(`${path}.shape`, "layout lowering requires positive static shape extents");
+  const size = staticValue(fact.size, `${path}.size`, limits);
+  const cosize = staticValue(fact.cosize, `${path}.cosize`, limits);
   let summary;
   try {
     summary = evaluateStaticCppCuteLayoutSummary(shapeLeaves, strideLeaves, {
-      path: "$.artifact.layoutFact",
+      path,
       limits,
     });
   } catch (error) {
@@ -212,8 +216,8 @@ function lowerLayoutFact(fact: CppCuteAffineLayoutFactV1, limits: DecodeLimits):
       { cause: error },
     );
   }
-  if (size !== summary.size) inconsistent("$.artifact.layoutFact.size", "layout size drifted after verification");
-  if (cosize !== summary.cosize) inconsistent("$.artifact.layoutFact.cosize", "layout cosize drifted after verification");
+  if (size !== summary.size) inconsistent(`${path}.size`, "layout size drifted after verification");
+  if (cosize !== summary.cosize) inconsistent(`${path}.cosize`, "layout cosize drifted after verification");
   const leafLayout: LayoutExpr = {
     kind: "strided",
     shape: shapeLeaves.map(constant),

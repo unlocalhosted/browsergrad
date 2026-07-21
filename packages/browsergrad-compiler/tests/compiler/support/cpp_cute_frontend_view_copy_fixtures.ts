@@ -34,6 +34,8 @@ const qualifiers = { const: false, volatile: false, restrict: false } as const;
 export const CPP_CUTE_VIEW_COPY_VOID_TYPE_ID = stableId("type", "0");
 export const CPP_CUTE_VIEW_COPY_SOURCE_POINTER_TYPE_ID = stableId("type", "1");
 export const CPP_CUTE_VIEW_COPY_DESTINATION_POINTER_TYPE_ID = stableId("type", "2");
+export const CPP_CUTE_VIEW_COPY_FLOAT_TYPE_ID = stableId("type", "a");
+export const CPP_CUTE_VIEW_COPY_CONST_FLOAT_TYPE_ID = stableId("type", "b");
 export const CPP_CUTE_VIEW_COPY_FUNCTION_TYPE_ID = stableId("type", "5");
 export const CPP_CUTE_VIEW_COPY_SOURCE_TENSOR_TYPE_ID = stableId("type", "6");
 export const CPP_CUTE_VIEW_COPY_DESTINATION_TENSOR_TYPE_ID = stableId("type", "7");
@@ -66,6 +68,16 @@ const CPP_CUTE_VIEW_COPY_OPERATION_STATEMENT_ID = stableId("statement", "3");
 export async function createCppCuteViewCopyArtifactInput(): Promise<Record<string, unknown>> {
   const artifact = structuredClone(await createCppCuteArtifactInput()) as CppCuteFrontendArtifactV3;
   const payload = artifact.payload;
+  await mutateCppCutePayloadToViewCopy(payload);
+  const boundArtifact: CppCuteFrontendArtifactV3 = {
+    ...artifact,
+    artifactId: await deriveCppCuteFrontendArtifactId(payload),
+    payload,
+  };
+  return boundArtifact as unknown as Record<string, unknown>;
+}
+
+export async function mutateCppCutePayloadToViewCopy(payload: CppCuteFrontendPayloadV3): Promise<void> {
   const baseInt = payload.types.find((type) => type.typeId === CPP_CUTE_FIXTURE_INT_TYPE_ID);
   if (baseInt === undefined || baseInt.kind !== "builtin") throw new Error("fixture lost int type");
 
@@ -86,27 +98,40 @@ export async function createCppCuteViewCopyArtifactInput(): Promise<Record<strin
       qualifiers: { ...qualifiers, const: true },
     },
     {
+      ...baseInt,
+      typeId: CPP_CUTE_VIEW_COPY_FLOAT_TYPE_ID,
+      canonicalName: "float",
+      builtin: "float",
+    },
+    {
+      ...baseInt,
+      typeId: CPP_CUTE_VIEW_COPY_CONST_FLOAT_TYPE_ID,
+      canonicalName: "const float",
+      builtin: "float",
+      qualifiers: { ...qualifiers, const: true },
+    },
+    {
       typeId: CPP_CUTE_VIEW_COPY_SOURCE_POINTER_TYPE_ID,
       kind: "pointer",
-      canonicalName: "const int *",
+      canonicalName: "const float *",
       qualifiers,
       origin,
-      pointeeTypeId: CPP_CUTE_VIEW_COPY_CONST_INT_TYPE_ID,
+      pointeeTypeId: CPP_CUTE_VIEW_COPY_CONST_FLOAT_TYPE_ID,
       addressSpace: "global",
     },
     {
       typeId: CPP_CUTE_VIEW_COPY_DESTINATION_POINTER_TYPE_ID,
       kind: "pointer",
-      canonicalName: "int *",
+      canonicalName: "float *",
       qualifiers,
       origin,
-      pointeeTypeId: CPP_CUTE_FIXTURE_INT_TYPE_ID,
+      pointeeTypeId: CPP_CUTE_VIEW_COPY_FLOAT_TYPE_ID,
       addressSpace: "global",
     },
     {
       typeId: CPP_CUTE_VIEW_COPY_FUNCTION_TYPE_ID,
       kind: "function",
-      canonicalName: "void (const int *, int *)",
+      canonicalName: "void (const float *, float *)",
       qualifiers,
       origin,
       returnTypeId: CPP_CUTE_VIEW_COPY_VOID_TYPE_ID,
@@ -129,7 +154,7 @@ export async function createCppCuteViewCopyArtifactInput(): Promise<Record<strin
     {
       typeId: CPP_CUTE_VIEW_COPY_SOURCE_TENSOR_TYPE_ID,
       kind: "template-specialization",
-      canonicalName: "cute::Tensor<const int *, SourceLayout>",
+      canonicalName: "cute::Tensor<const float *, SourceLayout>",
       qualifiers,
       origin,
       templateDeclarationId: CPP_CUTE_VIEW_COPY_TENSOR_TEMPLATE_DECLARATION_ID,
@@ -141,7 +166,7 @@ export async function createCppCuteViewCopyArtifactInput(): Promise<Record<strin
     {
       typeId: CPP_CUTE_VIEW_COPY_DESTINATION_TENSOR_TYPE_ID,
       kind: "template-specialization",
-      canonicalName: "cute::Tensor<int *, DestinationLayout>",
+      canonicalName: "cute::Tensor<float *, DestinationLayout>",
       qualifiers,
       origin,
       templateDeclarationId: CPP_CUTE_VIEW_COPY_TENSOR_TEMPLATE_DECLARATION_ID,
@@ -195,14 +220,14 @@ export async function createCppCuteViewCopyArtifactInput(): Promise<Record<strin
       ...declarationBase,
       declarationId: CPP_CUTE_VIEW_COPY_FUNCTION_DECLARATION_ID,
       kind: "function",
-      canonicalUsr: "c:@F@copy_views#*1I#*I#",
+      canonicalUsr: "c:@F@copy_views#*1f#*f#",
       canonicalName: "copy_views",
       lexicalParentId: null,
       semanticParentId: null,
       typeId: CPP_CUTE_VIEW_COPY_FUNCTION_TYPE_ID,
       definitionKind: "definition",
       linkage: "external",
-      mangledName: "_Z10copy_viewsPKiPi",
+      mangledName: "_Z10copy_viewsPKfPf",
       cudaAttributes: { host: false, device: true, global: false, forceInline: false },
     },
     {
@@ -290,7 +315,7 @@ export async function createCppCuteViewCopyArtifactInput(): Promise<Record<strin
       kind: "tensor",
       origin,
       resultDeclarationId: CPP_CUTE_VIEW_COPY_SOURCE_TENSOR_DECLARATION_ID,
-      elementTypeId: CPP_CUTE_FIXTURE_INT_TYPE_ID,
+      elementTypeId: CPP_CUTE_VIEW_COPY_FLOAT_TYPE_ID,
       layoutFactId: CPP_CUTE_FIXTURE_LAYOUT_FACT_ID,
       engine: {
         kind: "global-pointer",
@@ -304,7 +329,7 @@ export async function createCppCuteViewCopyArtifactInput(): Promise<Record<strin
       kind: "tensor",
       origin,
       resultDeclarationId: CPP_CUTE_VIEW_COPY_DESTINATION_TENSOR_DECLARATION_ID,
-      elementTypeId: CPP_CUTE_FIXTURE_INT_TYPE_ID,
+      elementTypeId: CPP_CUTE_VIEW_COPY_FLOAT_TYPE_ID,
       layoutFactId: CPP_CUTE_VIEW_COPY_DESTINATION_LAYOUT_FACT_ID,
       engine: {
         kind: "global-pointer",
@@ -405,15 +430,52 @@ export async function createCppCuteViewCopyArtifactInput(): Promise<Record<strin
 
   const functionEntityBody = {
     entityKind: "function" as const,
-    canonicalIdentity: "c:@F@copy_views#*1I#*I#",
+    canonicalIdentity: "c:@F@copy_views#*1f#*f#",
     origin,
     domains: ["device", "host"] as const,
   };
   const functionSourceEntityId = await deriveCppCuteSourceEntityId(payload, functionEntityBody);
+  const floatEntityBody = {
+    entityKind: "type" as const,
+    canonicalIdentity: "float",
+    origin,
+    domains: ["device", "host"] as const,
+  };
+  const floatSourceEntityId = await deriveCppCuteSourceEntityId(payload, floatEntityBody);
   const sourceEntities = [
     ...payload.sourceEntities.filter((entity) => entity.entityKind === "type"),
+    { sourceEntityId: floatSourceEntityId, ...floatEntityBody },
     { sourceEntityId: functionSourceEntityId, ...functionEntityBody },
   ].sort((left, right) => left.sourceEntityId.localeCompare(right.sourceEntityId));
+
+  const sourceAbi: CppCuteFrontendPayloadV3["sourceAbi"] = {
+    ...payload.sourceAbi,
+    types: ([
+      ...payload.sourceAbi.types,
+      {
+        domain: "device" as const,
+        shared: true,
+        sourceTypeEntityId: floatSourceEntityId,
+        deviceTypeId: CPP_CUTE_VIEW_COPY_FLOAT_TYPE_ID,
+        sizeBits: "32" as never,
+        alignmentBits: "32" as never,
+        fields: [],
+        bases: [],
+      },
+      {
+        domain: "host" as const,
+        shared: true,
+        sourceTypeEntityId: floatSourceEntityId,
+        deviceTypeId: null,
+        sizeBits: "32" as never,
+        alignmentBits: "32" as never,
+        fields: [],
+        bases: [],
+      },
+    ] satisfies CppCuteFrontendPayloadV3["sourceAbi"]["types"]).sort((left, right) => (
+      `${left.domain}:${left.sourceTypeEntityId}`.localeCompare(`${right.domain}:${right.sourceTypeEntityId}`)
+    )),
+  };
 
   const nextPayload: CppCuteFrontendPayloadV3 = {
     ...payload,
@@ -431,6 +493,7 @@ export async function createCppCuteViewCopyArtifactInput(): Promise<Record<strin
     }],
     outcome: { kind: "accepted", selectedEntryIds: [CPP_CUTE_FIXTURE_ENTRY_ID] },
     sourceEntities,
+    sourceAbi,
     semanticPasses: payload.semanticPasses.map((pass) => ({
       ...pass,
       selectedSourceRootEntityIds: [functionSourceEntityId],
@@ -442,10 +505,5 @@ export async function createCppCuteViewCopyArtifactInput(): Promise<Record<strin
     sharedSurfaceSha256: await computeCppCuteSharedSurfaceHash(nextPayload, pass.domain),
   })));
   const boundPayload = unshareJsonTree<CppCuteFrontendPayloadV3>({ ...nextPayload, semanticPasses });
-  const boundArtifact: CppCuteFrontendArtifactV3 = {
-    ...artifact,
-    artifactId: await deriveCppCuteFrontendArtifactId(boundPayload),
-    payload: boundPayload,
-  };
-  return boundArtifact as unknown as Record<string, unknown>;
+  Object.assign(payload, boundPayload);
 }

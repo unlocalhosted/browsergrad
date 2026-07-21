@@ -7,6 +7,7 @@ export default defineConfig({
     include: [
       "scripts/cpp_cute_browser_build/*.test.ts",
       "tests/compiler/cpp_cute_browser_*.test.ts",
+      "tests/compiler/cpp_cute_*_lowering.test.ts",
       "tests/compiler/cpp_cute_frontend_artifact.test.ts",
       "tests/compiler/cpp_cute_frontend_profile.test.ts",
       "tests/compiler/verify_compiler_runner.test.ts",
