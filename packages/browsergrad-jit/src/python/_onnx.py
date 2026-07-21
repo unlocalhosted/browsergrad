@@ -59,11 +59,12 @@ from ._ir import (
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
-    OP_WHERE, OP_BROADCAST_TO, OP_SGD_UPDATE, validate_broadcast_to_contract,
+    OP_WHERE, OP_BROADCAST_TO, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
 )
 from ._errors import JitError
+from ._framework_contracts import validate_broadcast_to_contract
 
 
 class OnnxUnmappableOp(JitError):

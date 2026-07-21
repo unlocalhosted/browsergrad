@@ -32,6 +32,8 @@ describe("Python source registry", () => {
     const paths = SOURCE_FILES.map((f) => f.path);
     expect(paths).toEqual([
       "browsergrad_jit/_errors.py",
+      "browsergrad_jit/framework-operation-contracts.v1.json",
+      "browsergrad_jit/_framework_contracts.py",
       "browsergrad_jit/_ir.py",
       "browsergrad_jit/_buffer_table.py",
       "browsergrad_jit/_fusion_config.py",

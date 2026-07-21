@@ -48,13 +48,14 @@ from ._ir import (
     OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
-    OP_SCATTER_ADD, OP_BROADCAST_TO, validate_broadcast_to_contract,
+    OP_SCATTER_ADD, OP_BROADCAST_TO,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 )
 from ._buffer_table import BufferTable
 from ._errors import RealizationError
+from ._framework_contracts import validate_broadcast_to_contract
 
 
 # A dispatch handler. Receives the node, the in-flight value table, and the

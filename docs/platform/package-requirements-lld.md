@@ -165,6 +165,22 @@ completion: remaining Grad view/dtype debt, runtime/profile consumption, the
 remaining advertised opaque operations, and contract-generated public support
 tables remain open.
 
+The first executable framework-operation registry now removes the hand-written
+support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
+record binds `Tensor.expand` to the same validator invoked by construction,
+CPU, VJP, vmap, ONNX, and tensor-plan execution. Import rejects duplicate keys,
+open fields, unknown decisions, invalid versions, duplicate identities, and
+records without an exact executable validator. Public
+`framework_operation_support()` returns a detached deterministic table with
+explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
+residency, and materialization decisions. A WebGPU profile is eligibility, not
+device availability or execution evidence. The architecture gate independently
+checks the registry and preserves the exact partition of the original 39
+opaque IDs into 38 still-opaque and one typed retirement. ADR-0003 records this
+public contract. The table currently covers typed migrations only; completing
+the remaining operation families and making runtime/profile UI consume these
+records remain Gate 6 work.
+
 Browser asset manifest v1.4 now binds one build-signature predicate, exact
 trust-store digest, and canonical builder allowlist into the profile-pinned
 asset-set identity. One strict DSSE/in-toto verifier rebinds a valid P-256

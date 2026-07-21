@@ -13,6 +13,8 @@
  * without going through `installJit`.
  */
 
+import { FRAMEWORK_OPERATION_CONTRACTS_JSON } from "./framework-operation-contracts.v1.generated.js";
+import { FRAMEWORK_CONTRACTS_PY } from "./_framework_contracts.generated.js";
 import { IR_PY } from "./_ir.generated.js";
 import { ERRORS_PY } from "./_errors.generated.js";
 import { BUFFER_TABLE_PY } from "./_buffer_table.generated.js";
@@ -111,6 +113,7 @@ from ._errors import (
     BufferTableError,
 )
 from . import _functional, _nn, _optim
+from . import _framework_contracts as _framework_contracts_mod
 from . import _fusion as _fusion_mod
 from . import _fusion_config as _fc
 from . import _trace_cache as _tc
@@ -144,6 +147,11 @@ nn = _nn
 optim = _optim
 functional = _functional
 F = _functional
+
+
+def framework_operation_support():
+    """Return executable typed-operation decisions used by every JIT boundary."""
+    return _framework_contracts_mod.framework_operation_support()
 
 
 # bg.jit — the introspection + control surface for the JIT.
@@ -734,6 +742,7 @@ __all__ = [
     "register_webgpu_bridge", "unregister_webgpu_bridge",
     "webgpu_is_available", "webgpu_supported_opcodes",
     "gpu_plan_summary",
+    "framework_operation_support",
     "install_torch_alias", "uninstall_torch_alias",
     "load_safetensors", "save_safetensors",
     "cache_stats", "clear_cache",
@@ -761,6 +770,8 @@ export interface PythonSource {
  */
 export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_errors.py", content: ERRORS_PY },
+  { path: "browsergrad_jit/framework-operation-contracts.v1.json", content: FRAMEWORK_OPERATION_CONTRACTS_JSON },
+  { path: "browsergrad_jit/_framework_contracts.py", content: FRAMEWORK_CONTRACTS_PY },
   { path: "browsergrad_jit/_ir.py", content: IR_PY },
   { path: "browsergrad_jit/_buffer_table.py", content: BUFFER_TABLE_PY },
   { path: "browsergrad_jit/_fusion_config.py", content: FUSION_CONFIG_PY },

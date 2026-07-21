@@ -60,8 +60,9 @@ from ._ir import (
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
     OP_CONST, OP_BROADCAST_TO,
-    OP_ISNAN, validate_broadcast_to_contract,
+    OP_ISNAN,
 )
+from ._framework_contracts import validate_broadcast_to_contract
 
 
 # ---------------------------------------------------------------------------

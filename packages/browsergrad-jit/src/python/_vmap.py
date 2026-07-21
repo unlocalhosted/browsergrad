@@ -68,10 +68,10 @@ from ._ir import (
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
     OP_PAD, OP_SLICE, OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
-    validate_broadcast_to_contract,
     OP_STORE,
 )
 from ._errors import JitNotImplementedError
+from ._framework_contracts import validate_broadcast_to_contract
 
 
 _VMAP_RULES: Dict[str, Callable[..., UOp]] = {}

@@ -1,0 +1,30 @@
+{
+  "schema": "browsergrad.jit.framework-operation-contracts",
+  "version": {
+    "major": 1,
+    "minor": 0
+  },
+  "operations": [
+    {
+      "contractId": "browsergrad.jit.framework.tensor.expand.v1",
+      "publicSurface": "Tensor.expand",
+      "opcode": "BROADCAST_TO",
+      "semanticState": "typed",
+      "shapeContract": "static-broadcast-with-existing-dim-minus-one",
+      "dtypeContract": "preserve-input",
+      "decisions": {
+        "cpu": "supported-numpy-owning-copy",
+        "closureAutograd": "supported-unbroadcast-sum",
+        "symbolicVjp": "supported-unbroadcast-sum",
+        "functionalGrad": "supported-via-symbolic-vjp",
+        "vmap": "supported-leading-batch-axis",
+        "onnxExport": "supported-opset17-expand",
+        "tensorPlan": "supported-primitive",
+        "webgpu": "profile-nonempty-f32-rank-at-most-4",
+        "residency": "supported-materializing-and-resident",
+        "materialization": "cpu-owning-copy"
+      },
+      "retiredOpaqueOperationId": "jit.custom.expand.v0"
+    }
+  ]
+}

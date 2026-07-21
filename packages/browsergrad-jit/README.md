@@ -134,6 +134,14 @@ map the same node; and the materializing/resident tensor-plan routes accept its
 current f32 rank-at-most-four WebGPU profile. Invalid, non-integral, rank-
 reducing, or incompatible shapes fail before execution.
 
+`bg.framework_operation_support()` returns the versioned public decision table
+for framework operations admitted to typed execution. The table is generated
+from the same package registry that binds executable validators at CPU,
+autograd, transform, export, and plan boundaries; each call returns detached
+data. Backend entries name eligibility profiles only. Check runtime/device
+availability and execution evidence separately. Operations absent from this
+table have no admitted typed framework-operation contract.
+
 ### Gradient control
 ```python
 with bg.no_grad():

@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from typing import Any, Tuple, FrozenSet
 
 from ._errors import ShapeError
+from ._framework_contracts import validate_framework_operation_contract
 
 
 # ---------------------------------------------------------------------------
@@ -266,66 +267,7 @@ class UOp:
                 f"{sorted(_KNOWN_DTYPES)}"
             )
         if self.op == OP_BROADCAST_TO:
-            validate_broadcast_to_contract(self)
-
-
-def validate_broadcast_to_contract(node: UOp) -> Tuple[int, ...]:
-    """Validate the complete typed BROADCAST_TO contract.
-
-    The check is intentionally reusable at construction and at every
-    transform/export/execution boundary. ``UOp`` is frozen, but its legacy
-    ``arg`` dictionary is not deeply immutable; revalidation therefore turns
-    post-construction mutation into a local failure rather than letting CPU,
-    export, and WebGPU paths disagree.
-    """
-    if node.op != OP_BROADCAST_TO:
-        raise ShapeError(
-            f"BROADCAST_TO contract validator received opcode {node.op!r}"
-        )
-    if len(node.inputs) != 1:
-        raise ShapeError(
-            f"BROADCAST_TO requires exactly one input, got {len(node.inputs)}"
-        )
-    if type(node.arg) is not dict:
-        raise ShapeError("BROADCAST_TO arg must be a plain dict")
-    fields = set(node.arg)
-    if "shape" not in fields or not fields.issubset({"shape", "vjp_of"}):
-        raise ShapeError(
-            "BROADCAST_TO arg fields must be exactly 'shape' plus optional 'vjp_of'"
-        )
-    if "vjp_of" in node.arg and not isinstance(node.arg["vjp_of"], UOp):
-        raise ShapeError("BROADCAST_TO arg.vjp_of must reference a UOp")
-    target = node.arg["shape"]
-    if type(target) is not tuple:
-        raise ShapeError("BROADCAST_TO arg.shape must be a tuple")
-    for axis, extent in enumerate(target):
-        if type(extent) is not int or extent < 0:
-            raise ShapeError(
-                f"BROADCAST_TO arg.shape[{axis}] must be a non-negative int, got {extent!r}"
-            )
-    if target != node.shape:
-        raise ShapeError(
-            f"BROADCAST_TO arg.shape {target} does not match node shape {node.shape}"
-        )
-    source = node.inputs[0]
-    if node.dtype != source.dtype:
-        raise ShapeError(
-            f"BROADCAST_TO must preserve dtype {source.dtype!r}, got {node.dtype!r}"
-        )
-    if len(source.shape) > len(target):
-        raise ShapeError(
-            f"BROADCAST_TO cannot reduce rank {len(source.shape)} to {len(target)}"
-        )
-    leading = len(target) - len(source.shape)
-    for axis, source_extent in enumerate(source.shape):
-        target_axis = axis + leading
-        target_extent = target[target_axis]
-        if source_extent != 1 and source_extent != target_extent:
-            raise ShapeError(
-                "BROADCAST_TO incompatible dimension "
-                f"{axis}: {source_extent} -> {target_extent}"
-            )
-    return target
+            validate_framework_operation_contract(self)
 
 
 # Dtypes the IR knows about. Add new dtypes here AND update the dispatch

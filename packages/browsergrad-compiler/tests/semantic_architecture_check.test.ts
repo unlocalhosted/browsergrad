@@ -503,7 +503,12 @@ def op(x):
     groupedCalls.constructorSites[0]!.constructorCount = 2;
     groupedCalls.constructorSites.pop();
     const groupedFailures = validateJitOpaqueOperationInventory(groupedCalls, fixture, jitFreeze);
-    expect(groupedFailures).toContainEqual(expect.stringContaining("36 exact CUSTOM constructor calls"));
+    const frozenConstructorCount = Object.values(
+      jitFreeze.constructorCounts as Record<string, number>,
+    ).reduce((total, count) => total + count, 0);
+    expect(groupedFailures).toContainEqual(
+      expect.stringContaining(`${frozenConstructorCount} exact frozen CUSTOM constructor calls`),
+    );
     expect(groupedFailures).toContainEqual(expect.stringContaining("constructorCount must be exactly 1"));
 
     const collapsedPlanDecision = structuredClone(inventory) as typeof inventory & {

@@ -37,8 +37,8 @@ from ._ir import (
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM, OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX, OP_CUSTOM,
-    validate_broadcast_to_contract,
 )
+from ._framework_contracts import validate_broadcast_to_contract
 
 
 _DTYPE_BYTES: Dict[str, int] = {

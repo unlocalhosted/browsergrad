@@ -48,6 +48,7 @@ export function runSemanticArchitectureCheck(root = repoRoot) {
   checkWorkspaceDependencies(root, failures);
   checkWorkspaceImports(root, ts, failures);
   checkGeneratedPython(root, failures);
+  checkJitFrameworkOperationContracts(root, manifest, failures);
 
   const adapters = Array.isArray(manifest.adapters) ? manifest.adapters : [];
   for (const adapter of adapters) {
@@ -680,6 +681,180 @@ export function validateJitOpaqueOperationInventory(inventory, fixture, freeze, 
     }
   }
   return failures;
+}
+
+function checkJitFrameworkOperationContracts(root, manifest, failures) {
+  const registryFile = path.join(
+    root,
+    "packages/browsergrad-jit/src/python/framework-operation-contracts.v1.json",
+  );
+  const registry = readJson(registryFile, failures);
+  if (!isRecord(registry)) return;
+  if (fs.statSync(registryFile).size < 1 || fs.statSync(registryFile).size > 16 * 1024) {
+    failures.push("JIT framework-operation registry must contain 1..16384 bytes");
+  }
+  compareExactKeys("JIT framework-operation registry", registry, ["schema", "version", "operations"], failures);
+  if (registry.schema !== "browsergrad.jit.framework-operation-contracts") {
+    failures.push("JIT framework-operation registry schema changed");
+  }
+  if (!isRecord(registry.version)) {
+    failures.push("JIT framework-operation registry version must be an object");
+  } else {
+    compareExactKeys("JIT framework-operation registry version", registry.version, ["major", "minor"], failures);
+    if (registry.version.major !== 1 || registry.version.minor !== 0) {
+      failures.push("JIT framework-operation registry version must be exactly 1.0");
+    }
+  }
+  if (!Array.isArray(registry.operations) || registry.operations.length === 0) {
+    failures.push("JIT framework-operation registry operations must be a nonempty array");
+    return;
+  }
+
+  const operationFields = [
+    "contractId",
+    "publicSurface",
+    "opcode",
+    "semanticState",
+    "shapeContract",
+    "dtypeContract",
+    "decisions",
+    "retiredOpaqueOperationId",
+  ];
+  const decisionFields = [
+    "cpu",
+    "closureAutograd",
+    "symbolicVjp",
+    "functionalGrad",
+    "vmap",
+    "onnxExport",
+    "tensorPlan",
+    "webgpu",
+    "residency",
+    "materialization",
+  ];
+  const allowed = {
+    semanticState: new Set(["typed"]),
+    shapeContract: new Set(["static-broadcast-with-existing-dim-minus-one"]),
+    dtypeContract: new Set(["preserve-input"]),
+    cpu: new Set(["supported-numpy-owning-copy"]),
+    closureAutograd: new Set(["supported-unbroadcast-sum"]),
+    symbolicVjp: new Set(["supported-unbroadcast-sum"]),
+    functionalGrad: new Set(["supported-via-symbolic-vjp"]),
+    vmap: new Set(["supported-leading-batch-axis"]),
+    onnxExport: new Set(["supported-opset17-expand"]),
+    tensorPlan: new Set(["supported-primitive"]),
+    webgpu: new Set(["profile-nonempty-f32-rank-at-most-4"]),
+    residency: new Set(["supported-materializing-and-resident"]),
+    materialization: new Set(["cpu-owning-copy"]),
+  };
+  const irSource = fs.readFileSync(
+    path.join(root, "packages/browsergrad-jit/src/python/_ir.py"),
+    "utf8",
+  );
+  const declaredOpcodes = new Set(
+    [...irSource.matchAll(/^OP_[A-Z0-9_]+\s*=\s*"([A-Z0-9_]+)"/gmu)].map((match) => match[1]),
+  );
+  const validatorSource = fs.readFileSync(
+    path.join(root, "packages/browsergrad-jit/src/python/_framework_contracts.py"),
+    "utf8",
+  );
+  const contractIds = [];
+  const opcodes = [];
+  const retiredIds = [];
+  for (const [index, operation] of registry.operations.entries()) {
+    const label = `JIT framework-operation registry operations[${index}]`;
+    if (!isRecord(operation)) {
+      failures.push(`${label} must be an object`);
+      continue;
+    }
+    compareExactKeys(label, operation, operationFields, failures);
+    for (const field of [
+      "contractId",
+      "publicSurface",
+      "opcode",
+      "semanticState",
+      "shapeContract",
+      "dtypeContract",
+      "retiredOpaqueOperationId",
+    ]) {
+      if (typeof operation[field] !== "string" || operation[field].length === 0 || operation[field].trim() !== operation[field]) {
+        failures.push(`${label}.${field} must be a nonempty canonical string`);
+      }
+    }
+    if (typeof operation.contractId === "string") {
+      contractIds.push(operation.contractId);
+      if (!operation.contractId.startsWith("browsergrad.jit.framework.")) {
+        failures.push(`${label}.contractId is outside the BrowserGrad JIT namespace`);
+      }
+      if (!validatorSource.includes(`"${operation.contractId}"`)) {
+        failures.push(`${label}.contractId has no package-owned executable validator binding`);
+      }
+    }
+    if (typeof operation.opcode === "string") {
+      opcodes.push(operation.opcode);
+      if (operation.opcode === "CUSTOM" || !declaredOpcodes.has(operation.opcode)) {
+        failures.push(`${label}.opcode must name a declared non-CUSTOM UOp`);
+      }
+    }
+    if (typeof operation.retiredOpaqueOperationId === "string") {
+      retiredIds.push(operation.retiredOpaqueOperationId);
+      if (!operation.retiredOpaqueOperationId.startsWith("jit.custom.")) {
+        failures.push(`${label}.retiredOpaqueOperationId is outside the frozen namespace`);
+      }
+    }
+    for (const field of ["semanticState", "shapeContract", "dtypeContract"]) {
+      if (!allowed[field].has(operation[field])) failures.push(`${label}.${field} is not registered`);
+    }
+    if (!isRecord(operation.decisions)) {
+      failures.push(`${label}.decisions must be an object`);
+    } else {
+      compareExactKeys(`${label}.decisions`, operation.decisions, decisionFields, failures);
+      for (const field of decisionFields) {
+        if (!allowed[field].has(operation.decisions[field])) {
+          failures.push(`${label}.decisions.${field} is not registered`);
+        }
+      }
+    }
+  }
+  for (const [label, values] of [
+    ["contract IDs", contractIds],
+    ["opcodes", opcodes],
+    ["retired opaque-operation IDs", retiredIds],
+  ]) {
+    if (new Set(values).size !== values.length) failures.push(`JIT framework-operation ${label} must be unique`);
+  }
+  const sortedContractIds = [...contractIds].sort((left, right) => left.localeCompare(right));
+  if (JSON.stringify(contractIds) !== JSON.stringify(sortedContractIds)) {
+    failures.push("JIT framework-operation contracts must be ordered by contractId");
+  }
+
+  const opaqueInventory = readJson(
+    path.join(root, "architecture/jit-opaque-operation-inventory.json"),
+    failures,
+  );
+  const currentOpaqueIds = isRecord(opaqueInventory) && Array.isArray(opaqueInventory.operations)
+    ? opaqueInventory.operations.map((operation) => isRecord(operation) ? operation.id : undefined)
+      .filter((id) => typeof id === "string")
+    : [];
+  for (const retiredId of retiredIds) {
+    if (currentOpaqueIds.includes(retiredId)) {
+      failures.push(`JIT typed framework operation ${retiredId} remains in the opaque inventory`);
+    }
+  }
+  const jitFreeze = Array.isArray(manifest.adapters)
+    ? manifest.adapters.find((adapter) => isRecord(adapter) && adapter.id === "jit.core-custom-ops.v0")?.freeze
+    : undefined;
+  const originalIds = isRecord(jitFreeze) ? jitFreeze.originalOperationIds : undefined;
+  if (!Array.isArray(originalIds) || originalIds.length === 0 || originalIds.some((id) => typeof id !== "string")) {
+    failures.push("JIT opaque-operation freeze must retain the original operation ID partition");
+  } else {
+    compareStringSets(
+      "JIT original opaque-operation partition",
+      [...currentOpaqueIds, ...retiredIds],
+      originalIds,
+      failures,
+    );
+  }
 }
 
 function validateManifest(root, manifest, failures) {

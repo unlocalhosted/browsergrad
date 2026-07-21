@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Codegen: src/python/*.py → src/python/*.generated.ts
+ * Codegen: package-owned Python/JSON sources → src/python/*.generated.ts
  *
  * Each `.py` file becomes a TypeScript module exporting its content as a
  * string constant. The string is base64-encoded inside the generated file
@@ -10,7 +10,7 @@
  * files are always fresh in CI. The generated files are committed so
  * fresh clones work without running codegen first.
  *
- * To add a new Python module: drop a `.py` file in src/python/, add an
+ * To add a new bundled source: drop it in src/python/, add an
  * entry to MODULES below, then run `pnpm codegen`.
  */
 
@@ -21,8 +21,10 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PYTHON_DIR = resolve(__dirname, "..", "src", "python");
 
-/** Each entry: [py filename, generated.ts filename, exported const name]. */
+/** Each entry: [source filename, generated.ts filename, exported const name]. */
 const MODULES = [
+  ["framework-operation-contracts.v1.json", "framework-operation-contracts.v1.generated.ts", "FRAMEWORK_OPERATION_CONTRACTS_JSON"],
+  ["_framework_contracts.py", "_framework_contracts.generated.ts", "FRAMEWORK_CONTRACTS_PY"],
   ["_ir.py", "_ir.generated.ts", "IR_PY"],
   ["_errors.py", "_errors.generated.ts", "ERRORS_PY"],
   ["_buffer_table.py", "_buffer_table.generated.ts", "BUFFER_TABLE_PY"],
@@ -75,8 +77,8 @@ export const ${constName}: string = ((): string => {
 // Fail-fast: every input file must exist before we emit anything.
 // Without this, ENOENT mid-loop would leave the repo in a half-emitted state.
 const missing = [];
-for (const [py] of MODULES) {
-  if (!existsSync(resolve(PYTHON_DIR, py))) missing.push(py);
+for (const [source] of MODULES) {
+  if (!existsSync(resolve(PYTHON_DIR, source))) missing.push(source);
 }
 if (missing.length) {
   process.stderr.write(
@@ -88,15 +90,15 @@ if (missing.length) {
 }
 
 let wrote = 0;
-for (const [py, gen, constName] of MODULES) {
-  const pyPath = resolve(PYTHON_DIR, py);
+for (const [source, gen, constName] of MODULES) {
+  const sourcePath = resolve(PYTHON_DIR, source);
   const genPath = resolve(PYTHON_DIR, gen);
-  const content = readFileSync(pyPath, "utf8");
+  const content = readFileSync(sourcePath, "utf8");
   const b64 = toBase64(content);
-  const tsSource = emit(constName, b64, py);
+  const tsSource = emit(constName, b64, source);
   writeFileSync(genPath, tsSource);
   wrote += 1;
-  process.stdout.write(`  ${py} → ${gen} (${content.length} chars)\n`);
+  process.stdout.write(`  ${source} → ${gen} (${content.length} chars)\n`);
 }
 
 process.stdout.write(`codegen: wrote ${wrote} files\n`);

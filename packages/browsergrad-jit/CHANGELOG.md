@@ -13,6 +13,12 @@ contract in the README](README.md#compatibility-contract).
   strict shape capture, shared contract revalidation, symbolic VJP, vmap,
   ONNX `Expand`, and materializing/resident tensor-plan coverage.
 
+### Added
+
+- Added the bounded v1 executable framework-operation registry and detached
+  `framework_operation_support()` table. Typed-operation support decisions now
+  come from the same validator bindings used by execution boundaries.
+
 ## [0.9.0] — 2026-07-15
 
 ### Added
