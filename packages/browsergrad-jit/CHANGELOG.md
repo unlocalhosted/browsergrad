@@ -41,6 +41,10 @@ contract in the README](README.md#compatibility-contract).
   exact boolean keepdims, owning dtype-preserving scalar/tensor CPU results,
   a zero-aware closure/symbolic product derivative, functional grad,
   batch-safe vmap, ONNX `ReduceProd`, and explicit tensor-plan/WebGPU refusal.
+- `Tensor.gather` now emits typed `INDEX` with exact normalized axis, int64
+  same-rank index semantics, runtime bounds checks, owning dtype-preserving CPU
+  results, deterministic scatter-add closure/symbolic VJP, paired batch-safe
+  vmap, ONNX `GatherElements`, and explicit tensor-plan/WebGPU refusal.
 
 ### Added
 
@@ -48,7 +52,7 @@ contract in the README](README.md#compatibility-contract).
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
   current table contains `ABS`, `CLAMP`, `COS`, `BROADCAST_TO`, `FLIP`,
-  `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, and `SIN`.
+  `INDEX`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, and `SIN`.
 
 ## [0.9.0] — 2026-07-15
 

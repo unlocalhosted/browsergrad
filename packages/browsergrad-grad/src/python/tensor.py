@@ -60,6 +60,27 @@ def _normalize_prod_axes(value, rank: int) -> tuple:
     return tuple(sorted(normalized))
 
 
+def _normalize_gather_axis(value, rank: int) -> int:
+    if type(value) not in _EXACT_INTEGER_SCALAR_TYPES:
+        raise ValueError(
+            "gather: axis must be a built-in or NumPy integer scalar, "
+            f"got {type(value).__name__}"
+        )
+    axis = int(value)
+    if axis < 0:
+        axis += rank
+    if axis < 0 or axis >= rank:
+        raise ValueError(f"gather: axis {value} out of range for rank {rank}")
+    return axis
+
+
+def _validate_gather_index_values(index: np.ndarray, axis_extent: int) -> None:
+    if index.size == 0:
+        return
+    if bool(np.any(index < 0)) or bool(np.any(index >= axis_extent)):
+        raise ValueError(f"gather: index values must be in [0, {axis_extent})")
+
+
 def _resolve_dtype(spec):
     """Normalize a torch-style dtype spec to a numpy dtype.
 
@@ -591,7 +612,7 @@ class Tensor:
 
         # Initialize this output's grad.
         if self.grad is None:
-            self.grad = Tensor(grad.data.copy())
+            self.grad = Tensor(grad.data.copy(), dtype=self.dtype)
         else:
             self.grad.data = self.grad.data + grad.data
 
@@ -620,7 +641,7 @@ class Tensor:
                 if not parent.requires_grad or g is None:
                     continue
                 if parent.grad is None:
-                    parent.grad = Tensor(g)
+                    parent.grad = Tensor(g, dtype=parent.dtype)
                 else:
                     parent.grad.data = parent.grad.data + g
 
@@ -945,14 +966,14 @@ def _mean(a: Tensor, axis=None, keepdims: bool = False) -> Tensor:
 # ─── Shape ops ─────────────────────────────────────────────
 
 def _reshape(a: Tensor, shape: tuple) -> Tensor:
-    out = Tensor(a.data.reshape(shape))
+    out = Tensor(a.data.reshape(shape), dtype=a.dtype)
     a_shape = a.data.shape
     return _build_ctx(out, (a,), lambda g: (g.data.reshape(a_shape).copy(),))
 
 
 def _transpose(a: Tensor, dim0: int, dim1: int) -> Tensor:
     out_data = np.swapaxes(a.data, dim0, dim1)
-    out = Tensor(out_data)
+    out = Tensor(out_data, dtype=a.dtype)
     return _build_ctx(out, (a,), lambda g: (np.swapaxes(g.data, dim0, dim1).copy(),))
 
 
@@ -981,13 +1002,16 @@ def _getitem(a: Tensor, key) -> Tensor:
         norm_key = _to_np(key)
 
     out_data = a.data[norm_key]
-    # Ensure we have a Tensor (numpy may have returned a scalar)
-    out_arr = np.asarray(out_data, dtype=np.float32)
-    out = Tensor(out_arr)
+    # Ensure we have a Tensor (numpy may have returned a scalar) without
+    # changing the source dtype. Index tensors commonly pass through a slice
+    # and reshape before gather, and silently converting those views to f32
+    # makes a valid int64 index fail at the gather boundary.
+    out_arr = np.asarray(out_data)
+    out = Tensor(out_arr, dtype=a.dtype)
     in_shape = a.data.shape
 
     def backward(g):
-        grad_a = np.zeros(in_shape, dtype=np.float32)
+        grad_a = np.zeros(in_shape, dtype=a.data.dtype)
         # np.add.at handles duplicate indices for fancy indexing AND works
         # for slice / bool-mask / int indices.
         np.add.at(grad_a, norm_key, g.data)
@@ -1011,7 +1035,7 @@ def _permute(a: Tensor, dims: tuple) -> Tensor:
     nd = a.data.ndim
     norm = tuple(d if d >= 0 else nd + d for d in dims)
     out_data = np.transpose(a.data, norm)
-    out = Tensor(out_data)
+    out = Tensor(out_data, dtype=a.dtype)
     # Inverse permutation for backward
     inv = [0] * len(norm)
     for i, d in enumerate(norm):
@@ -1119,19 +1143,37 @@ def _make_gather_idx(idx_np, dim: int, ndim: int):
             shape = [1] * ndim
             shape[d] = sz
             arr = np.arange(sz).reshape(shape)
-            idx_list.append(np.broadcast_to(arr, idx_np.shape).copy())
+            idx_list.append(np.broadcast_to(arr, idx_np.shape))
     return tuple(idx_list)
 
 
 def _gather(a: Tensor, dim: int, index) -> Tensor:
-    idx_np = index.data.astype(np.int64) if isinstance(index, Tensor) else np.asarray(index, dtype=np.int64)
-    out_data = np.take_along_axis(a.data, idx_np, axis=dim).astype(np.float32)
-    out = Tensor(out_data)
+    if not isinstance(index, Tensor):
+        raise TypeError(f"gather: index must be a Tensor, got {type(index).__name__}")
+    axis = _normalize_gather_axis(dim, a.data.ndim)
+    idx_np = index.data
+    if idx_np.dtype != np.dtype(np.int64):
+        raise ValueError(f"gather: index dtype must be int64, got {idx_np.dtype.name}")
+    if idx_np.ndim != a.data.ndim:
+        raise ValueError(
+            "gather: source and index must have the same nonzero rank, "
+            f"got {a.data.ndim} and {idx_np.ndim}"
+        )
+    for dimension, (source_extent, index_extent) in enumerate(zip(a.data.shape, idx_np.shape)):
+        if dimension != axis and index_extent > source_extent:
+            raise ValueError(
+                f"gather: index extent {index_extent} exceeds source extent "
+                f"{source_extent} at non-gather dimension {dimension}"
+            )
+    _validate_gather_index_values(idx_np, a.data.shape[axis])
+    out_data = a.data[_make_gather_idx(idx_np, axis, a.data.ndim)]
+    out = Tensor(np.array(out_data, dtype=a.data.dtype, copy=True), dtype=a.dtype)
     a_shape = a.data.shape
     def backward(g):
-        grad_a = np.zeros(a_shape, dtype=np.float32)
-        np.add.at(grad_a, _make_gather_idx(idx_np, dim, len(a_shape)), g.data)
-        return (grad_a,)
+        _validate_gather_index_values(idx_np, a_shape[axis])
+        grad_a = np.zeros(a_shape, dtype=a.data.dtype)
+        np.add.at(grad_a, _make_gather_idx(idx_np, axis, len(a_shape)), g.data)
+        return (grad_a.astype(a.data.dtype, copy=False),)
     return _build_ctx(out, (a,), backward)
 
 

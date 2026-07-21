@@ -111,6 +111,27 @@
       "retiredOpaqueOperationId": "jit.custom.flip.v0"
     },
     {
+      "contractId": "browsergrad.jit.framework.tensor.gather.v1",
+      "publicSurface": "Tensor.gather",
+      "opcode": "INDEX",
+      "semanticState": "typed",
+      "shapeContract": "same-rank-index-shaped-gather",
+      "dtypeContract": "preserve-source-require-int64-index",
+      "decisions": {
+        "cpu": "supported-numpy-owning-copy-with-range-check",
+        "closureAutograd": "supported-deterministic-scatter-add",
+        "symbolicVjp": "supported-deterministic-scatter-add",
+        "functionalGrad": "supported-via-symbolic-vjp",
+        "vmap": "supported-leading-batch-axis-with-index-axis-shift",
+        "onnxExport": "supported-opset17-gather-elements-float32-int32-int64-bool",
+        "tensorPlan": "refused-no-deterministic-index-lowering",
+        "webgpu": "refused-no-deterministic-index-kernel",
+        "residency": "host-materialized",
+        "materialization": "cpu-owning-copy"
+      },
+      "retiredOpaqueOperationId": "jit.custom.gather.v0"
+    },
+    {
       "contractId": "browsergrad.jit.framework.tensor.prod.v1",
       "publicSurface": "Tensor.prod",
       "opcode": "PROD",

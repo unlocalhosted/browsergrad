@@ -60,6 +60,8 @@ from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_clamp_contract,
     validate_flip_contract,
+    validate_gather_contract,
+    validate_gather_scatter_add_contract,
     validate_prod_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
@@ -986,11 +988,30 @@ def _h_where(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     return np.where(cond, a, b)
 
 
+def _gather_index_tuple(index: np.ndarray, axis: int) -> tuple[np.ndarray, ...]:
+    coordinates = []
+    for dimension in range(index.ndim):
+        if dimension == axis:
+            coordinates.append(index)
+        else:
+            extent = index.shape[dimension]
+            shape = [1] * index.ndim
+            shape[dimension] = extent
+            coordinate = np.arange(extent).reshape(shape)
+            coordinates.append(np.broadcast_to(coordinate, index.shape))
+    return tuple(coordinates)
+
+
 def _h_index(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     x = vt[id(node.inputs[0])]
     idx = vt[id(node.inputs[1])]
-    dim = node.arg.get("dim", 0)
-    return np.take(x, idx, axis=dim)
+    dim = validate_gather_contract(node)
+    if idx.size and (bool(np.any(idx < 0)) or bool(np.any(idx >= x.shape[dim]))):
+        raise RealizationError(
+            f"gather: index values must be in [0, {x.shape[dim]})"
+        )
+    gathered = x[_gather_index_tuple(idx, dim)]
+    return np.array(gathered, dtype=np.dtype(node.dtype), copy=True)
 
 
 def _h_mask(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
@@ -1052,13 +1073,13 @@ def _h_scatter_add(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     target = vt[id(node.inputs[0])]
     idx = vt[id(node.inputs[1])]
     src = vt[id(node.inputs[2])]
+    dim = validate_gather_scatter_add_contract(node)
+    if idx.size and (bool(np.any(idx < 0)) or bool(np.any(idx >= target.shape[dim]))):
+        raise RealizationError(
+            f"gather: index values must be in [0, {target.shape[dim]})"
+        )
     out = target.copy()
-    dim = node.arg.get("dim", 0)
-    # np.add.at handles per-axis fancy indexing; we route via the
-    # `[dim slice + idx slice]` pattern.
-    index_expr: list = [slice(None)] * out.ndim
-    index_expr[dim] = idx
-    np.add.at(out, tuple(index_expr), src)
+    np.add.at(out, _gather_index_tuple(idx, dim), src)
     return out
 
 

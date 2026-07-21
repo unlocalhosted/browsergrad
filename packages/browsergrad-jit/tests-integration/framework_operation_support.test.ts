@@ -112,6 +112,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.flip.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.tensor.gather.v1",
+      publicSurface: "Tensor.gather",
+      opcode: "INDEX",
+      semanticState: "typed",
+      shapeContract: "same-rank-index-shaped-gather",
+      dtypeContract: "preserve-source-require-int64-index",
+      decisions: {
+        cpu: "supported-numpy-owning-copy-with-range-check",
+        closureAutograd: "supported-deterministic-scatter-add",
+        symbolicVjp: "supported-deterministic-scatter-add",
+        functionalGrad: "supported-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-index-axis-shift",
+        onnxExport: "supported-opset17-gather-elements-float32-int32-int64-bool",
+        tensorPlan: "refused-no-deterministic-index-lowering",
+        webgpu: "refused-no-deterministic-index-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.gather.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.prod.v1",
       publicSurface: "Tensor.prod",
       opcode: "PROD",
@@ -257,7 +278,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(11);
+    expect(result.first.operations).toHaveLength(12);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

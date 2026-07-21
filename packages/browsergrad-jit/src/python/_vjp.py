@@ -61,13 +61,14 @@ from ._ir import (
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
-    OP_CONST, OP_BROADCAST_TO, OP_WHERE,
+    OP_CONST, OP_BROADCAST_TO, OP_WHERE, OP_INDEX, OP_SCATTER_ADD,
     OP_ISNAN,
 )
 from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_clamp_contract,
     validate_flip_contract,
+    validate_gather_contract,
     validate_prod_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
@@ -322,6 +323,38 @@ def _vjp_flip(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[U
         output,
         arg={"axis": axis},
     ),)
+
+
+@register_vjp(OP_INDEX)
+def _vjp_gather(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """Gather's source VJP is deterministic scatter-add; indices are discrete."""
+    axis = validate_gather_contract(output)
+    source, index = inputs
+    zero = _vjp_uop(
+        OP_CONST,
+        (),
+        (),
+        source.dtype,
+        output,
+        arg={"value": 0},
+    )
+    target = _vjp_uop(
+        OP_BROADCAST_TO,
+        (zero,),
+        source.shape,
+        source.dtype,
+        output,
+        arg={"shape": source.shape},
+    )
+    gradient = _vjp_uop(
+        OP_SCATTER_ADD,
+        (target, index, dy),
+        source.shape,
+        source.dtype,
+        output,
+        arg={"dim": axis},
+    )
+    return gradient, None
 
 
 @register_vjp(OP_REPEAT)

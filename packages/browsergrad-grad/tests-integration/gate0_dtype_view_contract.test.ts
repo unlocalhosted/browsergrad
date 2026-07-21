@@ -136,7 +136,7 @@ cases["grad.view.reshape-noncontiguous-materializes.v0"] = {
 }
 float16_matrix = grad.Tensor(np.arange(6, dtype=np.float16).reshape(2, 3), dtype="float16")
 float16_reshape = float16_matrix.reshape(3, 2)
-cases["grad.view.reshape-float16-materializes-f32.v0"] = {
+cases["grad.view.reshape-float16-alias-preserves-dtype.v1"] = {
     "sharesMemory": bool(np.shares_memory(float16_matrix.data, float16_reshape.data)),
     "sourceDtype": float16_matrix.dtype,
     "resultDtype": float16_reshape.dtype,
@@ -159,14 +159,14 @@ cases["grad.view.transpose-alias.v0"] = {
     "backwardGradient": transpose_source.grad.tolist(),
 }
 float16_transpose = float16_matrix.transpose(0, 1)
-cases["grad.view.transpose-float16-materializes-f32.v0"] = {
+cases["grad.view.transpose-float16-alias-preserves-dtype.v1"] = {
     "sharesMemory": bool(np.shares_memory(float16_matrix.data, float16_transpose.data)),
     "sourceDtype": float16_matrix.dtype,
     "resultDtype": float16_transpose.dtype,
 }
 bool_matrix = grad.Tensor(np.array([[True, False], [False, True]], dtype=np.bool_), dtype="bool")
 bool_transpose = bool_matrix.transpose(0, 1)
-cases["grad.view.transpose-bool-materializes-f32.v0"] = {
+cases["grad.view.transpose-bool-alias-preserves-dtype.v1"] = {
     "sharesMemory": bool(np.shares_memory(bool_matrix.data, bool_transpose.data)),
     "sourceDtype": bool_matrix.dtype,
     "resultDtype": bool_transpose.dtype,
@@ -191,7 +191,7 @@ cases["grad.view.permute-alias.v0"] = {
 }
 float16_rank3 = grad.Tensor(np.arange(24, dtype=np.float16).reshape(2, 3, 4), dtype="float16")
 float16_permute = float16_rank3.permute(2, 0, 1)
-cases["grad.view.permute-float16-materializes-f32.v0"] = {
+cases["grad.view.permute-float16-alias-preserves-dtype.v1"] = {
     "sharesMemory": bool(np.shares_memory(float16_rank3.data, float16_permute.data)),
     "sourceDtype": float16_rank3.dtype,
     "resultDtype": float16_permute.dtype,
@@ -262,7 +262,7 @@ cases["grad.view.fancy-index-materializes.v0"] = {
 }
 int64_source = grad.Tensor(np.arange(6, dtype=np.int64).reshape(2, 3), dtype="int64")
 int64_slice = int64_source[:, 1:]
-cases["grad.view.basic-slice-int64-materializes-f32.v0"] = {
+cases["grad.view.basic-slice-int64-alias-preserves-dtype.v1"] = {
     "sharesMemory": bool(np.shares_memory(int64_source.data, int64_slice.data)),
     "sourceDtype": int64_source.dtype,
     "resultDtype": int64_slice.dtype,

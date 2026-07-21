@@ -165,6 +165,16 @@ and ONNX emits a signed-int64 `Slice` for float32, int32, int64, and bool
 graphs. Other ONNX dtypes fail explicitly. Tensor-plan and WebGPU explicitly
 refuse the negative-stride profile rather than widening the portable view contract.
 
+`Tensor.gather()` emits typed `INDEX` for one normalized axis and an int64
+same-rank tensor index. Non-gather index extents may be smaller than the source;
+negative and out-of-range index values fail at the first value-observing
+boundary. CPU returns an owning source-dtype result, closure and symbolic VJP
+use deterministic duplicate-accumulating scatter-add, and paired vmap shifts
+the logical axis past its leading batch dimension. ONNX emits
+`GatherElements` for float32, int32, int64, and bool source graphs. Tensor-plan
+and WebGPU explicitly refuse until a deterministic bounds-checked index/scatter
+lowering exists.
+
 `Tensor.repeat()` emits typed `REPEAT` for bounded exact integer tile
 multipliers. CPU realization returns an owning dtype-preserving array;
 closure and symbolic gradients sum interleaved tile blocks; vmap prepends a

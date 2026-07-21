@@ -122,7 +122,7 @@ OP_PERMUTE = "PERMUTE"  # arg: {axes: tuple[int,...]}
 OP_SLICE   = "SLICE"    # arg: {slices: tuple[slice,...]}
 OP_PAD     = "PAD"      # arg: {pad_width, mode, value}
 OP_WHERE   = "WHERE"
-OP_INDEX   = "INDEX"    # arg: {dim: int}              ← int-array indexing
+OP_INDEX   = "INDEX"    # arg: {dim: int}, inputs: (source, int64 index) ← gather elements
 OP_MASK    = "MASK"     # arg: None                    ← bool-mask indexing
 OP_CUSTOM  = "CUSTOM"   # arg: {fn_id, captures, ...}  ← opaque NumPy callable
 

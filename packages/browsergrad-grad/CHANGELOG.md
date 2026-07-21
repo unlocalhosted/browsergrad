@@ -25,6 +25,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   with the JIT surface, returns owning scalar/tensor products in the input
   dtype, and uses the same zero-aware derivative instead of returning zero for
   every zero input or silently casting results and gradients to float32.
+- `Tensor.gather` now shares strict axis, int64-index, shape, and value-range
+  conformance with the JIT surface. It supports smaller non-gather dimensions,
+  accumulates duplicate-index gradients deterministically, and preserves
+  source, output, and gradient dtype instead of silently casting to float32.
+  Indexing, reshape, transpose, and permute now preserve float16, bool, and
+  integer storage dtype and compatible NumPy aliasing, so sliced/unsqueezed
+  int64 token tensors remain valid gather indices.
 
 ## [0.5.2] — 2026-07-15
 

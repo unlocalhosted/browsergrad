@@ -366,13 +366,13 @@
       "newUseProhibition": "No new core label or constructor site; only the explicit user-authored kernel API may supply user kernel names.",
       "retirementGate": "Advertised core operations have typed IR plus explicit CPU, VJP, transform, export, and backend decisions.",
       "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-jit@1.0.0",
-      "baselineDecision": "docs/adr/0010-migrate-jit-prod-to-typed-semantics.md",
+      "baselineDecision": "docs/adr/0011-migrate-jit-gather-to-typed-index-semantics.md",
       "freeze": {
         "kind": "jit-op-custom",
         "inventoryFile": "architecture/jit-opaque-operation-inventory.json",
-        "inventorySha256": "37ad7f1e0bb93c9efd46825c2bc6da3490fd33b340839b250ff617da459e584c",
+        "inventorySha256": "cb2287a8e416b3f12882d71d2f2da4404f1737131edb5637b82755e60b745353",
         "behaviorFixtureFile": "packages/browsergrad-jit/tests-integration/fixtures/jit-opaque-operation.v0.json",
-        "behaviorFixtureSha256": "8b1540f646c69e5395f3971710dcd21c17ec40a5b4a75919723eefac7f52ebb2",
+        "behaviorFixtureSha256": "cb3545f40841536e7120c5b807d306443374977ace4e13923ff28fef22fa1ca7",
         "behaviorFixtureIds": [
           "jit.custom.accelerator-and-constructor-only.v0",
           "jit.custom.all-callback-labels-and-dtypes.v0",
@@ -381,12 +381,12 @@
           "jit.custom.stateful-replay.v0"
         ],
         "behaviorTestFile": "packages/browsergrad-jit/tests-integration/gate0_opaque_operation_contract.test.ts",
-        "behaviorTestSha256": "be82bc7ffa49806f076a66e32ea86e4b739938717da9d9cd5262a2d2a7e3358c",
+        "behaviorTestSha256": "9fb72c4256638634be8a13c4667180ffc3db90d97fa0abe4183ff109ef3b3b20",
         "constructorCounts": {
           "packages/browsergrad-jit/src/python/_custom_kernel.py": 1,
           "packages/browsergrad-jit/src/python/_functional.py": 7,
           "packages/browsergrad-jit/src/python/_nn.py": 1,
-          "packages/browsergrad-jit/src/python/_tensor_proxy.py": 14,
+          "packages/browsergrad-jit/src/python/_tensor_proxy.py": 13,
           "packages/browsergrad-jit/src/python/_webnn.py": 1,
           "packages/browsergrad-jit/src/python/index.ts": 2
         },
@@ -430,7 +430,6 @@
               "cat",
               "cumsum",
               "einsum",
-              "gather",
               "masked_fill",
               "scatter",
               "sort_indices",
@@ -469,7 +468,6 @@
           "dropout",
           "einsum",
           "flash_attention",
-          "gather",
           "interpolate",
           "kl_div",
           "l1_loss",
@@ -512,7 +510,6 @@
           "tensor.cat",
           "tensor.cumsum",
           "tensor.einsum",
-          "tensor.gather",
           "tensor.masked-fill",
           "tensor.scatter",
           "tensor.sort-indices",
@@ -535,7 +532,6 @@
           "jit.custom.dropout.v0",
           "jit.custom.einsum.v0",
           "jit.custom.flash-attention.v0",
-          "jit.custom.gather.v0",
           "jit.custom.interpolate.v0",
           "jit.custom.kl-div.v0",
           "jit.custom.l1-loss.v0",
@@ -639,7 +635,6 @@
             "sort": ["60deb096207c3d45fa41d640295626f3341042b76df22c16fc98d742d087781d"],
             "stack": ["096ae6772ee0d0ea82b79cb48403f365d3bb880b5e34d0965673a224ffa7cc84"],
             "TensorProxy.backward": ["1da373743a463164ce02511e2ff37dba438853e2597018e855fe90d9834d4167"],
-            "TensorProxy.gather": ["bd1ee52100561d61efc7592d248a1eef836d372a3bfe1201bb2c3a5f3a5cb284"],
             "TensorProxy.masked_fill": ["97c701662f7465c80336aedbdd08c8f033f4dcc7b9a4dee8649b3164d862e120"],
             "TensorProxy.scatter": ["ba677cc933cdee1fc0b6e08c5a921ef88c194f225639d6764c2f5406298ee711"],
             "TensorProxy.var": ["a70520fc379e69b2b5dc84bd8d6dab105e20214c19953cf7f7915960ca2e4063"],
@@ -662,7 +657,7 @@
             "realize_webgpu": ["c8bb56f6665b8071d800ba3c035f97a83cc5c0334d2133315fd024693c91e774"]
           },
           "packages/browsergrad-jit/src/python/_gpu_plan.py": {
-            "build_gpu_execution_plan": ["83178b6dfdeb3b9a2f2a31cc258b048405977c3f4542efc7dfa48bec7b027150"]
+            "build_gpu_execution_plan": ["6ca857b3d9d94c24836519e99f3f74a3976c3998426edbad572e26e121c8be98"]
           },
           "packages/browsergrad-jit/src/python/_vjp.py": {
             "get_rule": ["b851b98e25bc8ae27bc0c88b0caf3080e1604f2880ffaea8d0fb3f4100f5e976"],
@@ -690,17 +685,17 @@
       "newUseProhibition": "No new API may claim view aliasing or bf16 storage through materializing views or f32 aliases.",
       "retirementGate": "View and alias fixtures agree or reject, and bf16 is real storage/conversion or rejected.",
       "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-grad@1.0.0",
-      "baselineDecision": "docs/adr/0002-migrate-jit-expand-to-broadcast.md",
+      "baselineDecision": "docs/adr/0011-migrate-jit-gather-to-typed-index-semantics.md",
       "freeze": {
         "kind": "grad-view-bf16",
         "tensorFile": "packages/browsergrad-grad/src/python/tensor.py",
         "torchCompatFile": "packages/browsergrad-grad/src/python/_torch_compat_real.py",
         "inventoryFile": "architecture/grad-compatibility-inventory.json",
-        "inventorySha256": "796e0d15502f7909ee61a107e3ac7f5b3fdd7459ee7ec00d1d6194c910875aef",
+        "inventorySha256": "e1bb5fa8baa15f4b08a3f0c6b13dd41ecfc1d3a00ec60ea9bc190549cce7613c",
         "behaviorFixtureFile": "packages/browsergrad-grad/tests-integration/fixtures/grad-view-bf16.v0.json",
-        "behaviorFixtureSha256": "95aeb2914abeef381b85349f8e2177c1ae5a87ee1b7d32a157886176fee5d8cd",
+        "behaviorFixtureSha256": "1ccec887bd26b0f757907b5fa0a464fbc4ba8f18461df3d70354b9f0bd5a5ec4",
         "behaviorTestFile": "packages/browsergrad-grad/tests-integration/gate0_dtype_view_contract.test.ts",
-        "behaviorTestSha256": "7a4ec9c51d56a30054a5386faeabd53bd4c8ccb542740abbaeb76f1292d0be55",
+        "behaviorTestSha256": "245045bb98fd1ede80471da306b0fc67a521d20ae9029835f32321504a36badc",
         "behaviorIds": [
           "grad.conversion.to-cross-dtype-detaches.v0",
           "grad.conversion.to-same-dtype-identity.v0",
@@ -715,10 +710,10 @@
           "grad.materialization.contiguous-noop.v0",
           "grad.materialization.detach-copy.v0",
           "grad.materialization.expand-copy.v0",
-          "grad.view.indexing.v0",
-          "grad.view.permute.v0",
-          "grad.view.reshape.v0",
-          "grad.view.transpose.v0"
+          "grad.view.indexing.v1",
+          "grad.view.permute.v1",
+          "grad.view.reshape.v1",
+          "grad.view.transpose.v1"
         ],
         "behaviorFixtureIds": [
           "grad.conversion.to-cross-dtype-detaches.v0",
@@ -740,16 +735,16 @@
           "grad.materialization.expand-copy.v0",
           "grad.materialization.expand-dtype-preservation.v0",
           "grad.view.basic-slice-alias.v0",
-          "grad.view.basic-slice-int64-materializes-f32.v0",
+          "grad.view.basic-slice-int64-alias-preserves-dtype.v1",
           "grad.view.fancy-index-materializes.v0",
           "grad.view.permute-alias.v0",
-          "grad.view.permute-float16-materializes-f32.v0",
+          "grad.view.permute-float16-alias-preserves-dtype.v1",
           "grad.view.reshape-contiguous-alias.v0",
-          "grad.view.reshape-float16-materializes-f32.v0",
+          "grad.view.reshape-float16-alias-preserves-dtype.v1",
           "grad.view.reshape-noncontiguous-materializes.v0",
           "grad.view.transpose-alias.v0",
-          "grad.view.transpose-bool-materializes-f32.v0",
-          "grad.view.transpose-float16-materializes-f32.v0",
+          "grad.view.transpose-bool-alias-preserves-dtype.v1",
+          "grad.view.transpose-float16-alias-preserves-dtype.v1",
           "grad.view.view-direct-alias.v0"
         ],
         "dtypeAliases": {
@@ -803,10 +798,10 @@
             "Tensor.view": ["082b36d27b218d35ab34c16122623a6ed7266df8d4ac6e8b5128dcd50afa7e6e"],
             "_build_ctx": ["8fda908bf799ce452723030e17b8e26ec8fc890a8a38993b2a2fcfc65f0d6d8f"],
             "_expand": ["41cdae017b94728b990aee7fa8d43d12427a31f765d7a971b4546bb6f8aa489e"],
-            "_getitem": ["70be2e42de10fe4ed1877422e0908e1abd7a6fc13f687dda73d30d35b868f51a"],
-            "_permute": ["36f7aa32800403a1340783333ee73cbc959426e51d8ea9c6d35b49717d454871"],
-            "_reshape": ["dcebd655b061f3714ad6837b1f23037a07531c67bdc57c9e111198ee88b131bc"],
-            "_transpose": ["bbd83fdcbf0eac2c1d441dd6be767c679e5f7032fad6c5f35067e9bd1907cf87"],
+            "_getitem": ["378add5f27f3b77c13487a975ca3db6d62348b73e0e58828a3d15c9d48b87c26"],
+            "_permute": ["a92544a8ace65349d70c20841b601c3f7abf0d294d6de904f13071434527c881"],
+            "_reshape": ["e52ed77f8777a9a23603b631e9f0eb4950ea3a54f0dfd298303a27a8817778bd"],
+            "_transpose": ["e201daa0d9ceba74adfb127c53aec2566ac0d19da02951fd7a6f5eaa889093c9"],
             "from_numpy": ["cbdac3e977453f1e0d77bce67be93e8a4492cbbe79968ace1caeee0ce235d803"]
           },
           "_torch_compat_real.py": {

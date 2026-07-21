@@ -17,7 +17,7 @@ Scope (v0):
     REDUCE (sum/mean/max), RESHAPE, PERMUTE, CAST, WHERE, CMP
     (→Equal/Greater/Less), and BROADCAST_TO (→Expand). Registry-admitted
     framework operations additionally cover ABS, SIGN, SIN, COS, CLAMP
-    (→Clip), FLIP (→Slice), PROD (→ReduceProd), REPEAT (→Tile), and
+    (→Clip), FLIP (→Slice), INDEX (→GatherElements), PROD (→ReduceProd), REPEAT (→Tile), and
     REPEAT_INTERLEAVE (→Unsqueeze/Tile/Reshape). Plus lifecycle
     (BUFFER/LOAD/CONST).
   * Opset 17 (axes as attribute on ReduceSum/Mean/Max — opset 18 made
@@ -30,7 +30,7 @@ Refusals (typed `OnnxUnmappableOp`):
   * OP_CONV1D/OP_CONV2D/OP_CONV_TRANSPOSE2D/OP_CONV3D and OP_CONV*_BACKWARD_*
     (tensor compiler/export mapping deferred)
   * OP_CUSTOM (opaque)
-  * OP_MASK, OP_INDEX, OP_SCATTER_ADD (initializer-tensor plumbing
+  * OP_MASK, OP_SCATTER_ADD (initializer-tensor plumbing
     deferred to a follow-on)
   * OP_ISNAN, OP_SLICE, OP_PAD (same — needs initializer wiring or
     opset-specific shapes)
@@ -66,7 +66,7 @@ from ._ir import (
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
-    OP_WHERE, OP_BROADCAST_TO, OP_SGD_UPDATE,
+    OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
 )
@@ -75,6 +75,7 @@ from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_clamp_contract,
     validate_flip_contract,
+    validate_gather_contract,
     validate_prod_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
@@ -541,6 +542,16 @@ def export_inference(
                 ))
                 slice_inputs.append(initializer_name)
             nodes.append(_emit_node(slice_inputs, [out_name], nm, "Slice"))
+        elif node.op == OP_INDEX:
+            axis = validate_gather_contract(node)
+            _dtype_or_die(node.dtype)
+            nodes.append(_emit_node(
+                input_names,
+                [out_name],
+                nm,
+                "GatherElements",
+                [_emit_attr_int("axis", axis)],
+            ))
         elif node.op == OP_PROD:
             axes, keepdims, _ = validate_prod_contract(node)
             if node.dtype not in ("float32", "int32", "int64"):
@@ -616,7 +627,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_PROD, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_INDEX, OP_PROD, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

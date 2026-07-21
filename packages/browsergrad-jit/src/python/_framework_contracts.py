@@ -55,6 +55,7 @@ _ENUMS = {
     "shapeContract": frozenset({
         "preserve-unary-input",
         "preserve-single-axis-reverse",
+        "same-rank-index-shaped-gather",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
@@ -64,15 +65,18 @@ _ENUMS = {
         "preserve-floating-input",
         "preserve-input",
         "preserve-real-numeric-input",
+        "preserve-source-require-int64-index",
     }),
     "cpu": frozenset({
         "supported-numpy-dtype-preserving",
         "supported-numpy-owning-copy",
+        "supported-numpy-owning-copy-with-range-check",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
         "supported-inclusive-bound-mask",
         "supported-involutive-flip",
+        "supported-deterministic-scatter-add",
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
         "supported-selected-axis-block-sum",
@@ -85,6 +89,7 @@ _ENUMS = {
         "supported-cos-derivative",
         "supported-inclusive-bound-mask",
         "supported-involutive-flip",
+        "supported-deterministic-scatter-add",
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
         "supported-selected-axis-block-sum",
@@ -97,12 +102,14 @@ _ENUMS = {
     "vmap": frozenset({
         "supported-leading-batch-axis",
         "supported-leading-batch-axis-with-axis-shift",
+        "supported-leading-batch-axis-with-index-axis-shift",
         "supported-leading-batch-axis-with-unit-repeat",
     }),
     "onnxExport": frozenset({
         "supported-opset17-clip-export-dtypes",
         "supported-opset17-direct-unary-export-dtypes",
         "supported-opset17-expand",
+        "supported-opset17-gather-elements-float32-int32-int64-bool",
         "supported-opset17-reduce-prod-float32-int32-int64",
         "supported-opset17-slice-float32-int32-int64-bool",
         "supported-opset17-tile-float32-int32-int64-bool",
@@ -110,6 +117,7 @@ _ENUMS = {
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
+        "refused-no-deterministic-index-lowering",
         "refused-no-canonical-tile-layout-profile",
         "refused-no-canonical-selected-axis-replication-profile",
         "refused-no-portable-lowering",
@@ -117,6 +125,7 @@ _ENUMS = {
     }),
     "webgpu": frozenset({
         "profile-nonempty-f32-rank-at-most-4",
+        "refused-no-deterministic-index-kernel",
         "refused-negative-stride-profile",
         "refused-no-canonical-tile-layout-profile",
         "refused-no-canonical-selected-axis-replication-profile",
@@ -437,6 +446,92 @@ def _validate_flip(node: Any, contract: FrameworkOperationContract) -> int:
     return axis
 
 
+def _validate_gather(node: Any, contract: FrameworkOperationContract) -> int:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or len(inputs) != 2:
+        raise ShapeError("INDEX must have exactly source and index inputs")
+    source, index = inputs
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("INDEX arg must be a plain dict")
+    fields = set(arg)
+    if "dim" not in fields or not fields.issubset({"dim", "vjp_of"}):
+        raise ShapeError("INDEX arg fields must be exactly 'dim' plus optional 'vjp_of'")
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("INDEX arg.vjp_of must reference a UOp")
+    source_shape = getattr(source, "shape", None)
+    index_shape = getattr(index, "shape", None)
+    if type(source_shape) is not tuple or type(index_shape) is not tuple:
+        raise ShapeError("INDEX source and index shapes must be tuples")
+    rank = len(source_shape)
+    if rank == 0 or len(index_shape) != rank:
+        raise ShapeError(
+            f"INDEX source and index must have the same nonzero rank, got {rank} and {len(index_shape)}"
+        )
+    axis = arg["dim"]
+    if type(axis) is not int or axis < 0 or axis >= rank:
+        raise ShapeError(f"INDEX arg.dim must be normalized into [0, {rank}), got {axis!r}")
+    if getattr(index, "dtype", None) != "int64":
+        raise ShapeError(f"INDEX index dtype must be 'int64', got {getattr(index, 'dtype', None)!r}")
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("INDEX must preserve its source dtype")
+    if getattr(node, "shape", None) != index_shape:
+        raise ShapeError("INDEX output shape must equal its index shape")
+    for dimension, (source_extent, index_extent) in enumerate(zip(source_shape, index_shape)):
+        if dimension != axis and index_extent > source_extent:
+            raise ShapeError(
+                f"INDEX index extent {index_extent} exceeds source extent {source_extent} "
+                f"at non-gather dimension {dimension}"
+            )
+    return axis
+
+
+def validate_gather_scatter_add_contract(node: Any) -> int:
+    if getattr(node, "op", None) != "SCATTER_ADD":
+        raise ShapeError("gather scatter-add validator requires SCATTER_ADD")
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or len(inputs) != 3:
+        raise ShapeError("SCATTER_ADD must have target, index, and source inputs")
+    target, index, source = inputs
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("SCATTER_ADD arg must be a plain dict")
+    fields = set(arg)
+    if "dim" not in fields or not fields.issubset({"dim", "vjp_of"}):
+        raise ShapeError("SCATTER_ADD arg fields must be exactly 'dim' plus optional 'vjp_of'")
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("SCATTER_ADD arg.vjp_of must reference a UOp")
+    target_shape = getattr(target, "shape", None)
+    index_shape = getattr(index, "shape", None)
+    if type(target_shape) is not tuple or type(index_shape) is not tuple:
+        raise ShapeError("SCATTER_ADD target and index shapes must be tuples")
+    rank = len(target_shape)
+    axis = arg["dim"]
+    if rank == 0 or len(index_shape) != rank:
+        raise ShapeError("SCATTER_ADD target and index must have the same nonzero rank")
+    if type(axis) is not int or axis < 0 or axis >= rank:
+        raise ShapeError(f"SCATTER_ADD arg.dim must be normalized into [0, {rank}), got {axis!r}")
+    if getattr(index, "dtype", None) != "int64":
+        raise ShapeError("SCATTER_ADD index dtype must be int64")
+    if getattr(source, "shape", None) != index_shape:
+        raise ShapeError("SCATTER_ADD source shape must equal its index shape")
+    if getattr(source, "dtype", None) != getattr(target, "dtype", None):
+        raise ShapeError("SCATTER_ADD source dtype must equal its target dtype")
+    if getattr(node, "shape", None) != target_shape or getattr(node, "dtype", None) != getattr(target, "dtype", None):
+        raise ShapeError("SCATTER_ADD output shape and dtype must equal its target")
+    for dimension, (target_extent, index_extent) in enumerate(zip(target_shape, index_shape)):
+        if dimension != axis and index_extent > target_extent:
+            raise ShapeError(
+                f"SCATTER_ADD index extent {index_extent} exceeds target extent {target_extent} "
+                f"at non-gather dimension {dimension}"
+            )
+    return axis
+
+
 def _validate_repeat(
     node: Any,
     contract: FrameworkOperationContract,
@@ -607,6 +702,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.cos.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.expand.v1": _validate_broadcast_to,
     "browsergrad.jit.framework.tensor.flip.v1": _validate_flip,
+    "browsergrad.jit.framework.tensor.gather.v1": _validate_gather,
     "browsergrad.jit.framework.tensor.prod.v1": _validate_prod,
     "browsergrad.jit.framework.tensor.repeat.v1": _validate_repeat,
     "browsergrad.jit.framework.tensor.repeat-interleave.v1": _validate_repeat_interleave,
@@ -658,6 +754,13 @@ def validate_flip_contract(node: Any) -> int:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.flip.v1":
         raise ShapeError("FLIP resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_gather_contract(node: Any) -> int:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.gather.v1":
+        raise ShapeError("INDEX resolved to the wrong framework-operation contract")
     return normalized
 
 
@@ -742,6 +845,8 @@ __all__ = [
     "validate_broadcast_to_contract",
     "validate_clamp_contract",
     "validate_flip_contract",
+    "validate_gather_contract",
+    "validate_gather_scatter_add_contract",
     "validate_prod_contract",
     "validate_repeat_contract",
     "validate_repeat_interleave_contract",

@@ -108,11 +108,11 @@
       }
     },
     {
-      "id": "grad.view.reshape-float16-materializes-f32.v0",
+      "id": "grad.view.reshape-float16-alias-preserves-dtype.v1",
       "expected": {
-        "sharesMemory": false,
+        "sharesMemory": true,
         "sourceDtype": "float16",
-        "resultDtype": "float32"
+        "resultDtype": "float16"
       }
     },
     {
@@ -129,19 +129,19 @@
       }
     },
     {
-      "id": "grad.view.transpose-float16-materializes-f32.v0",
+      "id": "grad.view.transpose-float16-alias-preserves-dtype.v1",
       "expected": {
-        "sharesMemory": false,
+        "sharesMemory": true,
         "sourceDtype": "float16",
-        "resultDtype": "float32"
+        "resultDtype": "float16"
       }
     },
     {
-      "id": "grad.view.transpose-bool-materializes-f32.v0",
+      "id": "grad.view.transpose-bool-alias-preserves-dtype.v1",
       "expected": {
-        "sharesMemory": false,
+        "sharesMemory": true,
         "sourceDtype": "bool",
-        "resultDtype": "float32"
+        "resultDtype": "bool"
       }
     },
     {
@@ -158,11 +158,11 @@
       }
     },
     {
-      "id": "grad.view.permute-float16-materializes-f32.v0",
+      "id": "grad.view.permute-float16-alias-preserves-dtype.v1",
       "expected": {
-        "sharesMemory": false,
+        "sharesMemory": true,
         "sourceDtype": "float16",
-        "resultDtype": "float32"
+        "resultDtype": "float16"
       }
     },
     {
@@ -217,11 +217,11 @@
       }
     },
     {
-      "id": "grad.view.basic-slice-int64-materializes-f32.v0",
+      "id": "grad.view.basic-slice-int64-alias-preserves-dtype.v1",
       "expected": {
-        "sharesMemory": false,
+        "sharesMemory": true,
         "sourceDtype": "int64",
-        "resultDtype": "float32"
+        "resultDtype": "int64"
       }
     },
     {

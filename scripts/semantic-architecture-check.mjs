@@ -427,7 +427,7 @@ export function validateGradCompatibilityInventory(inventory, fixture, freeze, f
   const targetConformance = new Set(["browsergrad-defined", "compatibility-debt", "pytorch-compatible"]);
   const referenceContracts = new Set(["browsergrad-grad-explicit", "numpy-array-protocol", "pytorch-shaped-compatibility"]);
   const dtypeEffects = new Set(["coerces-float32", "preserves", "preserves-float32-otherwise-coerces-float32", "resolved-target", "substitutes-float32-token", "surface-dependent"]);
-  const conditions = new Set(["all-inputs", "input-dtype-and-index-kind-dependent", "input-dtype-and-layout-dependent", "input-dtype-dependent", "no-requested-dtype", "requested-bf16-token", "requested-dtype-dependent", "requested-dtype-differs-from-storage-dtype", "requested-dtype-equals-storage-dtype", "surface-and-input-dependent", "torch-bfloat16-token", "unrecognized-string"]);
+  const conditions = new Set(["all-inputs", "index-kind-dependent", "input-dtype-and-index-kind-dependent", "input-dtype-and-layout-dependent", "input-dtype-dependent", "input-layout-dependent", "no-requested-dtype", "requested-bf16-token", "requested-dtype-dependent", "requested-dtype-differs-from-storage-dtype", "requested-dtype-equals-storage-dtype", "surface-and-input-dependent", "torch-bfloat16-token", "unrecognized-string"]);
   const failurePolicies = new Set(["delegate-invalid-broadcast-to-numpy", "delegate-invalid-dimension-to-numpy", "delegate-invalid-index-to-numpy", "delegate-invalid-input-to-python-or-numpy", "delegate-invalid-permutation-to-numpy", "delegate-invalid-shape-to-numpy", "no-dedicated-failure-path", "reject-invalid-dtype-after-numpy-delegation", "reject-invalid-expand-shape-before-execution", "unrecognized-dtype-treated-as-device-noop"]);
   const aliasing = new Set(["conditional", "must-alias", "must-not-alias", "not-applicable", "same-object"]);
   const contiguity = new Set(["contiguous", "input-dependent", "not-applicable", "preserved"]);
@@ -734,16 +734,16 @@ function checkJitFrameworkOperationContracts(root, manifest, failures) {
   ];
   const allowed = {
     semanticState: new Set(["typed"]),
-    shapeContract: new Set(["preserve-single-axis-reverse", "preserve-unary-input", "selected-axis-times-repeat-count", "static-broadcast-with-existing-dim-minus-one", "static-product-reduction", "tile-multipliers-with-left-rank-padding"]),
-    dtypeContract: new Set(["preserve-floating-input", "preserve-input", "preserve-real-numeric-input"]),
-    cpu: new Set(["supported-numpy-dtype-preserving", "supported-numpy-owning-copy"]),
-    closureAutograd: new Set(["supported-cos-derivative", "supported-inclusive-bound-mask", "supported-involutive-flip", "supported-negative-sin-derivative", "supported-selected-axis-block-sum", "supported-sign-derivative", "supported-tile-block-sum", "supported-unbroadcast-sum", "supported-zero-aware-product-rule", "supported-zero-derivative"]),
-    symbolicVjp: new Set(["supported-cos-derivative", "supported-inclusive-bound-mask", "supported-involutive-flip", "supported-negative-sin-derivative", "supported-selected-axis-block-sum", "supported-sign-derivative", "supported-tile-block-sum", "supported-unbroadcast-sum", "supported-zero-aware-product-rule", "supported-zero-derivative"]),
+    shapeContract: new Set(["preserve-single-axis-reverse", "preserve-unary-input", "same-rank-index-shaped-gather", "selected-axis-times-repeat-count", "static-broadcast-with-existing-dim-minus-one", "static-product-reduction", "tile-multipliers-with-left-rank-padding"]),
+    dtypeContract: new Set(["preserve-floating-input", "preserve-input", "preserve-real-numeric-input", "preserve-source-require-int64-index"]),
+    cpu: new Set(["supported-numpy-dtype-preserving", "supported-numpy-owning-copy", "supported-numpy-owning-copy-with-range-check"]),
+    closureAutograd: new Set(["supported-cos-derivative", "supported-deterministic-scatter-add", "supported-inclusive-bound-mask", "supported-involutive-flip", "supported-negative-sin-derivative", "supported-selected-axis-block-sum", "supported-sign-derivative", "supported-tile-block-sum", "supported-unbroadcast-sum", "supported-zero-aware-product-rule", "supported-zero-derivative"]),
+    symbolicVjp: new Set(["supported-cos-derivative", "supported-deterministic-scatter-add", "supported-inclusive-bound-mask", "supported-involutive-flip", "supported-negative-sin-derivative", "supported-selected-axis-block-sum", "supported-sign-derivative", "supported-tile-block-sum", "supported-unbroadcast-sum", "supported-zero-aware-product-rule", "supported-zero-derivative"]),
     functionalGrad: new Set(["supported-via-symbolic-vjp"]),
-    vmap: new Set(["supported-leading-batch-axis", "supported-leading-batch-axis-with-axis-shift", "supported-leading-batch-axis-with-unit-repeat"]),
-    onnxExport: new Set(["supported-opset17-clip-export-dtypes", "supported-opset17-direct-unary-export-dtypes", "supported-opset17-expand", "supported-opset17-reduce-prod-float32-int32-int64", "supported-opset17-slice-float32-int32-int64-bool", "supported-opset17-tile-float32-int32-int64-bool", "supported-opset17-unsqueeze-tile-reshape-float32-int32-int64-bool"]),
-    tensorPlan: new Set(["refused-negative-stride-profile", "refused-no-canonical-selected-axis-replication-profile", "refused-no-canonical-tile-layout-profile", "refused-no-portable-lowering", "supported-primitive"]),
-    webgpu: new Set(["profile-nonempty-f32-rank-at-most-4", "refused-negative-stride-profile", "refused-no-canonical-selected-axis-replication-profile", "refused-no-canonical-tile-layout-profile", "refused-no-tensor-plan-kernel"]),
+    vmap: new Set(["supported-leading-batch-axis", "supported-leading-batch-axis-with-axis-shift", "supported-leading-batch-axis-with-index-axis-shift", "supported-leading-batch-axis-with-unit-repeat"]),
+    onnxExport: new Set(["supported-opset17-clip-export-dtypes", "supported-opset17-direct-unary-export-dtypes", "supported-opset17-expand", "supported-opset17-gather-elements-float32-int32-int64-bool", "supported-opset17-reduce-prod-float32-int32-int64", "supported-opset17-slice-float32-int32-int64-bool", "supported-opset17-tile-float32-int32-int64-bool", "supported-opset17-unsqueeze-tile-reshape-float32-int32-int64-bool"]),
+    tensorPlan: new Set(["refused-negative-stride-profile", "refused-no-canonical-selected-axis-replication-profile", "refused-no-canonical-tile-layout-profile", "refused-no-deterministic-index-lowering", "refused-no-portable-lowering", "supported-primitive"]),
+    webgpu: new Set(["profile-nonempty-f32-rank-at-most-4", "refused-negative-stride-profile", "refused-no-canonical-selected-axis-replication-profile", "refused-no-canonical-tile-layout-profile", "refused-no-deterministic-index-kernel", "refused-no-tensor-plan-kernel"]),
     residency: new Set(["host-materialized", "supported-materializing-and-resident"]),
     materialization: new Set(["cpu-owning-array", "cpu-owning-copy"]),
   };

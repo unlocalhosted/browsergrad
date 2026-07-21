@@ -33,7 +33,7 @@ What we cover (v0):
   Reduce: REDUCE (shift axis numeric +1, or skip the new batch dim
     when axis=None).
 
-What we don't (raises): SCATTER_ADD, INDEX, MASK, RANDOM, CUSTOM,
+What we don't (raises): MASK, RANDOM, CUSTOM,
 FUSED_*, PAD, SLICE. The rules to add are mechanical — follow the
 same template — but PRD-014b owns them per the review's scope.
 
@@ -77,6 +77,8 @@ from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_clamp_contract,
     validate_flip_contract,
+    validate_gather_contract,
+    validate_gather_scatter_add_contract,
     validate_prod_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
@@ -492,38 +494,44 @@ def _vmap_fused_elementwise(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
 
 @register_vmap(OP_INDEX)
 def _vmap_index(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
-    """Shift dim by +1 (when batched). Both data and idx assumed
-    batched along axis 0; broadcasting over the new batch dim works
-    naturally for np.take semantics."""
+    """Map source and index together and shift gather dim past batch."""
+    axis = validate_gather_contract(node)
     data = batched[id(node.inputs[0])]
     idx = batched[id(node.inputs[1])]
-    arg = dict(node.arg)
-    dim = arg.get("dim", 0)
-    orig_data_ndim = len(node.inputs[0].shape)
-    is_batched = len(data.shape) > orig_data_ndim
-    if is_batched and dim >= 0:
-        arg["dim"] = dim + 1
-    # Output shape: same as data with dim replaced by idx's gather axis.
-    # Simplest derivation: prepend B if batched, otherwise unchanged.
-    new_shape = (B,) + node.shape if is_batched else node.shape
+    data_batched = len(data.shape) > len(node.inputs[0].shape)
+    index_batched = len(idx.shape) > len(node.inputs[1].shape)
+    if data_batched != index_batched:
+        raise JitNotImplementedError(
+            "bg.func.vmap: INDEX requires source and index to share the leading batch axis"
+        )
+    mapped_axis = axis + 1 if data_batched else axis
+    new_shape = (B,) + node.shape if data_batched else node.shape
     return UOp(op=OP_INDEX, inputs=(data, idx),
-               shape=new_shape, dtype=node.dtype, arg=arg)
+               shape=new_shape, dtype=node.dtype,
+               arg={**node.arg, "dim": mapped_axis})
 
 
 @register_vmap(OP_SCATTER_ADD)
 def _vmap_scatter_add(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
-    """target, idx, src all assumed batched along axis 0; dim shifts +1."""
+    """Map target, index, and source together and shift dim past batch."""
+    axis = validate_gather_scatter_add_contract(node)
     target = batched[id(node.inputs[0])]
     idx = batched[id(node.inputs[1])]
     src = batched[id(node.inputs[2])]
-    arg = dict(node.arg)
-    dim = arg.get("dim", 0)
-    orig_target_ndim = len(node.inputs[0].shape)
-    is_batched = len(target.shape) > orig_target_ndim
-    if is_batched and dim >= 0:
-        arg["dim"] = dim + 1
+    mapped = (
+        len(target.shape) > len(node.inputs[0].shape),
+        len(idx.shape) > len(node.inputs[1].shape),
+        len(src.shape) > len(node.inputs[2].shape),
+    )
+    if len(set(mapped)) != 1:
+        raise JitNotImplementedError(
+            "bg.func.vmap: SCATTER_ADD requires target, index, and source to share "
+            "the leading batch axis"
+        )
+    mapped_axis = axis + 1 if mapped[0] else axis
     return UOp(op=OP_SCATTER_ADD, inputs=(target, idx, src),
-               shape=target.shape, dtype=node.dtype, arg=arg)
+               shape=target.shape, dtype=node.dtype,
+               arg={**node.arg, "dim": mapped_axis})
 
 
 # Refusal stubs — these ops have semantics that don't translate
@@ -732,8 +740,8 @@ def vmap(
         TensorProxy input. Other axes raise.
       * `out_dims=0` only — output's batch ends up at axis 0.
       * Supported opcodes include BUFFER, LOAD, CONST, ADD, MUL, DIV, NEG,
-        EXP, LOG, ABS, CLAMP, COS, FLIP, REPEAT, SIGN, SIN, CMP, WHERE, CAST,
-        MATMUL, REDUCE, RESHAPE, PERMUTE, and BROADCAST_TO. Anything else
+        EXP, LOG, ABS, CLAMP, COS, FLIP, INDEX, REPEAT, SIGN, SIN, CMP, WHERE,
+        CAST, MATMUL, REDUCE, RESHAPE, PERMUTE, SCATTER_ADD, and BROADCAST_TO. Anything else
         raises with a pointer to PRD-014b.
     """
     if isinstance(in_dims, tuple):

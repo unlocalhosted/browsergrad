@@ -50,6 +50,11 @@ Each package follows independent [SemVer](https://semver.org/).
   axes, owning dtype-preserving scalar/tensor results, zero-aware VJP,
   batch-safe vmap, ONNX `ReduceProd`, and explicit device refusal. Grad shares
   the same conformance fixture and zero-aware dtype-preserving derivative.
+- Migrates JIT `Tensor.gather` to typed bounds-checked `INDEX` semantics with
+  int64 indices, deterministic duplicate-index scatter-add VJP, paired vmap,
+  ONNX `GatherElements`, and explicit device refusal. Grad shares the strict
+  conformance fixture, preserves source/output/gradient dtype, and keeps int64
+  index tensors intact through slice, reshape, transpose, and permute views.
 
 ## 2026-07 — semantic-core, kernels, compiler, and JIT semantic migration
 

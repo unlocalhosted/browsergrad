@@ -45,6 +45,7 @@ sorted(ALL_OPS)
     expect(ops).toContain("CLAMP");
     expect(ops).toContain("COS");
     expect(ops).toContain("FLIP");
+    expect(ops).toContain("INDEX");
     expect(ops).toContain("REPEAT");
     expect(ops).toContain("REPEAT_INTERLEAVE");
     expect(ops).toContain("PROD");

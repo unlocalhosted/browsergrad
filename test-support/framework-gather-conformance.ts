@@ -1,0 +1,87 @@
+export const FRAMEWORK_GATHER_CONFORMANCE = Object.freeze({
+  schema: "browsergrad.framework-gather-conformance@1",
+  valid: Object.freeze({
+    inputShape: Object.freeze([2, 3]),
+    inputValues: Object.freeze([10, 11, 12, 20, 21, 22]),
+    indexShape: Object.freeze([2, 2]),
+    indexValues: Object.freeze([2, 0, 1, 1]),
+    axis: 1,
+    negativeAxis: -1,
+    outputShape: Object.freeze([2, 2]),
+    outputValues: Object.freeze([12, 10, 21, 21]),
+    sourceGradient: Object.freeze([1, 0, 1, 0, 2, 0]),
+  }),
+  dtypeCases: Object.freeze([
+    Object.freeze({ dtype: "float16", expectedDtype: "float16" }),
+    Object.freeze({ dtype: "int32", expectedDtype: "int32" }),
+    Object.freeze({ dtype: "bool", expectedDtype: "bool" }),
+  ]),
+  invalid: Object.freeze([
+    Object.freeze({
+      id: "non-integral-axis",
+      kind: "axis",
+      value: 0.5,
+      message: "axis must be a built-in or NumPy integer scalar",
+    }),
+    Object.freeze({
+      id: "boolean-axis",
+      kind: "axis",
+      value: true,
+      message: "axis must be a built-in or NumPy integer scalar",
+    }),
+    Object.freeze({
+      id: "axis-out-of-range",
+      kind: "axis",
+      value: 2,
+      message: "axis 2 out of range for rank 2",
+    }),
+    Object.freeze({
+      id: "index-int32",
+      kind: "index-dtype",
+      value: "int32",
+      message: "index dtype must be int64",
+    }),
+    Object.freeze({
+      id: "index-float32",
+      kind: "index-dtype",
+      value: "float32",
+      message: "index dtype must be int64",
+    }),
+    Object.freeze({
+      id: "index-rank-mismatch",
+      kind: "index-rank",
+      value: Object.freeze([4]),
+      message: "source and index must have the same nonzero rank",
+    }),
+    Object.freeze({
+      id: "oversized-non-gather-dimension",
+      kind: "index-shape",
+      value: Object.freeze([3, 1]),
+      message: "index extent 3 exceeds source extent 2 at non-gather dimension 0",
+    }),
+    Object.freeze({
+      id: "non-tensor-index",
+      kind: "non-tensor",
+      value: Object.freeze([[0, 1], [1, 0]]),
+      message: "index must be a Tensor",
+    }),
+    Object.freeze({
+      id: "negative-index",
+      kind: "index-values",
+      value: Object.freeze([-1, 0, 0, 1]),
+      message: "index values must be in [0, 3)",
+    }),
+    Object.freeze({
+      id: "index-out-of-range",
+      kind: "index-values",
+      value: Object.freeze([3, 0, 0, 1]),
+      message: "index values must be in [0, 3)",
+    }),
+    Object.freeze({
+      id: "scalar-source",
+      kind: "scalar-source",
+      value: 0,
+      message: "axis 0 out of range for rank 0",
+    }),
+  ]),
+});

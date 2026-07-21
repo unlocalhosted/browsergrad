@@ -48,7 +48,7 @@ from ._ir import (
     OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
-    OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO,
+    OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO, OP_INDEX,
 )
 from ._errors import JitNotImplementedError, ShapeError, RealizationError
 from ._framework_contracts import REPEAT_FACTOR_MAX, REPEAT_RANK_MAX
@@ -133,6 +133,15 @@ def _normalize_single_axis(op_name: str, value: Any, rank: int) -> int:
     if axis < 0 or axis >= rank:
         raise ShapeError(f"{op_name}: axis {value} out of range for rank {rank}")
     return axis
+
+
+def _validate_gather_index_values(index: np.ndarray, axis_extent: int) -> None:
+    if index.size == 0:
+        return
+    if bool(np.any(index < 0)) or bool(np.any(index >= axis_extent)):
+        raise ShapeError(
+            f"gather: index values must be in [0, {axis_extent})"
+        )
 
 
 def _normalize_reduction_axes(op_name: str, value: Any, rank: int) -> Tuple[int, ...]:
@@ -1122,25 +1131,45 @@ class TensorProxy:
                            requires_grad=requires, ctx=ctx)
 
     def gather(self, dim: int, index: Any) -> "TensorProxy":
-        index_proxy = _to_proxy(index, self._get_session())
-        axis = int(dim) % self.ndim
-
-        def _gather_forward(x_arr: np.ndarray, idx_arr: np.ndarray) -> np.ndarray:
-            return np.take_along_axis(x_arr, idx_arr.astype(np.int64), axis=axis)
+        if not isinstance(index, TensorProxy):
+            raise TypeError(
+                f"gather: index must be a TensorProxy, got {type(index).__name__}"
+            )
+        index_proxy = index
+        if index_proxy._get_session() is not self._get_session():
+            raise ShapeError("gather: source and index must belong to the same session")
+        axis = _normalize_single_axis("gather", dim, self.ndim)
+        if index_proxy.dtype != "int64":
+            raise ShapeError(
+                f"gather: index dtype must be int64, got {index_proxy.dtype}"
+            )
+        if index_proxy.ndim != self.ndim:
+            raise ShapeError(
+                "gather: source and index must have the same nonzero rank, "
+                f"got {self.ndim} and {index_proxy.ndim}"
+            )
+        for dimension, (source_extent, index_extent) in enumerate(
+            zip(self.shape, index_proxy.shape)
+        ):
+            if dimension != axis and index_extent > source_extent:
+                raise ShapeError(
+                    f"gather: index extent {index_extent} exceeds source extent "
+                    f"{source_extent} at non-gather dimension {dimension}"
+                )
 
         uop = UOp(
-            op=OP_CUSTOM,
+            op=OP_INDEX,
             inputs=(self._uop, index_proxy._uop),
             shape=index_proxy.shape,
             dtype=self._uop.dtype,
-            arg={"fn": _gather_forward, "captures": (), "name": "gather"},
+            arg={"dim": axis},
         )
 
         def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
             x_arr, idx_arr = ins
-            idx_np = idx_arr.astype(np.int64)
+            _validate_gather_index_values(idx_arr, x_arr.shape[axis])
             grad_x = np.zeros_like(x_arr)
-            np.add.at(grad_x, _make_gather_idx(idx_np, axis, x_arr.ndim), dy)
+            np.add.at(grad_x, _make_gather_idx(idx_arr, axis, x_arr.ndim), dy)
             return (grad_x.astype(x_arr.dtype, copy=False), None)
 
         requires = _should_track(self)
@@ -2174,7 +2203,7 @@ def _make_gather_idx(idx_np: np.ndarray, dim: int, ndim: int) -> tuple:
             shape = [1] * ndim
             shape[axis] = size
             arr = np.arange(size).reshape(shape)
-            idx_list.append(np.broadcast_to(arr, idx_np.shape).copy())
+            idx_list.append(np.broadcast_to(arr, idx_np.shape))
     return tuple(idx_list)
 
 

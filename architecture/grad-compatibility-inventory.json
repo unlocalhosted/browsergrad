@@ -185,20 +185,20 @@
       ]
     },
     {
-      "id": "grad.view.reshape.v0",
+      "id": "grad.view.reshape.v1",
       "surface": "Tensor.reshape()/view()",
       "class": "view",
       "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
+      "targetConformance": "pytorch-compatible",
       "referenceContract": "pytorch-shaped-compatibility",
-      "dtypeEffect": "preserves-float32-otherwise-coerces-float32",
-      "condition": "input-dtype-and-layout-dependent",
+      "dtypeEffect": "preserves",
+      "condition": "input-layout-dependent",
       "failurePolicy": "delegate-invalid-shape-to-numpy",
       "aliasing": "conditional",
       "contiguity": "input-dependent",
       "materialization": "conditional",
       "autograd": "graph-edge",
-      "truth": "For float32 input, aliasing follows NumPy reshape: compatible layouts alias while incompatible non-contiguous layouts materialize. Other input dtypes are converted to float32 and therefore do not alias.",
+      "truth": "Reshape preserves storage dtype. Aliasing follows NumPy reshape: compatible layouts alias while incompatible non-contiguous layouts materialize.",
       "sourceDefinitions": [
         "tensor.py:Tensor.reshape",
         "tensor.py:Tensor.view",
@@ -209,24 +209,24 @@
         "grad.view.reshape-contiguous-alias.v0",
         "grad.view.view-direct-alias.v0",
         "grad.view.reshape-noncontiguous-materializes.v0",
-        "grad.view.reshape-float16-materializes-f32.v0"
+        "grad.view.reshape-float16-alias-preserves-dtype.v1"
       ]
     },
     {
-      "id": "grad.view.transpose.v0",
+      "id": "grad.view.transpose.v1",
       "surface": "Tensor.transpose()",
       "class": "view",
       "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
+      "targetConformance": "pytorch-compatible",
       "referenceContract": "pytorch-shaped-compatibility",
-      "dtypeEffect": "preserves-float32-otherwise-coerces-float32",
-      "condition": "input-dtype-dependent",
+      "dtypeEffect": "preserves",
+      "condition": "all-inputs",
       "failurePolicy": "delegate-invalid-dimension-to-numpy",
       "aliasing": "conditional",
       "contiguity": "input-dependent",
       "materialization": "conditional",
       "autograd": "graph-edge",
-      "truth": "For float32 input, transpose uses NumPy swapaxes and shares storage; non-degenerate swaps may be non-contiguous. Other input dtypes are converted to new float32 storage.",
+      "truth": "Transpose preserves storage dtype, uses NumPy swapaxes, and shares storage; non-degenerate swaps may be non-contiguous.",
       "sourceDefinitions": [
         "tensor.py:Tensor.transpose",
         "tensor.py:_transpose",
@@ -234,25 +234,25 @@
       ],
       "fixtureCaseIds": [
         "grad.view.transpose-alias.v0",
-        "grad.view.transpose-float16-materializes-f32.v0",
-        "grad.view.transpose-bool-materializes-f32.v0"
+        "grad.view.transpose-float16-alias-preserves-dtype.v1",
+        "grad.view.transpose-bool-alias-preserves-dtype.v1"
       ]
     },
     {
-      "id": "grad.view.permute.v0",
+      "id": "grad.view.permute.v1",
       "surface": "Tensor.permute()",
       "class": "view",
       "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
+      "targetConformance": "pytorch-compatible",
       "referenceContract": "pytorch-shaped-compatibility",
-      "dtypeEffect": "preserves-float32-otherwise-coerces-float32",
-      "condition": "input-dtype-dependent",
+      "dtypeEffect": "preserves",
+      "condition": "all-inputs",
       "failurePolicy": "delegate-invalid-permutation-to-numpy",
       "aliasing": "conditional",
       "contiguity": "input-dependent",
       "materialization": "conditional",
       "autograd": "graph-edge",
-      "truth": "For float32 input, permute uses NumPy transpose and shares storage; non-identity permutations may be non-contiguous. Other input dtypes are converted to new float32 storage.",
+      "truth": "Permute preserves storage dtype, uses NumPy transpose, and shares storage; non-identity permutations may be non-contiguous.",
       "sourceDefinitions": [
         "tensor.py:Tensor.permute",
         "tensor.py:_permute",
@@ -260,7 +260,7 @@
       ],
       "fixtureCaseIds": [
         "grad.view.permute-alias.v0",
-        "grad.view.permute-float16-materializes-f32.v0"
+        "grad.view.permute-float16-alias-preserves-dtype.v1"
       ]
     },
     {
@@ -289,20 +289,20 @@
       ]
     },
     {
-      "id": "grad.view.indexing.v0",
+      "id": "grad.view.indexing.v1",
       "surface": "Tensor.__getitem__()",
       "class": "view",
       "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
+      "targetConformance": "pytorch-compatible",
       "referenceContract": "pytorch-shaped-compatibility",
-      "dtypeEffect": "preserves-float32-otherwise-coerces-float32",
-      "condition": "input-dtype-and-index-kind-dependent",
+      "dtypeEffect": "preserves",
+      "condition": "index-kind-dependent",
       "failurePolicy": "delegate-invalid-index-to-numpy",
       "aliasing": "conditional",
       "contiguity": "input-dependent",
       "materialization": "conditional",
       "autograd": "graph-edge",
-      "truth": "For float32 input, basic slicing may share storage while fancy indexing copies. The helper explicitly coerces every indexed result to float32, so non-float32 input materializes and loses its storage dtype.",
+      "truth": "Indexing preserves source dtype. Basic slicing may share storage while fancy indexing copies; both retain the source dtype and an autograd edge when required.",
       "sourceDefinitions": [
         "tensor.py:Tensor.__getitem__",
         "tensor.py:_getitem",
@@ -311,7 +311,7 @@
       "fixtureCaseIds": [
         "grad.view.basic-slice-alias.v0",
         "grad.view.fancy-index-materializes.v0",
-        "grad.view.basic-slice-int64-materializes-f32.v0"
+        "grad.view.basic-slice-int64-alias-preserves-dtype.v1"
       ]
     },
     {
