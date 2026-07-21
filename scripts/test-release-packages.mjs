@@ -319,12 +319,14 @@ try {
     semanticCoreRange === workspaceSemanticCoreVersion,
     `kernels package semantic-core dependency should be ${workspaceSemanticCoreVersion}, got ${semanticCoreRange}`,
   );
-  for (const subpath of ["./wgsl_program", "./float16", "./cuda_concepts", "./cuda_program", "./rubric", "./semantic_view_copy"]) {
+  for (const subpath of ["./wgsl_program", "./float16", "./cuda_concepts", "./cuda_program", "./rubric", "./semantic_view_copy", "./semantic_gemm"]) {
     assert(kernelsPkg.exports?.[subpath], `kernels package missing export ${subpath}`);
   }
   for (const file of [
     "dist/semantic_view_copy.js",
     "dist/semantic_view_copy.d.ts",
+    "dist/semantic_gemm.js",
+    "dist/semantic_gemm.d.ts",
   ]) {
     assert(existsSync(join(kernels, file)), `kernels tarball missing ${file}`);
   }
@@ -358,6 +360,8 @@ try {
     "createBrowsergradKernelRubric",
     "prepareSemanticViewCopyWgsl",
     "runSemanticViewCopyWebGpu",
+    "prepareSemanticGemmWgsl",
+    "runSemanticGemmWebGpu",
   ]) {
     assert(exportName in kernelsRoot, `kernels root export missing ${exportName}`);
   }
@@ -369,6 +373,7 @@ try {
     ["cuda_program", "defineCuda1DProgram"],
     ["rubric", "createKernelRubric"],
     ["semantic_view_copy", "prepareSemanticViewCopyWgsl"],
+    ["semantic_gemm", "prepareSemanticGemmWgsl"],
   ]) {
     const mod = await import(pathToFileURL(join(kernels, `dist/${subpath}.js`)));
     assert(exportName in mod, `kernels ${subpath} export missing ${exportName}`);
@@ -383,6 +388,25 @@ try {
   assert(packedWgsl.program.wgsl.includes("var<storage, read> source_words: array<u32>"), "packed WGSL lowering lost bit-exact source words");
   assert(packedWgsl.program.wgsl.includes("destination_words[destination_word] = copied_bits"), "packed WGSL lowering lost destination copy");
   assert(!packedWgsl.program.wgsl.includes("select("), "packed WGSL lowering used eager select for guarded copy");
+  const kernelsSemanticGemm = await import(pathToFileURL(join(kernels, "dist/semantic_gemm.js")));
+  const packedExactSchedule = await semanticSchedule.createVerifiedLogicalGemmTileSchedule(
+    packedExactLogicalGemm.kernel,
+    { physicalTile: { m: "1", n: "1", k: "1" } },
+  );
+  const packedSemanticGemm = await kernelsSemanticGemm.prepareSemanticGemmWgsl(
+    packedExactLogicalGemm.layout,
+    packedExactLogicalGemm.kernel,
+    packedExactSchedule.artifact,
+    { operationId: packedExactLogicalGemm.operationId },
+  );
+  assert(
+    packedSemanticGemm.semantic.specializationHash === packedExactInput.specializationHash,
+    "packed semantic GEMM lost the certificate-bound logical specialization",
+  );
+  assert(
+    packedSemanticGemm.program.wgsl.match(/workgroupBarrier\(\);/gu)?.length === 2,
+    "packed semantic GEMM lost its two uniform staging barriers",
+  );
   const installedConsumer = installPackedConsumer(
     "semantic-view-copy",
     ["browsergrad-semantic-core", "browsergrad-kernels", "browsergrad-compiler"],

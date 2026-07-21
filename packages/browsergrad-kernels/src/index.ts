@@ -188,6 +188,25 @@ export {
 } from "./semantic_view_copy.js";
 
 export {
+  SEMANTIC_GEMM_WEBGPU_BACKEND_VERSION,
+  SEMANTIC_GEMM_WEBGPU_PROFILE,
+  SemanticGemmWebGpuError,
+  prepareSemanticGemmWgsl,
+  runPreparedSemanticGemmResident,
+  runSemanticGemmWebGpu,
+  type PreparedSemanticGemmWgsl,
+  type PrepareSemanticGemmWgslRequest,
+  type SemanticGemmResidentInput,
+  type SemanticGemmResidentInputs,
+  type SemanticGemmResidentRunOptions,
+  type SemanticGemmWebGpuDeviceFacts,
+  type SemanticGemmWebGpuErrorCode,
+  type SemanticGemmWebGpuResult,
+  type SemanticGemmWebGpuRunOptions,
+  type SemanticGemmWebGpuTrace,
+} from "./semantic_gemm.js";
+
+export {
   defineCuda1DProgram,
   defineKernel1DProgram,
   emitCuda1DProgramWgsl,

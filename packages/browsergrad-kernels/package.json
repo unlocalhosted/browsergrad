@@ -59,6 +59,10 @@
       "types": "./dist/semantic_view_copy.d.ts",
       "import": "./dist/semantic_view_copy.js"
     },
+    "./semantic_gemm": {
+      "types": "./dist/semantic_gemm.d.ts",
+      "import": "./dist/semantic_gemm.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -77,6 +81,8 @@
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:browser:view-copy": "vitest run --config vitest.browser.config.ts tests-browser/semantic_view_copy_webgpu.test.ts",
     "test:browser:view-copy:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_view_copy_webgpu.test.ts",
+    "test:browser:semantic-gemm": "vitest run --config vitest.browser.config.ts tests-browser/semantic_gemm_webgpu.test.ts",
+    "test:browser:semantic-gemm:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_gemm_webgpu.test.ts",
     "test:browser:open": "vitest --config vitest.browser.config.ts --watch --browser.headless=false",
     "lint": "oxlint src",
     "clean": "rm -rf dist *.tsbuildinfo",

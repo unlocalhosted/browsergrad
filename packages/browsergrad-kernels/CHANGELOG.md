@@ -7,6 +7,21 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- Production semantic GEMM preparation and WebGPU execution consume the exact
+  verified layout, logical GEMM, physical schedule, and concrete-input
+  certificate authorities. Cooperative scalar workgroup staging uses uniform
+  barriers, zero-filled boundary loads, masked complete-root stores, and
+  deterministic logical/schedule/backend/WGSL trace identities.
+- The portable numerical profile is deliberately limited to semantic-core's
+  exact nonnegative-integer f32 certificate. Host execution uploads only fresh
+  authority-retained snapshots and compares complete destination bytes; raw
+  resident `GPUBuffer` inputs fail closed until trusted upload provenance exists.
+- Focused advisory and required-device browser lanes execute irregular
+  17-by-23-by-19 GEMM through 8-by-8-by-8 and 16-by-16-by-16 schedules and
+  require both actual WebGPU outputs to bit-match the source-ordered CPU result.
+
 ### Changed
 
 - Resident semantic dispatch and materialization now issue all synchronous GPU

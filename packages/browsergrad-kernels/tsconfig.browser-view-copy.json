@@ -3,6 +3,7 @@
   "include": [
     "src",
     "tests-browser/semantic_view_copy_webgpu.test.ts",
+    "tests-browser/semantic_gemm_webgpu.test.ts",
     "../../test-support/webgpu-evidence.ts"
   ],
   "exclude": ["dist", "node_modules"]

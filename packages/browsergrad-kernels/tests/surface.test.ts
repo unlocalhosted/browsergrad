@@ -17,6 +17,9 @@ import {
   referenceFusedAttention,
   referenceOrderedCircleRender,
   referenceSaxpy,
+  prepareSemanticGemmWgsl,
+  runPreparedSemanticGemmResident,
+  runSemanticGemmWebGpu,
   runCuda1DProgramWebGpu,
   runKernel1DProgramReference,
   runKernel1DProgramWebGpu,
@@ -61,6 +64,9 @@ describe("public surface", () => {
     expect(typeof referenceFusedAttention).toBe("function");
     expect(typeof referenceFlashAttention).toBe("function");
     expect(typeof referenceFlashAttentionBackward).toBe("function");
+    expect(typeof prepareSemanticGemmWgsl).toBe("function");
+    expect(typeof runSemanticGemmWebGpu).toBe("function");
+    expect(typeof runPreparedSemanticGemmResident).toBe("function");
   });
 
   it("kernels bundle exposes the v0 op set", () => {
