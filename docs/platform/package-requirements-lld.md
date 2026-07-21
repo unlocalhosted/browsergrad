@@ -57,21 +57,24 @@ detection before any semantic authority can be minted. The resulting exact
 producer-neutral authorized `view-copy` entry can lower genuine f32 ABI,
 tensor-engine, affine-layout, copy-effect, and explicit runtime-allocation
 facts into the canonical Gate 2 layout/kernel artifacts. The initial profile
-is positive flat static rank 2, two distinct non-null global pointers,
+is positive flat static rank 2 or rank 3, two distinct non-null global pointers,
 synchronous portable copy, reject on an invalid source, and forbid overlap.
-Its CPU reference proves the pinned transpose bit-for-bit with nonzero
-allocation offsets. The exact canonical payload reproduced by that
-authorization path now also executes bit-for-bit through the canonical WebGPU
-backend on Apple Metal 3 and required CI SwiftShader, including complete
-destination comparison and nonzero-offset canaries. This browser evidence is
-fixture-payload convergence across realms: it explicitly records
+Its CPU reference proves the pinned rank-2 and `(2,3,4)` rank-3 transposes
+bit-for-bit with nonzero allocation offsets. The two exact canonical payloads
+reproduced by that authorization path now also execute bit-for-bit through the
+canonical WebGPU backend, including complete destination comparison and
+nonzero-offset canaries. The required actual-WebGPU lane executes both cases.
+This browser evidence is fixture-payload convergence across realms: it
+explicitly records
 `productionBrowserCompileObserved=false` and does not mint backend,
 distribution, or release authority. Capability commits `a8a861e2`,
-`c4e2d799`, `08f4b102`, `6355289c`, and `e546a124`, plus exact-source CI run
-`29810488096`, prove the candidate/authorization and required-WebGPU
-boundaries. The next software slice expands the same static positive-affine
-view-copy lowering from rank 2 to rank 3 without widening the unsupported
-layout profile. Two distinct
+`c4e2d799`, `08f4b102`, `6355289c`, `e546a124`, and `dca33be5`, plus
+their tests, prove the candidate/authorization, rank-2/rank-3 lowering, and
+required-WebGPU boundaries. Exact-source CI run `29811673981` completed with
+all eight jobs green. The complete compiler suite passes 95 files and 1,591
+tests at this checkpoint. The next software
+slice begins Gate 4 with one frontend-neutral logical GEMM tile, kept separate
+from physical schedule, staging, and backend mapping. Two distinct
 cache-free builds now prove exact
 extractor Wasm/factory reproducibility; the package binds their canonical v3
 evidence without claiming reproducibility of the still-incomplete distributed
@@ -217,9 +220,8 @@ reproducibility, exact package admission of that evidence, browser build-subject
 syntax, and signature/build-subject binding. The fast configuration now uses
 family globs for all browser and C++/CuTe lowering tests instead of a drifting
 per-file browser allowlist. The current Node 25 focused Vitest phase passes 700
-tests across the same 80 files in 11.54 seconds. The last complete local
-compiler-suite measurement before this authorization slice passed 92 files and
-1,578 tests in 11.16 seconds when run after the package build. The local
+tests across the same 80 files in 11.54 seconds. The complete compiler suite
+after rank-3 convergence passes 95 files and 1,591 tests. The local
 feedback loop remains measured in tens of seconds.
 Clean validation and two-build
 reproducibility still restore no cache and remain intentionally more expensive.
