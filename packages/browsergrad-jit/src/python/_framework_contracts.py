@@ -52,6 +52,7 @@ _ENUMS = {
     "semanticState": frozenset({"typed"}),
     "shapeContract": frozenset({
         "preserve-unary-input",
+        "preserve-single-axis-reverse",
         "static-broadcast-with-existing-dim-minus-one",
     }),
     "dtypeContract": frozenset({
@@ -66,6 +67,7 @@ _ENUMS = {
     "closureAutograd": frozenset({
         "supported-cos-derivative",
         "supported-inclusive-bound-mask",
+        "supported-involutive-flip",
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
         "supported-unbroadcast-sum",
@@ -74,21 +76,31 @@ _ENUMS = {
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
         "supported-inclusive-bound-mask",
+        "supported-involutive-flip",
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
         "supported-unbroadcast-sum",
         "supported-zero-derivative",
     }),
     "functionalGrad": frozenset({"supported-via-symbolic-vjp"}),
-    "vmap": frozenset({"supported-leading-batch-axis"}),
+    "vmap": frozenset({
+        "supported-leading-batch-axis",
+        "supported-leading-batch-axis-with-axis-shift",
+    }),
     "onnxExport": frozenset({
         "supported-opset17-clip-export-dtypes",
         "supported-opset17-direct-unary-export-dtypes",
         "supported-opset17-expand",
+        "supported-opset17-slice-float32-int32-int64-bool",
     }),
-    "tensorPlan": frozenset({"refused-no-portable-lowering", "supported-primitive"}),
+    "tensorPlan": frozenset({
+        "refused-negative-stride-profile",
+        "refused-no-portable-lowering",
+        "supported-primitive",
+    }),
     "webgpu": frozenset({
         "profile-nonempty-f32-rank-at-most-4",
+        "refused-negative-stride-profile",
         "refused-no-tensor-plan-kernel",
     }),
     "residency": frozenset({"host-materialized", "supported-materializing-and-resident"}),
@@ -378,11 +390,40 @@ def _validate_clamp(
     return minimum, maximum
 
 
+def _validate_flip(node: Any, contract: FrameworkOperationContract) -> int:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = _require_single_input_tuple(node, contract.opcode)
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("FLIP arg must be a plain dict")
+    fields = set(arg)
+    if "axis" not in fields or not fields.issubset({"axis", "vjp_of"}):
+        raise ShapeError("FLIP arg fields must be exactly 'axis' plus optional 'vjp_of'")
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("FLIP arg.vjp_of must reference a UOp")
+    source = inputs[0]
+    if getattr(node, "shape", None) != getattr(source, "shape", None):
+        raise ShapeError("FLIP must preserve its input shape")
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("FLIP must preserve its input dtype")
+    axis = arg["axis"]
+    if type(axis) is not int:
+        raise ShapeError("FLIP arg.axis must be a normalized integer")
+    rank = len(getattr(source, "shape", ()))
+    if axis < 0 or axis >= rank:
+        raise ShapeError(f"FLIP arg.axis {axis} out of range for rank {rank}")
+    return axis
+
+
 _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = MappingProxyType({
     "browsergrad.jit.framework.tensor.abs.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.clamp.v1": _validate_clamp,
     "browsergrad.jit.framework.tensor.cos.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.expand.v1": _validate_broadcast_to,
+    "browsergrad.jit.framework.tensor.flip.v1": _validate_flip,
     "browsergrad.jit.framework.tensor.sign.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.sin.v1": _validate_typed_unary,
 })
@@ -424,6 +465,13 @@ def validate_clamp_contract(node: Any) -> Tuple[Optional[float], Optional[float]
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.clamp.v1":
         raise ShapeError("CLAMP resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_flip_contract(node: Any) -> int:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.flip.v1":
+        raise ShapeError("FLIP resolved to the wrong framework-operation contract")
     return normalized
 
 
@@ -482,6 +530,7 @@ __all__ = [
     "validate_framework_operation_contract",
     "validate_broadcast_to_contract",
     "validate_clamp_contract",
+    "validate_flip_contract",
     "validate_real_numeric_unary_contract",
     "validate_typed_unary_contract",
 ]

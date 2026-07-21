@@ -34,6 +34,9 @@ Each package follows independent [SemVer](https://semver.org/).
   scalar-coercion rejection, floating dtype preservation, inclusive typed VJP,
   functional grad, vmap, and ONNX `Clip`; device planning remains an explicit
   refusal.
+- Migrates JIT `Tensor.flip` to typed single-axis reversal with strict scalar
+  admission, owning CPU materialization, involutive typed VJP, batch-safe
+  vmap, ONNX `Slice`, and explicit negative-stride device refusal.
 
 ## 2026-07 — semantic-core, kernels, compiler, and JIT semantic migration
 

@@ -45,7 +45,7 @@ from ._ir import (
     UOp,
     OP_BUFFER,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_SIGN, OP_SIN, OP_CMP,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO,
 )
@@ -66,6 +66,17 @@ _CLAMP_BOUND_TYPES = (
     np.float16,
     np.float32,
     np.float64,
+)
+_AXIS_TYPES = (
+    int,
+    np.int8,
+    np.int16,
+    np.int32,
+    np.int64,
+    np.uint8,
+    np.uint16,
+    np.uint32,
+    np.uint64,
 )
 
 
@@ -106,6 +117,20 @@ def _normalize_clamp_bound(name: str, value: Any) -> Optional[float]:
     if not np.isfinite(normalized):
         raise ValueError(f"clamp: {name} must be finite, got {normalized!r}")
     return normalized
+
+
+def _normalize_single_axis(op_name: str, value: Any, rank: int) -> int:
+    if type(value) not in _AXIS_TYPES:
+        raise ShapeError(
+            f"{op_name}: axis must be a built-in or NumPy integer scalar, "
+            f"got {type(value).__name__}"
+        )
+    axis = int(value)
+    if axis < 0:
+        axis += rank
+    if axis < 0 or axis >= rank:
+        raise ShapeError(f"{op_name}: axis {value} out of range for rank {rank}")
+    return axis
 
 
 # ---------------------------------------------------------------------------
@@ -857,17 +882,14 @@ class TensorProxy:
                            requires_grad=requires, ctx=ctx)
 
     def flip(self, dim: int) -> "TensorProxy":
-        axis = int(dim) % self.ndim
-
-        def _flip_forward(x_arr: np.ndarray) -> np.ndarray:
-            return np.flip(x_arr, axis=axis).copy()
+        axis = _normalize_single_axis("flip", dim, self.ndim)
 
         uop = UOp(
-            op=OP_CUSTOM,
+            op=OP_FLIP,
             inputs=(self._uop,),
             shape=self._uop.shape,
             dtype=self._uop.dtype,
-            arg={"fn": _flip_forward, "captures": (), "name": "flip"},
+            arg={"axis": axis},
         )
 
         def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:

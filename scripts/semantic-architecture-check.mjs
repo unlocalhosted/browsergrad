@@ -734,16 +734,16 @@ function checkJitFrameworkOperationContracts(root, manifest, failures) {
   ];
   const allowed = {
     semanticState: new Set(["typed"]),
-    shapeContract: new Set(["preserve-unary-input", "static-broadcast-with-existing-dim-minus-one"]),
+    shapeContract: new Set(["preserve-single-axis-reverse", "preserve-unary-input", "static-broadcast-with-existing-dim-minus-one"]),
     dtypeContract: new Set(["preserve-floating-input", "preserve-input", "preserve-real-numeric-input"]),
     cpu: new Set(["supported-numpy-dtype-preserving", "supported-numpy-owning-copy"]),
-    closureAutograd: new Set(["supported-cos-derivative", "supported-inclusive-bound-mask", "supported-negative-sin-derivative", "supported-sign-derivative", "supported-unbroadcast-sum", "supported-zero-derivative"]),
-    symbolicVjp: new Set(["supported-cos-derivative", "supported-inclusive-bound-mask", "supported-negative-sin-derivative", "supported-sign-derivative", "supported-unbroadcast-sum", "supported-zero-derivative"]),
+    closureAutograd: new Set(["supported-cos-derivative", "supported-inclusive-bound-mask", "supported-involutive-flip", "supported-negative-sin-derivative", "supported-sign-derivative", "supported-unbroadcast-sum", "supported-zero-derivative"]),
+    symbolicVjp: new Set(["supported-cos-derivative", "supported-inclusive-bound-mask", "supported-involutive-flip", "supported-negative-sin-derivative", "supported-sign-derivative", "supported-unbroadcast-sum", "supported-zero-derivative"]),
     functionalGrad: new Set(["supported-via-symbolic-vjp"]),
-    vmap: new Set(["supported-leading-batch-axis"]),
-    onnxExport: new Set(["supported-opset17-clip-export-dtypes", "supported-opset17-direct-unary-export-dtypes", "supported-opset17-expand"]),
-    tensorPlan: new Set(["refused-no-portable-lowering", "supported-primitive"]),
-    webgpu: new Set(["profile-nonempty-f32-rank-at-most-4", "refused-no-tensor-plan-kernel"]),
+    vmap: new Set(["supported-leading-batch-axis", "supported-leading-batch-axis-with-axis-shift"]),
+    onnxExport: new Set(["supported-opset17-clip-export-dtypes", "supported-opset17-direct-unary-export-dtypes", "supported-opset17-expand", "supported-opset17-slice-float32-int32-int64-bool"]),
+    tensorPlan: new Set(["refused-negative-stride-profile", "refused-no-portable-lowering", "supported-primitive"]),
+    webgpu: new Set(["profile-nonempty-f32-rank-at-most-4", "refused-negative-stride-profile", "refused-no-tensor-plan-kernel"]),
     residency: new Set(["host-materialized", "supported-materializing-and-resident"]),
     materialization: new Set(["cpu-owning-array", "cpu-owning-copy"]),
   };

@@ -24,14 +24,18 @@ contract in the README](README.md#compatibility-contract).
   floating dtype preservation, owning CPU realization, inclusive closure and
   symbolic gradients, functional grad, vmap, ONNX `Clip`, hostile-coercion
   rejection, and explicit tensor-plan/WebGPU refusal.
+- `Tensor.flip` now emits typed `FLIP` with strict single-axis normalization,
+  owning dtype-preserving CPU realization, involutive closure/symbolic VJP,
+  functional grad, batch-safe vmap, signed-int64 ONNX `Slice`, and explicit
+  negative-stride tensor-plan/WebGPU refusal.
 
 ### Added
 
 - Added the bounded v1 executable framework-operation registry and detached
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
-  current table contains `ABS`, `CLAMP`, `COS`, `BROADCAST_TO`, `SIGN`, and
-  `SIN`.
+  current table contains `ABS`, `CLAMP`, `COS`, `BROADCAST_TO`, `FLIP`, `SIGN`,
+  and `SIN`.
 
 ## [0.9.0] — 2026-07-15
 

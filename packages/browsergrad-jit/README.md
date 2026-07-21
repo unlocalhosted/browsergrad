@@ -156,6 +156,15 @@ consume the closed contract. `clip()` and `clamp_min()` reuse the same typed
 builder. Integer inputs and hostile/non-finite bounds fail before execution,
 and tensor-plan/WebGPU remain explicit refusals.
 
+`Tensor.flip()` emits typed `FLIP` for one built-in or NumPy integer axis.
+Negative axes normalize once; bool, floating, hostile-conversion, scalar-rank,
+and out-of-range axes fail before execution. CPU realization is an owning
+dtype-preserving copy, closure and symbolic gradients apply the same
+involutive reversal, vmap shifts the logical axis past its leading batch axis,
+and ONNX emits a signed-int64 `Slice` for float32, int32, int64, and bool
+graphs. Other ONNX dtypes fail explicitly. Tensor-plan and WebGPU explicitly
+refuse the negative-stride profile rather than widening the portable view contract.
+
 `bg.framework_operation_support()` returns the versioned public decision table
 for framework operations admitted to typed execution. The table is generated
 from the same package registry that binds executable validators at CPU,

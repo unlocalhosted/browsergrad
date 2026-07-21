@@ -48,7 +48,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_SIGN, OP_SIN, OP_CMP,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -68,6 +68,7 @@ from ._errors import JitError
 from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_clamp_contract,
+    validate_flip_contract,
     validate_typed_unary_contract,
 )
 
@@ -513,6 +514,24 @@ def export_inference(
                 ))
                 clip_inputs.append(max_name)
             nodes.append(_emit_node(clip_inputs, [out_name], nm, "Clip"))
+        elif node.op == OP_FLIP:
+            axis = validate_flip_contract(node)
+            slice_inputs = list(input_names)
+            for suffix, value in (
+                ("starts", -1),
+                ("ends", -(1 << 63)),
+                ("axes", axis),
+                ("steps", -1),
+            ):
+                initializer_name = f"const_flip_{suffix}_{next_node_id - 1}"
+                initializers.append(_emit_tensor_proto(
+                    initializer_name,
+                    DT_INT64,
+                    (1,),
+                    _i64_initializer_for_shape((value,)),
+                ))
+                slice_inputs.append(initializer_name)
+            nodes.append(_emit_node(slice_inputs, [out_name], nm, "Slice"))
         elif node.op == OP_CMP:
             cmp_op = node.arg["op"]
             onnx_op = _CMP_OP_MAP.get(cmp_op)
@@ -525,7 +544,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

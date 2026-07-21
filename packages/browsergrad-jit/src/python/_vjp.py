@@ -48,7 +48,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from ._ir import (
     UOp,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_SIGN, OP_SIN, OP_CAST, OP_CMP,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_SIGN, OP_SIN, OP_CAST, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -66,6 +66,7 @@ from ._ir import (
 from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_clamp_contract,
+    validate_flip_contract,
     validate_real_numeric_unary_contract,
     validate_typed_unary_contract,
 )
@@ -302,6 +303,21 @@ def _vjp_clamp(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[
         arg={"dtype": x.dtype},
     )
     return (_vjp_uop(OP_MUL, (dy, typed_mask), x.shape, x.dtype, output),)
+
+
+@register_vjp(OP_FLIP)
+def _vjp_flip(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """Flip is its own inverse and therefore its own VJP."""
+    axis = validate_flip_contract(output)
+    (x,) = inputs
+    return (_vjp_uop(
+        OP_FLIP,
+        (dy,),
+        x.shape,
+        x.dtype,
+        output,
+        arg={"axis": axis},
+    ),)
 
 
 @register_vjp(OP_SIN)

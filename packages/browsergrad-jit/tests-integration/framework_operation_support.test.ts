@@ -91,6 +91,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.expand.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.tensor.flip.v1",
+      publicSurface: "Tensor.flip",
+      opcode: "FLIP",
+      semanticState: "typed",
+      shapeContract: "preserve-single-axis-reverse",
+      dtypeContract: "preserve-input",
+      decisions: {
+        cpu: "supported-numpy-owning-copy",
+        closureAutograd: "supported-involutive-flip",
+        symbolicVjp: "supported-involutive-flip",
+        functionalGrad: "supported-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-axis-shift",
+        onnxExport: "supported-opset17-slice-float32-int32-int64-bool",
+        tensorPlan: "refused-negative-stride-profile",
+        webgpu: "refused-negative-stride-profile",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.flip.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.sign.v1",
       publicSurface: "Tensor.sign",
       opcode: "SIGN",
@@ -173,7 +194,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(7);
+    expect(result.first.operations).toHaveLength(8);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");
