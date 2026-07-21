@@ -205,6 +205,7 @@ try {
     "createVerifiedAttentionOnlineKvTileSchedule",
     "createVerifiedLogicalGemmTileSchedule",
     "logicalGemmTileScheduleArtifactPayload",
+    "prepareAttentionOnlineKvTileSchedule",
     "prepareLogicalGemmTileSchedule",
     "verifyLogicalGemmTileScheduleArtifact",
     "verifyAttentionOnlineKvTileScheduleArtifact",
@@ -340,6 +341,30 @@ try {
       && packedAttentionSchedulePayload.schedule.masks.logicalMask
         === "exclude-before-online-state-update",
     "semantic-core packed attention schedule lost logical binding, staging, masks, or distinct tiling",
+  );
+  const packedAttentionLogical = await semanticKernel.prepareAttentionForwardSpecialization(
+    packedAttention.layout,
+    packedAttention.kernel,
+    { operationId: packedAttention.operationId },
+  );
+  const packedPreparedAttentionSchedule8 = await semanticSchedule.prepareAttentionOnlineKvTileSchedule(
+    packedAttentionLogical,
+    packedAttention.kernel,
+    packedAttentionSchedule8.artifact,
+  );
+  const packedPreparedAttentionSchedule16 = await semanticSchedule.prepareAttentionOnlineKvTileSchedule(
+    packedAttentionLogical,
+    packedAttention.kernel,
+    packedAttentionSchedule16.artifact,
+  );
+  assert(
+    packedPreparedAttentionSchedule8.logical === packedAttentionLogical
+      && packedPreparedAttentionSchedule16.logical === packedAttentionLogical
+      && packedPreparedAttentionSchedule8.aggregateStagingBytes === 320n
+      && packedPreparedAttentionSchedule16.aggregateStagingBytes === 640n
+      && packedPreparedAttentionSchedule8.scheduleSpecializationHash
+        !== packedPreparedAttentionSchedule16.scheduleSpecializationHash,
+    "semantic-core packed attention schedule specialization lost logical authority or geometry",
   );
   const packedAttentionCpu = await semanticKernel.prepareAttentionForwardCpu(
     packedAttention.layout,

@@ -48,3 +48,8 @@ export {
   type ConstructedAttentionOnlineKvTileSchedule,
   type CreateVerifiedAttentionOnlineKvTileScheduleRequest,
 } from "./schedule/attention-online-kv-tile-construction.js";
+export {
+  prepareAttentionOnlineKvTileSchedule,
+  type PreparedAttentionOnlineKvTileSchedule,
+  type PrepareAttentionOnlineKvTileScheduleRequest,
+} from "./schedule/attention-online-kv-tile-prepare.js";

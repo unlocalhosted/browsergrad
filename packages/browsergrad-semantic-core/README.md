@@ -66,6 +66,13 @@ makes them scores. The schedule remains backend-neutral and scalar. It does
 not claim target legality, numerical preservation, execution, performance, or
 a named fused-attention implementation tier.
 
+Schedule specialization composes one authority-bound logical attention proof
+with one exact schedule and derives bounded workgroup size, K/V staging bytes,
+per-invocation private-state elements, key-tile count, and three-dimensional
+dispatch geometry. Distinct 8x8 and 8x16 schedules reuse the same logical proof
+but retain distinct schedule-specialization hashes. Device feature/limit
+admission and numerical preservation remain backend responsibilities.
+
 The schedule-independent CPU oracle prepares the logical artifact directly. It
 proves the initial dense row-major address profile under explicit element,
 scalar-operation, evaluation-step, time, and cancellation limits; snapshots

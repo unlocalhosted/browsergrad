@@ -114,8 +114,11 @@ inputs before yielding, enforces every finite-domain requirement, evaluates
 the stable-softmax and weighted-value phases with stepwise f32 rounding, and
 commits destination bytes only after complete success. Its comparator
 implements the named absolute-or-relative policy and rejects non-finite output.
-This grants CPU reference evidence only. Schedule specialization and block-tiled
-WebGPU execution are the next slices; the existing row-wise online-softmax
+This grants CPU reference evidence only. Schedule specialization now composes the
+exact prepared logical and schedule authorities and derives bounded workgroup,
+K/V staging, private-state, key-tile, and dispatch geometry without granting
+device legality or preservation. Block-tiled WebGPU execution is the next
+slice; the existing row-wise online-softmax
 implementation remains named only as a baseline. Two
 distinct cache-free builds now prove exact
 extractor Wasm/factory reproducibility; the package binds their canonical v3

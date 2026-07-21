@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createVerifiedDenseAttentionForwardArtifacts,
+  prepareAttentionForwardSpecialization,
   type VerifiedAttentionForwardArtifacts,
 } from "../../src/kernel";
 import {
@@ -9,10 +10,12 @@ import {
   attentionOnlineKvTileScheduleArtifactPayload,
   createVerifiedAttentionOnlineKvTileSchedule,
   decodeAttentionOnlineKvTileScheduleArtifact,
+  prepareAttentionOnlineKvTileSchedule,
   verifyAttentionOnlineKvTileScheduleArtifact,
   type AttentionOnlineKvTileScheduleArtifactPayloadV1,
 } from "../../src/schedule";
 import {
+  KERNEL_DIAGNOSTIC_CODES,
   SCHEDULE_DIAGNOSTIC_CODES,
   SCHEMA_DIAGNOSTIC_CODES,
   SemanticSchemaError,
@@ -154,6 +157,106 @@ describe("attention online K/V tile schedule artifact", () => {
     expect(first.attentionForwardSemanticHash).not.toBe(second.attentionForwardSemanticHash);
     expect(first.scheduleSemanticHash).not.toBe(second.scheduleSemanticHash);
     expect(firstPayload.schedule.masks.logicalMask).toBe("exclude-before-online-state-update");
+  });
+
+  it("specializes two schedules from one authorized logical proof", async () => {
+    const artifacts = await attention();
+    const logical = await prepareAttentionForwardSpecialization(
+      artifacts.layout,
+      artifacts.kernel,
+      { operationId: artifacts.operationId },
+    );
+    const schedule8Artifact = await createVerifiedAttentionOnlineKvTileSchedule(
+      artifacts.kernel,
+      { physicalTile: { queryRows: wire("8"), keyRows: wire("8") } },
+    );
+    const schedule16Artifact = await createVerifiedAttentionOnlineKvTileSchedule(
+      artifacts.kernel,
+      { physicalTile: { queryRows: wire("8"), keyRows: wire("16") } },
+    );
+    const schedule8 = await prepareAttentionOnlineKvTileSchedule(
+      logical,
+      artifacts.kernel,
+      schedule8Artifact.artifact,
+    );
+    const schedule16 = await prepareAttentionOnlineKvTileSchedule(
+      logical,
+      artifacts.kernel,
+      schedule16Artifact.artifact,
+    );
+
+    expect(schedule8.logical).toBe(logical);
+    expect(schedule16.logical).toBe(logical);
+    expect(schedule8).toMatchObject({
+      queryRows: 8n,
+      keyRows: 8n,
+      workgroupInvocations: 8n,
+      keyStagingElements: 128n,
+      valueStagingElements: 96n,
+      aggregateStagingElements: 224n,
+      aggregateStagingBytes: 896n,
+      queryPrivateElements: 16n,
+      outputPrivateElements: 12n,
+      privateElementsPerInvocation: 28n,
+      keyTiles: 3n,
+      dispatchX: 3n,
+      dispatchY: 3n,
+      dispatchZ: 2n,
+      dispatchWorkgroups: 18n,
+    });
+    expect(schedule16).toMatchObject({
+      keyRows: 16n,
+      keyStagingElements: 256n,
+      valueStagingElements: 192n,
+      aggregateStagingElements: 448n,
+      aggregateStagingBytes: 1792n,
+      keyTiles: 2n,
+      dispatchWorkgroups: 18n,
+    });
+    expect(schedule8.scheduleSemanticHash).not.toBe(schedule16.scheduleSemanticHash);
+    expect(schedule8.scheduleSpecializationHash).not.toBe(
+      schedule16.scheduleSpecializationHash,
+    );
+  });
+
+  it("rejects copied logical proofs, artifact mismatches, and resource overflow", async () => {
+    const first = await attention(false);
+    const second = await attention(true);
+    const logical = await prepareAttentionForwardSpecialization(
+      first.layout,
+      first.kernel,
+      { operationId: first.operationId },
+    );
+    const firstSchedule = await createVerifiedAttentionOnlineKvTileSchedule(first.kernel, {
+      physicalTile: { queryRows: wire("8"), keyRows: wire("8") },
+    });
+    const secondSchedule = await createVerifiedAttentionOnlineKvTileSchedule(second.kernel, {
+      physicalTile: { queryRows: wire("8"), keyRows: wire("8") },
+    });
+    expect((await diagnostic(() => prepareAttentionOnlineKvTileSchedule(
+      { ...logical },
+      first.kernel,
+      firstSchedule.artifact,
+    ))).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.invalidBinding);
+    expect((await diagnostic(() => prepareAttentionOnlineKvTileSchedule(
+      logical,
+      second.kernel,
+      secondSchedule.artifact,
+    ))).diagnostic.code).toBe(SCHEDULE_DIAGNOSTIC_CODES.kernelHashMismatch);
+    for (const limits of [
+      { maxWorkgroupInvocations: 7 },
+      { maxStagingBytes: 895 },
+      { maxPrivateElementsPerInvocation: 27 },
+      { maxDispatchWorkgroups: 17 },
+      { maxKeyTiles: 2 },
+    ]) {
+      expect((await diagnostic(() => prepareAttentionOnlineKvTileSchedule(
+        logical,
+        first.kernel,
+        firstSchedule.artifact,
+        limits,
+      ))).diagnostic.code).toBe(SCHEDULE_DIAGNOSTIC_CODES.resourceLimit);
+    }
   });
 
   it("keeps identity independent of transport metadata and logical fields out of schedule", async () => {
