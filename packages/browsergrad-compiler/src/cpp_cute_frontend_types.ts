@@ -8,6 +8,10 @@ import type {
 export const CPP_CUTE_FRONTEND_ARTIFACT_SCHEMA = "browsergrad.compiler.cpp-cute.frontend-artifact";
 export const CPP_CUTE_FRONTEND_ARTIFACT_MAJOR = 3;
 export const CPP_CUTE_FRONTEND_ARTIFACT_MINOR = 0;
+/** First closed wire revision that can represent a backend-neutral logical GEMM tile. */
+export const CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR = 1;
+export const CPP_CUTE_FRONTEND_ARTIFACT_MAX_MINOR =
+  CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR;
 
 export type CppCuteSemanticDomainV1 = "host" | "device";
 
@@ -580,6 +584,49 @@ export interface CppCuteTensorFactV1 extends JsonObject {
   readonly memorySpace: CppCuteAddressSpaceV1;
 }
 
+/**
+ * Producer-declared, backend-neutral GEMM meaning carried by an authorized
+ * typed artifact. This fact deliberately owns no source-body equivalence,
+ * workgroup, staging, vectorization, subgroup, target-instruction, or backend
+ * fields; those belong to independently verified schedule/backend artifacts.
+ */
+export interface CppCuteLogicalGemmTileFactV1 extends JsonObject {
+  readonly factId: string;
+  readonly kind: "logical-gemm-tile";
+  readonly origin: CppCuteSourceOriginV1;
+  readonly functionDeclarationId: string;
+  readonly lhsTensorFactId: string;
+  readonly rhsTensorFactId: string;
+  readonly destinationTensorFactId: string;
+  readonly logicalTile: JsonObject & {
+    readonly m: WireU64;
+    readonly n: WireU64;
+    readonly k: WireU64;
+  };
+  readonly boundary: JsonObject & {
+    readonly lhs: "zero-fill";
+    readonly rhs: "zero-fill";
+    readonly destination: "mask-outside-logical-shape";
+  };
+  readonly accumulation: JsonObject & {
+    readonly inputDType: "f32";
+    readonly accumulatorDType: "f32";
+    readonly outputDType: "f32";
+    readonly initialAccumulator: "positive-zero";
+    readonly product: "multiply";
+    readonly reduction: "sum";
+    readonly reductionOrder: "increasing-k";
+    readonly rounding: "toward-nearest-ties-even";
+    readonly contraction: "forbid";
+    readonly reassociation: "forbid";
+  };
+  readonly phases: JsonObject & {
+    readonly order: readonly ["load", "accumulate", "store"];
+    readonly participation: "masked-full-logical-tile";
+  };
+  readonly overlap: JsonObject & { readonly kind: "forbid-all" };
+}
+
 export interface CppCuteIntrinsicEffectsV1 extends JsonObject {
   readonly readsMemory: boolean;
   readonly writesMemory: boolean;
@@ -641,6 +688,7 @@ export interface CppCuteTargetIntrinsicFactV1 extends JsonObject {
 export type CppCuteResolvedFactV1 =
   | CppCuteAffineLayoutFactV1
   | CppCuteTensorFactV1
+  | CppCuteLogicalGemmTileFactV1
   | CppCuteTargetIntrinsicFactV1;
 
 export type CppCuteFrontendEntryV1 =
@@ -656,6 +704,12 @@ export type CppCuteFrontendEntryV1 =
       readonly sourceTensorFactId: string;
       readonly destinationTensorFactId: string;
       readonly operationExpressionId: string;
+      readonly selectedRootDeclarationIds: readonly string[];
+    })
+  | (JsonObject & {
+      readonly entryId: string;
+      readonly kind: "logical-gemm-tile";
+      readonly logicalGemmTileFactId: string;
       readonly selectedRootDeclarationIds: readonly string[];
     });
 

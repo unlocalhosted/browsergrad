@@ -367,6 +367,7 @@ export interface ValidatedCppCuteBrowserWorkerResultFrameRecord {
 
 export type CppCuteBrowserWorkerProtocolErrorCode =
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-INVALID"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-UNSUPPORTED-ENTRY"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-UNVERIFIED"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-INVOCATION-MISMATCH"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RESULT-MISMATCH"
@@ -493,6 +494,15 @@ async function prepareWorkerInvocationAuthority(
   if (manifestRecord.profile !== profile || requestRecord.profile !== profile) {
     mismatch("$.profile", "manifest and request must derive from the exact prepared browser profile");
   }
+  const entryRequest = requestRecord.request.entryRequests[0];
+  if (entryRequest === undefined) mismatch("$.request.entryRequests", "prepared request lost its entry anchor");
+  if (entryRequest.kind === "logical-gemm-tile") {
+    fail(
+      "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-UNSUPPORTED-ENTRY",
+      "$.request.entryRequests[0].kind",
+      "production browser Clang extraction does not emit logical-gemm-tile facts; typed-artifact lowering is not source compatibility",
+    );
+  }
   const extractionLimits = effectiveExtractionLimits(profile, request);
   // Reject request/verifier incompatibility before copying or hashing either
   // executable asset. This is a pure admission check over prepared authorities.
@@ -565,8 +575,6 @@ async function prepareWorkerInvocationAuthority(
       mismatch("$.workerModuleBytes", "package-owned worker module differs from the exact prepared profile identity");
     }
   }
-  const entryRequest = requestRecord.request.entryRequests[0];
-  if (entryRequest === undefined) mismatch("$.request.entryRequests", "prepared request lost its entry anchor");
   const sourceSnapshotSetSha256 = await hashCanonicalJson({
     domain: "browsergrad.compiler.cpp-cute.browser-worker-source-snapshots.v1",
     requestId: request.requestId,

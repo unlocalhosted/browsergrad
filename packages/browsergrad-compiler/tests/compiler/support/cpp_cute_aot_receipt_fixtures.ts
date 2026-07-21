@@ -42,6 +42,7 @@ import {
   type VerifiedCppCuteFrontendArtifactResource,
 } from "../../../src/cpp_cute_frontend_artifact.js";
 import {
+  CPP_CUTE_FRONTEND_REQUEST_LOGICAL_GEMM_TILE_MINOR,
   CPP_CUTE_FRONTEND_REQUEST_SCHEMA,
   deriveCppCuteFrontendEntryRequestId,
   deriveCppCuteFrontendRequestHash,
@@ -65,6 +66,7 @@ import {
 } from "../../../src/cpp_cute_frontend_profile.js";
 import {
   CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
+  CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR,
   CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
   type CppCuteFrontendArtifactV3,
   type CppCuteFrontendPayloadV3,
@@ -244,7 +246,10 @@ async function createRequest(
   const selectedEntry = payload.entries.find((entry) => entry.entryId === selectedEntryId);
   const entryKind = selectedEntry?.kind === "view-copy"
     ? { kind: "view-copy" as const, declarationKind: "function" as const }
-    : { kind: "layout" as const, declarationKind: "variable" as const };
+    : selectedEntry?.kind === "logical-gemm-tile"
+      ? { kind: "logical-gemm-tile" as const, declarationKind: "function" as const }
+      : { kind: "layout" as const, declarationKind: "variable" as const };
+  const logicalGemm = selectedEntry?.kind === "logical-gemm-tile";
   const entryBody = {
     requestId: `bg.cpp.entry-request.sha256.${"0".repeat(64)}`,
     ...entryKind,
@@ -256,14 +261,22 @@ async function createRequest(
   };
   const body: CppCuteFrontendRequestBodyV1 = {
     schema: CPP_CUTE_FRONTEND_REQUEST_SCHEMA,
-    version: { major: 1, minor: 0 },
+    version: {
+      major: 1,
+      minor: logicalGemm ? CPP_CUTE_FRONTEND_REQUEST_LOGICAL_GEMM_TILE_MINOR : 0,
+    },
     compilationContractHash: profile.compilationContractHash,
     mainVirtualPath: main.virtualPath,
     files: [file],
     entryRequests: [entry],
     expectedArtifact: {
       schema: "browsergrad.compiler.cpp-cute.frontend-artifact",
-      version: { major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR, minor: CPP_CUTE_FRONTEND_ARTIFACT_MINOR },
+      version: {
+        major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
+        minor: logicalGemm
+          ? CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR
+          : CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
+      },
     },
     limits: semanticLimits(profile),
   };
@@ -295,6 +308,9 @@ async function createRealSourceBackedArtifact(
   (rewritten as { byteLength: WireU64 }).byteLength = body.byteLength;
   await rebindCppCuteFixtureSourceEntityIds(payload);
   await mutatePayload?.(payload);
+  const artifactMinor = payload.entries.some((entry) => entry.kind === "logical-gemm-tile")
+    ? CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR
+    : CPP_CUTE_FRONTEND_ARTIFACT_MINOR;
   const hashes = await computeCppCuteInputHashes(payload);
   (payload.inputs as { sourceSetSha256: string }).sourceSetSha256 = hashes.sourceSetSha256;
   (payload.inputs as { headerSetSha256: string }).headerSetSha256 = hashes.headerSetSha256;
@@ -307,7 +323,12 @@ async function createRealSourceBackedArtifact(
   }
   (payload.extraction as { inputClosureSha256: string }).inputClosureSha256 = hashes.closureSha256;
   if (outcome === "rejected") rejectPayload(payload);
-  return { ...artifact, artifactId: await deriveCppCuteFrontendArtifactId(payload), payload };
+  return {
+    ...artifact,
+    version: { major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR, minor: artifactMinor },
+    artifactId: await deriveCppCuteFrontendArtifactId(payload, { minor: artifactMinor }),
+    payload,
+  };
 }
 
 function rejectPayload(payload: CppCuteFrontendPayloadV3): void {

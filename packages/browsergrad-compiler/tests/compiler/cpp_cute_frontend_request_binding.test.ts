@@ -22,6 +22,7 @@ import {
 } from "../../src/cpp_cute_frontend_request_binding.js";
 import {
   CPP_CUTE_FRONTEND_REQUEST_SCHEMA,
+  CPP_CUTE_FRONTEND_REQUEST_LOGICAL_GEMM_TILE_MINOR,
   deriveCppCuteFrontendEntryRequestId,
   deriveCppCuteFrontendRequestHash,
   deriveCppCuteFrontendSourceFileId,
@@ -40,6 +41,7 @@ import {
 } from "../../src/cpp_cute_frontend_profile.js";
 import {
   CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
+  CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR,
   CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
   type CppCuteFrontendPayloadV3,
 } from "../../src/cpp_cute_frontend_types.js";
@@ -110,6 +112,11 @@ async function requestInputFor(
   files: readonly CppCuteFrontendRequestSourceFileV1[],
   mainBytes: Uint8Array,
   token = TOKEN,
+  versions: {
+    readonly requestMinor?: 0 | typeof CPP_CUTE_FRONTEND_REQUEST_LOGICAL_GEMM_TILE_MINOR;
+    readonly artifactMinor?: typeof CPP_CUTE_FRONTEND_ARTIFACT_MINOR |
+      typeof CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR;
+  } = {},
 ): Promise<CppCuteFrontendRequestV1> {
   const tokenBytes = ENCODER.encode(token);
   const begin = bytesIndexOf(mainBytes, tokenBytes);
@@ -131,14 +138,17 @@ async function requestInputFor(
   };
   const body: CppCuteFrontendRequestBodyV1 = {
     schema: CPP_CUTE_FRONTEND_REQUEST_SCHEMA,
-    version: { major: 1, minor: 0 },
+    version: { major: 1, minor: versions.requestMinor ?? 0 },
     compilationContractHash: profile.compilationContractHash,
     mainVirtualPath: MAIN_PATH,
     files,
     entryRequests: [entry],
     expectedArtifact: {
       schema: "browsergrad.compiler.cpp-cute.frontend-artifact",
-      version: { major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR, minor: CPP_CUTE_FRONTEND_ARTIFACT_MINOR },
+      version: {
+        major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
+        minor: versions.artifactMinor ?? CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
+      },
     },
     limits: semanticLimits(profile),
   };
@@ -156,6 +166,8 @@ async function artifactResourceFor(
     readonly injectUnrequestedSource?: boolean;
     readonly omitProjectHeader?: boolean;
     readonly omitRequestedMain?: boolean;
+    readonly artifactMinor?: typeof CPP_CUTE_FRONTEND_ARTIFACT_MINOR |
+      typeof CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR;
   } = {},
 ): Promise<VerifiedCppCuteFrontendArtifactResource> {
   const artifact = await createCppCuteArtifactInput(profile.compilationContractHash);
@@ -282,7 +294,12 @@ async function artifactResourceFor(
     );
   }
   (mutablePayload["extraction"] as Record<string, unknown>)["inputClosureSha256"] = hashes.closureSha256;
-  (artifact as { artifactId: string }).artifactId = await deriveCppCuteFrontendArtifactId(artifact.payload);
+  const artifactMinor = options.artifactMinor ?? CPP_CUTE_FRONTEND_ARTIFACT_MINOR;
+  (artifact.version as { minor: number }).minor = artifactMinor;
+  (artifact as { artifactId: string }).artifactId = await deriveCppCuteFrontendArtifactId(
+    artifact.payload,
+    { minor: artifactMinor },
+  );
   const verified = await verifyCppCuteFrontendArtifact(artifact);
   return decodeCppCuteFrontendArtifact(canonicalCppCuteFrontendArtifactBytes(verified));
 }
@@ -403,6 +420,53 @@ describe("producer-neutral frontend request binding", () => {
     expect(Object.isFrozen(prepared)).toBe(true);
     expect(Object.isFrozen(record.binding)).toBe(true);
     expect(Object.isFrozen(record.binding.selection)).toBe(true);
+  });
+
+  it("requires the verified artifact to match expectedArtifact major and minor exactly", async () => {
+    const fixture = await createBindingFixture();
+    const requestEntry = fixture.requestInput.entryRequests[0];
+    const mainSnapshot = fixture.snapshots.find((snapshot) => snapshot.virtualPath === MAIN_PATH);
+    if (requestEntry === undefined || mainSnapshot === undefined) throw new Error("fixture input missing");
+
+    const artifact31 = await artifactResourceFor(
+      fixture.profile,
+      fixture.requestInput.files,
+      requestEntry,
+      { artifactMinor: CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR },
+    );
+    const request10Expecting30 = await preparedRequest(
+      fixture.profile,
+      fixture.requestInput,
+      fixture.snapshots,
+      artifact31,
+    );
+    await expectBindingError(
+      prepareCppCuteFrontendRequestBinding(request10Expecting30, artifact31),
+      "BG-COMPILER-CPP-CUTE-REQUEST-BINDING-ARTIFACT-MISMATCH",
+      "$.artifact.version",
+    );
+
+    const request11Input = await requestInputFor(
+      fixture.profile,
+      fixture.requestInput.files,
+      mainSnapshot.bytes,
+      TOKEN,
+      {
+        requestMinor: CPP_CUTE_FRONTEND_REQUEST_LOGICAL_GEMM_TILE_MINOR,
+        artifactMinor: CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR,
+      },
+    );
+    const request11Expecting31 = await preparedRequest(
+      fixture.profile,
+      request11Input,
+      fixture.snapshots,
+      fixture.artifactResource,
+    );
+    await expectBindingError(
+      prepareCppCuteFrontendRequestBinding(request11Expecting31, fixture.artifactResource),
+      "BG-COMPILER-CPP-CUTE-REQUEST-BINDING-ARTIFACT-MISMATCH",
+      "$.artifact.version",
+    );
   });
 
   it("accepts an unopened request project header omitted from artifact source inputs", async () => {

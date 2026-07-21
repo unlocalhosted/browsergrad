@@ -229,6 +229,15 @@ Their `size`, `rank`, and `cosize` queries plus one-coordinate application
 lower to scalar Kernel IR expressions. Tensors, multi-rank layouts, dynamic
 layout objects, and tiled MMA remain explicit unsupported diagnostics rather
 than partially modeled C++ objects.
+
+The producer-neutral typed-artifact reader also has a closed artifact 3.1 /
+request 1.1 representation for one dense f32 `logical-gemm-tile`. An exact
+authorized fact lowers into semantic-core's backend-neutral GEMM artifact;
+physical schedules and WebGPU execution remain independent authorities. The
+shipping AOT and browser-Worker extractors reject this entry because they do
+not yet prove source-body equivalence or floating-point controls. Synthetic or
+externally produced typed artifacts therefore do not establish C++/CuTe source
+compatibility.
 WMMA fragments are accepted as scalarized cooperative-matrix primitives:
 `wmma::fragment`, `wmma::fill_fragment`, `wmma::load_matrix_sync`,
 `wmma::mma_sync`, and `wmma::store_matrix_sync` lower through CPU reference and

@@ -13,6 +13,8 @@ import {
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
   CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
+  CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR,
+  CPP_CUTE_FRONTEND_ARTIFACT_MAX_MINOR,
   CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
   CPP_CUTE_FRONTEND_ARTIFACT_SCHEMA,
   type CppCuteFrontendPayloadV3,
@@ -84,15 +86,16 @@ export async function verifyCppCuteFrontendArtifact(
   const envelope = validateWireEnvelope(value, {
     schema: CPP_CUTE_FRONTEND_ARTIFACT_SCHEMA,
     supportedMajor: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
-    supportedMinor: CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
+    supportedMinor: CPP_CUTE_FRONTEND_ARTIFACT_MAX_MINOR,
     knownRequiredExtensions: new Set(),
     limits,
   });
-  if (envelope.version.minor !== CPP_CUTE_FRONTEND_ARTIFACT_MINOR) {
+  if (envelope.version.minor !== CPP_CUTE_FRONTEND_ARTIFACT_MINOR &&
+      envelope.version.minor !== CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR) {
     cppCuteFrontendArtifactFailure(
       "BG-COMPILER-CPP-CUTE-ARTIFACT-UNSUPPORTED-VERSION",
       "$.version.minor",
-      `closed artifact reader supports ${CPP_CUTE_FRONTEND_ARTIFACT_MAJOR}.${CPP_CUTE_FRONTEND_ARTIFACT_MINOR} only`,
+      `closed artifact reader supports ${CPP_CUTE_FRONTEND_ARTIFACT_MAJOR}.${CPP_CUTE_FRONTEND_ARTIFACT_MINOR} and ${CPP_CUTE_FRONTEND_ARTIFACT_MAJOR}.${CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR} only`,
     );
   }
   if (envelope.optionalMetadata !== undefined) {
@@ -103,9 +106,23 @@ export async function verifyCppCuteFrontendArtifact(
     );
   }
   const payload = parseCppCuteFrontendPayload(envelope.payload, artifactLimits);
+  if (envelope.version.minor < CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR &&
+      (payload.facts.some((fact) => fact.kind === "logical-gemm-tile") ||
+       payload.entries.some((entry) => entry.kind === "logical-gemm-tile"))) {
+    cppCuteFrontendArtifactFailure(
+      "BG-COMPILER-CPP-CUTE-ARTIFACT-UNSUPPORTED-VERSION",
+      "$.version.minor",
+      `logical-gemm-tile facts and entries require artifact ${CPP_CUTE_FRONTEND_ARTIFACT_MAJOR}.${CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR}`,
+    );
+  }
   const inputHashes = await verifyCppCuteFrontendPayload(payload, { limits });
   throwIfAborted(options.signal);
-  const artifactHash = await hashCppCuteFrontendSemantics(payload, envelope.requiredExtensions, { limits });
+  const artifactHash = await hashCppCuteFrontendSemantics(
+    payload,
+    envelope.requiredExtensions,
+    envelope.version.minor,
+    { limits },
+  );
   const expectedArtifactId = `bg.artifact.cpp-cute-frontend.sha256.${artifactHash}`;
   if (envelope.artifactId !== expectedArtifactId) {
     cppCuteFrontendArtifactFailure(
@@ -118,7 +135,7 @@ export async function verifyCppCuteFrontendArtifact(
     schema: CPP_CUTE_FRONTEND_ARTIFACT_SCHEMA,
     version: {
       major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
-      minor: CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
+      minor: envelope.version.minor,
     },
     producer: envelope.producer,
     artifactId: expectedArtifactId,
@@ -221,9 +238,27 @@ export function unwrapVerifiedCppCuteFrontendArtifact(
 
 export async function deriveCppCuteFrontendArtifactId(
   payload: CppCuteFrontendPayloadV3,
-  options: { readonly limits?: Partial<DecodeLimits> } = {},
+  options: {
+    readonly limits?: Partial<DecodeLimits>;
+    readonly minor?: typeof CPP_CUTE_FRONTEND_ARTIFACT_MINOR |
+      typeof CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR;
+  } = {},
 ): Promise<string> {
-  const digest = await hashCppCuteFrontendSemantics(payload, [], options);
+  const minor = options.minor ?? CPP_CUTE_FRONTEND_ARTIFACT_MINOR;
+  if (minor !== CPP_CUTE_FRONTEND_ARTIFACT_MINOR &&
+      minor !== CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR) {
+    cppCuteFrontendArtifactFailure(
+      "BG-COMPILER-CPP-CUTE-ARTIFACT-UNSUPPORTED-VERSION",
+      "$.options.minor",
+      "artifact ID derivation requires an explicitly supported closed wire minor",
+    );
+  }
+  const digest = await hashCppCuteFrontendSemantics(
+    payload,
+    [],
+    minor,
+    options,
+  );
   return `bg.artifact.cpp-cute-frontend.sha256.${digest}`;
 }
 
@@ -249,6 +284,7 @@ export async function deriveCppCuteStableId(
 async function hashCppCuteFrontendSemantics(
   payload: CppCuteFrontendPayloadV3,
   requiredExtensions: readonly string[],
+  minor: number,
   options: { readonly limits?: Partial<DecodeLimits> },
 ): Promise<string> {
   return hashCanonicalJson({
@@ -256,7 +292,7 @@ async function hashCppCuteFrontendSemantics(
     schema: CPP_CUTE_FRONTEND_ARTIFACT_SCHEMA,
     version: {
       major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
-      minor: CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
+      minor,
     },
     requiredExtensions: [...requiredExtensions].sort(),
     payload,

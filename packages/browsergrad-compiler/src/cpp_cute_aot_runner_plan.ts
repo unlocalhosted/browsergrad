@@ -162,6 +162,7 @@ export interface DecodeCppCuteAotResultFrameOptions {
 export type CppCuteAotOfflineRunnerErrorCode =
   | "BG-COMPILER-CPP-CUTE-AOT-RUNNER-CANCELLED"
   | "BG-COMPILER-CPP-CUTE-AOT-RUNNER-INVALID"
+  | "BG-COMPILER-CPP-CUTE-AOT-RUNNER-UNSUPPORTED-ENTRY"
   | "BG-COMPILER-CPP-CUTE-AOT-RUNNER-SOURCE-MISMATCH"
   | "BG-COMPILER-CPP-CUTE-AOT-RUNNER-POLICY-MISMATCH"
   | "BG-COMPILER-CPP-CUTE-AOT-RUNNER-RESOURCE-LIMIT"
@@ -196,6 +197,13 @@ export async function prepareCppCuteAotOfflineRun(
   const profileRecord = unwrapPreparedCppCuteAotFrontendProfile(profile);
   const signal = normalizeOptions(options);
   throwIfAborted(signal);
+  if (requestRecord.request.entryRequests[0]?.kind === "logical-gemm-tile") {
+    fail(
+      "BG-COMPILER-CPP-CUTE-AOT-RUNNER-UNSUPPORTED-ENTRY",
+      "$.request.entryRequests[0].kind",
+      "production AOT Clang extraction does not emit logical-gemm-tile facts; typed-artifact lowering is not source compatibility",
+    );
+  }
   const snapshots = copyPreparedCppCuteAotRunSourceSnapshots(metadata);
   const environmentRecord = unwrapPreparedCppCuteAotExecutionEnvironment(executionEnvironment);
   if (environmentRecord.profile !== profile || executionEnvironment.profileHash !== profile.profileHash) {

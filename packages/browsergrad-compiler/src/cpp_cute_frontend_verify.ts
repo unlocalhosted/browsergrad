@@ -962,6 +962,20 @@ async function verifySemanticPasses(
         invalid(`$.payload.facts[${factIndex}].layoutFactId`, "tensor and layout facts must share one semantic domain");
       }
     }
+    if (fact.kind === "logical-gemm-tile") {
+      for (const [field, tensorFactId] of [
+        ["lhsTensorFactId", fact.lhsTensorFactId],
+        ["rhsTensorFactId", fact.rhsTensorFactId],
+        ["destinationTensorFactId", fact.destinationTensorFactId],
+      ] as const) {
+        if (factOwner.get(tensorFactId) !== owner) {
+          invalid(
+            `$.payload.facts[${factIndex}].${field}`,
+            "logical GEMM fact and tensor dependencies must share one semantic domain",
+          );
+        }
+      }
+    }
     if (fact.kind === "target-intrinsic" && fact.availability.kind === "recognized-unsupported") {
       if (diagnosticOwner.get(fact.availability.diagnosticId) !== owner) {
         invalid(
@@ -1012,7 +1026,9 @@ async function verifySemanticPasses(
   for (const [entryIndex, entry] of payload.entries.entries()) {
     const owners = entry.kind === "layout"
       ? [factOwner.get(entry.layoutFactId)]
-      : [factOwner.get(entry.sourceTensorFactId), factOwner.get(entry.destinationTensorFactId)];
+      : entry.kind === "view-copy"
+        ? [factOwner.get(entry.sourceTensorFactId), factOwner.get(entry.destinationTensorFactId)]
+        : [factOwner.get(entry.logicalGemmTileFactId)];
     if (owners.some((owner) => owner !== 0)) {
       invalid(`$.payload.entries[${entryIndex}]`, "frontend entries must select only the device canonical semantic graph");
     }
@@ -1321,8 +1337,212 @@ function verifyFacts(
     verifyOrigin(fact.origin, `${path}.origin`, indexes);
     if (fact.kind === "affine-layout") verifyAffineLayoutFact(fact, path, indexes, limits);
     else if (fact.kind === "tensor") verifyTensorFact(fact, path, indexes);
-    else verifyTargetIntrinsicFact(fact, path, indexes);
+    else if (fact.kind === "logical-gemm-tile") {
+      verifyLogicalGemmTileFact(payload, fact, path, indexes, limits);
+    } else verifyTargetIntrinsicFact(fact, path, indexes);
   }
+}
+
+function verifyLogicalGemmTileFact(
+  payload: CppCuteFrontendPayloadV3,
+  fact: Extract<CppCuteResolvedFactV1, { readonly kind: "logical-gemm-tile" }>,
+  path: string,
+  indexes: ArtifactIndexes,
+  limits: Partial<DecodeLimits> | undefined,
+): void {
+  const root = ref(
+    indexes.declarations,
+    fact.functionDeclarationId,
+    `${path}.functionDeclarationId`,
+    "declaration",
+  );
+  const functionType = root.typeId === null ? undefined : indexes.types.get(root.typeId);
+  if (root.kind !== "function" || root.definitionKind !== "definition" ||
+      root.cudaAttributes.host || !root.cudaAttributes.device || !root.cudaAttributes.global ||
+      functionType?.kind !== "function" || functionType.callingConvention !== "cuda-kernel" ||
+      functionType.variadic) {
+    invalid(
+      `${path}.functionDeclarationId`,
+      "logical GEMM fact requires one defined device-only CUDA kernel with a closed parameter list",
+    );
+  }
+  const tensorIds = [fact.lhsTensorFactId, fact.rhsTensorFactId, fact.destinationTensorFactId];
+  if (new Set(tensorIds).size !== 3) {
+    invalid(path, "logical GEMM requires three distinct tensor facts");
+  }
+  const lhs = logicalGemmTensor(indexes, fact.lhsTensorFactId, `${path}.lhsTensorFactId`);
+  const rhs = logicalGemmTensor(indexes, fact.rhsTensorFactId, `${path}.rhsTensorFactId`);
+  const destination = logicalGemmTensor(
+    indexes,
+    fact.destinationTensorFactId,
+    `${path}.destinationTensorFactId`,
+  );
+  const tensors = [lhs, rhs, destination] as const;
+  const body = payload.functionBodies.find((candidate) => candidate.declarationId === root.declarationId);
+  if (body === undefined) {
+    invalid(`${path}.functionDeclarationId`, "logical GEMM kernel requires one serialized function body");
+  }
+  for (const [role, tensor] of [
+    ["lhs", lhs],
+    ["rhs", rhs],
+    ["destination", destination],
+  ] as const) {
+    const result = ref(
+      indexes.declarations,
+      tensor.resultDeclarationId,
+      `${path}.${role}TensorFactId.resultDeclarationId`,
+      "declaration",
+    );
+    if (result.kind !== "variable" || result.semanticParentId !== root.declarationId ||
+        result.lexicalParentId !== root.declarationId ||
+        !body.statements.some((statement) => (
+          statement.kind === "declaration" && statement.declarationId === result.declarationId
+        ))) {
+      invalid(
+        `${path}.${role}TensorFactId.resultDeclarationId`,
+        "logical GEMM tensor result must be a local variable declared by the selected kernel body",
+      );
+    }
+  }
+  const pointerIds = tensors.map((tensor) => tensor.engine.pointerDeclarationId);
+  if (new Set(pointerIds).size !== 3) {
+    invalid(path, "logical GEMM requires pairwise-distinct global pointer parameters");
+  }
+  const parameterDeclarations = payload.declarations.filter((declaration) => (
+    declaration.kind === "parameter" && declaration.semanticParentId === root.declarationId &&
+    declaration.lexicalParentId === root.declarationId
+  ));
+  if (parameterDeclarations.length !== 3 ||
+      pointerIds.some((pointerId) => !parameterDeclarations.some((parameter) => parameter.declarationId === pointerId))) {
+    invalid(
+      `${path}.functionDeclarationId`,
+      "initial logical GEMM profile requires exactly the lhs, rhs, and destination pointer parameters",
+    );
+  }
+
+  const elementTypeIds = tensors.map((tensor) => tensor.elementTypeId);
+  if (new Set(elementTypeIds).size !== 1) {
+    invalid(path, "logical GEMM tensors must share one exact element type");
+  }
+  const elementType = indexes.types.get(elementTypeIds[0]!);
+  const deviceAbi = payload.sourceAbi.types.filter((abi) => (
+    abi.domain === "device" && abi.deviceTypeId === elementTypeIds[0]
+  ));
+  if (elementType?.kind !== "builtin" || elementType.builtin !== "float" ||
+      elementType.qualifiers.const || elementType.qualifiers.volatile ||
+      deviceAbi.length !== 1 || deviceAbi[0]?.sizeBits !== "32" || deviceAbi[0].alignmentBits !== "32") {
+    invalid(path, "logical GEMM requires one exact non-const f32 element type with 32-bit device ABI");
+  }
+  const lhsPointerTypeId = verifyLogicalGemmPointer(indexes, lhs, true, `${path}.lhsTensorFactId`);
+  const rhsPointerTypeId = verifyLogicalGemmPointer(indexes, rhs, true, `${path}.rhsTensorFactId`);
+  const destinationPointerTypeId = verifyLogicalGemmPointer(
+    indexes,
+    destination,
+    false,
+    `${path}.destinationTensorFactId`,
+  );
+  if (!sameStrings(
+    functionType.parameterTypeIds,
+    [lhsPointerTypeId, rhsPointerTypeId, destinationPointerTypeId],
+  )) {
+    invalid(
+      `${path}.functionDeclarationId`,
+      "logical GEMM kernel parameter types must be exactly const f32 lhs, const f32 rhs, and f32 destination",
+    );
+  }
+
+  const lhsShape = verifyDenseRowMajorRank2(indexes, lhs, `${path}.lhsTensorFactId`, limits);
+  const rhsShape = verifyDenseRowMajorRank2(indexes, rhs, `${path}.rhsTensorFactId`, limits);
+  const destinationShape = verifyDenseRowMajorRank2(
+    indexes,
+    destination,
+    `${path}.destinationTensorFactId`,
+    limits,
+  );
+  if (lhsShape[0] !== destinationShape[0] || lhsShape[1] !== rhsShape[0] ||
+      rhsShape[1] !== destinationShape[1]) {
+    invalid(path, "logical GEMM dense tensor shapes must be lhs[M,K], rhs[K,N], destination[M,N]");
+  }
+  for (const [name, value] of [
+    ["m", fact.logicalTile.m],
+    ["n", fact.logicalTile.n],
+    ["k", fact.logicalTile.k],
+  ] as const) {
+    if (wireIntegerToBigInt(value) === 0n) invalid(`${path}.logicalTile.${name}`, "logical tile extent must be positive");
+  }
+}
+
+type LogicalGemmTensorFact = Extract<CppCuteResolvedFactV1, { readonly kind: "tensor" }> & {
+  readonly engine: Extract<
+    Extract<CppCuteResolvedFactV1, { readonly kind: "tensor" }>["engine"],
+    { readonly kind: "global-pointer" }
+  >;
+};
+
+function logicalGemmTensor(
+  indexes: ArtifactIndexes,
+  factId: string,
+  path: string,
+): LogicalGemmTensorFact {
+  const fact = ref(indexes.facts, factId, path, "fact");
+  if (fact.kind !== "tensor" || fact.memorySpace !== "global" ||
+      fact.engine.kind !== "global-pointer" || fact.engine.nullable) {
+    invalid(path, "logical GEMM operand must be a non-null global-pointer tensor fact");
+  }
+  return fact as LogicalGemmTensorFact;
+}
+
+function verifyLogicalGemmPointer(
+  indexes: ArtifactIndexes,
+  tensor: LogicalGemmTensorFact,
+  readOnly: boolean,
+  path: string,
+): string {
+  const declaration = ref(
+    indexes.declarations,
+    tensor.engine.pointerDeclarationId,
+    `${path}.engine.pointerDeclarationId`,
+    "declaration",
+  );
+  const pointer = declaration.typeId === null ? undefined : indexes.types.get(declaration.typeId);
+  const pointee = pointer?.kind === "pointer" ? indexes.types.get(pointer.pointeeTypeId) : undefined;
+  if (declaration.kind !== "parameter" || declaration.memorySpace !== "global" ||
+      pointer?.kind !== "pointer" || pointer.addressSpace !== "global" ||
+      pointee?.kind !== "builtin" || pointee.builtin !== "float" ||
+      pointee.qualifiers.const !== readOnly || pointee.qualifiers.volatile) {
+    invalid(
+      path,
+      `logical GEMM ${readOnly ? "input" : "destination"} must use an exact global ${readOnly ? "const " : ""}f32 pointer parameter`,
+    );
+  }
+  return pointer.typeId;
+}
+
+function verifyDenseRowMajorRank2(
+  indexes: ArtifactIndexes,
+  tensor: LogicalGemmTensorFact,
+  path: string,
+  limits: Partial<DecodeLimits> | undefined,
+): readonly [bigint, bigint] {
+  const layout = ref(indexes.facts, tensor.layoutFactId, `${path}.layoutFactId`, "fact");
+  if (layout.kind !== "affine-layout" || layout.rank !== 2 || layout.leafRank !== 2 ||
+      layout.shape.kind !== "tuple" || layout.stride.kind !== "tuple" ||
+      layout.shape.elements.length !== 2 || layout.stride.elements.length !== 2 ||
+      layout.shape.elements.some((mode) => mode.kind !== "scalar") ||
+      layout.stride.elements.some((mode) => mode.kind !== "scalar")) {
+    invalid(`${path}.layoutFactId`, "logical GEMM requires a flat static dense row-major rank-2 layout");
+  }
+  const shape = hierarchyLeaves(layout.shape).map((expression) => (
+    evaluateStaticIntegerExpr(expression, `${path}.layout.shape`, limits)
+  ));
+  const stride = hierarchyLeaves(layout.stride).map((expression) => (
+    evaluateStaticIntegerExpr(expression, `${path}.layout.stride`, limits)
+  ));
+  if (shape.some((extent) => extent === undefined || extent <= 0n) ||
+      stride[0] !== shape[1] || stride[1] !== 1n) {
+    invalid(`${path}.layoutFactId`, "logical GEMM requires positive static row-major shape with strides [inner,1]");
+  }
+  return [shape[0]!, shape[1]!];
 }
 
 function verifyAffineLayoutFact(
@@ -1435,9 +1655,51 @@ function verifyEntries(payload: CppCuteFrontendPayloadV3, indexes: ArtifactIndex
           "layout entry must select exactly its affine-layout result declaration",
         );
       }
-    } else {
+    } else if (entry.kind === "view-copy") {
       verifyViewCopyEntry(payload, entry, path, indexes);
+    } else {
+      verifyLogicalGemmTileEntry(payload, entry, path, indexes);
     }
+  }
+}
+
+function verifyLogicalGemmTileEntry(
+  payload: CppCuteFrontendPayloadV3,
+  entry: Extract<CppCuteFrontendPayloadV3["entries"][number], { readonly kind: "logical-gemm-tile" }>,
+  path: string,
+  indexes: ArtifactIndexes,
+): void {
+  const fact = ref(indexes.facts, entry.logicalGemmTileFactId, `${path}.logicalGemmTileFactId`, "fact");
+  if (fact.kind !== "logical-gemm-tile") {
+    invalid(`${path}.logicalGemmTileFactId`, "logical GEMM entry must reference a logical-gemm-tile fact");
+  }
+  if (entry.selectedRootDeclarationIds.length !== 1 ||
+      entry.selectedRootDeclarationIds[0] !== fact.functionDeclarationId) {
+    invalid(
+      `${path}.selectedRootDeclarationIds`,
+      "logical GEMM entry must select exactly the fact's device function root",
+    );
+  }
+  const dependencyIds = new Set([
+    fact.factId,
+    fact.lhsTensorFactId,
+    fact.rhsTensorFactId,
+    fact.destinationTensorFactId,
+  ]);
+  for (const tensorFactId of [
+    fact.lhsTensorFactId,
+    fact.rhsTensorFactId,
+    fact.destinationTensorFactId,
+  ]) {
+    const tensor = indexes.facts.get(tensorFactId);
+    if (tensor?.kind === "tensor") dependencyIds.add(tensor.layoutFactId);
+  }
+  if (dependencyIds.size !== 7 || payload.facts.length !== dependencyIds.size ||
+      payload.facts.some((candidate) => !dependencyIds.has(candidate.factId))) {
+    invalid(
+      `${path}.logicalGemmTileFactId`,
+      "initial logical GEMM entry requires exactly its three layouts, three tensors, and backend-neutral logical fact",
+    );
   }
 }
 

@@ -134,6 +134,7 @@ import {
   CPP_CUTE_BROWSER_FRONTEND_WORK_METRICS_PROTOCOL,
 } from "../../src/cpp_cute_browser_frontend_work_metrics.js";
 import {
+  CPP_CUTE_FRONTEND_REQUEST_LOGICAL_GEMM_TILE_MINOR,
   deriveCppCuteFrontendEntryRequestId,
   deriveCppCuteFrontendRequestHash,
   deriveCppCuteFrontendSourceFileId,
@@ -157,6 +158,7 @@ import type {
 } from "../../src/cpp_cute_frontend_types.js";
 import {
   CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
+  CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR,
   CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
 } from "../../src/cpp_cute_frontend_types.js";
 import {
@@ -600,12 +602,28 @@ describe("C++/CuTe browser Worker positive framing", () => {
     expect(authorities.assetCopyCalls).toBe(assetCopyCalls);
     expect(hashControl.lastInvocationSha256Calls).toBe(0);
   });
+
+  it("rejects typed-artifact logical GEMM requests before Worker assets or compilation", async () => {
+    const assetCopyCalls = authorities.assetCopyCalls;
+    await expect(createEnvironment(
+      "accepted",
+      "representable",
+      "default",
+      "logical-gemm-tile",
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-UNSUPPORTED-ENTRY",
+      path: "$.request.entryRequests[0].kind",
+    });
+    expect(authorities.assetCopyCalls).toBe(assetCopyCalls);
+    expect(hashControl.lastInvocationSha256Calls).toBe(0);
+  });
 });
 
 async function createEnvironment(
   outcome: "accepted" | "rejected",
   requestLimitMode: "representable" | "profile-wide" = "representable",
   profileMode: "default" | "include-root-overflow" = "default",
+  entryKind: "layout" | "logical-gemm-tile" = "layout",
 ): Promise<PositiveEnvironment> {
   const clangBytes = Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0);
   const workerBytes = new Uint8Array(65_536);
@@ -633,7 +651,7 @@ async function createEnvironment(
   (profileInput.deployment.worker as { moduleSha256: string; moduleByteLength: number }).moduleByteLength =
     workerBytes.byteLength;
   const profile = await prepareCppCuteFrontendProfile(profileInput);
-  const requestInput = await createRequestInput(profile, requestLimitMode);
+  const requestInput = await createRequestInput(profile, requestLimitMode, entryKind);
   const request = await prepareCppCuteFrontendRequest(
     profile,
     requestInput,
@@ -714,6 +732,7 @@ async function createEnvironment(
 async function createRequestInput(
   profile: PreparedCppCuteFrontendProfile,
   limitMode: "representable" | "profile-wide",
+  entryKind: "layout" | "logical-gemm-tile" = "layout",
 ): Promise<CppCuteFrontendRequestV1> {
   const descriptorBody = {
     role: "main-source" as const,
@@ -726,10 +745,12 @@ async function createRequestInput(
     fileId: await deriveCppCuteFrontendSourceFileId(descriptorBody),
     ...descriptorBody,
   };
+  const entrySelection = entryKind === "layout"
+    ? { kind: "layout" as const, declarationKind: "variable" as const }
+    : { kind: "logical-gemm-tile" as const, declarationKind: "function" as const };
   const entryBody = {
     requestId: `bg.cpp.entry-request.sha256.${"0".repeat(64)}`,
-    kind: "layout" as const,
-    declarationKind: "variable" as const,
+    ...entrySelection,
     anchor: {
       virtualPath: SOURCE_PATH,
       beginByte: "0" as WireU64,
@@ -740,7 +761,12 @@ async function createRequestInput(
   const entry = { ...entryBody, requestId: await deriveCppCuteFrontendEntryRequestId(entryBody) };
   const body: CppCuteFrontendRequestBodyV1 = {
     schema: "browsergrad.compiler.cpp-cute.frontend-request",
-    version: { major: 1, minor: 0 },
+    version: {
+      major: 1,
+      minor: entryKind === "logical-gemm-tile"
+        ? CPP_CUTE_FRONTEND_REQUEST_LOGICAL_GEMM_TILE_MINOR
+        : 0,
+    },
     compilationContractHash: profile.compilationContractHash,
     mainVirtualPath: SOURCE_PATH,
     files: [file],
@@ -749,7 +775,9 @@ async function createRequestInput(
       schema: "browsergrad.compiler.cpp-cute.frontend-artifact",
       version: {
         major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
-        minor: CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
+        minor: entryKind === "logical-gemm-tile"
+          ? CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR
+          : CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
       },
     },
     limits: limitMode === "representable"

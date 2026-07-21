@@ -133,6 +133,22 @@ export async function prepareCppCuteFrontendRequestBinding(
   const artifact = unwrapVerifiedCppCuteFrontendArtifactResource(artifactResource);
   const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
   const payload = artifactRecord.envelope.payload;
+  const expectedArtifact = requestRecord.request.expectedArtifact;
+  if (artifactRecord.envelope.schema !== expectedArtifact.schema) {
+    mismatch(
+      "BG-COMPILER-CPP-CUTE-REQUEST-BINDING-ARTIFACT-MISMATCH",
+      "$.artifact.schema",
+      "artifact schema differs from the exact schema requested by expectedArtifact",
+    );
+  }
+  if (artifactRecord.envelope.version.major !== expectedArtifact.version.major ||
+      artifactRecord.envelope.version.minor !== expectedArtifact.version.minor) {
+    mismatch(
+      "BG-COMPILER-CPP-CUTE-REQUEST-BINDING-ARTIFACT-MISMATCH",
+      "$.artifact.version",
+      "artifact version differs from the exact major/minor requested by expectedArtifact",
+    );
+  }
   if (artifact.compilationContractHash !== request.compilationContractHash) {
     mismatch(
       "BG-COMPILER-CPP-CUTE-REQUEST-BINDING-ARTIFACT-MISMATCH",

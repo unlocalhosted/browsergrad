@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Adds closed frontend artifact 3.1 and request 1.1 support for one
+  producer-declared, backend-neutral `logical-gemm-tile` fact. Authorized
+  typed artifacts lower through semantic-core's canonical dense f32 GEMM
+  constructor without importing schedule, MMA, or backend meaning. Exact
+  expected-artifact schema and major/minor are now bound before source work.
+  The production AOT and browser-Worker extractors reject this entry until
+  native body/FP-control extraction exists, so this is not a source-
+  compatibility or backend-execution claim.
 - Adds an internal, authorization-only C++/CuTe layout boundary that selects
   one verified affine fact, preserves nested hierarchy and signed element
   locations, and lowers it into allocation-free semantic-core layout meaning.

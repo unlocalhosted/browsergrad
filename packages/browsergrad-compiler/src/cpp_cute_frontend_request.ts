@@ -32,6 +32,7 @@ import {
 import { findCppCuteVirtualPathError } from "./cpp_cute_virtual_path.js";
 import {
   CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
+  CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR,
   CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
   CPP_CUTE_FRONTEND_ARTIFACT_SCHEMA,
 } from "./cpp_cute_frontend_types.js";
@@ -39,6 +40,7 @@ import {
 export const CPP_CUTE_FRONTEND_REQUEST_SCHEMA = "browsergrad.compiler.cpp-cute.frontend-request";
 export const CPP_CUTE_FRONTEND_REQUEST_MAJOR = 1;
 export const CPP_CUTE_FRONTEND_REQUEST_MINOR = 0;
+export const CPP_CUTE_FRONTEND_REQUEST_LOGICAL_GEMM_TILE_MINOR = 1;
 
 const REQUEST_ID = /^bg\.cpp\.frontend-request\.sha256\.[0-9a-f]{64}$/u;
 const ENTRY_REQUEST_ID = /^bg\.cpp\.entry-request\.sha256\.[0-9a-f]{64}$/u;
@@ -49,7 +51,8 @@ const PREPARED_REQUESTS = new WeakMap<object, StoredCppCuteFrontendRequest>();
 
 export interface CppCuteFrontendRequestVersionV1 extends JsonObject {
   readonly major: typeof CPP_CUTE_FRONTEND_REQUEST_MAJOR;
-  readonly minor: typeof CPP_CUTE_FRONTEND_REQUEST_MINOR;
+  readonly minor: typeof CPP_CUTE_FRONTEND_REQUEST_MINOR |
+    typeof CPP_CUTE_FRONTEND_REQUEST_LOGICAL_GEMM_TILE_MINOR;
 }
 
 export interface CppCuteFrontendRequestSourceFileV1 extends JsonObject {
@@ -81,13 +84,20 @@ export type CppCuteFrontendEntryRequestV1 =
       readonly kind: "view-copy";
       readonly declarationKind: "function";
       readonly anchor: CppCuteFrontendRequestSourceAnchorV1;
+    })
+  | (JsonObject & {
+      readonly requestId: string;
+      readonly kind: "logical-gemm-tile";
+      readonly declarationKind: "function";
+      readonly anchor: CppCuteFrontendRequestSourceAnchorV1;
     });
 
 export interface CppCuteFrontendExpectedArtifactV1 extends JsonObject {
   readonly schema: typeof CPP_CUTE_FRONTEND_ARTIFACT_SCHEMA;
   readonly version: JsonObject & {
     readonly major: typeof CPP_CUTE_FRONTEND_ARTIFACT_MAJOR;
-    readonly minor: typeof CPP_CUTE_FRONTEND_ARTIFACT_MINOR;
+    readonly minor: typeof CPP_CUTE_FRONTEND_ARTIFACT_MINOR |
+      typeof CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR;
   };
 }
 
@@ -400,11 +410,12 @@ function parseRequest(
   }
   const versionObject = closedObject(field(object, "version", "$"), ["major", "minor"], "$.version");
   if (versionObject.major !== CPP_CUTE_FRONTEND_REQUEST_MAJOR ||
-      versionObject.minor !== CPP_CUTE_FRONTEND_REQUEST_MINOR) {
+      (versionObject.minor !== CPP_CUTE_FRONTEND_REQUEST_MINOR &&
+       versionObject.minor !== CPP_CUTE_FRONTEND_REQUEST_LOGICAL_GEMM_TILE_MINOR)) {
     fail(
       "BG-COMPILER-CPP-CUTE-REQUEST-UNSUPPORTED-VERSION",
       "$.version",
-      `closed request reader supports ${CPP_CUTE_FRONTEND_REQUEST_MAJOR}.${CPP_CUTE_FRONTEND_REQUEST_MINOR} only`,
+      `closed request reader supports ${CPP_CUTE_FRONTEND_REQUEST_MAJOR}.${CPP_CUTE_FRONTEND_REQUEST_MINOR} and ${CPP_CUTE_FRONTEND_REQUEST_MAJOR}.${CPP_CUTE_FRONTEND_REQUEST_LOGICAL_GEMM_TILE_MINOR} only`,
     );
   }
   const mainVirtualPath = virtualPath(field(object, "mainVirtualPath", "$"), "$.mainVirtualPath");
@@ -415,14 +426,30 @@ function parseRequest(
     parseSourceFile(entry, `$.files[${index}]`, profile));
   validateSourceFiles(files, mainVirtualPath, profile.extractionLimits);
   const entryRequests = arrayValue(field(object, "entryRequests", "$"), "$.entryRequests").map((entry, index) =>
-    parseEntryRequest(entry, `$.entryRequests[${index}]`, files, mainVirtualPath));
+    parseEntryRequest(
+      entry,
+      `$.entryRequests[${index}]`,
+      files,
+      mainVirtualPath,
+      versionObject.minor as CppCuteFrontendRequestVersionV1["minor"],
+    ));
   if (entryRequests.length !== 1) invalid("$.entryRequests", "request requires exactly one supported entry");
   const expectedArtifact = parseExpectedArtifact(field(object, "expectedArtifact", "$"), "$.expectedArtifact");
+  if (entryRequests[0]?.kind === "logical-gemm-tile" &&
+      expectedArtifact.version.minor !== CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR) {
+    invalid(
+      "$.expectedArtifact.version.minor",
+      `logical-gemm-tile requests require artifact ${CPP_CUTE_FRONTEND_ARTIFACT_MAJOR}.${CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR}`,
+    );
+  }
   const limits = parseRequestLimits(field(object, "limits", "$"), "$.limits", profile.extractionLimits);
   validateRequestSourceLimits(files, limits);
   return deepFreezeJson({
     schema: CPP_CUTE_FRONTEND_REQUEST_SCHEMA,
-    version: { major: CPP_CUTE_FRONTEND_REQUEST_MAJOR, minor: CPP_CUTE_FRONTEND_REQUEST_MINOR },
+    version: {
+      major: CPP_CUTE_FRONTEND_REQUEST_MAJOR,
+      minor: versionObject.minor as CppCuteFrontendRequestVersionV1["minor"],
+    },
     requestId: stableId(field(object, "requestId", "$"), "$.requestId", REQUEST_ID, "request"),
     compilationContractHash: sha256(field(object, "compilationContractHash", "$"), "$.compilationContractHash"),
     mainVirtualPath,
@@ -511,15 +538,22 @@ function parseEntryRequest(
   path: string,
   files: readonly CppCuteFrontendRequestSourceFileV1[],
   mainVirtualPath: string,
+  requestMinor: CppCuteFrontendRequestVersionV1["minor"],
 ): CppCuteFrontendEntryRequestV1 {
   const object = closedObject(value, ["requestId", "kind", "declarationKind", "anchor"], path);
   const selection = object.kind === "layout" && object.declarationKind === "variable"
     ? { kind: "layout" as const, declarationKind: "variable" as const }
     : object.kind === "view-copy" && object.declarationKind === "function"
       ? { kind: "view-copy" as const, declarationKind: "function" as const }
+      : object.kind === "logical-gemm-tile" && object.declarationKind === "function" &&
+          requestMinor >= CPP_CUTE_FRONTEND_REQUEST_LOGICAL_GEMM_TILE_MINOR
+        ? { kind: "logical-gemm-tile" as const, declarationKind: "function" as const }
       : null;
   if (selection === null) {
-    invalid(path, "entry kind must map layout to variable or view-copy to function");
+    invalid(
+      path,
+      "entry kind must map layout to variable, view-copy to function, or logical-gemm-tile to function in request 1.1",
+    );
   }
   const anchorPath = `${path}.anchor`;
   const anchor = closedObject(field(object, "anchor", path), [
@@ -555,12 +589,20 @@ function parseExpectedArtifact(value: JsonValue, path: string): CppCuteFrontendE
   }
   const versionPath = `${path}.version`;
   const version = closedObject(field(object, "version", path), ["major", "minor"], versionPath);
-  if (version.major !== CPP_CUTE_FRONTEND_ARTIFACT_MAJOR || version.minor !== CPP_CUTE_FRONTEND_ARTIFACT_MINOR) {
-    invalid(versionPath, `expected artifact version ${CPP_CUTE_FRONTEND_ARTIFACT_MAJOR}.${CPP_CUTE_FRONTEND_ARTIFACT_MINOR}`);
+  if (version.major !== CPP_CUTE_FRONTEND_ARTIFACT_MAJOR ||
+      (version.minor !== CPP_CUTE_FRONTEND_ARTIFACT_MINOR &&
+       version.minor !== CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR)) {
+    invalid(
+      versionPath,
+      `expected artifact version ${CPP_CUTE_FRONTEND_ARTIFACT_MAJOR}.${CPP_CUTE_FRONTEND_ARTIFACT_MINOR} or ${CPP_CUTE_FRONTEND_ARTIFACT_MAJOR}.${CPP_CUTE_FRONTEND_ARTIFACT_LOGICAL_GEMM_TILE_MINOR}`,
+    );
   }
   return {
     schema: CPP_CUTE_FRONTEND_ARTIFACT_SCHEMA,
-    version: { major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR, minor: CPP_CUTE_FRONTEND_ARTIFACT_MINOR },
+    version: {
+      major: CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
+      minor: version.minor as CppCuteFrontendExpectedArtifactV1["version"]["minor"],
+    },
   };
 }
 

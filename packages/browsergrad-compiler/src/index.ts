@@ -303,6 +303,17 @@ export {
   type LowerAuthorizedCppCuteViewCopyEntryRequest,
 } from "./cpp_cute_view_copy_lowering.js";
 export {
+  CppCuteLogicalGemmTileLoweringError,
+  lowerAuthorizedCppCuteLogicalGemmTileEntry,
+  prepareVerifiedCppCuteLogicalGemmTileSemantics,
+  type CppCuteLogicalGemmTileLoweringErrorCode,
+  type LowerAuthorizedCppCuteLogicalGemmTileEntryOptions,
+  type LowerAuthorizedCppCuteLogicalGemmTileEntryRequest,
+  type PreparedVerifiedCppCuteLogicalGemmTileSemantics,
+  type PrepareVerifiedCppCuteLogicalGemmTileSemanticsOptions,
+  type PrepareVerifiedCppCuteLogicalGemmTileSemanticsRequest,
+} from "./cpp_cute_logical_gemm_lowering.js";
+export {
   CppCuteBrowserViewCopyCandidateError,
   prepareObservedCppCuteBrowserViewCopyCandidate,
   unwrapObservedCppCuteBrowserViewCopyCandidate,

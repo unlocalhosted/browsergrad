@@ -223,6 +223,9 @@ describe("producer-neutral C++/CUDA/CuTe frontend request", () => {
 
   it("prepares deterministic opaque authority over copied caller source bytes", async () => {
     const fixture = await createRequestFixture();
+    expect(fixture.input.requestId).toBe(
+      "bg.cpp.frontend-request.sha256.0cfe01e6f55c098140d21779d1c7ffb877ed24179206ed42fc3cb1d6afbeb6bd",
+    );
     const first = await prepareCppCuteFrontendRequest(fixture.profile, fixture.input, fixture.snapshots);
     const second = await prepareCppCuteFrontendRequest(fixture.profile, cloneRequest(fixture.input), fixture.snapshots);
     const record = unwrapPreparedCppCuteFrontendRequest(first);
@@ -523,7 +526,7 @@ describe("producer-neutral C++/CUDA/CuTe frontend request", () => {
   it("fails closed on version, cancellation, and decode budgets", async () => {
     const fixture = await createRequestFixture();
     const version = cloneRequest(fixture.input);
-    (version.version as { minor: number }).minor = 1;
+    (version.version as { minor: number }).minor = 2;
     await expectRequestError(
       prepareCppCuteFrontendRequest(fixture.profile, version, fixture.snapshots),
       "BG-COMPILER-CPP-CUTE-REQUEST-UNSUPPORTED-VERSION",

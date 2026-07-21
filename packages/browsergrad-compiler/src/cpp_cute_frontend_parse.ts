@@ -39,6 +39,7 @@ import type {
   CppCuteInputOwnerV3,
   CppCuteIntegerExprV1,
   CppCuteIntrinsicEffectsV1,
+  CppCuteLogicalGemmTileFactV1,
   CppCuteMacroExpansionV1,
   CppCuteOverloadResolutionV1,
   CppCuteParameterAbiV1,
@@ -1209,8 +1210,89 @@ function parseFact(value: JsonValue, path: string): CppCuteResolvedFactV1 {
   if (!isJsonObject(value)) invalid(path, "resolved fact must be an object");
   if (value.kind === "affine-layout") return parseAffineLayoutFact(value, path);
   if (value.kind === "tensor") return parseTensorFact(value, path);
+  if (value.kind === "logical-gemm-tile") return parseLogicalGemmTileFact(value, path);
   if (value.kind === "target-intrinsic") return parseTargetIntrinsicFact(value, path);
   invalid(`${path}.kind`, "unknown resolved fact kind");
+}
+
+function parseLogicalGemmTileFact(value: JsonValue, path: string): CppCuteLogicalGemmTileFactV1 {
+  const object = closedObject(value, [
+    "factId", "kind", "origin", "functionDeclarationId", "lhsTensorFactId", "rhsTensorFactId",
+    "destinationTensorFactId", "logicalTile", "boundary", "accumulation", "phases", "overlap",
+  ], path);
+  const tilePath = `${path}.logicalTile`;
+  const logicalTile = closedObject(field(object, "logicalTile", path), ["m", "n", "k"], tilePath);
+  const boundaryPath = `${path}.boundary`;
+  const boundary = closedObject(
+    field(object, "boundary", path),
+    ["lhs", "rhs", "destination"],
+    boundaryPath,
+  );
+  const accumulationPath = `${path}.accumulation`;
+  const accumulation = closedObject(field(object, "accumulation", path), [
+    "inputDType", "accumulatorDType", "outputDType", "initialAccumulator", "product", "reduction",
+    "reductionOrder", "rounding", "contraction", "reassociation",
+  ], accumulationPath);
+  const phasesPath = `${path}.phases`;
+  const phases = closedObject(field(object, "phases", path), ["order", "participation"], phasesPath);
+  const order = orderedArrayField(phases, "order", phasesPath, 3);
+  if (order.length !== 3 || order[0] !== "load" || order[1] !== "accumulate" || order[2] !== "store") {
+    invalid(`${phasesPath}.order`, "logical GEMM phases must be exactly load, accumulate, store");
+  }
+  const overlapPath = `${path}.overlap`;
+  const overlap = closedObject(field(object, "overlap", path), ["kind"], overlapPath);
+  return {
+    factId: stableId(field(object, "factId", path), `${path}.factId`, "fact"),
+    kind: "logical-gemm-tile",
+    origin: parseOrigin(field(object, "origin", path), `${path}.origin`),
+    functionDeclarationId: stableId(
+      field(object, "functionDeclarationId", path),
+      `${path}.functionDeclarationId`,
+      "declaration",
+    ),
+    lhsTensorFactId: stableId(field(object, "lhsTensorFactId", path), `${path}.lhsTensorFactId`, "fact"),
+    rhsTensorFactId: stableId(field(object, "rhsTensorFactId", path), `${path}.rhsTensorFactId`, "fact"),
+    destinationTensorFactId: stableId(
+      field(object, "destinationTensorFactId", path),
+      `${path}.destinationTensorFactId`,
+      "fact",
+    ),
+    logicalTile: {
+      m: parseWireU64(field(logicalTile, "m", tilePath), `${tilePath}.m`),
+      n: parseWireU64(field(logicalTile, "n", tilePath), `${tilePath}.n`),
+      k: parseWireU64(field(logicalTile, "k", tilePath), `${tilePath}.k`),
+    },
+    boundary: {
+      lhs: exactString(field(boundary, "lhs", boundaryPath), "zero-fill", `${boundaryPath}.lhs`),
+      rhs: exactString(field(boundary, "rhs", boundaryPath), "zero-fill", `${boundaryPath}.rhs`),
+      destination: exactString(
+        field(boundary, "destination", boundaryPath),
+        "mask-outside-logical-shape",
+        `${boundaryPath}.destination`,
+      ),
+    },
+    accumulation: {
+      inputDType: exactString(field(accumulation, "inputDType", accumulationPath), "f32", `${accumulationPath}.inputDType`),
+      accumulatorDType: exactString(field(accumulation, "accumulatorDType", accumulationPath), "f32", `${accumulationPath}.accumulatorDType`),
+      outputDType: exactString(field(accumulation, "outputDType", accumulationPath), "f32", `${accumulationPath}.outputDType`),
+      initialAccumulator: exactString(field(accumulation, "initialAccumulator", accumulationPath), "positive-zero", `${accumulationPath}.initialAccumulator`),
+      product: exactString(field(accumulation, "product", accumulationPath), "multiply", `${accumulationPath}.product`),
+      reduction: exactString(field(accumulation, "reduction", accumulationPath), "sum", `${accumulationPath}.reduction`),
+      reductionOrder: exactString(field(accumulation, "reductionOrder", accumulationPath), "increasing-k", `${accumulationPath}.reductionOrder`),
+      rounding: exactString(field(accumulation, "rounding", accumulationPath), "toward-nearest-ties-even", `${accumulationPath}.rounding`),
+      contraction: exactString(field(accumulation, "contraction", accumulationPath), "forbid", `${accumulationPath}.contraction`),
+      reassociation: exactString(field(accumulation, "reassociation", accumulationPath), "forbid", `${accumulationPath}.reassociation`),
+    },
+    phases: {
+      order: ["load", "accumulate", "store"],
+      participation: exactString(
+        field(phases, "participation", phasesPath),
+        "masked-full-logical-tile",
+        `${phasesPath}.participation`,
+      ),
+    },
+    overlap: { kind: exactString(field(overlap, "kind", overlapPath), "forbid-all", `${overlapPath}.kind`) },
+  };
 }
 
 function parseAffineLayoutFact(value: JsonValue, path: string): CppCuteAffineLayoutFactV1 {
@@ -1473,6 +1555,25 @@ function parseEntry(value: JsonValue, path: string): CppCuteFrontendEntryV1 {
         field(object, "operationExpressionId", path),
         `${path}.operationExpressionId`,
         "expression",
+      ),
+      selectedRootDeclarationIds: sortedStableIdSet(
+        field(object, "selectedRootDeclarationIds", path),
+        `${path}.selectedRootDeclarationIds`,
+        "declaration",
+      ),
+    };
+  }
+  if (value.kind === "logical-gemm-tile") {
+    const object = closedObject(value, [
+      "entryId", "kind", "logicalGemmTileFactId", "selectedRootDeclarationIds",
+    ], path);
+    return {
+      entryId: stableId(field(object, "entryId", path), `${path}.entryId`, "entry"),
+      kind: "logical-gemm-tile",
+      logicalGemmTileFactId: stableId(
+        field(object, "logicalGemmTileFactId", path),
+        `${path}.logicalGemmTileFactId`,
+        "fact",
       ),
       selectedRootDeclarationIds: sortedStableIdSet(
         field(object, "selectedRootDeclarationIds", path),
