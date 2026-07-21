@@ -49,6 +49,10 @@ contract in the README](README.md#compatibility-contract).
   bounded correction, owning float16/32/64 CPU results, centered
   closure/symbolic VJP, batch-safe vmap, a float32 ONNX variance decomposition,
   hostile-coercion rejection, and explicit tensor-plan/WebGPU refusal.
+- `Tensor.masked_fill` now emits typed `WHERE` with a bool tensor mask, closed
+  source-shape broadcasting, an exact source-dtype scalar constant, owning CPU
+  results, mask-complement closure/symbolic VJP, vmap, ONNX `Where`, and
+  explicit tensor-plan/WebGPU refusal.
 
 ### Added
 
@@ -56,7 +60,8 @@ contract in the README](README.md#compatibility-contract).
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
   current table contains `ABS`, `CLAMP`, `COS`, `BROADCAST_TO`, `FLIP`,
-  `INDEX`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`, and `VAR`.
+  `INDEX`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`, `VAR`, and
+  masked-fill `WHERE`.
 
 ## [0.9.0] — 2026-07-15
 

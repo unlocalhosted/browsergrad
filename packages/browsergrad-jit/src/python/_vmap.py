@@ -74,6 +74,7 @@ from ._ir import (
 )
 from ._errors import JitNotImplementedError
 from ._framework_contracts import (
+    MASKED_FILL_CONTRACT_ID,
     validate_broadcast_to_contract,
     validate_clamp_contract,
     validate_flip_contract,
@@ -81,6 +82,7 @@ from ._framework_contracts import (
     validate_gather_scatter_add_contract,
     validate_prod_contract,
     validate_var_contract,
+    validate_where_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
     validate_typed_unary_contract,
@@ -329,12 +331,21 @@ def _vmap_cmp(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
 
 @register_vmap(OP_WHERE)
 def _vmap_where(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    validate_where_contract(node)
     cond = batched[id(node.inputs[0])]
     a = batched[id(node.inputs[1])]
     b = batched[id(node.inputs[2])]
+    if node.arg == MASKED_FILL_CONTRACT_ID:
+        source_was_mapped = len(b.shape) == len(node.inputs[2].shape) + 1
+        if not source_was_mapped or not b.shape or b.shape[0] != B:
+            raise JitNotImplementedError(
+                "vmap masked_fill requires the source tensor on the leading mapped axis"
+            )
     new_shape = _broadcast(cond.shape, a.shape, b.shape)
-    return UOp(op=OP_WHERE, inputs=(cond, a, b),
-               shape=new_shape, dtype=node.dtype, arg=node.arg)
+    mapped = UOp(op=OP_WHERE, inputs=(cond, a, b),
+                 shape=new_shape, dtype=node.dtype, arg=node.arg)
+    validate_where_contract(mapped)
+    return mapped
 
 
 # Compute --------------------------------------------------------------

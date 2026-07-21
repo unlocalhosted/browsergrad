@@ -65,6 +65,7 @@ from ._framework_contracts import (
     validate_gather_scatter_add_contract,
     validate_prod_contract,
     validate_var_contract,
+    validate_where_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
     validate_real_numeric_unary_contract,
@@ -998,10 +999,12 @@ def _h_pad(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
 
 
 def _h_where(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    validate_where_contract(node)
     cond = vt[id(node.inputs[0])]
     a = vt[id(node.inputs[1])]
     b = vt[id(node.inputs[2])]
-    return np.where(cond, a, b)
+    selected = np.where(cond, a, b)
+    return np.array(selected, dtype=np.dtype(node.dtype), copy=True).reshape(node.shape)
 
 
 def _gather_index_tuple(index: np.ndarray, axis: int) -> tuple[np.ndarray, ...]:

@@ -366,13 +366,13 @@
       "newUseProhibition": "No new core label or constructor site; only the explicit user-authored kernel API may supply user kernel names.",
       "retirementGate": "Advertised core operations have typed IR plus explicit CPU, VJP, transform, export, and backend decisions.",
       "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-jit@1.0.0",
-      "baselineDecision": "docs/adr/0012-migrate-jit-var-to-typed-semantics.md",
+      "baselineDecision": "docs/adr/0013-migrate-jit-masked-fill-to-typed-where.md",
       "freeze": {
         "kind": "jit-op-custom",
         "inventoryFile": "architecture/jit-opaque-operation-inventory.json",
-        "inventorySha256": "3b906847bbc247092e693b41142dc2875bdabc3e0c9e802dc059f9d20f61bbff",
+        "inventorySha256": "a514abbabd824df29d3e5a686c66568600c3aed90074e790555be9331818c3d2",
         "behaviorFixtureFile": "packages/browsergrad-jit/tests-integration/fixtures/jit-opaque-operation.v0.json",
-        "behaviorFixtureSha256": "c21b344d1e9a5f4d747818b67cd235d4cd6ea8078bb054f1cf9c1dc4bc9eeedb",
+        "behaviorFixtureSha256": "6b249b149bf0daeaca68e6b336bd31187b93b95d0e13d89197d7dcf13eb95935",
         "behaviorFixtureIds": [
           "jit.custom.accelerator-and-constructor-only.v0",
           "jit.custom.all-callback-labels-and-dtypes.v0",
@@ -381,12 +381,12 @@
           "jit.custom.stateful-replay.v0"
         ],
         "behaviorTestFile": "packages/browsergrad-jit/tests-integration/gate0_opaque_operation_contract.test.ts",
-        "behaviorTestSha256": "e512a5180ead805f44b2c88376f1654d781949b02cf36016695488327263a3c3",
+        "behaviorTestSha256": "63f3288cc354e13984a77de262e90b0a24881c7e8a1561fa6d8f8c4bbb94a4c6",
         "constructorCounts": {
           "packages/browsergrad-jit/src/python/_custom_kernel.py": 1,
           "packages/browsergrad-jit/src/python/_functional.py": 7,
           "packages/browsergrad-jit/src/python/_nn.py": 1,
-          "packages/browsergrad-jit/src/python/_tensor_proxy.py": 12,
+          "packages/browsergrad-jit/src/python/_tensor_proxy.py": 11,
           "packages/browsergrad-jit/src/python/_webnn.py": 1,
           "packages/browsergrad-jit/src/python/index.ts": 2
         },
@@ -430,7 +430,6 @@
               "cat",
               "cumsum",
               "einsum",
-              "masked_fill",
               "scatter",
               "sort_indices",
               "sort_values",
@@ -470,7 +469,6 @@
           "interpolate",
           "kl_div",
           "l1_loss",
-          "masked_fill",
           "nll_loss",
           "pad",
           "scatter",
@@ -508,7 +506,6 @@
           "tensor.cat",
           "tensor.cumsum",
           "tensor.einsum",
-          "tensor.masked-fill",
           "tensor.scatter",
           "tensor.sort-indices",
           "tensor.sort-values",
@@ -532,7 +529,6 @@
           "jit.custom.interpolate.v0",
           "jit.custom.kl-div.v0",
           "jit.custom.l1-loss.v0",
-          "jit.custom.masked-fill.v0",
           "jit.custom.nll-loss.v0",
           "jit.custom.pad.v0",
           "jit.custom.scatter.v0",
@@ -631,7 +627,6 @@
             "sort": ["60deb096207c3d45fa41d640295626f3341042b76df22c16fc98d742d087781d"],
             "stack": ["096ae6772ee0d0ea82b79cb48403f365d3bb880b5e34d0965673a224ffa7cc84"],
             "TensorProxy.backward": ["1da373743a463164ce02511e2ff37dba438853e2597018e855fe90d9834d4167"],
-            "TensorProxy.masked_fill": ["97c701662f7465c80336aedbdd08c8f033f4dcc7b9a4dee8649b3164d862e120"],
             "TensorProxy.scatter": ["ba677cc933cdee1fc0b6e08c5a921ef88c194f225639d6764c2f5406298ee711"],
             "tril": ["2e19309ad4389f205b9b152c410a3123ebc6d91c9fd65db02bdd3868fc2f8e15"],
             "triu": ["72c4d6ddbe860a6b8eaa34d725020c001527c68d260fbfe982ebd55213e0d613"]
@@ -652,7 +647,7 @@
             "realize_webgpu": ["c8bb56f6665b8071d800ba3c035f97a83cc5c0334d2133315fd024693c91e774"]
           },
           "packages/browsergrad-jit/src/python/_gpu_plan.py": {
-            "build_gpu_execution_plan": ["3e77fcf18362cb497a60894c64cb702edce1194e1a170948e233de9a3f896325"]
+            "build_gpu_execution_plan": ["54f6fa4086338b3800e4b565ef2b8031b392a787246ed62445c2f7ea7f73be1b"]
           },
           "packages/browsergrad-jit/src/python/_vjp.py": {
             "get_rule": ["b851b98e25bc8ae27bc0c88b0caf3080e1604f2880ffaea8d0fb3f4100f5e976"],

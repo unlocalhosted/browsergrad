@@ -85,6 +85,15 @@ _EXACT_INTEGER_SCALAR_TYPES = (
     np.uint32,
     np.uint64,
 )
+_MASKED_FILL_VALUE_TYPES = _CLAMP_BOUND_TYPES + (
+    np.uint16,
+    np.uint32,
+    np.uint64,
+)
+_MASKED_FILL_DTYPES = frozenset({
+    "float16", "float32", "float64",
+    "int8", "int16", "int32", "int64", "uint8", "bool",
+})
 
 
 class no_grad:
@@ -168,6 +177,38 @@ def _normalize_variance_correction(correction: Any, unbiased: Any) -> int:
         raise ShapeError(
             f"var: correction must be in [{VAR_CORRECTION_MIN}, {VAR_CORRECTION_MAX}], "
             f"got {normalized}"
+        )
+    return normalized
+
+
+def _normalize_masked_fill_value(value: Any, dtype: str) -> Any:
+    if dtype == "bool":
+        if type(value) not in (bool, np.bool_):
+            raise TypeError(
+                "masked_fill: a boolean source requires a built-in or NumPy boolean value"
+            )
+        return bool(value)
+    if type(value) not in _MASKED_FILL_VALUE_TYPES:
+        raise TypeError(
+            "masked_fill: value must be a built-in or NumPy real scalar, "
+            f"got {type(value).__name__}"
+        )
+    if dtype.startswith("float"):
+        with np.errstate(over="ignore", invalid="ignore"):
+            return float(np.asarray(value, dtype=np.dtype(dtype)).item())
+    if type(value) in (float, np.float16, np.float32, np.float64):
+        numeric = float(value)
+        if not np.isfinite(numeric) or not numeric.is_integer():
+            raise ValueError(
+                f"masked_fill: value {numeric!r} is not an exact finite integer for {dtype}"
+            )
+        normalized = int(numeric)
+    else:
+        normalized = int(value)
+    bounds = np.iinfo(np.dtype(dtype))
+    if normalized < int(bounds.min) or normalized > int(bounds.max):
+        raise ValueError(
+            f"masked_fill: value {normalized} is out of range for {dtype}"
         )
     return normalized
 
@@ -1323,32 +1364,72 @@ class TensorProxy:
             unbiased=unbiased,
         ).sqrt()
 
-    def masked_fill(self, mask: Any, value: float) -> "TensorProxy":
-        mask_proxy = _to_proxy(mask, self._get_session())
-        out_shape = _broadcast_shape(self.shape, mask_proxy.shape)
-
-        def _masked_fill_forward(x_arr: np.ndarray, mask_arr: np.ndarray) -> np.ndarray:
-            return np.where(mask_arr.astype(bool), np.asarray(value, dtype=x_arr.dtype), x_arr)
-
-        uop = UOp(
-            op=OP_CUSTOM,
-            inputs=(self._uop, mask_proxy._uop),
-            shape=out_shape,
-            dtype=self._uop.dtype,
-            arg={"fn": _masked_fill_forward, "captures": (), "name": "masked_fill"},
+    def masked_fill(self, mask: Any, value: Any) -> "TensorProxy":
+        from ._framework_contracts import (
+            MASKED_FILL_CONTRACT_ID,
+            validate_masked_fill_contract,
         )
 
+        if not isinstance(mask, TensorProxy):
+            raise TypeError(
+                f"masked_fill: mask must be a TensorProxy, got {type(mask).__name__}"
+            )
+        mask_proxy = mask
+        if mask_proxy.dtype != "bool":
+            raise ShapeError(
+                f"masked_fill: mask dtype must be bool, got {mask_proxy.dtype!r}"
+            )
+        if self.dtype not in _MASKED_FILL_DTYPES:
+            raise ShapeError(
+                f"masked_fill: source dtype {self.dtype!r} is not supported"
+            )
+        try:
+            out_shape = _broadcast_shape(self.shape, mask_proxy.shape)
+        except ShapeError as exc:
+            raise ShapeError(
+                f"masked_fill: mask shape {mask_proxy.shape} cannot broadcast to source shape {self.shape}"
+            ) from exc
+        if out_shape != self.shape:
+            raise ShapeError(
+                f"masked_fill: mask shape {mask_proxy.shape} cannot broadcast to source shape {self.shape}"
+            )
+        normalized_value = _normalize_masked_fill_value(value, self.dtype)
+        fill_uop = UOp(
+            op=OP_CONST,
+            inputs=(),
+            shape=(),
+            dtype=self.dtype,
+            arg={"value": normalized_value},
+        )
+        fill_proxy = TensorProxy(fill_uop, session=self._get_session())
+
+        uop = UOp(
+            op=OP_WHERE,
+            inputs=(mask_proxy._uop, fill_uop, self._uop),
+            shape=self.shape,
+            dtype=self._uop.dtype,
+            arg=MASKED_FILL_CONTRACT_ID,
+        )
+        validate_masked_fill_contract(uop)
+
         def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
-            x_arr, mask_arr = ins
-            grad = np.where(mask_arr.astype(bool), 0, dy)
-            return (_unbroadcast(grad, x_arr.shape).astype(x_arr.dtype, copy=False), None)
+            mask_arr, _, x_arr = ins
+            grad = np.where(mask_arr, np.asarray(0, dtype=x_arr.dtype), dy)
+            return (
+                None,
+                None,
+                _unbroadcast(grad, x_arr.shape).astype(x_arr.dtype, copy=False),
+            )
 
         requires = _should_track(self)
-        ctx = _BackwardCtx(fn=_bw, input_proxies=(self, mask_proxy)) if requires else None
+        ctx = _BackwardCtx(
+            fn=_bw,
+            input_proxies=(mask_proxy, fill_proxy, self),
+        ) if requires else None
         return TensorProxy(uop, session=self._get_session(),
                            requires_grad=requires, ctx=ctx)
 
-    def masked_fill_(self, mask: Any, value: float) -> "TensorProxy":
+    def masked_fill_(self, mask: Any, value: Any) -> "TensorProxy":
         return self.masked_fill(mask, value)
 
     def scatter(self, dim: int, index: Any, src: Any) -> "TensorProxy":
@@ -2192,12 +2273,16 @@ def stack(tensors: Any, dim: int = 0) -> "TensorProxy":
 
 
 def where(condition: Any, a: Any, b: Any) -> "TensorProxy":
+    from ._framework_contracts import validate_where_contract
+
     first_proxy = next(
         (v for v in (condition, a, b) if isinstance(v, TensorProxy)),
         None,
     )
     sess = first_proxy._get_session() if first_proxy is not None else None
     cond = _to_proxy(condition, sess)
+    if cond.dtype != "bool":
+        raise ShapeError(f"where: condition dtype must be bool, got {cond.dtype!r}")
     lhs = _to_proxy(a, sess)
     rhs = _to_proxy(b, sess)
     out_shape = _broadcast_shape(cond.shape, lhs.shape, rhs.shape)
@@ -2209,6 +2294,7 @@ def where(condition: Any, a: Any, b: Any) -> "TensorProxy":
         dtype=out_dtype,
         arg=None,
     )
+    validate_where_contract(uop)
 
     def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
         cond_arr, lhs_arr, rhs_arr = ins

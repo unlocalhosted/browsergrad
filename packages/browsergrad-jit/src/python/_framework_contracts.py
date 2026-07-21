@@ -25,6 +25,7 @@ REPEAT_FACTOR_MAX = 1 << 30
 REPEAT_RANK_MAX = 32
 VAR_CORRECTION_MIN = -(1 << 31)
 VAR_CORRECTION_MAX = (1 << 31) - 1
+MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 16 * 1024
 _ROOT_FIELDS = frozenset({"schema", "version", "operations"})
@@ -58,6 +59,7 @@ _ENUMS = {
         "preserve-unary-input",
         "preserve-single-axis-reverse",
         "same-rank-index-shaped-gather",
+        "preserve-source-with-broadcast-bool-mask",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
@@ -67,6 +69,7 @@ _ENUMS = {
     "dtypeContract": frozenset({
         "preserve-floating-input",
         "preserve-input",
+        "preserve-input-require-bool-mask",
         "preserve-real-numeric-input",
         "preserve-source-require-int64-index",
     }),
@@ -83,6 +86,7 @@ _ENUMS = {
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
         "supported-selected-axis-block-sum",
+        "supported-mask-complement-selection",
         "supported-centered-variance-rule",
         "supported-tile-block-sum",
         "supported-unbroadcast-sum",
@@ -97,6 +101,7 @@ _ENUMS = {
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
         "supported-selected-axis-block-sum",
+        "supported-mask-complement-selection",
         "supported-centered-variance-rule",
         "supported-tile-block-sum",
         "supported-unbroadcast-sum",
@@ -108,6 +113,7 @@ _ENUMS = {
         "supported-leading-batch-axis",
         "supported-leading-batch-axis-with-axis-shift",
         "supported-leading-batch-axis-with-index-axis-shift",
+        "supported-leading-batch-axis-with-mask-broadcast",
         "supported-leading-batch-axis-with-unit-repeat",
     }),
     "onnxExport": frozenset({
@@ -115,6 +121,7 @@ _ENUMS = {
         "supported-opset17-direct-unary-export-dtypes",
         "supported-opset17-expand",
         "supported-opset17-gather-elements-float32-int32-int64-bool",
+        "supported-opset17-where-float32-int32-int64-bool",
         "supported-opset17-reduce-prod-float32-int32-int64",
         "supported-opset17-variance-decomposition-float32",
         "supported-opset17-slice-float32-int32-int64-bool",
@@ -124,6 +131,7 @@ _ENUMS = {
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
         "refused-no-deterministic-index-lowering",
+        "refused-no-portable-masked-selection",
         "refused-no-canonical-tile-layout-profile",
         "refused-no-canonical-selected-axis-replication-profile",
         "refused-no-portable-lowering",
@@ -146,6 +154,7 @@ _REAL_NUMERIC_DTYPES = frozenset({
     "int8", "int16", "int32", "int64", "uint8",
 })
 _FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
+_MASKED_FILL_DTYPES = _REAL_NUMERIC_DTYPES | frozenset({"bool"})
 _UNARY_DTYPE_PROFILES = MappingProxyType({
     "preserve-floating-input": (_FLOATING_DTYPES, "floating"),
     "preserve-real-numeric-input": (_REAL_NUMERIC_DTYPES, "real numeric"),
@@ -538,6 +547,91 @@ def validate_gather_scatter_add_contract(node: Any) -> int:
     return axis
 
 
+def _closed_broadcast_shape(*shapes: Tuple[int, ...]) -> Tuple[int, ...]:
+    rank = max((len(shape) for shape in shapes), default=0)
+    result = []
+    for reverse_axis in range(1, rank + 1):
+        extents = [
+            shape[-reverse_axis] if reverse_axis <= len(shape) else 1
+            for shape in shapes
+        ]
+        nonunit = {extent for extent in extents if extent != 1}
+        if len(nonunit) > 1:
+            raise ShapeError(f"WHERE input shapes {shapes!r} are not broadcastable")
+        result.append(next(iter(nonunit), 1))
+    return tuple(reversed(result))
+
+
+def _validate_where_common(node: Any) -> Tuple[Any, Any, Any]:
+    if getattr(node, "op", None) != "WHERE":
+        raise ShapeError(
+            f"WHERE validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or len(inputs) != 3:
+        raise ShapeError("WHERE must have exactly three inputs")
+    condition, lhs, rhs = inputs
+    if getattr(condition, "dtype", None) != "bool":
+        raise ShapeError("WHERE condition dtype must be bool")
+    shapes = tuple(getattr(value, "shape", None) for value in inputs)
+    if any(type(shape) is not tuple for shape in shapes):
+        raise ShapeError("WHERE input shapes must be tuples")
+    expected_shape = _closed_broadcast_shape(*shapes)
+    if getattr(node, "shape", None) != expected_shape:
+        raise ShapeError(
+            f"WHERE declared shape {getattr(node, 'shape', None)!r} does not match "
+            f"derived shape {expected_shape!r}"
+        )
+    arg = getattr(node, "arg", None)
+    if arg is not None and arg != MASKED_FILL_CONTRACT_ID:
+        if type(arg) is not dict or set(arg) != {"vjp_of"}:
+            raise ShapeError(
+                "WHERE arg must be None, the masked-fill contract ID, or exact VJP provenance"
+            )
+        if type(arg["vjp_of"]) is not type(node):
+            raise ShapeError("WHERE arg.vjp_of must reference a UOp")
+    return condition, lhs, rhs
+
+
+def _validate_masked_fill(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> Any:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    mask, fill, source = _validate_where_common(node)
+    if getattr(node, "arg", None) != contract.contract_id:
+        return None
+    if getattr(node, "shape", None) != getattr(source, "shape", None):
+        raise ShapeError("masked_fill must preserve its source shape")
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("masked_fill must preserve its source dtype")
+    if getattr(source, "dtype", None) not in _MASKED_FILL_DTYPES:
+        raise ShapeError(
+            f"masked_fill does not support source dtype {getattr(source, 'dtype', None)!r}"
+        )
+    if getattr(fill, "op", None) != "CONST" or getattr(fill, "shape", None) != ():
+        raise ShapeError("masked_fill fill input must be a scalar CONST")
+    if getattr(fill, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("masked_fill fill CONST dtype must equal its source dtype")
+    fill_arg = getattr(fill, "arg", None)
+    if type(fill_arg) is not dict or set(fill_arg) != {"value"}:
+        raise ShapeError("masked_fill fill CONST arg must contain exactly 'value'")
+    value = fill_arg["value"]
+    source_dtype = getattr(source, "dtype", None)
+    if source_dtype == "bool":
+        if type(value) is not bool:
+            raise ShapeError("masked_fill boolean fill value must be normalized to bool")
+    elif isinstance(source_dtype, str) and source_dtype.startswith("float"):
+        if type(value) is not float:
+            raise ShapeError("masked_fill floating fill value must be normalized to float")
+    elif type(value) is not int or type(value) is bool:
+        raise ShapeError("masked_fill integer fill value must be normalized to int")
+    return value
+
+
 def _validate_repeat(
     node: Any,
     contract: FrameworkOperationContract,
@@ -785,6 +879,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.expand.v1": _validate_broadcast_to,
     "browsergrad.jit.framework.tensor.flip.v1": _validate_flip,
     "browsergrad.jit.framework.tensor.gather.v1": _validate_gather,
+    "browsergrad.jit.framework.tensor.masked-fill.v1": _validate_masked_fill,
     "browsergrad.jit.framework.tensor.prod.v1": _validate_prod,
     "browsergrad.jit.framework.tensor.var.v1": _validate_var,
     "browsergrad.jit.framework.tensor.repeat.v1": _validate_repeat,
@@ -845,6 +940,23 @@ def validate_gather_contract(node: Any) -> int:
     if record.contract_id != "browsergrad.jit.framework.tensor.gather.v1":
         raise ShapeError("INDEX resolved to the wrong framework-operation contract")
     return normalized
+
+
+def validate_masked_fill_contract(node: Any) -> Any:
+    if getattr(node, "arg", None) != MASKED_FILL_CONTRACT_ID:
+        raise ShapeError("masked_fill WHERE arg must be its exact framework contract ID")
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != MASKED_FILL_CONTRACT_ID:
+        raise ShapeError("WHERE resolved to the wrong masked-fill contract")
+    return normalized
+
+
+def validate_where_contract(node: Any) -> bool:
+    _validate_where_common(node)
+    if getattr(node, "arg", None) == MASKED_FILL_CONTRACT_ID:
+        validate_masked_fill_contract(node)
+        return True
+    return False
 
 
 def validate_repeat_contract(node: Any) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
@@ -932,6 +1044,7 @@ __all__ = [
     "REPEAT_RANK_MAX",
     "VAR_CORRECTION_MIN",
     "VAR_CORRECTION_MAX",
+    "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "framework_operation_support",
     "has_framework_operation_contract",
@@ -941,6 +1054,8 @@ __all__ = [
     "validate_flip_contract",
     "validate_gather_contract",
     "validate_gather_scatter_add_contract",
+    "validate_masked_fill_contract",
+    "validate_where_contract",
     "validate_prod_contract",
     "validate_var_contract",
     "validate_repeat_contract",

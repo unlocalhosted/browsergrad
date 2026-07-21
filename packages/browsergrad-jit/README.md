@@ -175,6 +175,16 @@ the logical axis past its leading batch dimension. ONNX emits
 and WebGPU explicitly refuse until a deterministic bounds-checked index/scatter
 lowering exists.
 
+`Tensor.masked_fill()` emits the canonical typed `WHERE(mask, fill, source)`
+selection. The mask must be a bool tensor that broadcasts into, but never
+enlarges, the source shape; the fill is normalized once into an exact scalar
+constant of the source dtype without invoking conversion hooks. CPU returns an
+owning source-dtype result, closure and symbolic gradients route through the
+mask complement, and vmap supports a leading mapped source with a captured or
+mapped broadcast mask. ONNX emits `Where` for float32, int32, int64, and bool.
+Tensor-plan and WebGPU explicitly refuse until portable masked selection
+exists.
+
 `Tensor.repeat()` emits typed `REPEAT` for bounded exact integer tile
 multipliers. CPU realization returns an owning dtype-preserving array;
 closure and symbolic gradients sum interleaved tile blocks; vmap prepends a

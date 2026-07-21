@@ -71,6 +71,7 @@ from ._framework_contracts import (
     validate_gather_contract,
     validate_prod_contract,
     validate_var_contract,
+    validate_where_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
     validate_real_numeric_unary_contract,
@@ -675,6 +676,49 @@ def _vjp_div(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UO
         _unbroadcast_uop(da_full, a.shape, output),
         _unbroadcast_uop(db_full, b.shape, output),
     )
+
+
+@register_vjp(OP_WHERE)
+def _vjp_where(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """Route cotangents through the selected branch; the bool mask is discrete."""
+    validate_where_contract(output)
+    condition, lhs, rhs = inputs
+    zero = _vjp_uop(OP_CONST, (), (), dy.dtype, output, arg={"value": 0})
+    lhs_full = _vjp_uop(
+        OP_WHERE,
+        (condition, dy, zero),
+        output.shape,
+        dy.dtype,
+        output,
+    )
+    rhs_full = _vjp_uop(
+        OP_WHERE,
+        (condition, zero, dy),
+        output.shape,
+        dy.dtype,
+        output,
+    )
+    lhs_grad = _unbroadcast_uop(lhs_full, lhs.shape, output)
+    rhs_grad = _unbroadcast_uop(rhs_full, rhs.shape, output)
+    if lhs_grad.dtype != lhs.dtype:
+        lhs_grad = _vjp_uop(
+            OP_CAST,
+            (lhs_grad,),
+            lhs.shape,
+            lhs.dtype,
+            output,
+            arg={"dtype": lhs.dtype},
+        )
+    if rhs_grad.dtype != rhs.dtype:
+        rhs_grad = _vjp_uop(
+            OP_CAST,
+            (rhs_grad,),
+            rhs.shape,
+            rhs.dtype,
+            output,
+            arg={"dtype": rhs.dtype},
+        )
+    return None, lhs_grad, rhs_grad
 
 
 # ---------------------------------------------------------------------------

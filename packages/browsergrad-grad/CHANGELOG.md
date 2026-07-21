@@ -36,6 +36,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   with the JIT surface, accepts the legacy boolean `unbiased` alias only when
   unambiguous, preserves float16/32/64 output and gradient dtype in owning
   results, and uses the centered correction-aware derivative.
+- `Tensor.masked_fill` now requires an actual bool tensor mask that broadcasts
+  into, but never enlarges, the source. Exact scalar fills, owning out-of-place
+  results, compatibility in-place updates, and source gradients preserve the
+  source dtype instead of coercing masks and silently casting everything to
+  float32.
 
 ## [0.5.2] — 2026-07-15
 

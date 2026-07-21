@@ -133,6 +133,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.gather.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.tensor.masked-fill.v1",
+      publicSurface: "Tensor.masked_fill",
+      opcode: "WHERE",
+      semanticState: "typed",
+      shapeContract: "preserve-source-with-broadcast-bool-mask",
+      dtypeContract: "preserve-input-require-bool-mask",
+      decisions: {
+        cpu: "supported-numpy-owning-copy",
+        closureAutograd: "supported-mask-complement-selection",
+        symbolicVjp: "supported-mask-complement-selection",
+        functionalGrad: "supported-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-mask-broadcast",
+        onnxExport: "supported-opset17-where-float32-int32-int64-bool",
+        tensorPlan: "refused-no-portable-masked-selection",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.masked-fill.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.prod.v1",
       publicSurface: "Tensor.prod",
       opcode: "PROD",
@@ -299,7 +320,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(13);
+    expect(result.first.operations).toHaveLength(14);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

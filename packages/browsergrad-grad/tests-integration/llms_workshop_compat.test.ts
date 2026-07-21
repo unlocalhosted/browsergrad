@@ -98,7 +98,7 @@ out = scores.masked_fill(mask, float("-inf"))
     const r = await target.run<{ grad_at_masked: number; grad_at_unmasked: number }>(`
 ${PRELUDE}
 x = grad.Tensor([1.0, 2.0, 3.0], requires_grad=True)
-mask = grad.Tensor([False, True, False])
+mask = grad.Tensor([False, True, False], dtype="bool")
 out = x.masked_fill(mask, 0.0)
 out.sum().backward()
 {"grad_at_masked": float(x.grad.numpy()[1]), "grad_at_unmasked": float(x.grad.numpy()[0])}

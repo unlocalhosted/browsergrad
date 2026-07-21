@@ -43,6 +43,7 @@ from ._framework_contracts import (
     validate_gather_contract,
     validate_gather_scatter_add_contract,
     validate_var_contract,
+    validate_where_contract,
 )
 
 
@@ -264,6 +265,13 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
             validate_gather_scatter_add_contract(node)
         elif node.op == OP_VAR:
             validate_var_contract(node)
+        elif node.op == OP_WHERE:
+            masked_fill = validate_where_contract(node)
+            label = "masked_fill" if masked_fill else "WHERE"
+            raise GpuPlanUnsupported(
+                f"GPU tensor plan does not support {label}. "
+                "Add a portable masked-selection lowering before GPU codegen."
+            )
         if node.op not in PRIMITIVE_GPU_IR_OPS and not (allow_custom and node.op == OP_CUSTOM):
             raise GpuPlanUnsupported(
                 f"GPU tensor plan does not support opcode {node.op!r}. "

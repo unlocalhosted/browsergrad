@@ -60,6 +60,10 @@ Each package follows independent [SemVer](https://semver.org/).
   symbolic gradients, batch-safe vmap, exact float32 ONNX decomposition, and
   explicit device refusal. Grad shares its dtype, correction, and refusal
   fixture instead of silently casting variance results and gradients to f32.
+- Migrates JIT `Tensor.masked_fill` from an opaque callback to typed `WHERE`
+  with strict bool-mask broadcasting, exact source-dtype scalar fill,
+  mask-complement VJP, vmap, ONNX `Where`, and explicit device refusal. Grad
+  shares the same fixture and preserves source/output/gradient dtype.
 
 ## 2026-07 — semantic-core, kernels, compiler, and JIT semantic migration
 

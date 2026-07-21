@@ -79,6 +79,7 @@ from ._framework_contracts import (
     validate_gather_contract,
     validate_prod_contract,
     validate_var_contract,
+    validate_where_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
     validate_typed_unary_contract,
@@ -461,6 +462,9 @@ def export_inference(
                 )
             )
         elif node.op in _SIMPLE_OPS:
+            if node.op == OP_WHERE:
+                validate_where_contract(node)
+                _dtype_or_die(node.dtype)
             nodes.append(_emit_node(input_names, [out_name], nm, _SIMPLE_OPS[node.op]))
         elif node.op == OP_CAST:
             attrs = [_emit_attr_int("to", _dtype_or_die(node.dtype))]

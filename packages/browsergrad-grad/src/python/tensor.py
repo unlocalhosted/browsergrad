@@ -29,6 +29,25 @@ _EXACT_INTEGER_SCALAR_TYPES = (
     np.uint32,
     np.uint64,
 )
+_MASKED_FILL_VALUE_TYPES = (
+    int,
+    float,
+    np.int8,
+    np.int16,
+    np.int32,
+    np.int64,
+    np.uint8,
+    np.uint16,
+    np.uint32,
+    np.uint64,
+    np.float16,
+    np.float32,
+    np.float64,
+)
+_MASKED_FILL_DTYPES = frozenset({
+    "float16", "float32", "float64",
+    "int8", "int16", "int32", "int64", "uint8", "bool",
+})
 
 
 def _normalize_prod_axes(value, rank: int) -> tuple:
@@ -116,6 +135,61 @@ def _normalize_variance_correction(correction, unbiased) -> int:
             f"got {normalized}"
         )
     return normalized
+
+
+def _normalize_masked_fill_value(value, dtype: str):
+    if dtype == "bool":
+        if type(value) not in (bool, np.bool_):
+            raise TypeError(
+                "masked_fill: a boolean source requires a built-in or NumPy boolean value"
+            )
+        return bool(value)
+    if type(value) not in _MASKED_FILL_VALUE_TYPES:
+        raise TypeError(
+            "masked_fill: value must be a built-in or NumPy real scalar, "
+            f"got {type(value).__name__}"
+        )
+    if dtype.startswith("float"):
+        with np.errstate(over="ignore", invalid="ignore"):
+            return float(np.asarray(value, dtype=np.dtype(dtype)).item())
+    if type(value) in (float, np.float16, np.float32, np.float64):
+        numeric = float(value)
+        if not np.isfinite(numeric) or not numeric.is_integer():
+            raise ValueError(
+                f"masked_fill: value {numeric!r} is not an exact finite integer for {dtype}"
+            )
+        normalized = int(numeric)
+    else:
+        normalized = int(value)
+    bounds = np.iinfo(np.dtype(dtype))
+    if normalized < int(bounds.min) or normalized > int(bounds.max):
+        raise ValueError(
+            f"masked_fill: value {normalized} is out of range for {dtype}"
+        )
+    return normalized
+
+
+def _normalize_masked_fill_inputs(source, mask, value):
+    if not isinstance(mask, Tensor):
+        raise TypeError(f"masked_fill: mask must be a Tensor, got {type(mask).__name__}")
+    if mask.dtype != "bool":
+        raise ValueError(f"masked_fill: mask dtype must be bool, got {mask.dtype!r}")
+    if source.dtype not in _MASKED_FILL_DTYPES:
+        raise ValueError(f"masked_fill: source dtype {source.dtype!r} is not supported")
+    try:
+        broadcast_shape = tuple(np.broadcast_shapes(source.shape, mask.shape))
+    except ValueError as exc:
+        raise ValueError(
+            f"masked_fill: mask shape {mask.shape} cannot broadcast to source shape {source.shape}"
+        ) from exc
+    if broadcast_shape != source.shape:
+        raise ValueError(
+            f"masked_fill: mask shape {mask.shape} cannot broadcast to source shape {source.shape}"
+        )
+    return np.broadcast_to(mask.data, source.shape), _normalize_masked_fill_value(
+        value,
+        source.dtype,
+    )
 
 
 def _normalize_gather_axis(value, rank: int) -> int:
@@ -512,18 +586,22 @@ class Tensor:
         suffix = self.data.shape[ed + 1:]
         return self.reshape(prefix + (middle,) + suffix)
 
-    def masked_fill(self, mask, value: float) -> "Tensor":
+    def masked_fill(self, mask, value) -> "Tensor":
         """Return a copy with positions where mask is True replaced by value."""
-        return _masked_fill(self, mask, float(value))
+        return _masked_fill(self, mask, value)
 
-    def masked_fill_(self, mask, value: float) -> "Tensor":
+    def masked_fill_(self, mask, value) -> "Tensor":
         """True in-place variant: mutates self.data and returns self.
 
         Safe for the workshop pattern (causal masking before softmax) because
         the masked positions receive 0 gradient through softmax regardless.
         """
-        mask_bool = mask.data.astype(bool) if isinstance(mask, Tensor) else np.asarray(mask, dtype=bool)
-        self.data = np.where(mask_bool, np.float32(value), self.data).astype(np.float32)
+        mask_bool, normalized_value = _normalize_masked_fill_inputs(self, mask, value)
+        self.data = np.array(
+            np.where(mask_bool, np.asarray(normalized_value, dtype=self.data.dtype), self.data),
+            dtype=self.data.dtype,
+            copy=True,
+        )
         return self
 
     def var(self, dim=None, axis=None, keepdim: bool = False, keepdims: bool = False,
@@ -1150,14 +1228,20 @@ def _var(a: Tensor, axes: tuple, keepdim: bool, correction: int) -> Tensor:
     return _build_ctx(out, (a,), backward)
 
 
-def _masked_fill(a: Tensor, mask, value: float) -> Tensor:
-    mask_bool = mask.data.astype(bool) if isinstance(mask, Tensor) else np.asarray(mask, dtype=bool)
-    # np.where broadcasts mask against a.data, handling rank mismatches
-    # (e.g. (T, T) mask into (B, H, T, T) attention scores).
-    out_data = np.where(mask_bool, np.float32(value), a.data).astype(np.float32)
-    out = Tensor(out_data)
+def _masked_fill(a: Tensor, mask, value) -> Tensor:
+    mask_bool, normalized_value = _normalize_masked_fill_inputs(a, mask, value)
+    out_data = np.array(
+        np.where(mask_bool, np.asarray(normalized_value, dtype=a.data.dtype), a.data),
+        dtype=a.data.dtype,
+        copy=True,
+    )
+    out = Tensor(out_data, dtype=a.dtype)
     def backward(g):
-        return (np.where(mask_bool, np.float32(0.0), g.data).astype(np.float32),)
+        return (np.where(
+            mask_bool,
+            np.asarray(0, dtype=a.data.dtype),
+            g.data,
+        ).astype(a.data.dtype, copy=False),)
     return _build_ctx(out, (a,), backward)
 
 
