@@ -243,7 +243,20 @@ describe("Clang-Wasm evidence workflow", () => {
     }
   });
 
-  it("keeps Grad integration and real WebGPU suites blocking", () => {
+  it("keeps independent JIT and Grad integration plus real WebGPU suites blocking", () => {
+    const jitStart = ciWorkflow.indexOf("\n  integration-jit:\n");
+    const gradStart = ciWorkflow.indexOf("\n  integration-grad:\n");
+    const browserStart = ciWorkflow.indexOf("\n  browser:\n");
+    expect(jitStart).toBeGreaterThan(0);
+    expect(gradStart).toBeGreaterThan(jitStart);
+    expect(browserStart).toBeGreaterThan(gradStart);
+    const jitJob = ciWorkflow.slice(jitStart, gradStart);
+    const gradJob = ciWorkflow.slice(gradStart, browserStart);
+    expect(jitJob).toContain("Run jit integration suite");
+    expect(jitJob).not.toContain("Run grad integration suite");
+    expect(gradJob).toContain("Run blocking Grad Gate 0 contract");
+    expect(gradJob).toContain("Run grad integration suite");
+    expect(gradJob).not.toContain("Run jit integration suite");
     expect(ciWorkflow).toContain("Run grad integration suite");
     expect(ciWorkflow).toContain("Run kernels browser suite");
     expect(ciWorkflow).not.toContain("continue-on-error");
@@ -264,7 +277,7 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(ciWorkflow).toContain("node: [20, 24, 25]");
     const surfaceStart = ciWorkflow.indexOf("\n  surface:\n");
     const nativeStart = ciWorkflow.indexOf("\n  compiler-native:\n");
-    const integrationStart = ciWorkflow.indexOf("\n  integration:\n");
+    const integrationStart = ciWorkflow.indexOf("\n  integration-jit:\n");
     expect(surfaceStart).toBeGreaterThan(0);
     expect(nativeStart).toBeGreaterThan(surfaceStart);
     expect(integrationStart).toBeGreaterThan(nativeStart);
