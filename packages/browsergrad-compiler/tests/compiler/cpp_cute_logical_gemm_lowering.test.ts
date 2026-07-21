@@ -1,5 +1,9 @@
 import { layoutArtifactPayload } from "@unlocalhosted/browsergrad-semantic-core/layout";
-import { logicalGemmTileArtifactPayload } from "@unlocalhosted/browsergrad-semantic-core/kernel";
+import {
+  createVerifiedDenseLogicalGemmTileArtifacts,
+  logicalGemmTileArtifactPayload,
+} from "@unlocalhosted/browsergrad-semantic-core/kernel";
+import { parseWireU64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import { beforeAll, describe, expect, it } from "vitest";
 import { prepareCppCuteAotOfflineRun } from "../../src/cpp_cute_aot_runner_plan.js";
 import {
@@ -105,6 +109,23 @@ describe("authorized C++/CuTe typed-artifact logical GEMM lowering", () => {
     expect(kernel.operation).not.toHaveProperty("schedule");
     expect(kernel.operation).not.toHaveProperty("backend");
     expect(kernel.operation).not.toHaveProperty("mma");
+  });
+
+  it("converges with the frontend-neutral constructor on exact semantic hashes", async () => {
+    const compilerArtifacts = await lower();
+    const directArtifacts = await createVerifiedDenseLogicalGemmTileArtifacts({
+      m: parseWireU64("17"),
+      n: parseWireU64("19"),
+      k: parseWireU64("23"),
+      logicalTile: {
+        m: parseWireU64("16"),
+        n: parseWireU64("16"),
+        k: parseWireU64("16"),
+      },
+    });
+    expect(compilerArtifacts.layoutSemanticHash).toBe(directArtifacts.layoutSemanticHash);
+    expect(compilerArtifacts.kernelSemanticHash).toBe(directArtifacts.kernelSemanticHash);
+    expect(compilerArtifacts.operationId).toBe(directArtifacts.operationId);
   });
 
   it("prepares structural meaning without minting authority or claiming body parity/native extraction", async () => {
