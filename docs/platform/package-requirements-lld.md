@@ -15,13 +15,15 @@ general emphasis.
 
 ## Implementation Checkpoint — Active 2026-07-21
 
-Gates 0 through 2 remain verified; Gate 3 is active; Gates 4 through 7 have not
-started. The strict native producer, pinned no-shell Clang-Wasm executor,
+Gates 0 through 2 and Gate 4 are verified; Gate 3 remains active; Gates 5
+through 7 have not started. Gate 4 is verified for its initial closed portable
+profile only: dense row-major, 4-byte-aligned, certified exact-input `f32`
+GEMM. The strict native producer, pinned no-shell Clang-Wasm executor,
 isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
 are implemented on `main`. The current source additionally owns exact
 frontend-work instrumentation, the local Wasm C-ABI runner, and a canonical
 Worker result-control encoder. It now pins the current clean-built 27,125-byte
-generated factory inside one exact 559,512-byte package-owned compiler Worker
+generated factory inside one exact 571,098-byte package-owned compiler Worker
 module and a separate exact 151,555-byte package-owned raw-Wasm verifier Worker;
 both have zero static or dynamic imports. The production controller captures
 browser effects at module evaluation, runs the exact verifier before preparing
@@ -72,10 +74,30 @@ distribution, or release authority. Capability commits `a8a861e2`,
 their tests, prove the candidate/authorization, rank-2/rank-3 lowering, and
 required-WebGPU boundaries. Exact-source CI run `29811673981` completed with
 all eight jobs green. The complete compiler suite passes 95 files and 1,591
-tests at this checkpoint. The next software
-slice begins Gate 4 with one frontend-neutral logical GEMM tile, kept separate
-from physical schedule, staging, and backend mapping. Two distinct
-cache-free builds now prove exact
+tests at that checkpoint. Gate 4 capability commits `2cb7cea3` through
+`fe5581d3` now define one frontend-neutral logical GEMM tile independently from
+physical schedule, staging, and backend mapping; derive and verify separate
+8x8x8 and 16x16x16 scalar cooperative schedules; and bind exact retained input
+bytes to the logical and schedule-specialization hashes. A typed compiler
+artifact can lower into the same canonical constructor, but it does not claim
+source-body equivalence or a production browser compile. The kernels package
+implements zero-filled cooperative workgroup staging, boundary-masked stores,
+uniform barriers, and increasing-K scalar accumulation. Required real-WebGPU
+evidence executes the irregular 17x23 by 23x19 case under both schedules and
+compares every destination byte against one CPU reference and against each
+other. The terminal evidence reports `portable-webgpu-core`,
+`portable-relegalized`, and `bit-exact-on-certified-inputs`; it makes no native
+MMA, preserved CUDA/CuTe schedule, general-f32, resident-buffer, distribution,
+or source-compatibility claim. CI run `29818182317` contains the successful
+dedicated required semantic-GEMM WebGPU job; its whole run is not a success
+record because the required-native lane exposed the stale package Worker pin.
+Commit `343523fe` regenerates and repins the deterministic zero-import compiler
+Worker at 571,098 bytes and SHA-256
+`01a4c1d10d606773bfa241284160f3af787dec856e1a17e22edd7c34dae043a3`.
+Gate 5's first software slice is
+the tiled-attention semantic baseline and schedule contract; the existing
+row-wise online-softmax implementation remains named only as a baseline. Two
+distinct cache-free builds now prove exact
 extractor Wasm/factory reproducibility; the package binds their canonical v3
 evidence without claiming reproducibility of the still-incomplete distributed
 asset set.
