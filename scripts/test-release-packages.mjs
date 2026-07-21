@@ -195,6 +195,7 @@ try {
   for (const exportName of [
     "createVerifiedLogicalGemmTileSchedule",
     "logicalGemmTileScheduleArtifactPayload",
+    "prepareLogicalGemmTileSchedule",
     "verifyLogicalGemmTileScheduleArtifact",
   ]) {
     assert(exportName in semanticSchedule, `semantic-core schedule export missing ${exportName}`);
@@ -220,6 +221,31 @@ try {
   assert(
     packedSchedule8.scheduleSemanticHash !== packedSchedule16.scheduleSemanticHash,
     "semantic-core packed /schedule collapsed distinct physical GEMM schedules",
+  );
+  const packedLogicalGemmSpecialization = await semanticKernel.prepareLogicalGemmTileSpecialization(
+    packedLogicalGemm.layout,
+    packedLogicalGemm.kernel,
+    { operationId: packedLogicalGemm.operationId },
+  );
+  const packedPreparedSchedule8 = await semanticSchedule.prepareLogicalGemmTileSchedule(
+    packedLogicalGemmSpecialization,
+    packedLogicalGemm.kernel,
+    packedSchedule8.artifact,
+  );
+  const packedPreparedSchedule16 = await semanticSchedule.prepareLogicalGemmTileSchedule(
+    packedLogicalGemmSpecialization,
+    packedLogicalGemm.kernel,
+    packedSchedule16.artifact,
+  );
+  assert(
+    packedPreparedSchedule8.logical === packedLogicalGemmSpecialization
+      && packedPreparedSchedule16.logical === packedLogicalGemmSpecialization,
+    "semantic-core packed /schedule repeated or reconstructed the authorized logical specialization",
+  );
+  assert(
+    packedPreparedSchedule8.scheduleSpecializationHash
+      !== packedPreparedSchedule16.scheduleSpecializationHash,
+    "semantic-core packed /schedule collapsed distinct specialized schedule geometry",
   );
   const packedArtifacts = await semanticKernel.createVerifiedDensePermutationViewCopyArtifacts({
     inputShape: ["2", "2"],
