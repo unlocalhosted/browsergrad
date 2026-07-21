@@ -2,9 +2,8 @@
  * Browser-mode vitest config for the WebGPU realizer + WGSL kernel tests.
  *
  * Launches Chromium via Playwright with WebGPU enabled. The headless
- * `--enable-unsafe-swiftshader` flag is required for Apple Silicon and
- * for any environment that doesn't have a hardware-accelerated GPU
- * visible to headless Chromium (CI runners often fall into this).
+ * The minimal `--enable-unsafe-webgpu` launch profile matches the required
+ * real-world browser gate and lets Chromium select its available adapter.
  *
  * Tests that need a real GPUDevice import navigator.gpu directly. When
  * the adapter request returns null (no GPU even via SwiftShader), the
@@ -50,25 +49,7 @@ export default defineConfig(({ mode }) => ({
       instances: [
         {
           browser: "chromium",
-          launch: {
-            // Headless Chromium on macOS ARM64 needs a specific cocktail
-            // for WebGPU: software-rendered Vulkan via SwiftShader is the
-            // reliable cross-platform answer (slow but functional).
-            //
-            // The hierarchy of supported headless adapters varies by
-            // platform; we throw the kitchen sink and fall back gracefully
-            // if none materialise.
-            args: [
-              "--enable-unsafe-webgpu",
-              "--enable-features=Vulkan,UseSkiaRenderer",
-              "--enable-unsafe-swiftshader",
-              "--use-vulkan=swiftshader",
-              "--use-angle=swiftshader",
-              "--disable-gpu-sandbox",
-              "--ignore-gpu-blocklist",
-              "--no-sandbox",
-            ],
-          },
+          launch: { args: ["--enable-unsafe-webgpu"] },
         },
       ],
     },

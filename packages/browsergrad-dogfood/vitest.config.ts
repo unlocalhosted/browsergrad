@@ -16,23 +16,13 @@ export default defineConfig({
     browser: {
       enabled: true,
       provider: playwright(),
-      // Headed on macOS to get the real Metal driver. CI on Linux can flip
-      // via BG_BROWSER_HEADLESS=1 (relies on SwiftShader Vulkan).
+      // Headed on macOS to get the real Metal driver. CI can flip headless.
       headless: process.env.BG_BROWSER_HEADLESS === "1",
       instances: [
         {
           browser: "chromium",
           launch: {
-            args: [
-              "--enable-unsafe-webgpu",
-              "--enable-features=Vulkan,UseSkiaRenderer",
-              "--enable-unsafe-swiftshader",
-              "--use-vulkan=swiftshader",
-              "--use-angle=swiftshader",
-              "--disable-gpu-sandbox",
-              "--ignore-gpu-blocklist",
-              "--no-sandbox",
-            ],
+            args: ["--enable-unsafe-webgpu"],
           },
         },
       ],

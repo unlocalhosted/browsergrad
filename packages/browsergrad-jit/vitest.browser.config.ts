@@ -58,16 +58,8 @@ export default defineConfig(({ mode }) => ({
       instances: [{
         browser: "chromium",
         launch: {
-          args: [
-            "--enable-unsafe-webgpu",
-            "--enable-features=Vulkan,UseSkiaRenderer",
-            "--enable-unsafe-swiftshader",
-            "--use-vulkan=swiftshader",
-            "--use-angle=swiftshader",
-            "--disable-gpu-sandbox",
-            "--ignore-gpu-blocklist",
-            "--no-sandbox",
-          ],
+          // Keep this aligned with the required real-world browser gate.
+          args: ["--enable-unsafe-webgpu"],
         },
       }],
     },

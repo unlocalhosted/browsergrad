@@ -18,7 +18,6 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import {
   EXECUTION_ENVIRONMENT_SCHEMA,
-  EXECUTION_EVIDENCE_SCHEMA,
   acquireWebGpuEvidenceDevice,
   createTerminalEvidenceEmitter,
   requiredEvidenceFailure,
@@ -31,6 +30,17 @@ import {
   environmentIdFor,
   type EvidenceEnvironment,
 } from "./semantic_view_copy_bindings_evidence";
+import {
+  CPP_CUTE_VIEW_COPY_WEBGPU_BACKEND_ID as BACKEND_ID,
+  CPP_CUTE_VIEW_COPY_WEBGPU_CAPABILITY_ID as CAPABILITY_ID,
+  CPP_CUTE_VIEW_COPY_WEBGPU_CASE_ID,
+  CPP_CUTE_VIEW_COPY_WEBGPU_COMPARISON_POLICY_ID as COMPARISON_POLICY_ID,
+  CPP_CUTE_VIEW_COPY_WEBGPU_SUITE_ID as SUITE_ID,
+  CPP_CUTE_VIEW_COPY_WEBGPU_TERMINAL_EXPECTATION,
+  finalizeCppCuteViewCopyWebGpuEvidence,
+  type CppCuteViewCopyWebGpuCaseEvidence,
+  type CppCuteViewCopyWebGpuTerminalEvidence,
+} from "./cpp_cute_view_copy_webgpu_evidence";
 import { CPP_CUTE_BROWSER_VIEW_COPY_CONVERGENCE_FIXTURE as convergence } from
   "../tests/fixtures/cpp_cute_browser_view_copy_convergence";
 
@@ -39,28 +49,32 @@ declare const __BG_KERNELS_VERSION__: string;
 declare const __BG_SEMANTIC_CORE_VERSION__: string;
 declare const __BG_SOURCE_REVISION__: string;
 
-const EVIDENCE_PREFIX = "[browsergrad-cpp-cute-view-copy-webgpu-evidence]";
-const SUITE_ID = "browsergrad.compiler.cpp-cute-browser-view-copy.webgpu-convergence@1";
-const CAPABILITY_ID = "browsergrad.compiler.cpp-cute-browser-view-copy";
-const BACKEND_ID = "browsergrad.backend.webgpu.core";
-const COMPARISON_POLICY_ID =
-  "browsergrad.comparison.bit-exact-u32-complete-destination-with-canaries.v1";
+const EVIDENCE_PREFIX = "[browsergrad-cpp-cute-view-copy-fixture-webgpu-evidence]";
 const EXECUTION_FAILURE_DIAGNOSTIC =
-  "BG-COMPILER-CPP-CUTE-BROWSER-VIEW-COPY-WEBGPU-EXECUTION";
+  "BG-COMPILER-CPP-CUTE-VIEW-COPY-FIXTURE-WEBGPU-EXECUTION";
+const DEVICE_LOST_DIAGNOSTIC =
+  "BG-COMPILER-CPP-CUTE-VIEW-COPY-WEBGPU-DEVICE-LOST";
+const EVIDENCE_TIMEOUT_DIAGNOSTIC =
+  "BG-COMPILER-CPP-CUTE-VIEW-COPY-WEBGPU-TIMEOUT";
+const EVIDENCE_TIMEOUT_MS = 10_000;
 const PRODUCER_VERSIONS = Object.freeze({
   "@unlocalhosted/browsergrad-compiler": __BG_COMPILER_VERSION__,
   "@unlocalhosted/browsergrad-kernels": __BG_KERNELS_VERSION__,
   "@unlocalhosted/browsergrad-semantic-core": __BG_SEMANTIC_CORE_VERSION__,
 }) as JsonObject;
-const TERMINAL_EMITTER = createTerminalEvidenceEmitter(EVIDENCE_PREFIX, {
-  suiteId: SUITE_ID,
-  capabilityId: CAPABILITY_ID,
-  backendId: BACKEND_ID,
-  comparisonPolicyId: COMPARISON_POLICY_ID,
-  requireDeviceProfile: true,
-});
+const TERMINAL_EMITTER = createTerminalEvidenceEmitter(
+  EVIDENCE_PREFIX,
+  CPP_CUTE_VIEW_COPY_WEBGPU_TERMINAL_EXPECTATION,
+);
 
-it("converges the browser-authorized CuTe view-copy artifacts on required actual WebGPU", async (context) => {
+class EvidenceLaneError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = "EvidenceLaneError";
+  }
+}
+
+it("converges the exact canonical CuTe view-copy fixture payload on required actual WebGPU", async (context) => {
   const required = requiresWebGpuEvidence();
   const sourceWords = Uint32Array.from(convergence.expected.sourceWords);
   const initialDestinationWords = Uint32Array.from(
@@ -72,6 +86,7 @@ it("converges the browser-authorized CuTe view-copy artifacts on required actual
     hashWords(Uint32Array.from(convergence.expected.destinationWords)),
   ]);
   let environment = freezeEnvironment({ acquisition: "not-attempted" });
+  let environmentId = await environmentIdFor(environment);
   let deviceProfileHash: string | undefined;
   let terminalEmitted = false;
   let actualWebGpuExecution = false;
@@ -79,7 +94,9 @@ it("converges the browser-authorized CuTe view-copy artifacts on required actual
   let kernelDevice: KernelDevice | undefined;
   let preparedBackendArtifactHash: string | undefined;
   let cpuSemanticSpecializationHash: string | undefined;
-  let caseEvidence: JsonObject | undefined;
+  let caseEvidence: CppCuteViewCopyWebGpuCaseEvidence | undefined;
+  let deviceLostBeforeTerminal: GPUDeviceLostInfo | undefined;
+  let deviceLoss: Promise<GPUDeviceLostInfo> | undefined;
   const uncapturedErrors: string[] = [];
   const uncapturedHandler = (event: GPUUncapturedErrorEvent) => {
     uncapturedErrors.push(event.error.message);
@@ -111,18 +128,24 @@ it("converges the browser-authorized CuTe view-copy artifacts on required actual
     expect([...cpuDestinationWords]).toEqual(convergence.expected.destinationWords);
     expect(cpuTrace).toMatchObject(convergence.expected.cpuTrace);
 
-    const acquisition = await acquireWebGpuEvidenceDevice();
+    const acquisition = await withEvidenceTimeout(
+      acquireWebGpuEvidenceDevice(),
+      EVIDENCE_TIMEOUT_MS,
+      "device-acquisition",
+    );
     if (acquisition.kind === "unavailable") {
       environment = freezeEnvironment({
         acquisition: "navigator.gpu.requestAdapter/requestDevice",
         unavailableReason: acquisition.reason,
       });
-      await emitTerminal({
+      environmentId = await environmentIdFor(environment);
+      emitTerminal({
         required,
         fixtureArtifactHash,
         inputHash,
         expectedDestinationHash,
         environment,
+        environmentId,
         outcome: required ? "failed" : "not-run",
         diagnosticCodes: [DEVICE_UNAVAILABLE_DIAGNOSTIC],
         actualWebGpuExecution,
@@ -141,6 +164,10 @@ it("converges the browser-authorized CuTe view-copy artifacts on required actual
     const { adapter, device: acquiredDevice, adapterInfo } = acquisition.value;
     device = acquiredDevice;
     device.addEventListener("uncapturederror", uncapturedHandler);
+    deviceLoss = device.lost.then((info) => {
+      deviceLostBeforeTerminal = info;
+      return info;
+    });
     environment = freezeEnvironment({
       acquisition: "navigator.gpu.requestAdapter/requestDevice",
       adapter: adapterInfo as unknown as JsonObject,
@@ -148,13 +175,30 @@ it("converges the browser-authorized CuTe view-copy artifacts on required actual
       negotiatedDeviceFeatures: Object.freeze([...device.features].map(String).sort()),
       negotiatedDeviceLimits: deviceLimits(device),
     });
-    deviceProfileHash = await deviceProfileHashFor(environment);
+    [environmentId, deviceProfileHash] = await Promise.all([
+      environmentIdFor(environment),
+      deviceProfileHashFor(environment),
+    ]);
 
-    kernelDevice = await createDevice({ device });
-    const prepared = await prepareSemanticViewCopyWgsl(
-      artifacts.layout,
-      artifacts.kernel,
-      { operationId: artifacts.operationId },
+    kernelDevice = await raceDeviceLoss(
+      withEvidenceTimeout(
+        createDevice({ device }),
+        EVIDENCE_TIMEOUT_MS,
+        "kernel-device-construction",
+      ),
+      deviceLoss,
+    );
+    const prepared = await raceDeviceLoss(
+      withEvidenceTimeout(
+        prepareSemanticViewCopyWgsl(
+          artifacts.layout,
+          artifacts.kernel,
+          { operationId: artifacts.operationId },
+        ),
+        EVIDENCE_TIMEOUT_MS,
+        "semantic-view-copy-preparation",
+      ),
+      deviceLoss,
     );
     preparedBackendArtifactHash = await hashNamedComponents({
       backendProfile: prepared.backendProfile,
@@ -167,13 +211,27 @@ it("converges the browser-authorized CuTe view-copy artifacts on required actual
       dispatchCount: prepared.launch.dispatchCount,
     });
     const gpuSourceWords = new Uint32Array(sourceWords);
-    const result = await runSemanticViewCopyWebGpu(kernelDevice, prepared, {
-      sourceWords: gpuSourceWords,
-      destinationWords: new Uint32Array(initialDestinationWords),
-    });
-    await device.queue.onSubmittedWorkDone();
-
+    const result = await raceDeviceLoss(
+      withEvidenceTimeout(
+        runSemanticViewCopyWebGpu(kernelDevice, prepared, {
+          sourceWords: gpuSourceWords,
+          destinationWords: new Uint32Array(initialDestinationWords),
+        }),
+        EVIDENCE_TIMEOUT_MS,
+        "semantic-view-copy-execution",
+      ),
+      deviceLoss,
+    );
     actualWebGpuExecution = result.trace.submitted;
+    await raceDeviceLoss(
+      withEvidenceTimeout(
+        device.queue.onSubmittedWorkDone(),
+        EVIDENCE_TIMEOUT_MS,
+        "execution-queue-drain",
+      ),
+      deviceLoss,
+    );
+
     expect(actualWebGpuExecution).toBe(true);
     expect(result.trace.layoutSemanticHash).toBe(convergence.expected.layoutSemanticHash);
     expect(result.trace.kernelSemanticHash).toBe(convergence.expected.kernelSemanticHash);
@@ -188,12 +246,10 @@ it("converges the browser-authorized CuTe view-copy artifacts on required actual
     expect(result.destinationWords.at(-1)).toBe(
       convergence.expected.initialDestinationWords.at(-1),
     );
-    expect(uncapturedErrors).toEqual([]);
-
     const actualDestinationHash = await hashWords(result.destinationWords);
     expect(actualDestinationHash).toBe(expectedDestinationHash);
     caseEvidence = Object.freeze({
-      caseId: "browser-authorized-rank2-cute-transpose",
+      caseId: CPP_CUTE_VIEW_COPY_WEBGPU_CASE_ID,
       fixtureArtifactHash,
       inputHash,
       expectedDestinationHash,
@@ -212,13 +268,38 @@ it("converges the browser-authorized CuTe view-copy artifacts on required actual
       completeDestinationBitComparisonPassed: true,
       nonzeroOffsetCanariesPreserved: true,
     });
-    await emitTerminal({
+    await raceDeviceLoss(
+      withEvidenceTimeout(
+        device.queue.onSubmittedWorkDone(),
+        EVIDENCE_TIMEOUT_MS,
+        "final-queue-drain",
+      ),
+      deviceLoss,
+    );
+    await raceDeviceLoss(
+      withEvidenceTimeout(nextTask(), 1_000, "late-error-task-yield"),
+      deviceLoss,
+    );
+    if (deviceLostBeforeTerminal !== undefined) {
+      throw new EvidenceLaneError(
+        DEVICE_LOST_DIAGNOSTIC,
+        `${deviceLostBeforeTerminal.reason}: ${deviceLostBeforeTerminal.message}`,
+      );
+    }
+    if (uncapturedErrors.length > 0) {
+      throw new EvidenceLaneError(
+        UNCAPTURED_GPU_ERROR_DIAGNOSTIC,
+        uncapturedErrors.join("; "),
+      );
+    }
+    emitTerminal({
       required,
       fixtureArtifactHash,
       inputHash,
       expectedDestinationHash,
       preparedBackendArtifactHash,
       environment,
+      environmentId,
       deviceProfileHash,
       outcome: "passed",
       diagnosticCodes: [],
@@ -229,16 +310,15 @@ it("converges the browser-authorized CuTe view-copy artifacts on required actual
     terminalEmitted = true;
   } catch (error) {
     if (!terminalEmitted) {
-      const diagnostic = uncapturedErrors.length === 0
-        ? EXECUTION_FAILURE_DIAGNOSTIC
-        : UNCAPTURED_GPU_ERROR_DIAGNOSTIC;
-      await emitTerminal({
+      const diagnostic = diagnosticCode(error, uncapturedErrors);
+      emitTerminal({
         required,
         fixtureArtifactHash,
         inputHash,
         expectedDestinationHash,
         ...(preparedBackendArtifactHash === undefined ? {} : { preparedBackendArtifactHash }),
         environment,
+        environmentId,
         ...(deviceProfileHash === undefined ? {} : { deviceProfileHash }),
         outcome: "failed",
         diagnosticCodes: [diagnostic],
@@ -271,23 +351,24 @@ async function fixtureArtifactHashFor(): Promise<string> {
   });
 }
 
-async function emitTerminal(input: Readonly<{
+function emitTerminal(input: Readonly<{
   required: boolean;
   fixtureArtifactHash: string;
   inputHash: string;
   expectedDestinationHash: string;
   preparedBackendArtifactHash?: string;
   environment: EvidenceEnvironment;
+  environmentId: string;
   deviceProfileHash?: string;
   outcome: "not-run" | "passed" | "failed";
   diagnosticCodes: readonly string[];
   actualWebGpuExecution: boolean;
-  caseEvidence?: JsonObject;
+  caseEvidence?: CppCuteViewCopyWebGpuCaseEvidence;
   uncapturedErrors: readonly string[];
   error?: JsonObject;
-}>): Promise<void> {
-  TERMINAL_EMITTER.emit(Object.freeze({
-    schema: EXECUTION_EVIDENCE_SCHEMA,
+}>): void {
+  const unsigned = Object.freeze({
+    schema: "browsergrad.execution-evidence@1",
     kind: "terminal",
     suiteId: SUITE_ID,
     required: input.required,
@@ -295,7 +376,7 @@ async function emitTerminal(input: Readonly<{
       capabilityId: CAPABILITY_ID,
       artifactHash: input.fixtureArtifactHash,
       backendId: BACKEND_ID,
-      environmentId: await environmentIdFor(input.environment),
+      environmentId: input.environmentId,
       producerVersions: PRODUCER_VERSIONS,
       sourceRevision: __BG_SOURCE_REVISION__,
       ...(input.deviceProfileHash === undefined
@@ -323,6 +404,16 @@ async function emitTerminal(input: Readonly<{
     ...(input.caseEvidence === undefined ? {} : { case: input.caseEvidence }),
     uncapturedErrors: Object.freeze([...input.uncapturedErrors]),
     ...(input.error === undefined ? {} : { error: input.error }),
+  }) as CppCuteViewCopyWebGpuTerminalEvidence;
+  TERMINAL_EMITTER.emit(finalizeCppCuteViewCopyWebGpuEvidence(unsigned, {
+    expectedRequired: input.required,
+    expectedFixtureSchema: convergence.schema,
+    expectedFixtureArtifactHash: input.fixtureArtifactHash,
+    expectedInputHash: input.inputHash,
+    expectedDestinationHash: input.expectedDestinationHash,
+    expectedEnvironmentId: input.environmentId,
+    expectedSourceRevision: __BG_SOURCE_REVISION__,
+    expectedProducerVersions: PRODUCER_VERSIONS,
   }));
 }
 
@@ -383,6 +474,58 @@ async function hashWordsPair(
 
 function bytes(words: Uint32Array): Uint8Array {
   return new Uint8Array(words.buffer, words.byteOffset, words.byteLength);
+}
+
+async function raceDeviceLoss<T>(
+  promise: Promise<T>,
+  loss: Promise<GPUDeviceLostInfo> | undefined,
+): Promise<T> {
+  if (loss === undefined) return promise;
+  const result = await Promise.race([
+    promise.then((value) => ({ kind: "value" as const, value })),
+    loss.then((info) => ({ kind: "lost" as const, info })),
+  ]);
+  if (result.kind === "lost") {
+    throw new EvidenceLaneError(
+      DEVICE_LOST_DIAGNOSTIC,
+      `${result.info.reason}: ${result.info.message}`,
+    );
+  }
+  return result.value;
+}
+
+async function withEvidenceTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  name: string,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new EvidenceLaneError(
+          EVIDENCE_TIMEOUT_DIAGNOSTIC,
+          `${name} did not settle within ${timeoutMs}ms`,
+        )), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
+function nextTask(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function diagnosticCode(
+  error: unknown,
+  uncapturedErrors: readonly string[],
+): string {
+  if (uncapturedErrors.length > 0) return UNCAPTURED_GPU_ERROR_DIAGNOSTIC;
+  if (error instanceof EvidenceLaneError) return error.code;
+  return EXECUTION_FAILURE_DIAGNOSTIC;
 }
 
 function errorRecord(error: unknown, code: string): JsonObject {
