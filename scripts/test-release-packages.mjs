@@ -199,10 +199,13 @@ try {
     assert(exportName in semanticKernel, `semantic-core kernel export missing ${exportName}`);
   }
   for (const exportName of [
+    "attentionOnlineKvTileScheduleArtifactPayload",
+    "createVerifiedAttentionOnlineKvTileSchedule",
     "createVerifiedLogicalGemmTileSchedule",
     "logicalGemmTileScheduleArtifactPayload",
     "prepareLogicalGemmTileSchedule",
     "verifyLogicalGemmTileScheduleArtifact",
+    "verifyAttentionOnlineKvTileScheduleArtifact",
   ]) {
     assert(exportName in semanticSchedule, `semantic-core schedule export missing ${exportName}`);
   }
@@ -311,6 +314,30 @@ try {
       && semanticKernel.INITIAL_ATTENTION_FORWARD_COMPARISON_POLICY.relativeTolerance === 0.0001
       && !JSON.stringify(packedAttentionPayload).match(/workgroup|staging|barrier|wgsl|webgpu|cuda|flash/iu),
     "semantic-core packed attention-forward contract gained schedule/backend meaning or lost its comparison policy",
+  );
+  const packedAttentionSchedule8 = await semanticSchedule.createVerifiedAttentionOnlineKvTileSchedule(
+    packedAttention.kernel,
+    { physicalTile: { queryRows: "8", keyRows: "8" } },
+  );
+  const packedAttentionSchedule16 = await semanticSchedule.createVerifiedAttentionOnlineKvTileSchedule(
+    packedAttention.kernel,
+    { physicalTile: { queryRows: "8", keyRows: "16" } },
+  );
+  const packedAttentionSchedulePayload = semanticSchedule.attentionOnlineKvTileScheduleArtifactPayload(
+    packedAttentionSchedule16.artifact,
+  );
+  assert(
+    packedAttentionSchedule16.attentionForwardSemanticHash
+      === await semanticSchema.hashSemanticArtifact(packedAttention.kernel)
+      && packedAttentionSchedule8.scheduleSemanticHash
+        !== packedAttentionSchedule16.scheduleSemanticHash
+      && packedAttentionSchedulePayload.schedule.staging.key === "cooperative"
+      && packedAttentionSchedulePayload.schedule.staging.value === "cooperative"
+      && packedAttentionSchedulePayload.schedule.masks.invalidKeyScore
+        === "exclude-before-online-state-update"
+      && packedAttentionSchedulePayload.schedule.masks.logicalMask
+        === "exclude-before-online-state-update",
+    "semantic-core packed attention schedule lost logical binding, staging, masks, or distinct tiling",
   );
   const packedArtifacts = await semanticKernel.createVerifiedDensePermutationViewCopyArtifacts({
     inputShape: ["2", "2"],

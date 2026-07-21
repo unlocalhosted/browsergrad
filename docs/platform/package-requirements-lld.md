@@ -16,8 +16,8 @@ general emphasis.
 ## Implementation Checkpoint — Active 2026-07-21
 
 Gates 0 through 2 and Gate 4 are verified; Gate 3 remains active; Gate 5 is
-partial; Gates 6 and 7 have not started. Gate 4 is verified for its initial closed portable
-profile only: dense row-major, 4-byte-aligned, certified exact-input `f32`
+partial; Gates 6 and 7 have not started. Gate 4 is verified for its initial
+closed portable profile only: dense row-major, 4-byte-aligned, certified exact-input `f32`
 GEMM. The strict native producer, pinned no-shell Clang-Wasm executor,
 isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
 are implemented on `main`. The current source additionally owns exact
@@ -101,9 +101,15 @@ upper-left causal masking, stable-softmax phases, finite scaled-score and
 online-state preconditions, a named `1e-4` absolute-or-relative comparison
 policy, pairwise-disjoint effects, and explicit VJP refusal. The artifact
 contains no physical tiles, staging, barriers, WGSL, backend, or performance
-meaning and grants no CPU or WebGPU execution claim. The separate tiled
-schedule contract is the next slice; the existing row-wise online-softmax
-implementation remains named only as a baseline. Two
+meaning and grants no CPU or WebGPU execution claim. A separate closed
+`browsergrad.schedule.attention-online-kv-tile@1` artifact now binds the exact
+logical hash to physical query/key tiles, increasing key traversal,
+cooperative single-buffered K/V staging, tile-wise online-softmax rescaling,
+uniform workgroup barriers, scalar vectors, and masks that exclude invalid or
+logical-mask keys before online-state updates. It contains no logical dtype,
+scale, view, comparison, backend, execution, performance, or named fused-kernel
+claim. The CPU reference is the next slice; the existing row-wise
+online-softmax implementation remains named only as a baseline. Two
 distinct cache-free builds now prove exact
 extractor Wasm/factory reproducibility; the package binds their canonical v3
 evidence without claiming reproducibility of the still-incomplete distributed

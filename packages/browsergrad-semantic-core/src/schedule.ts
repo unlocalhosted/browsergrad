@@ -25,3 +25,26 @@ export {
   type PreparedLogicalGemmTileSchedule,
   type PrepareLogicalGemmTileScheduleRequest,
 } from "./schedule/gemm-tile-prepare.js";
+export {
+  INITIAL_ATTENTION_ONLINE_KV_MAX_TILE_ROWS,
+  type AttentionOnlineKvPhysicalTile,
+  type AttentionOnlineKvTileSchedule,
+  type AttentionOnlineKvWorkgroupBarrier,
+} from "./schedule/attention-online-kv-tile-model.js";
+export {
+  ATTENTION_ONLINE_KV_TILE_SCHEDULE_ARTIFACT_MAJOR,
+  ATTENTION_ONLINE_KV_TILE_SCHEDULE_ARTIFACT_MINOR,
+  ATTENTION_ONLINE_KV_TILE_SCHEDULE_ARTIFACT_SCHEMA,
+  attentionOnlineKvTileScheduleArtifactPayload,
+  decodeAttentionOnlineKvTileScheduleArtifact,
+  verifyAttentionOnlineKvTileScheduleArtifact,
+  type AttentionOnlineKvTileScheduleArtifactPayloadV1,
+  type AttentionOnlineKvTileScheduleArtifactVerificationOptions,
+  type VerifiedAttentionOnlineKvTileScheduleArtifact,
+} from "./schedule/attention-online-kv-tile-artifact.js";
+export {
+  createVerifiedAttentionOnlineKvTileSchedule,
+  type AttentionOnlineKvTileScheduleConstructionOptions,
+  type ConstructedAttentionOnlineKvTileSchedule,
+  type CreateVerifiedAttentionOnlineKvTileScheduleRequest,
+} from "./schedule/attention-online-kv-tile-construction.js";

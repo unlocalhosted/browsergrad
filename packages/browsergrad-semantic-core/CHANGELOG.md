@@ -16,6 +16,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   causal meaning, the initial abs-or-relative comparison policy, and an
   explicit forward-only VJP refusal without admitting schedule or backend
   fields.
+- Closed `browsergrad.schedule.attention-online-kv-tile@1` artifacts bind one
+  exact attention-forward semantic hash to physical query/key tiles,
+  cooperative single-buffered K/V staging, increasing tile traversal,
+  tile-wise online-softmax rescaling, uniform barriers, scalar vectors, and
+  masks that exclude invalid or logical-mask keys before online-state updates.
+  The schedule owns no logical dtype, scale, view, comparison, backend, or
+  performance claim.
 - Closed `browsergrad.kernel.gemm-tile@1` artifacts for dense static rank-2 f32
   operands with exact logical tiles, boundary masks, pairwise-disjoint effects,
   increasing-K round-to-nearest-even accumulation, and explicit prohibitions on

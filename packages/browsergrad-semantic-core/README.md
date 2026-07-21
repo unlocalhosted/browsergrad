@@ -56,6 +56,16 @@ backend facilities, and performance claims are absent by construction; those
 require separate schedule and execution artifacts. No CPU or WebGPU execution
 claim is made by this semantic slice.
 
+The initial separate `/schedule` attention artifact binds that exact logical
+hash to physical query-row and key-row tiles, increasing key traversal,
+cooperative single-buffered K/V workgroup staging, a tile-wise online-softmax
+recurrence, full-workgroup barrier participation, and fail-closed boundary and
+logical-mask placement. Invalid or causally masked keys are excluded before
+the tile maximum or any online-state update; zero-filled staging alone never
+makes them scores. The schedule remains backend-neutral and scalar. It does
+not claim target legality, numerical preservation, execution, performance, or
+a named fused-attention implementation tier.
+
 Frontends construct the operation through one `/kernel` sink rather than
 assembling allocation, alias, index-map, view, and operation IDs themselves.
 `createVerifiedViewCopyArtifacts` accepts layout construction algebra plus
