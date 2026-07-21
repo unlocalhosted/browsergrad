@@ -624,13 +624,14 @@ def std(x, dim=None, axis=None, keepdim=False, keepdims=False, unbiased=True):
     )
 
 
-def var(x, dim=None, axis=None, keepdim=False, keepdims=False, unbiased=True):
+def var(x, dim=None, axis=None, keepdim=False, keepdims=False, unbiased=None, correction=None):
     return x.var(
         dim=dim,
         axis=axis,
         keepdim=keepdim,
         keepdims=keepdims,
         unbiased=unbiased,
+        correction=correction,
     )
 
 

@@ -45,6 +45,10 @@ contract in the README](README.md#compatibility-contract).
   same-rank index semantics, runtime bounds checks, owning dtype-preserving CPU
   results, deterministic scatter-add closure/symbolic VJP, paired batch-safe
   vmap, ONNX `GatherElements`, and explicit tensor-plan/WebGPU refusal.
+- `Tensor.var` now emits typed `VAR` with canonical static axes, an exact
+  bounded correction, owning float16/32/64 CPU results, centered
+  closure/symbolic VJP, batch-safe vmap, a float32 ONNX variance decomposition,
+  hostile-coercion rejection, and explicit tensor-plan/WebGPU refusal.
 
 ### Added
 
@@ -52,7 +56,7 @@ contract in the README](README.md#compatibility-contract).
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
   current table contains `ABS`, `CLAMP`, `COS`, `BROADCAST_TO`, `FLIP`,
-  `INDEX`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, and `SIN`.
+  `INDEX`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`, and `VAR`.
 
 ## [0.9.0] — 2026-07-15
 

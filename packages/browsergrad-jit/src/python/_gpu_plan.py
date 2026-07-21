@@ -33,7 +33,7 @@ from ._ir import (
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
-    OP_WHERE, OP_INDEX, OP_MASK, OP_SCATTER_ADD, OP_BROADCAST_TO,
+    OP_WHERE, OP_INDEX, OP_VAR, OP_MASK, OP_SCATTER_ADD, OP_BROADCAST_TO,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM, OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX, OP_CUSTOM,
@@ -42,6 +42,7 @@ from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_gather_contract,
     validate_gather_scatter_add_contract,
+    validate_var_contract,
 )
 
 
@@ -261,6 +262,8 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
             validate_gather_contract(node)
         elif node.op == OP_SCATTER_ADD:
             validate_gather_scatter_add_contract(node)
+        elif node.op == OP_VAR:
+            validate_var_contract(node)
         if node.op not in PRIMITIVE_GPU_IR_OPS and not (allow_custom and node.op == OP_CUSTOM):
             raise GpuPlanUnsupported(
                 f"GPU tensor plan does not support opcode {node.op!r}. "

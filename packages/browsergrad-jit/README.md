@@ -199,6 +199,16 @@ ONNX emits `ReduceProd` for float32, int32, and int64 graphs. Tensor-plan and
 WebGPU explicitly refuse the operation until a portable product-reduction
 lowering exists.
 
+`Tensor.var()` emits typed `VAR` for canonical static reduction axes, an exact
+signed 32-bit correction, and an exact keepdims flag. It accepts float16,
+float32, and float64, preserves dtype in owning CPU scalar/tensor results, and
+supports the legacy boolean `unbiased` alias only when `correction` is absent.
+Closure and symbolic gradients use the centered correction-aware derivative;
+vmap shifts reduction axes past the leading batch. ONNX opset 17 decomposes
+float32 variance into `ReduceMean`/`Sub`/`Mul`/`ReduceSum`/`Div`; other dtypes
+fail export explicitly. Tensor-plan and WebGPU refuse until a portable
+variance-reduction lowering exists.
+
 `bg.framework_operation_support()` returns the versioned public decision table
 for framework operations admitted to typed execution. The table is generated
 from the same package registry that binds executable validators at CPU,

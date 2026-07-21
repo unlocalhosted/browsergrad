@@ -7,6 +7,7 @@ New methods: exp, log, transpose (axis-aware), reshape, view.
 
 from __future__ import annotations
 import operator
+import warnings
 import numpy as np
 from typing import Callable, List, Optional, Tuple, Union
 from . import _device
@@ -15,6 +16,8 @@ Number = Union[int, float]
 ArrayLike = Union[Number, List, Tuple, "np.ndarray", "Tensor"]
 _REPEAT_FACTOR_MAX = 1 << 30
 _REPEAT_RANK_MAX = 32
+_VAR_CORRECTION_MIN = -(1 << 31)
+_VAR_CORRECTION_MAX = (1 << 31) - 1
 _EXACT_INTEGER_SCALAR_TYPES = (
     int,
     np.int8,
@@ -58,6 +61,61 @@ def _normalize_prod_axes(value, rank: int) -> tuple:
     if len(set(normalized)) != len(normalized):
         raise ValueError("prod: axes must be unique after normalization")
     return tuple(sorted(normalized))
+
+
+def _normalize_var_axes(value, rank: int) -> tuple:
+    if value is None:
+        return tuple(range(rank))
+    if type(value) in _EXACT_INTEGER_SCALAR_TYPES:
+        values = (value,)
+    elif type(value) in (tuple, list):
+        if not value:
+            raise ValueError("var: axis sequence must be non-empty")
+        values = tuple(value)
+    else:
+        raise ValueError(
+            "var: axis must be None, an integer scalar, or a plain tuple/list, "
+            f"got {type(value).__name__}"
+        )
+    normalized = []
+    for index, raw_axis in enumerate(values):
+        if type(raw_axis) not in _EXACT_INTEGER_SCALAR_TYPES:
+            raise ValueError(
+                f"var: axis {index} must be a built-in or NumPy integer scalar, "
+                f"got {type(raw_axis).__name__}"
+            )
+        axis = int(raw_axis)
+        if axis < 0:
+            axis += rank
+        if axis < 0 or axis >= rank:
+            raise ValueError(f"var: axis {raw_axis} out of range for rank {rank}")
+        normalized.append(axis)
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("var: axes must be unique after normalization")
+    return tuple(sorted(normalized))
+
+
+def _normalize_variance_correction(correction, unbiased) -> int:
+    if correction is not None and unbiased is not None:
+        raise ValueError("var: specify only one of correction or unbiased")
+    if unbiased is not None:
+        if type(unbiased) is not bool:
+            raise ValueError("var: unbiased must be a boolean")
+        return 1 if unbiased else 0
+    if correction is None:
+        return 1
+    if type(correction) not in _EXACT_INTEGER_SCALAR_TYPES:
+        raise ValueError(
+            "var: correction must be a built-in or NumPy integer scalar, "
+            f"got {type(correction).__name__}"
+        )
+    normalized = int(correction)
+    if normalized < _VAR_CORRECTION_MIN or normalized > _VAR_CORRECTION_MAX:
+        raise ValueError(
+            f"var: correction must be in [{_VAR_CORRECTION_MIN}, {_VAR_CORRECTION_MAX}], "
+            f"got {normalized}"
+        )
+    return normalized
 
 
 def _normalize_gather_axis(value, rank: int) -> int:
@@ -469,10 +527,22 @@ class Tensor:
         return self
 
     def var(self, dim=None, axis=None, keepdim: bool = False, keepdims: bool = False,
-            unbiased: bool = True) -> "Tensor":
-        """Variance. Accepts both PyTorch (dim/keepdim) and NumPy (axis/keepdims) kwargs."""
-        return _var(self, dim=dim if dim is not None else axis,
-                    keepdim=keepdim or keepdims, unbiased=unbiased)
+            unbiased=None, correction=None) -> "Tensor":
+        """Variance with canonical axis and degrees-of-freedom correction semantics."""
+        if dim is not None and axis is not None:
+            raise ValueError("var: specify only one of axis or dim")
+        if type(keepdim) is not bool or type(keepdims) is not bool:
+            raise ValueError("var: keepdim and keepdims must be booleans")
+        if self.dtype not in ("float16", "float32", "float64"):
+            raise ValueError(f"var: floating dtypes only, got {self.dtype!r}")
+        axes = _normalize_var_axes(dim if dim is not None else axis, self.data.ndim)
+        correction_i = _normalize_variance_correction(correction, unbiased)
+        return _var(
+            self,
+            axes=axes,
+            keepdim=keepdim or keepdims,
+            correction=correction_i,
+        )
 
     def std(self, dim=None, axis=None, keepdim: bool = False, keepdims: bool = False,
             unbiased: bool = True) -> "Tensor":
@@ -1046,29 +1116,37 @@ def _permute(a: Tensor, dims: tuple) -> Tensor:
 
 # ─── var / masked_fill helpers ─────────────────────────────
 
-def _var(a: Tensor, dim=None, keepdim: bool = False, unbiased: bool = True) -> Tensor:
+def _var(a: Tensor, axes: tuple, keepdim: bool, correction: int) -> Tensor:
     xd = a.data
-    ddof = 1 if unbiased else 0
-    out_data = xd.var(axis=dim, keepdims=keepdim, ddof=ddof).astype(np.float32)
-    out = Tensor(out_data)
+    with warnings.catch_warnings(), np.errstate(divide="ignore", invalid="ignore"):
+        warnings.simplefilter("ignore", RuntimeWarning)
+        out_data = np.var(
+            xd,
+            axis=axes,
+            keepdims=keepdim,
+            ddof=correction,
+            dtype=xd.dtype,
+        )
+    out = Tensor(np.array(out_data, dtype=xd.dtype, copy=True), dtype=a.dtype)
     a_shape = xd.shape
-    if dim is None:
-        n = float(xd.size)
-        mean_data = xd.mean()
-        centered = xd - mean_data
-    else:
-        mean_data = xd.mean(axis=dim, keepdims=True)
-        centered = xd - mean_data
-        n = float(np.prod([xd.shape[ax] for ax in ((dim,) if isinstance(dim, int) else tuple(dim))]))
-    denom = n - float(ddof)
-    # d(var)/dx_i = 2*(x_i - mean) / denom  (mean's own gradient cancels)
+    mean_data = xd.mean(axis=axes, keepdims=True, dtype=xd.dtype)
+    centered = xd - mean_data
+    reduced_elements = 1
+    for axis in axes:
+        reduced_elements *= xd.shape[axis]
+    denominator = max(0, reduced_elements - correction)
+    expanded_shape = tuple(
+        1 if axis in axes else extent
+        for axis, extent in enumerate(a_shape)
+    )
+
     def backward(g):
-        gd = g.data
-        if not keepdim and dim is not None:
-            norm_axes = (dim,) if isinstance(dim, int) else tuple(dim)
-            for ax in sorted(ax % len(a_shape) for ax in norm_axes):
-                gd = np.expand_dims(gd, ax)
-        return (np.broadcast_to(gd * 2.0 * centered / denom, a_shape).copy().astype(np.float32),)
+        upstream = g.data if keepdim else g.data.reshape(expanded_shape)
+        upstream = np.broadcast_to(upstream, a_shape)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            gradient = upstream * np.asarray(2, dtype=xd.dtype) * centered
+            gradient = gradient / np.asarray(denominator, dtype=xd.dtype)
+        return (gradient.astype(xd.dtype, copy=False),)
     return _build_ctx(out, (a,), backward)
 
 

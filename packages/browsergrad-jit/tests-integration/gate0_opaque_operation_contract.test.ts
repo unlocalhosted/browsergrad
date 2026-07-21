@@ -42,7 +42,8 @@ def error_name(fn):
         return type(exc).__name__
 
 x = bg.from_numpy(np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32), requires_grad=True)
-y = x.var(dim=1)
+mask = bg.from_numpy(np.array([[True, False], [False, True]], dtype=np.bool_))
+y = x.masked_fill(mask, -1.0)
 cpu_values = y.numpy().tolist()
 y.sum().backward()
 custom_plan = bg.gpu_plan_summary(y, allow_custom=True)
@@ -56,7 +57,7 @@ class PlanOnlyGpuBuffers:
     "cpuValues": cpu_values,
     "cpuGradient": x.grad.numpy().tolist(),
     "symbolicVjpRegistered": _vjp.get_rule("CUSTOM") is not None,
-    "functionalGradError": error_name(lambda: bg.func.grad(lambda value: value.var(dim=1).sum())(x)),
+    "functionalGradError": error_name(lambda: bg.func.grad(lambda value: value.masked_fill(mask, -1.0).sum())(x)),
     "vmapError": error_name(lambda: _vmap._VMAP_RULES["CUSTOM"](y._uop, {}, 2)),
     "onnxError": error_name(lambda: bg.onnx.export_inference(y, input_buffers=(x,))),
     "tensorPlanError": error_name(lambda: bg.gpu_plan_summary(y)),
@@ -71,7 +72,7 @@ class PlanOnlyGpuBuffers:
     )),
     "legacyWebgpuError": error_name(lambda: _h_custom(
         y._uop,
-        {id(x._uop): "x"},
+        {id(x._uop): "x", id(mask._uop): "mask"},
         None,
         object(),
         None,
@@ -299,7 +300,6 @@ a = leaf([1.0, 3.0]); check("smooth_l1_loss", F.smooth_l1_loss(a, constant([0.0,
 a = leaf([1.0, 2.0]); check("stack", bg.stack((a, constant([3.0, 4.0])), dim=0), a)
 a = leaf([[1.0, 2.0], [3.0, 4.0]]); check("tril", bg.tril(a), a)
 a = leaf([[1.0, 2.0], [3.0, 4.0]]); check("triu", bg.triu(a), a)
-a = leaf([[1.0, 2.0], [3.0, 5.0]]); check("var", a.var(dim=0), a)
 
 def dtype_observation(output):
     return {"declared": output.dtype, "realized": str(output.numpy().dtype)}
@@ -309,7 +309,6 @@ bool_values = constant([True, False, True], np.bool_)
 dtype_drift = {
     "cumsum-bool": dtype_observation(bg.cumsum(bool_values, dim=0)),
     "cumsum-int32": dtype_observation(bg.cumsum(int_values, dim=0)),
-    "var-int32": dtype_observation(int_values.var(dim=0)),
 }
 
 {
@@ -319,9 +318,6 @@ dtype_drift = {
     "closureGradientLabels": sorted(label for label, present in gradient_present.items() if present),
     "allClosureGradientsPresent": all(gradient_present.values()),
     "realizedDtypeDrift": dtype_drift,
-    "scalarReductionErrors": {
-        "var": error_name(lambda: int_values.var().numpy()),
-    },
 }
 `);
     expect(result).toEqual(expected("jit.custom.all-callback-labels-and-dtypes.v0"));

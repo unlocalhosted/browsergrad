@@ -23,6 +23,8 @@ FRAMEWORK_OPERATION_SUPPORT_SCHEMA = "browsergrad.jit.framework-operation-contra
 FRAMEWORK_OPERATION_SUPPORT_VERSION = (1, 0)
 REPEAT_FACTOR_MAX = 1 << 30
 REPEAT_RANK_MAX = 32
+VAR_CORRECTION_MIN = -(1 << 31)
+VAR_CORRECTION_MAX = (1 << 31) - 1
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 16 * 1024
 _ROOT_FIELDS = frozenset({"schema", "version", "operations"})
@@ -59,6 +61,7 @@ _ENUMS = {
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
+        "static-variance-reduction",
         "tile-multipliers-with-left-rank-padding",
     }),
     "dtypeContract": frozenset({
@@ -80,6 +83,7 @@ _ENUMS = {
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
         "supported-selected-axis-block-sum",
+        "supported-centered-variance-rule",
         "supported-tile-block-sum",
         "supported-unbroadcast-sum",
         "supported-zero-aware-product-rule",
@@ -93,6 +97,7 @@ _ENUMS = {
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
         "supported-selected-axis-block-sum",
+        "supported-centered-variance-rule",
         "supported-tile-block-sum",
         "supported-unbroadcast-sum",
         "supported-zero-aware-product-rule",
@@ -111,6 +116,7 @@ _ENUMS = {
         "supported-opset17-expand",
         "supported-opset17-gather-elements-float32-int32-int64-bool",
         "supported-opset17-reduce-prod-float32-int32-int64",
+        "supported-opset17-variance-decomposition-float32",
         "supported-opset17-slice-float32-int32-int64-bool",
         "supported-opset17-tile-float32-int32-int64-bool",
         "supported-opset17-unsqueeze-tile-reshape-float32-int32-int64-bool",
@@ -644,6 +650,82 @@ def _validate_prod(
     return axes, keepdims, expanded_shape
 
 
+def _validate_var(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> Tuple[Tuple[int, ...], int, bool, Tuple[int, ...], int]:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = _require_single_input_tuple(node, contract.opcode)
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("VAR arg must be a plain dict")
+    fields = set(arg)
+    if not {"axes", "correction", "keepdims"}.issubset(fields) or not fields.issubset(
+        {"axes", "correction", "keepdims", "vjp_of"}
+    ):
+        raise ShapeError(
+            "VAR arg fields must be exactly 'axes', 'correction', and 'keepdims' "
+            "plus optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("VAR arg.vjp_of must reference a UOp")
+    source = inputs[0]
+    source_shape = getattr(source, "shape", None)
+    if type(source_shape) is not tuple:
+        raise ShapeError("VAR source shape must be a tuple")
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("VAR must preserve its input dtype")
+    if getattr(node, "dtype", None) not in _FLOATING_DTYPES:
+        raise ShapeError(
+            f"VAR supports floating dtypes only, got {getattr(node, 'dtype', None)!r}"
+        )
+    axes = arg["axes"]
+    correction = arg["correction"]
+    keepdims = arg["keepdims"]
+    if type(axes) is not tuple:
+        raise ShapeError("VAR arg.axes must be a canonical tuple")
+    if type(correction) is not int:
+        raise ShapeError("VAR arg.correction must be a normalized integer")
+    if correction < VAR_CORRECTION_MIN or correction > VAR_CORRECTION_MAX:
+        raise ShapeError(
+            f"VAR arg.correction must be in [{VAR_CORRECTION_MIN}, {VAR_CORRECTION_MAX}], "
+            f"got {correction}"
+        )
+    if type(keepdims) is not bool:
+        raise ShapeError("VAR arg.keepdims must be a boolean")
+    if source_shape and not axes:
+        raise ShapeError("VAR arg.axes must be non-empty for a non-scalar input")
+    if tuple(sorted(axes)) != axes or len(set(axes)) != len(axes):
+        raise ShapeError("VAR arg.axes must be strictly increasing and unique")
+    reduced_elements = 1
+    for axis in axes:
+        if type(axis) is not int:
+            raise ShapeError("VAR arg.axes must contain normalized integers")
+        if axis < 0 or axis >= len(source_shape):
+            raise ShapeError(
+                f"VAR arg axis {axis} out of range for rank {len(source_shape)}"
+            )
+        reduced_elements *= source_shape[axis]
+    expected_shape = tuple(
+        1 if keepdims and axis in axes else extent
+        for axis, extent in enumerate(source_shape)
+        if keepdims or axis not in axes
+    )
+    if getattr(node, "shape", None) != expected_shape:
+        raise ShapeError(
+            f"VAR declared shape {getattr(node, 'shape', None)!r} does not match "
+            f"derived shape {expected_shape!r}"
+        )
+    expanded_shape = tuple(
+        1 if axis in axes else extent
+        for axis, extent in enumerate(source_shape)
+    )
+    return axes, correction, keepdims, expanded_shape, reduced_elements
+
+
 def _validate_repeat_interleave(
     node: Any,
     contract: FrameworkOperationContract,
@@ -704,6 +786,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.flip.v1": _validate_flip,
     "browsergrad.jit.framework.tensor.gather.v1": _validate_gather,
     "browsergrad.jit.framework.tensor.prod.v1": _validate_prod,
+    "browsergrad.jit.framework.tensor.var.v1": _validate_var,
     "browsergrad.jit.framework.tensor.repeat.v1": _validate_repeat,
     "browsergrad.jit.framework.tensor.repeat-interleave.v1": _validate_repeat_interleave,
     "browsergrad.jit.framework.tensor.sign.v1": _validate_typed_unary,
@@ -778,6 +861,15 @@ def validate_prod_contract(node: Any) -> Tuple[Tuple[int, ...], bool, Tuple[int,
     return normalized
 
 
+def validate_var_contract(
+    node: Any,
+) -> Tuple[Tuple[int, ...], int, bool, Tuple[int, ...], int]:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.var.v1":
+        raise ShapeError("VAR resolved to the wrong framework-operation contract")
+    return normalized
+
+
 def validate_repeat_interleave_contract(node: Any) -> Tuple[int, int]:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.repeat-interleave.v1":
@@ -838,6 +930,8 @@ __all__ = [
     "FRAMEWORK_OPERATION_SUPPORT_VERSION",
     "REPEAT_FACTOR_MAX",
     "REPEAT_RANK_MAX",
+    "VAR_CORRECTION_MIN",
+    "VAR_CORRECTION_MAX",
     "FrameworkOperationContract",
     "framework_operation_support",
     "has_framework_operation_contract",
@@ -848,6 +942,7 @@ __all__ = [
     "validate_gather_contract",
     "validate_gather_scatter_add_contract",
     "validate_prod_contract",
+    "validate_var_contract",
     "validate_repeat_contract",
     "validate_repeat_interleave_contract",
     "validate_real_numeric_unary_contract",

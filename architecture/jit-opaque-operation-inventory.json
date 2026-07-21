@@ -185,14 +185,6 @@
       "operationIds": ["jit.custom.batch-norm-1d.v0"]
     },
     {
-      "id": "tensor.var",
-      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
-      "definition": "TensorProxy.var",
-      "constructorCount": 1,
-      "labelBinding": "static-name",
-      "operationIds": ["jit.custom.var.v0"]
-    },
-    {
       "id": "tensor.masked-fill",
       "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
       "definition": "TensorProxy.masked_fill",
@@ -354,7 +346,6 @@
     {"id":"jit.custom.tril.v0","label":"tril","labelField":"name","constructorSite":"tensor.tril","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.triu.v0","label":"triu","labelField":"name","constructorSite":"tensor.triu","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.user.v0","label":"user","labelField":"op","constructorSite":"custom-kernel.builder","policy":"legacy-webgpu-forward-only","constructorReachability":"registered-decorator-builder-invoked","effectCondition":"legacy-webgpu-bridge-and-live-kernel-registry-entry-required","effectClass":"user-authored-kernel","replayContract":"forward-only-root-materialization","inputArity":"decorator-num-inputs","shapeRule":"decorator-output-shape-function","declaredDtypeRule":"decorator-output-dtype","realizedDtypeRule":"bridge-materialized-as-declared","webgpuRoute":"user-kernel","currentFailure":"CPU and portable tensor plan refuse; autograd is explicitly disconnected","targetConformance":"intentional-extension","evidence":["gate0-contract","source-freeze","legacy-webgpu-user"]},
-    {"id":"jit.custom.var.v0","label":"var","labelField":"name","constructorSite":"tensor.var","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"full reduction returns a NumPy scalar rejected by the CPU realizer; portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.webnn-matmul.v0","label":"webnn_matmul","labelField":"op","constructorSite":"webnn.matmul","policy":"constructor-only-forward-only","constructorReachability":"two-dimensional-inputs-only","effectCondition":"no-realizer-support","effectClass":"constructor-only","replayContract":"not-realizable","inputArity":"2","shapeRule":"matrix-product-two-dimensional","declaredDtypeRule":"preserve-left-input-without-equality-validation","realizedDtypeRule":"not-realizable","webgpuRoute":"none","currentFailure":"CPU and WebGPU realizers both refuse; advertised f32 and fallback contracts are absent","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]}
   ],
   "evidenceDefinitions": [

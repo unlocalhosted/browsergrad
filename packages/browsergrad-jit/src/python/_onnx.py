@@ -17,7 +17,8 @@ Scope (v0):
     REDUCE (sum/mean/max), RESHAPE, PERMUTE, CAST, WHERE, CMP
     (→Equal/Greater/Less), and BROADCAST_TO (→Expand). Registry-admitted
     framework operations additionally cover ABS, SIGN, SIN, COS, CLAMP
-    (→Clip), FLIP (→Slice), INDEX (→GatherElements), PROD (→ReduceProd), REPEAT (→Tile), and
+    (→Clip), FLIP (→Slice), INDEX (→GatherElements), PROD (→ReduceProd),
+    VAR (→ReduceMean/Sub/Mul/ReduceSum/Div), REPEAT (→Tile), and
     REPEAT_INTERLEAVE (→Unsqueeze/Tile/Reshape). Plus lifecycle
     (BUFFER/LOAD/CONST).
   * Opset 17 (axes as attribute on ReduceSum/Mean/Max — opset 18 made
@@ -53,7 +54,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -77,6 +78,7 @@ from ._framework_contracts import (
     validate_flip_contract,
     validate_gather_contract,
     validate_prod_contract,
+    validate_var_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
     validate_typed_unary_contract,
@@ -564,6 +566,63 @@ def export_inference(
                 _emit_attr_int("keepdims", 1 if keepdims else 0),
             ]
             nodes.append(_emit_node(input_names, [out_name], nm, "ReduceProd", attrs))
+        elif node.op == OP_VAR:
+            axes, correction, keepdims, _, reduced_elements = validate_var_contract(node)
+            if node.dtype != "float32":
+                raise OnnxUnmappableOp(
+                    f"export_inference: VAR dtype {node.dtype!r} is not exportable; "
+                    "supported dtype is float32"
+                )
+            suffix = next_node_id - 1
+            mean_name = f"var_mean_{suffix}"
+            centered_name = f"var_centered_{suffix}"
+            squared_name = f"var_squared_{suffix}"
+            sum_name = f"var_sum_{suffix}"
+            denominator_name = f"const_var_denominator_{suffix}"
+            axes_attr = _emit_attr_ints("axes", axes)
+            initializers.append(_emit_tensor_proto(
+                denominator_name,
+                DT_FLOAT,
+                (1,),
+                _initializer_bytes_for_scalar(
+                    float(max(0, reduced_elements - correction)),
+                    node.dtype,
+                ),
+            ))
+            nodes.extend([
+                _emit_node(
+                    input_names,
+                    [mean_name],
+                    f"{nm}_mean",
+                    "ReduceMean",
+                    [axes_attr, _emit_attr_int("keepdims", 1)],
+                ),
+                _emit_node(
+                    [input_names[0], mean_name],
+                    [centered_name],
+                    f"{nm}_center",
+                    "Sub",
+                ),
+                _emit_node(
+                    [centered_name, centered_name],
+                    [squared_name],
+                    f"{nm}_square",
+                    "Mul",
+                ),
+                _emit_node(
+                    [squared_name],
+                    [sum_name],
+                    f"{nm}_sum",
+                    "ReduceSum",
+                    [axes_attr, _emit_attr_int("keepdims", 1 if keepdims else 0)],
+                ),
+                _emit_node(
+                    [sum_name, denominator_name],
+                    [out_name],
+                    f"{nm}_divide",
+                    "Div",
+                ),
+            ])
         elif node.op == OP_REPEAT:
             repeats, _ = validate_repeat_contract(node)
             _dtype_or_die(node.dtype)
@@ -627,7 +686,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_INDEX, OP_PROD, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

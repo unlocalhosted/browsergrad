@@ -5,10 +5,10 @@
     {
       "id": "jit.custom.shared-refusals.v0",
       "expected": {
-        "label": "var",
+        "label": "masked_fill",
         "labelField": "name",
-        "cpuValues": [0.5, 0.5],
-        "cpuGradient": [[-1, 1], [-1, 1]],
+        "cpuValues": [[-1, 2], [3, -1]],
+        "cpuGradient": [[0, 1], [1, 0]],
         "symbolicVjpRegistered": false,
         "functionalGradError": "JitNotImplementedError",
         "vmapError": "JitNotImplementedError",
@@ -93,8 +93,7 @@
           "smooth_l1_loss",
           "stack",
           "tril",
-          "triu",
-          "var"
+          "triu"
         ],
         "allLabelsMatch": true,
         "closureGradientLabels": [
@@ -114,17 +113,12 @@
           "smooth_l1_loss",
           "stack",
           "tril",
-          "triu",
-          "var"
+          "triu"
         ],
         "allClosureGradientsPresent": true,
         "realizedDtypeDrift": {
           "cumsum-bool": {"declared": "bool", "realized": "int32"},
-          "cumsum-int32": {"declared": "int32", "realized": "int32"},
-          "var-int32": {"declared": "int32", "realized": "float64"}
-        },
-        "scalarReductionErrors": {
-          "var": "RealizationError"
+          "cumsum-int32": {"declared": "int32", "realized": "int32"}
         }
       }
     }

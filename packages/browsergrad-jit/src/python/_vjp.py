@@ -48,7 +48,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from ._ir import (
     UOp,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CAST, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -70,6 +70,7 @@ from ._framework_contracts import (
     validate_flip_contract,
     validate_gather_contract,
     validate_prod_contract,
+    validate_var_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
     validate_real_numeric_unary_contract,
@@ -510,6 +511,77 @@ def _vjp_prod(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[U
     return (_vjp_uop(
         OP_MUL,
         (upstream, local_derivative),
+        x.shape,
+        x.dtype,
+        output,
+    ),)
+
+
+@register_vjp(OP_VAR)
+def _vjp_var(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """Variance derivative with one canonical static correction."""
+    axes, correction, keepdims, expanded_shape, reduced_elements = validate_var_contract(output)
+    (x,) = inputs
+    mean = _vjp_uop(
+        OP_REDUCE,
+        (x,),
+        expanded_shape,
+        x.dtype,
+        output,
+        arg={"op": "mean", "axis": axes, "keepdims": True},
+    )
+    negative_mean = _vjp_uop(
+        OP_NEG,
+        (mean,),
+        expanded_shape,
+        x.dtype,
+        output,
+    )
+    centered = _vjp_uop(
+        OP_ADD,
+        (x, negative_mean),
+        x.shape,
+        x.dtype,
+        output,
+    )
+    two = _vjp_uop(
+        OP_CONST, (), (), x.dtype, output, arg={"value": 2}
+    )
+    denominator = _vjp_uop(
+        OP_CONST,
+        (),
+        (),
+        x.dtype,
+        output,
+        arg={"value": max(0, reduced_elements - correction)},
+    )
+    local = _vjp_uop(
+        OP_MUL,
+        (centered, two),
+        x.shape,
+        x.dtype,
+        output,
+    )
+    local = _vjp_uop(
+        OP_DIV,
+        (local, denominator),
+        x.shape,
+        x.dtype,
+        output,
+    )
+    upstream = dy
+    if not keepdims and upstream.shape != expanded_shape:
+        upstream = _vjp_uop(
+            OP_RESHAPE,
+            (upstream,),
+            expanded_shape,
+            upstream.dtype,
+            output,
+            arg={"new_shape": expanded_shape},
+        )
+    return (_vjp_uop(
+        OP_MUL,
+        (local, upstream),
         x.shape,
         x.dtype,
         output,

@@ -55,6 +55,11 @@ Each package follows independent [SemVer](https://semver.org/).
   ONNX `GatherElements`, and explicit device refusal. Grad shares the strict
   conformance fixture, preserves source/output/gradient dtype, and keeps int64
   index tensors intact through slice, reshape, transpose, and permute views.
+- Migrates JIT `Tensor.var` to typed static reduction semantics with canonical
+  axes and correction, owning float16/32/64 CPU results, centered closure and
+  symbolic gradients, batch-safe vmap, exact float32 ONNX decomposition, and
+  explicit device refusal. Grad shares its dtype, correction, and refusal
+  fixture instead of silently casting variance results and gradients to f32.
 
 ## 2026-07 — semantic-core, kernels, compiler, and JIT semantic migration
 

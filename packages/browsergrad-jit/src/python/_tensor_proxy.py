@@ -45,13 +45,18 @@ from ._ir import (
     UOp,
     OP_BUFFER,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO, OP_INDEX,
 )
 from ._errors import JitNotImplementedError, ShapeError, RealizationError
-from ._framework_contracts import REPEAT_FACTOR_MAX, REPEAT_RANK_MAX
+from ._framework_contracts import (
+    REPEAT_FACTOR_MAX,
+    REPEAT_RANK_MAX,
+    VAR_CORRECTION_MAX,
+    VAR_CORRECTION_MIN,
+)
 
 if TYPE_CHECKING:
     from ._buffer_table import BufferTable
@@ -142,6 +147,29 @@ def _validate_gather_index_values(index: np.ndarray, axis_extent: int) -> None:
         raise ShapeError(
             f"gather: index values must be in [0, {axis_extent})"
         )
+
+
+def _normalize_variance_correction(correction: Any, unbiased: Any) -> int:
+    if correction is not None and unbiased is not None:
+        raise ShapeError("var: specify only one of correction or unbiased")
+    if unbiased is not None:
+        if type(unbiased) is not bool:
+            raise ShapeError("var: unbiased must be a boolean")
+        return 1 if unbiased else 0
+    if correction is None:
+        return 1
+    if type(correction) not in _EXACT_INTEGER_SCALAR_TYPES:
+        raise ShapeError(
+            "var: correction must be a built-in or NumPy integer scalar, "
+            f"got {type(correction).__name__}"
+        )
+    normalized = int(correction)
+    if normalized < VAR_CORRECTION_MIN or normalized > VAR_CORRECTION_MAX:
+        raise ShapeError(
+            f"var: correction must be in [{VAR_CORRECTION_MIN}, {VAR_CORRECTION_MAX}], "
+            f"got {normalized}"
+        )
+    return normalized
 
 
 def _normalize_reduction_axes(op_name: str, value: Any, rank: int) -> Tuple[int, ...]:
@@ -1219,54 +1247,60 @@ class TensorProxy:
         dim: Any = None,
         keepdims: bool = False,
         keepdim: bool = False,
-        unbiased: bool = True,
+        unbiased: Any = None,
+        correction: Any = None,
     ) -> "TensorProxy":
+        if axis is not None and dim is not None:
+            raise ShapeError("var: specify only one of axis or dim")
+        if type(keepdims) is not bool or type(keepdim) is not bool:
+            raise ShapeError("var: keepdim and keepdims must be booleans")
+        if self.dtype not in ("float16", "float32", "float64"):
+            raise ShapeError(
+                f"var: floating dtypes only, got {self.dtype!r}"
+            )
+        correction_i = _normalize_variance_correction(correction, unbiased)
         reduce_axis = dim if dim is not None else axis
         keep = keepdim or keepdims
-        ddof = 1 if unbiased else 0
-        axes = None if reduce_axis is None else (
-            (reduce_axis,) if isinstance(reduce_axis, int) else tuple(reduce_axis)
+        norm_axes = _normalize_reduction_axes("var", reduce_axis, self.ndim)
+        out_shape = tuple(
+            1 if keep and index in norm_axes else extent
+            for index, extent in enumerate(self.shape)
+            if keep or index not in norm_axes
         )
-        norm_axes = None if axes is None else tuple(a % self.ndim for a in axes)
-        if norm_axes is None:
-            out_shape = (1,) * self.ndim if keep else ()
-        else:
-            out_dims = []
-            for i, d in enumerate(self.shape):
-                if i in norm_axes:
-                    if keep:
-                        out_dims.append(1)
-                else:
-                    out_dims.append(d)
-            out_shape = tuple(out_dims)
-
-        def _var_forward(x_arr: np.ndarray) -> np.ndarray:
-            return np.var(x_arr, axis=reduce_axis, keepdims=keep, ddof=ddof)
+        expanded_shape = tuple(
+            1 if index in norm_axes else extent
+            for index, extent in enumerate(self.shape)
+        )
+        reduced_elements = 1
+        for normalized_axis in norm_axes:
+            reduced_elements *= self.shape[normalized_axis]
 
         uop = UOp(
-            op=OP_CUSTOM,
+            op=OP_VAR,
             inputs=(self._uop,),
             shape=out_shape,
             dtype=self._uop.dtype,
-            arg={"fn": _var_forward, "captures": (), "name": "var"},
+            arg={
+                "axes": norm_axes,
+                "correction": correction_i,
+                "keepdims": keep,
+            },
         )
 
         def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
             (x_arr,) = ins
-            if norm_axes is None:
-                n = float(x_arr.size)
-                centered = x_arr - x_arr.mean()
-                grad = np.broadcast_to(dy, x_arr.shape)
-            else:
-                n = float(np.prod([x_arr.shape[ax] for ax in norm_axes]))
-                centered = x_arr - x_arr.mean(axis=norm_axes, keepdims=True)
-                grad = dy
-                if not keep:
-                    for ax in sorted(norm_axes):
-                        grad = np.expand_dims(grad, ax)
-                grad = np.broadcast_to(grad, x_arr.shape)
-            denom = n - float(ddof)
-            return ((grad * 2.0 * centered / denom).astype(x_arr.dtype, copy=False),)
+            centered = x_arr - x_arr.mean(
+                axis=norm_axes,
+                keepdims=True,
+                dtype=x_arr.dtype,
+            )
+            upstream = dy if keep else dy.reshape(expanded_shape)
+            upstream = np.broadcast_to(upstream, x_arr.shape)
+            denominator = max(0, reduced_elements - correction_i)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                gradient = upstream * np.asarray(2, dtype=x_arr.dtype) * centered
+                gradient = gradient / np.asarray(denominator, dtype=x_arr.dtype)
+            return (gradient.astype(x_arr.dtype, copy=False),)
 
         requires = _should_track(self)
         ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None

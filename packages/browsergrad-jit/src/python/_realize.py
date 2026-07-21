@@ -25,6 +25,7 @@ handler's return value.
 """
 
 from __future__ import annotations
+import warnings
 from typing import Any, Callable
 
 import numpy as np
@@ -33,7 +34,7 @@ from ._ir import (
     UOp, ALL_OPS, toposort,
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM,
     OP_CAST, OP_ADD, OP_MUL, OP_DIV, OP_NEG,
-    OP_EXP, OP_LOG, OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_REPEAT,
+    OP_EXP, OP_LOG, OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_VAR, OP_REPEAT,
     OP_REPEAT_INTERLEAVE, OP_SIGN, OP_SIN, OP_CMP, OP_MATMUL,
     OP_CONV1D, OP_CONV1D_BACKWARD_INPUT, OP_CONV1D_BACKWARD_WEIGHT,
     OP_CONV1D_BACKWARD_BIAS, OP_CONV2D,
@@ -63,6 +64,7 @@ from ._framework_contracts import (
     validate_gather_contract,
     validate_gather_scatter_add_contract,
     validate_prod_contract,
+    validate_var_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
     validate_real_numeric_unary_contract,
@@ -198,6 +200,20 @@ def _h_prod(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
         dtype=np.dtype(node.dtype),
     )
     return np.array(product, dtype=np.dtype(node.dtype), copy=True).reshape(node.shape)
+
+
+def _h_var(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    axes, correction, keepdims, _, _ = validate_var_contract(node)
+    with warnings.catch_warnings(), np.errstate(divide="ignore", invalid="ignore"):
+        warnings.simplefilter("ignore", RuntimeWarning)
+        variance = np.var(
+            vt[id(node.inputs[0])],
+            axis=axes,
+            keepdims=keepdims,
+            ddof=correction,
+            dtype=np.dtype(node.dtype),
+        )
+    return np.array(variance, dtype=np.dtype(node.dtype), copy=True).reshape(node.shape)
 
 
 def _h_repeat_interleave(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
@@ -1271,6 +1287,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_COS:     _h_cos,
     OP_FLIP:    _h_flip,
     OP_PROD:    _h_prod,
+    OP_VAR:     _h_var,
     OP_REPEAT:  _h_repeat,
     OP_REPEAT_INTERLEAVE: _h_repeat_interleave,
     OP_SIGN:    _h_sign,

@@ -52,7 +52,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -80,6 +80,7 @@ from ._framework_contracts import (
     validate_gather_contract,
     validate_gather_scatter_add_contract,
     validate_prod_contract,
+    validate_var_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
     validate_typed_unary_contract,
@@ -271,6 +272,26 @@ def _vmap_prod(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
         shape=mapped_shape,
         dtype=node.dtype,
         arg={"axes": mapped_axes, "keepdims": keepdims},
+    )
+
+
+@register_vmap(OP_VAR)
+def _vmap_var(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    axes, correction, keepdims, _, _ = validate_var_contract(node)
+    inner = batched[id(node.inputs[0])]
+    is_batched = len(inner.shape) > len(node.inputs[0].shape)
+    mapped_axes = tuple(axis + 1 for axis in axes) if is_batched else axes
+    mapped_shape = (B,) + node.shape if is_batched else node.shape
+    return UOp(
+        op=OP_VAR,
+        inputs=(inner,),
+        shape=mapped_shape,
+        dtype=node.dtype,
+        arg={
+            "axes": mapped_axes,
+            "correction": correction,
+            "keepdims": keepdims,
+        },
     )
 
 
@@ -740,7 +761,7 @@ def vmap(
         TensorProxy input. Other axes raise.
       * `out_dims=0` only — output's batch ends up at axis 0.
       * Supported opcodes include BUFFER, LOAD, CONST, ADD, MUL, DIV, NEG,
-        EXP, LOG, ABS, CLAMP, COS, FLIP, INDEX, REPEAT, SIGN, SIN, CMP, WHERE,
+        EXP, LOG, ABS, CLAMP, COS, FLIP, INDEX, REPEAT, VAR, SIGN, SIN, CMP, WHERE,
         CAST, MATMUL, REDUCE, RESHAPE, PERMUTE, SCATTER_ADD, and BROADCAST_TO. Anything else
         raises with a pointer to PRD-014b.
     """

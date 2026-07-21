@@ -148,7 +148,8 @@ asset set.
 
 Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
 `Tensor.sign`, `Tensor.sin`, `Tensor.cos`, `Tensor.clamp`, `Tensor.flip`,
-`Tensor.gather`, `Tensor.prod`, `Tensor.repeat`, and `Tensor.repeat_interleave` from the frozen
+`Tensor.gather`, `Tensor.prod`, `Tensor.repeat`, `Tensor.repeat_interleave`, and
+`Tensor.var` from the frozen
 opaque callback inventory. Expand emits the existing typed `BROADCAST_TO`
 primitive. One shared contract validates exact arity, closed shape arguments,
 output-shape identity, dtype preservation, rank direction, and broadcast
@@ -175,8 +176,8 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 25 constructor calls and 28 operations under ADR-0002
-and ADR-0004 through ADR-0011. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 24 constructor calls and 27 operations under ADR-0002
+and ADR-0004 through ADR-0012. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -225,11 +226,23 @@ int64 index cannot silently become float32 while passing through an ordinary
 slice/unsqueeze path. This is eleven migrated operations, not Gate 6
 completion.
 
+Variance now emits typed `VAR` with canonical sorted static axes, exact signed
+32-bit correction, exact keepdims, floating dtype preservation, and owning CPU
+scalar/tensor results. The default correction is one; the legacy `unbiased`
+alias is accepted only when correction is absent. Closure and symbolic VJP use
+the centered correction-aware derivative; vmap shifts every reduction axis
+past the leading batch; ONNX decomposes the exact float32 profile into
+`ReduceMean`, `Sub`, `Mul`, `ReduceSum`, and `Div`. Tensor-plan and WebGPU
+explicitly refuse until a portable variance reduction exists. Grad consumes
+the same value/dtype/refusal fixture and no longer casts variance or its
+gradient to float32. This is twelve migrated operations, not Gate 6
+completion.
+
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
 records bind `Tensor.abs`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
-`Tensor.flip`, `Tensor.gather`, `Tensor.prod`, `Tensor.repeat_interleave`, `Tensor.repeat`,
-`Tensor.sign`, and `Tensor.sin` to the same
+`Tensor.flip`, `Tensor.gather`, `Tensor.prod`, `Tensor.repeat_interleave`,
+`Tensor.repeat`, `Tensor.sign`, `Tensor.sin`, and `Tensor.var` to the same
 validators invoked by construction and every admitted execution, transform,
 export, or plan boundary. Import rejects duplicate keys,
 open fields, unknown decisions, invalid versions, duplicate identities, and
@@ -239,7 +252,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 28 still-opaque and eleven typed retirements. ADR-0003 records
+opaque IDs into 27 still-opaque and twelve typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.
