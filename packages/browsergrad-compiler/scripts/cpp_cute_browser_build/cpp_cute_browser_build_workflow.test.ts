@@ -262,14 +262,17 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(ciWorkflow).not.toContain("continue-on-error");
   });
 
-  it("shards complete real-world CUDA gates by bundle without changing corpus selection", () => {
+  it("runs real-world CUDA audits once beside independently sharded browser bundles", () => {
+    expect(ciWorkflow).toContain("real-world-audits:");
     expect(ciWorkflow).toContain("browser-real-world:");
     expect(ciWorkflow).toContain("bundle: [src, dist]");
     expect(ciWorkflow).toContain("verify:real-world-cuda --");
     expect(ciWorkflow).toContain("--skip-build");
     expect(ciWorkflow).toContain("--require-webgpu");
+    expect(ciWorkflow).toContain("--verification-scope=compile-codegen-audits");
+    expect(ciWorkflow).toContain("--verification-scope=browser-execution");
     expect(ciWorkflow).toContain("--bundle=${{ matrix.bundle }}");
-    expect(ciWorkflow.match(/verify:real-world-cuda/gu)).toHaveLength(1);
+    expect(ciWorkflow.match(/verify:real-world-cuda/gu)).toHaveLength(2);
     expect(ciWorkflow).not.toMatch(/--(?:only|corpus)(?:=|\s)/u);
   });
 

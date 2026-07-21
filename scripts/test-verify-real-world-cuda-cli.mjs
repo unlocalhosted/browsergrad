@@ -16,6 +16,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const defaults = parseVerifyRealWorldCudaArgs([]);
 assert.equal(defaults.autoCorpusSmokeProfile, "fast");
 assert.equal(defaults.browserShards, 1);
+assert.equal(defaults.verificationScope, "full");
 
 const defaultPlan = verifyRealWorldCudaPlan(defaults);
 const defaultAuditSteps = defaultPlan.filter((step) =>
@@ -40,6 +41,49 @@ for (const step of defaultBrowserSteps) {
   assert.ok(cases.includes("auto-corpus:leetcuda:"));
   assert.ok(!cases.includes("example:saxpy"));
 }
+
+const auditOnly = parseVerifyRealWorldCudaArgs([
+  "--skip-fetch",
+  "--verification-scope=compile-codegen-audits",
+]);
+const auditOnlyPlan = verifyRealWorldCudaPlan(auditOnly);
+assert.equal(auditOnlyPlan.length, 4);
+assert.ok(auditOnlyPlan.every((step) => step.kind === "compile-codegen-audit"));
+assert.deepEqual(
+  auditOnlyPlan.map((step) => argAfter(step.args, "--only")),
+  ["cuda-120", "cuda-samples", "llm.c", "leetcuda"],
+);
+assert.ok(auditOnlyPlan.every((step) => step.args.includes("--skip-fetch")));
+assert.equal(auditOnlyPlan.some((step) => step.kind === "browser-e2e"), false);
+
+const browserOnly = parseVerifyRealWorldCudaArgs([
+  "--verification-scope",
+  "browser-execution",
+]);
+const browserOnlyPlan = verifyRealWorldCudaPlan(browserOnly);
+assert.equal(browserOnlyPlan.length, 2);
+assert.equal(browserOnlyPlan.some((step) => step.kind === "compile-codegen-audit"), false);
+assert.ok(browserOnlyPlan.every((step) => step.kind === "browser-e2e"));
+assert.ok(browserOnlyPlan.every((step) => step.requireWebGpu === true));
+assert.ok(browserOnlyPlan.every((step) => step.forbidSkips === true));
+assert.ok(browserOnlyPlan.every((step) =>
+  cudaLiteCorpusExecutionFixtures.every((fixture) => step.expectedFixtureCases.includes(fixture.caseName))));
+
+assert.throws(
+  () => parseVerifyRealWorldCudaArgs(["--verification-scope=audits"]),
+  /--verification-scope expects full, compile-codegen-audits, or browser-execution/u,
+);
+assert.throws(
+  () => parseVerifyRealWorldCudaArgs([
+    "--verification-scope=compile-codegen-audits",
+    "--verification-scope=browser-execution",
+  ]),
+  /--verification-scope may be specified only once/u,
+);
+assert.throws(
+  () => verifyRealWorldCudaPlan({ ...defaults, verificationScope: "unknown" }),
+  /--verification-scope expects full, compile-codegen-audits, or browser-execution/u,
+);
 
 const full = parseVerifyRealWorldCudaArgs([
   "--skip-fetch",
@@ -324,6 +368,13 @@ const workflowContracts = [
     file: ".github/workflows/ci.yml",
     provision: "Provision pinned real-world CUDA corpora",
     verify: "Run complete real-world CUDA bundle gate",
+    scope: "--verification-scope=browser-execution",
+  },
+  {
+    file: ".github/workflows/ci.yml",
+    provision: "Provision pinned real-world CUDA corpora for audits",
+    verify: "Run complete real-world CUDA compile/codegen audit",
+    scope: "--verification-scope=compile-codegen-audits",
   },
   {
     file: ".github/workflows/publish-npm.yml",
@@ -360,14 +411,36 @@ for (const contract of workflowContracts) {
     assert.equal(stepField(steps[provisionIndex], "if"), contract.condition);
     assert.equal(stepField(steps[verifyIndex], "if"), contract.condition);
   }
+  if (contract.scope !== undefined) {
+    assert.ok(
+      steps[verifyIndex].body.includes(contract.scope),
+      `${contract.file} verification must select ${contract.scope}`,
+    );
+  }
 }
 
 const ciWorkflow = readFileSync(path.join(repositoryRoot, ".github/workflows/ci.yml"), "utf8");
 assert.ok(ciWorkflow.includes("bundle: [src, dist]"));
 assert.ok(ciWorkflow.includes("--bundle=${{ matrix.bundle }}"));
+assert.ok(ciWorkflow.includes("--verification-scope=compile-codegen-audits"));
+assert.ok(ciWorkflow.includes("--verification-scope=browser-execution"));
 assert.ok(ciWorkflow.includes("--browser-shards=2"));
 assert.ok(ciWorkflow.includes("--timing-json=.tmp/real-world-cuda-timing-${{ matrix.bundle }}.json"));
 assert.ok(ciWorkflow.includes("Upload real-world CUDA timing attribution"));
+const auditJobStart = ciWorkflow.indexOf("\n  real-world-audits:\n");
+const browserJobStart = ciWorkflow.indexOf("\n  browser-real-world:\n");
+assert.ok(auditJobStart > 0 && browserJobStart > auditJobStart);
+const auditJob = ciWorkflow.slice(auditJobStart, browserJobStart);
+const browserJob = ciWorkflow.slice(browserJobStart);
+assert.ok(auditJob.includes("--verification-scope=compile-codegen-audits"));
+assert.equal(auditJob.includes("Install Playwright Chromium"), false);
+assert.equal(auditJob.includes("matrix.bundle"), false);
+assert.equal(auditJob.includes("needs:"), false);
+assert.equal(auditJob.includes("continue-on-error"), false);
+assert.ok(browserJob.includes("--verification-scope=browser-execution"));
+assert.equal(browserJob.includes("--verification-scope=compile-codegen-audits"), false);
+assert.equal(browserJob.includes("needs:"), false);
+assert.equal(browserJob.includes("continue-on-error"), false);
 
 console.log("verify real-world CUDA CLI tests ok");
 

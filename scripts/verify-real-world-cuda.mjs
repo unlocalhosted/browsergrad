@@ -23,6 +23,7 @@ export function parseVerifyRealWorldCudaArgs(args) {
     limit: 0,
     only: [],
     bundle: "both",
+    verificationScope: "full",
     autoCorpusSmokeLimit: 32,
     autoCorpusSmokeMode: "reference",
     autoCorpusSmokeProfile: "fast",
@@ -38,6 +39,7 @@ export function parseVerifyRealWorldCudaArgs(args) {
     browserShards: 1,
     timingJson: undefined,
   };
+  let verificationScopeSeen = false;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--skip-fetch") {
@@ -81,6 +83,18 @@ export function parseVerifyRealWorldCudaArgs(args) {
     }
     if (arg?.startsWith("--bundle=")) {
       options.bundle = parseBundle(arg.slice("--bundle=".length));
+      continue;
+    }
+    if (arg === "--verification-scope") {
+      if (verificationScopeSeen) throw new Error("--verification-scope may be specified only once");
+      verificationScopeSeen = true;
+      options.verificationScope = parseVerificationScope(args[++index]);
+      continue;
+    }
+    if (arg?.startsWith("--verification-scope=")) {
+      if (verificationScopeSeen) throw new Error("--verification-scope may be specified only once");
+      verificationScopeSeen = true;
+      options.verificationScope = parseVerificationScope(arg.slice("--verification-scope=".length));
       continue;
     }
     if (arg === "--auto-corpus-smoke-limit") {
@@ -192,7 +206,7 @@ export function parseVerifyRealWorldCudaArgs(args) {
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--require-webgpu] [--allow-missing-webgpu] [--forbid-skips] [--limit N] [--only CORPUS[,CORPUS...]] [--corpus CORPUS[,CORPUS...]] [--bundle src|dist|both] [--auto-corpus-smoke-limit N] [--auto-corpus-smoke-mode reference|dispatch] [--auto-corpus-smoke-profile fast|full] [--auto-corpus-smoke-features subgroups] [--case-timeout-ms N] [--browser-shards N] [--benchmark-webgpu] [--benchmark-runs N] [--benchmark-warmup N] [--benchmark-length N] [--expect-prepared-ratio-max N] [--expect-prepared-scalar-ratio-max N] [--expect-prepared-readback-ratio-max N] [--timing-json PATH]");
+      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--require-webgpu] [--allow-missing-webgpu] [--forbid-skips] [--limit N] [--only CORPUS[,CORPUS...]] [--corpus CORPUS[,CORPUS...]] [--bundle src|dist|both] [--verification-scope full|compile-codegen-audits|browser-execution] [--auto-corpus-smoke-limit N] [--auto-corpus-smoke-mode reference|dispatch] [--auto-corpus-smoke-profile fast|full] [--auto-corpus-smoke-features subgroups] [--case-timeout-ms N] [--browser-shards N] [--benchmark-webgpu] [--benchmark-runs N] [--benchmark-warmup N] [--benchmark-length N] [--expect-prepared-ratio-max N] [--expect-prepared-scalar-ratio-max N] [--expect-prepared-readback-ratio-max N] [--timing-json PATH]");
       process.exit(0);
     }
     throw new Error(`unexpected argument: ${arg}`);
@@ -201,20 +215,25 @@ export function parseVerifyRealWorldCudaArgs(args) {
 }
 
 export function verifyRealWorldCudaPlan(options, context = {}) {
+  parseVerificationScope(options.verificationScope);
   const selectedCorpusIds = selectedCorpora(options.only);
   const browserReportDir = context.browserReportDir ?? path.join(root, ".tmp", "real-world-cuda-browser-plan");
-  const steps = selectedCorpusIds.map((id) => ({
-    label: `real-world CUDA compile/codegen audit (${id})`,
-    parallelGroup: "compile-codegen-audits",
-    args: [
-      path.join(scriptDir, "audit-real-world-cuda-corpora.mjs"),
-      ...(options.skipFetch ? ["--skip-fetch"] : []),
-      "--only",
-      id,
-      "--limit",
-      String(options.limit),
-    ],
-  }));
+  const steps = options.verificationScope === "browser-execution"
+    ? []
+    : selectedCorpusIds.map((id) => ({
+      kind: "compile-codegen-audit",
+      label: `real-world CUDA compile/codegen audit (${id})`,
+      parallelGroup: "compile-codegen-audits",
+      args: [
+        path.join(scriptDir, "audit-real-world-cuda-corpora.mjs"),
+        ...(options.skipFetch ? ["--skip-fetch"] : []),
+        "--only",
+        id,
+        "--limit",
+        String(options.limit),
+      ],
+    }));
+  if (options.verificationScope === "compile-codegen-audits") return steps;
   const browserShardCount = effectiveBrowserShardCount(options);
   for (const bundle of browserBundles(options.bundle)) {
     for (let shardIndex = 1; shardIndex <= browserShardCount; shardIndex++) {
@@ -289,6 +308,15 @@ export function verifyRealWorldCudaPlan(options, context = {}) {
 function parseBundle(raw) {
   if (raw === "src" || raw === "dist" || raw === "both") return raw;
   throw new Error("--bundle expects src, dist, or both");
+}
+
+function parseVerificationScope(raw) {
+  if (raw === "full" || raw === "compile-codegen-audits" || raw === "browser-execution") {
+    return raw;
+  }
+  throw new Error(
+    "--verification-scope expects full, compile-codegen-audits, or browser-execution",
+  );
 }
 
 function parseAutoCorpusSmokeMode(raw) {
@@ -492,6 +520,7 @@ function timingReport(options, timings, totalMs, browserEvidence) {
   return Object.freeze({
     kind: "browsergrad-real-world-cuda-timing",
     version: 1,
+    verificationScope: options.verificationScope,
     bundle: options.bundle,
     selectedCorpora: options.only.length === 0
       ? cudaLiteCorpora.map((corpus) => corpus.id)
