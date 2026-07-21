@@ -19,17 +19,12 @@ import {
 } from "./cpp_cute_frontend_provenance.js";
 import { unwrapVerifiedCppCuteAotRunnerReceipt } from "./cpp_cute_aot_receipt.js";
 import {
-  unwrapObservedCppCuteBrowserLayoutCandidate,
-  type ObservedCppCuteBrowserLayoutCandidate,
-} from "./cpp_cute_browser_layout_candidate.js";
-import {
-  unwrapVerifiedCppCuteBrowserBuildProducer,
   type VerifiedCppCuteBrowserBuildProducer,
 } from "./cpp_cute_browser_producer_trust.js";
-import { unwrapVerifiedCppCuteBrowserBuildSignatureBinding } from
-  "./cpp_cute_browser_build_provenance.js";
-import { unwrapValidatedCppCuteBrowserWorkerResultFrame } from
-  "./cpp_cute_browser_worker_protocol.js";
+import type { ObservedCppCuteBrowserSemanticCandidate } from
+  "./cpp_cute_browser_semantic_candidate.js";
+import { verifyCppCuteBrowserSemanticCandidateProducerBinding } from
+  "./cpp_cute_browser_semantic_authorization.js";
 
 declare const authorizedArtifactBrand: unique symbol;
 
@@ -67,7 +62,7 @@ export type CppCuteFrontendAuthorizationEvidence =
   | {
       readonly kind: "browser-worker-build-producer";
       readonly authority: {
-        readonly candidate: ObservedCppCuteBrowserLayoutCandidate;
+        readonly candidate: ObservedCppCuteBrowserSemanticCandidate;
         readonly producer: VerifiedCppCuteBrowserBuildProducer;
       };
       readonly requestBinding: PreparedCppCuteFrontendRequestBinding;
@@ -86,7 +81,7 @@ export interface AuthorizeAotCppCuteFrontendArtifactRequest {
 }
 
 export interface IssueBrowserCppCuteFrontendArtifactAuthorizationRequest {
-  readonly candidate: ObservedCppCuteBrowserLayoutCandidate;
+  readonly candidate: ObservedCppCuteBrowserSemanticCandidate;
   readonly producer: VerifiedCppCuteBrowserBuildProducer;
   readonly evidenceHash: string;
 }
@@ -169,13 +164,9 @@ export function issueBrowserCppCuteFrontendArtifactAuthorization(
   const candidate = request.candidate;
   const producer = request.producer;
   const evidenceHash = request.evidenceHash;
-  const candidateRecord = unwrapObservedCppCuteBrowserLayoutCandidate(candidate);
-  const producerRecord = unwrapVerifiedCppCuteBrowserBuildProducer(producer);
-  const signatureRecord = unwrapVerifiedCppCuteBrowserBuildSignatureBinding(
-    producerRecord.signatureBinding,
-  );
-  const frameRecord = unwrapValidatedCppCuteBrowserWorkerResultFrame(
-    candidateRecord.validatedResultFrame,
+  const { candidateRecord } = verifyCppCuteBrowserSemanticCandidateProducerBinding(
+    candidate,
+    producer,
   );
   const artifact = candidateRecord.artifact;
   const profile = candidateRecord.profile;
@@ -198,12 +189,7 @@ export function issueBrowserCppCuteFrontendArtifactAuthorization(
       "browser authorization requires the exact artifact, request binding, and prepared profile chain",
     );
   }
-  if (frameRecord.artifact !== artifact ||
-      frameRecord.profile !== profile ||
-      frameRecord.requestBinding !== requestBinding ||
-      signatureRecord.profile !== profile ||
-      signatureRecord.assetManifest !== frameRecord.assetManifest ||
-      candidate.profileHash !== producer.profileHash ||
+  if (candidate.profileHash !== producer.profileHash ||
       producer.producerTrusted !== true ||
       producer.distributionAuthorized !== false ||
       producer.releaseReady !== false) {

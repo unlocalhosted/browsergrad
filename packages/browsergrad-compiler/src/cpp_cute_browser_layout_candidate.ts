@@ -3,27 +3,16 @@ import {
   type WireU64,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
-  unwrapObservedCppCuteBrowserWorkerExecution,
   type ObservedCppCuteBrowserWorkerExecution,
 } from "./cpp_cute_browser_worker_controller.js";
 import {
-  unwrapValidatedCppCuteBrowserWorkerResultFrame,
-  type ValidatedCppCuteBrowserWorkerResultFrame,
-} from "./cpp_cute_browser_worker_protocol.js";
-import {
-  unwrapPreparedCppCuteBrowserFrontendProfile,
-  type PreparedCppCuteFrontendProfile,
-} from "./cpp_cute_frontend_profile.js";
-import {
-  unwrapPreparedCppCuteFrontendRequestBinding,
-  type PreparedCppCuteFrontendRequestBinding,
-} from "./cpp_cute_frontend_request_binding.js";
-import type { VerifiedCppCuteFrontendArtifact } from "./cpp_cute_frontend_artifact.js";
-import {
-  inspectObservedCppCuteBrowserPackageWasmConformance,
-  unwrapObservedCppCuteBrowserPackageWasmConformance,
-  type ObservedCppCuteBrowserPackageWasmConformance,
-} from "./cpp_cute_browser_wasm_verifier_controller.js";
+  CppCuteBrowserSemanticCandidateError,
+  authenticateObservedCppCuteBrowserSemanticSubject,
+  registerObservedCppCuteBrowserSemanticCandidate,
+  unwrapObservedCppCuteBrowserSemanticSubject,
+  type ObservedCppCuteBrowserSemanticCandidate,
+  type ObservedCppCuteBrowserSemanticCandidateRecord,
+} from "./cpp_cute_browser_semantic_candidate.js";
 import {
   prepareVerifiedCppCuteLayoutSemantics,
   type LowerAuthorizedCppCuteLayoutEntryOptions,
@@ -50,7 +39,7 @@ declare const observedLayoutCandidateBrand: unique symbol;
  * build-producer trust, common lowering, backend execution, and release are
  * deliberately false.
  */
-export interface ObservedCppCuteBrowserLayoutCandidate {
+export interface ObservedCppCuteBrowserLayoutCandidate extends ObservedCppCuteBrowserSemanticCandidate {
   readonly [observedLayoutCandidateBrand]: true;
   readonly authority: "observed-browser-worker-layout-semantic-candidate";
   readonly candidateId: string;
@@ -76,13 +65,8 @@ export interface ObservedCppCuteBrowserLayoutCandidate {
   readonly releaseReady: false;
 }
 
-export interface ObservedCppCuteBrowserLayoutCandidateRecord {
-  readonly execution: ObservedCppCuteBrowserWorkerExecution;
-  readonly validatedResultFrame: ValidatedCppCuteBrowserWorkerResultFrame;
-  readonly artifact: VerifiedCppCuteFrontendArtifact;
-  readonly profile: PreparedCppCuteFrontendProfile;
-  readonly requestBinding: PreparedCppCuteFrontendRequestBinding;
-  readonly observedWasmConformance: ObservedCppCuteBrowserPackageWasmConformance;
+export interface ObservedCppCuteBrowserLayoutCandidateRecord
+  extends ObservedCppCuteBrowserSemanticCandidateRecord {
   readonly semantics: PreparedVerifiedCppCuteLayoutSemantics;
   readonly commonLoweringAuthorized: false;
   readonly backendExecutionAuthorized: false;
@@ -123,73 +107,16 @@ export async function prepareObservedCppCuteBrowserLayoutCandidate(
 ): Promise<ObservedCppCuteBrowserLayoutCandidate> {
   const initialSignal = inspectCandidateSignal(options);
   throwIfAborted(initialSignal);
-  let executionRecord: ReturnType<typeof unwrapObservedCppCuteBrowserWorkerExecution>;
-  let frameRecord: ReturnType<typeof unwrapValidatedCppCuteBrowserWorkerResultFrame>;
-  let verifierInspection: ReturnType<
-    typeof inspectObservedCppCuteBrowserPackageWasmConformance
-  >;
+  let subject: ReturnType<typeof authenticateObservedCppCuteBrowserSemanticSubject>;
+  let subjectRecord: ReturnType<typeof unwrapObservedCppCuteBrowserSemanticSubject>;
   try {
-    executionRecord = unwrapObservedCppCuteBrowserWorkerExecution(execution);
-    frameRecord = unwrapValidatedCppCuteBrowserWorkerResultFrame(
-      executionRecord.validatedResultFrame,
-    );
-    verifierInspection = inspectObservedCppCuteBrowserPackageWasmConformance(
-      executionRecord.packageInvocationLineage.observedWasmConformance,
-    );
-    unwrapObservedCppCuteBrowserPackageWasmConformance(
-      executionRecord.packageInvocationLineage.observedWasmConformance,
-    );
+    subject = authenticateObservedCppCuteBrowserSemanticSubject(execution);
+    subjectRecord = unwrapObservedCppCuteBrowserSemanticSubject(subject);
   } catch (cause) {
-    unverified("$.execution", "expected the exact host-observed Worker authority chain", cause);
+    translateSemanticCandidateError(cause);
   }
-  const lineage = executionRecord.packageInvocationLineage;
-  const invocation = lineage.invocation;
-  const artifact = frameRecord.artifact;
-  const profile = frameRecord.profile;
-  const requestBinding = frameRecord.requestBinding;
-  const binding = unwrapPreparedCppCuteFrontendRequestBinding(requestBinding);
-  unwrapPreparedCppCuteBrowserFrontendProfile(profile);
-  if (executionRecord.productionAuthority !== true ||
-      execution.authority !== "host-owned-browser-worker-execution" ||
-      execution.workerExecutionObserved !== true ||
-      execution.acceptedTerminalMessages !== "1" ||
-      execution.loweringAuthorityMinted !== false ||
-      execution.releaseReady !== false ||
-      execution.invocationId !== invocation.invocationId ||
-      execution.profileHash !== invocation.profileHash ||
-      execution.requestId !== invocation.requestId ||
-      execution.workerModuleSha256 !== invocation.worker.moduleSha256 ||
-      execution.invocationNonceSha256 !== invocation.invocationNonceSha256 ||
-      execution.verifierEvidenceRegionSha256 !== lineage.verifierEvidenceRegionSha256 ||
-      executionRecord.validatedPackageResult.validationId !==
-        executionRecord.validatedResultFrame.validationId ||
-      executionRecord.validatedResultFrame.invocationId !== invocation.invocationId ||
-      executionRecord.validatedResultFrame.requestId !== invocation.requestId ||
-      frameRecord.profile.profileHash !== invocation.profileHash ||
-      frameRecord.requestBinding.requestId !== invocation.requestId ||
-      frameRecord.requestBinding.bindingId !== executionRecord.validatedResultFrame.requestBindingId ||
-      frameRecord.artifact.artifactId !== executionRecord.validatedResultFrame.artifactId ||
-      frameRecord.artifact.artifactBytesSha256 !==
-        executionRecord.validatedResultFrame.artifactBytesSha256 ||
-      frameRecord.artifact.outcome !== executionRecord.validatedResultFrame.outcome ||
-      binding.artifact !== artifact ||
-      binding.request.profileHash !== profile.profileHash ||
-      verifierInspection.evidenceId !== lineage.verifierEvidenceId ||
-      verifierInspection.productionConformanceAuthorityMinted !== true ||
-      verifierInspection.verifierWorkerExecutionObserved !== true ||
-      verifierInspection.rawWasmVerified !== true ||
-      verifierInspection.exactInterfaceConformanceObserved !== true ||
-      verifierInspection.compilerWorkerExecutionObserved !== false ||
-      verifierInspection.loweringAuthorityMinted !== false ||
-      verifierInspection.releaseReady !== false) {
-    mismatch(
-      "$.execution",
-      "Worker execution, verifier, frame, request binding, and artifact are not one exact authority chain",
-    );
-  }
-  if (artifact.outcome !== "accepted") {
-    mismatch("$.artifact.outcome", "rejected Worker artifacts cannot become layout candidates");
-  }
+  const artifact = subjectRecord.artifact;
+  const requestBinding = subjectRecord.requestBinding;
   throwIfAborted(options.signal);
   const semantics = await prepareVerifiedCppCuteLayoutSemantics(artifact, request, options);
   throwIfAborted(options.signal);
@@ -234,17 +161,10 @@ export async function prepareObservedCppCuteBrowserLayoutCandidate(
     releaseReady: false,
   }) as ObservedCppCuteBrowserLayoutCandidate;
   weakMapSet(CANDIDATES, candidate, NATIVE_OBJECT_FREEZE({
-    execution,
-    validatedResultFrame: executionRecord.validatedResultFrame,
-    artifact,
-    profile,
-    requestBinding,
-    observedWasmConformance: lineage.observedWasmConformance,
+    ...subjectRecord,
     semantics,
-    commonLoweringAuthorized: false,
-    backendExecutionAuthorized: false,
-    releaseReady: false,
   }));
+  registerObservedCppCuteBrowserSemanticCandidate(candidate, subject);
   return candidate;
 }
 
@@ -300,6 +220,14 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
       "observed Worker layout candidate preparation was cancelled",
     );
   }
+}
+
+function translateSemanticCandidateError(cause: unknown): never {
+  if (cause instanceof CppCuteBrowserSemanticCandidateError) {
+    if (cause.kind === "subject-mismatch") mismatch(cause.path, cause.message);
+    unverified(cause.path, cause.message, cause);
+  }
+  unverified("$.execution", "expected the exact host-observed Worker authority chain", cause);
 }
 
 function mismatch(path: string, message: string): never {

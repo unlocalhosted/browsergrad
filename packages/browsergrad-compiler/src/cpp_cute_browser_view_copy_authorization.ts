@@ -1,11 +1,10 @@
 import { hashCanonicalJson } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
-  unwrapObservedCppCuteBrowserLayoutCandidate,
-  type ObservedCppCuteBrowserLayoutCandidate,
-} from "./cpp_cute_browser_layout_candidate.js";
-import {
-  type VerifiedCppCuteBrowserBuildProducer,
-} from "./cpp_cute_browser_producer_trust.js";
+  unwrapObservedCppCuteBrowserViewCopyCandidate,
+  type ObservedCppCuteBrowserViewCopyCandidate,
+} from "./cpp_cute_browser_view_copy_candidate.js";
+import type { VerifiedCppCuteBrowserBuildProducer } from
+  "./cpp_cute_browser_producer_trust.js";
 import {
   CppCuteBrowserSemanticAuthorizationError,
   verifyCppCuteBrowserSemanticCandidateProducerBinding,
@@ -28,21 +27,13 @@ const NATIVE_WEAK_MAP_SET = WeakMap.prototype.set;
 const ABORT_SIGNAL_ABORTED_GETTER = typeof AbortSignal === "undefined"
   ? undefined
   : Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")?.get;
-const AUTHORIZATIONS = new CAPTURED_WEAK_MAP<
-  object,
-  AuthorizedCppCuteBrowserLayoutArtifactRecord
->();
 
-declare const authorizedBrowserLayoutArtifactBrand: unique symbol;
+declare const authorizedBrowserViewCopyArtifactBrand: unique symbol;
 
-/**
- * Local semantic-lowering authority for one exact observed Worker artifact and
- * one independently admitted build producer. It grants no backend,
- * distribution, or release authority.
- */
-export interface AuthorizedCppCuteBrowserLayoutArtifact {
-  readonly [authorizedBrowserLayoutArtifactBrand]: true;
-  readonly authority: "browser-worker-layout-local-semantic-authorization";
+/** Local lowering authority for one source-derived view-copy; no storage or backend authority. */
+export interface AuthorizedCppCuteBrowserViewCopyArtifact {
+  readonly [authorizedBrowserViewCopyArtifactBrand]: true;
+  readonly authority: "browser-worker-view-copy-local-semantic-authorization";
   readonly authorizationId: string;
   readonly candidateId: string;
   readonly producerEvidenceId: string;
@@ -52,7 +43,7 @@ export interface AuthorizedCppCuteBrowserLayoutArtifact {
   readonly requestId: string;
   readonly requestBindingId: string;
   readonly entryId: string;
-  readonly layoutSemanticHash: string;
+  readonly entrySubjectHash: string;
   readonly workerExecutionObserved: true;
   readonly producerTrusted: true;
   readonly localSemanticLoweringAuthorized: true;
@@ -61,8 +52,8 @@ export interface AuthorizedCppCuteBrowserLayoutArtifact {
   readonly releaseReady: false;
 }
 
-export interface AuthorizedCppCuteBrowserLayoutArtifactRecord {
-  readonly candidate: ObservedCppCuteBrowserLayoutCandidate;
+export interface AuthorizedCppCuteBrowserViewCopyArtifactRecord {
+  readonly candidate: ObservedCppCuteBrowserViewCopyCandidate;
   readonly producer: VerifiedCppCuteBrowserBuildProducer;
   readonly authorization: AuthorizedCppCuteFrontendArtifact;
   readonly backendExecutionAuthorized: false;
@@ -70,39 +61,44 @@ export interface AuthorizedCppCuteBrowserLayoutArtifactRecord {
   readonly releaseReady: false;
 }
 
-export interface AuthorizeCppCuteBrowserLayoutArtifactOptions {
+export interface AuthorizeCppCuteBrowserViewCopyArtifactOptions {
   readonly signal?: AbortSignal;
 }
 
-export type CppCuteBrowserLayoutAuthorizationErrorCode =
-  | "BG-COMPILER-CPP-CUTE-BROWSER-LAYOUT-AUTHORIZATION-CANCELLED"
-  | "BG-COMPILER-CPP-CUTE-BROWSER-LAYOUT-AUTHORIZATION-SUBJECT-MISMATCH"
-  | "BG-COMPILER-CPP-CUTE-BROWSER-LAYOUT-AUTHORIZATION-UNVERIFIED";
+export type CppCuteBrowserViewCopyAuthorizationErrorCode =
+  | "BG-COMPILER-CPP-CUTE-BROWSER-VIEW-COPY-AUTHORIZATION-CANCELLED"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-VIEW-COPY-AUTHORIZATION-SUBJECT-MISMATCH"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-VIEW-COPY-AUTHORIZATION-UNVERIFIED";
 
-export class CppCuteBrowserLayoutAuthorizationError extends Error {
+export class CppCuteBrowserViewCopyAuthorizationError extends Error {
   constructor(
-    readonly code: CppCuteBrowserLayoutAuthorizationErrorCode,
+    readonly code: CppCuteBrowserViewCopyAuthorizationErrorCode,
     readonly path: string,
     message: string,
     options?: ErrorOptions,
   ) {
     super(`${code}: ${message}`, options);
-    this.name = "CppCuteBrowserLayoutAuthorizationError";
+    this.name = "CppCuteBrowserViewCopyAuthorizationError";
   }
 }
 
-export async function authorizeCppCuteBrowserLayoutArtifact(
-  candidate: ObservedCppCuteBrowserLayoutCandidate,
+const AUTHORIZATIONS = new CAPTURED_WEAK_MAP<
+  object,
+  AuthorizedCppCuteBrowserViewCopyArtifactRecord
+>();
+
+export async function authorizeCppCuteBrowserViewCopyArtifact(
+  candidate: ObservedCppCuteBrowserViewCopyCandidate,
   producer: VerifiedCppCuteBrowserBuildProducer,
-  options: AuthorizeCppCuteBrowserLayoutArtifactOptions = {},
-): Promise<AuthorizedCppCuteBrowserLayoutArtifact> {
+  options: AuthorizeCppCuteBrowserViewCopyArtifactOptions = {},
+): Promise<AuthorizedCppCuteBrowserViewCopyArtifact> {
   const signal = normalizeOptions(options);
   throwIfAborted(signal);
-  let candidateRecord: ReturnType<typeof unwrapObservedCppCuteBrowserLayoutCandidate>;
+  let candidateRecord: ReturnType<typeof unwrapObservedCppCuteBrowserViewCopyCandidate>;
   try {
-    candidateRecord = unwrapObservedCppCuteBrowserLayoutCandidate(candidate);
+    candidateRecord = unwrapObservedCppCuteBrowserViewCopyCandidate(candidate);
   } catch (cause) {
-    unverified("$.candidate", "candidate is not an exact observed browser layout authority", cause);
+    unverified("$.candidate", "candidate is not an exact observed browser view-copy authority", cause);
   }
   let commonBinding: ReturnType<typeof verifyCppCuteBrowserSemanticCandidateProducerBinding>;
   try {
@@ -112,27 +108,21 @@ export async function authorizeCppCuteBrowserLayoutArtifact(
   }
   const semantics = candidateRecord.semantics;
   const artifact = candidateRecord.artifact;
-
-  if (candidate.authority !== "observed-browser-worker-layout-semantic-candidate" ||
+  if (candidate.authority !== "observed-browser-worker-view-copy-semantic-candidate" ||
       candidate.workerExecutionObserved !== true ||
       candidate.artifactOutcome !== "accepted" ||
-      candidate.sharedLayoutSemanticsPrepared !== true ||
+      candidate.sharedViewCopySemanticsPrepared !== true ||
       candidate.producerTrusted !== false ||
       candidate.loweringAuthorityMinted !== false ||
       candidate.backendExecutionAuthorized !== false ||
       candidate.releaseReady !== false ||
-      candidateRecord.commonLoweringAuthorized !== false ||
-      candidateRecord.backendExecutionAuthorized !== false ||
-      candidateRecord.releaseReady !== false ||
       candidate.entryId !== semantics.entry.entryId ||
-      candidate.layoutSemanticHash !== semantics.preparedLayout.layoutSemanticHash ||
-      candidate.indexMapId !== semantics.preparedLayout.indexMapId ||
-      candidate.coordinateRank !== semantics.preparedLayout.coordinateRank ||
+      candidate.entrySubjectHash !== semantics.entrySubjectHash ||
       semantics.artifact !== artifact ||
+      semantics.loweringAuthorityMinted !== false ||
       artifact.outcome !== "accepted") {
-    mismatch("$.candidate", "candidate projection differs from its retained semantic authority chain");
+    mismatch("$.candidate", "candidate projection differs from its retained view-copy semantic authority chain");
   }
-
   if (commonBinding.candidateRecord.execution !== candidateRecord.execution ||
       commonBinding.candidateRecord.validatedResultFrame !== candidateRecord.validatedResultFrame ||
       commonBinding.candidateRecord.artifact !== candidateRecord.artifact ||
@@ -142,13 +132,12 @@ export async function authorizeCppCuteBrowserLayoutArtifact(
         candidateRecord.observedWasmConformance) {
     mismatch(
       "$.candidate",
-      "layout candidate and common browser semantic authority are not one exact lineage",
+      "view-copy candidate and common browser semantic authority are not one exact lineage",
     );
   }
-
   throwIfAborted(signal);
   const evidenceHash = await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.browser-layout-authorization.v1",
+    domain: "browsergrad.compiler.cpp-cute.browser-view-copy-authorization.v1",
     candidateId: candidate.candidateId,
     producerEvidenceId: producer.producerEvidenceId,
     executionEvidenceId: candidate.executionEvidenceId,
@@ -158,7 +147,7 @@ export async function authorizeCppCuteBrowserLayoutArtifact(
     requestId: candidate.requestId,
     requestBindingId: candidate.requestBindingId,
     entryId: candidate.entryId,
-    layoutSemanticHash: candidate.layoutSemanticHash,
+    entrySubjectHash: candidate.entrySubjectHash,
   });
   throwIfAborted(signal);
   const authorization = issueBrowserCppCuteFrontendArtifactAuthorization({
@@ -167,8 +156,8 @@ export async function authorizeCppCuteBrowserLayoutArtifact(
     evidenceHash,
   });
   const authorized = NATIVE_OBJECT_FREEZE({
-    authority: "browser-worker-layout-local-semantic-authorization",
-    authorizationId: `bg.cpp.browser-layout-authorization.sha256.${evidenceHash}`,
+    authority: "browser-worker-view-copy-local-semantic-authorization",
+    authorizationId: `bg.cpp.browser-view-copy-authorization.sha256.${evidenceHash}`,
     candidateId: candidate.candidateId,
     producerEvidenceId: producer.producerEvidenceId,
     executionEvidenceId: candidate.executionEvidenceId,
@@ -177,14 +166,14 @@ export async function authorizeCppCuteBrowserLayoutArtifact(
     requestId: candidate.requestId,
     requestBindingId: candidate.requestBindingId,
     entryId: candidate.entryId,
-    layoutSemanticHash: candidate.layoutSemanticHash,
+    entrySubjectHash: candidate.entrySubjectHash,
     workerExecutionObserved: true,
     producerTrusted: true,
     localSemanticLoweringAuthorized: true,
     backendExecutionAuthorized: false,
     distributionAuthorized: false,
     releaseReady: false,
-  }) as AuthorizedCppCuteBrowserLayoutArtifact;
+  }) as AuthorizedCppCuteBrowserViewCopyArtifact;
   weakMapSet(AUTHORIZATIONS, authorized, NATIVE_OBJECT_FREEZE({
     candidate,
     producer,
@@ -196,41 +185,32 @@ export async function authorizeCppCuteBrowserLayoutArtifact(
   return authorized;
 }
 
-export function unwrapAuthorizedCppCuteBrowserLayoutArtifact(
-  authorized: AuthorizedCppCuteBrowserLayoutArtifact,
-): AuthorizedCppCuteBrowserLayoutArtifactRecord {
-  if (typeof authorized !== "object" || authorized === null) unverified("$", "expected opaque browser layout authorization");
+export function unwrapAuthorizedCppCuteBrowserViewCopyArtifact(
+  authorized: AuthorizedCppCuteBrowserViewCopyArtifact,
+): AuthorizedCppCuteBrowserViewCopyArtifactRecord {
+  if (typeof authorized !== "object" || authorized === null) {
+    unverified("$", "expected opaque browser view-copy authorization");
+  }
   const record = weakMapGet(AUTHORIZATIONS, authorized as object);
-  if (record === undefined) unverified("$", "browser layout authorization was not issued by this module instance");
+  if (record === undefined) {
+    unverified("$", "browser view-copy authorization was not issued by this module instance");
+  }
   return record;
 }
 
-function normalizeOptions(options: AuthorizeCppCuteBrowserLayoutArtifactOptions): AbortSignal | undefined {
-  if (typeof options !== "object" || options === null) {
-    mismatch("$.options", "options must be a plain data record");
-  }
+function normalizeOptions(options: AuthorizeCppCuteBrowserViewCopyArtifactOptions): AbortSignal | undefined {
+  if (typeof options !== "object" || options === null) mismatch("$.options", "options must be a plain data record");
   let prototype: object | null;
   let descriptors: PropertyDescriptorMap;
   let keys: readonly PropertyKey[];
   try {
-    prototype = NATIVE_REFLECT_APPLY(
-      NATIVE_OBJECT_GET_PROTOTYPE_OF,
-      CAPTURED_OBJECT,
-      [options],
-    ) as object | null;
-    descriptors = NATIVE_REFLECT_APPLY(
-      NATIVE_OBJECT_GET_OWN_PROPERTY_DESCRIPTORS,
-      CAPTURED_OBJECT,
-      [options],
-    ) as PropertyDescriptorMap;
-    keys = NATIVE_REFLECT_APPLY(NATIVE_REFLECT_OWN_KEYS, CAPTURED_REFLECT, [descriptors]) as
-      readonly PropertyKey[];
+    prototype = NATIVE_REFLECT_APPLY(NATIVE_OBJECT_GET_PROTOTYPE_OF, CAPTURED_OBJECT, [options]) as object | null;
+    descriptors = NATIVE_REFLECT_APPLY(NATIVE_OBJECT_GET_OWN_PROPERTY_DESCRIPTORS, CAPTURED_OBJECT, [options]) as PropertyDescriptorMap;
+    keys = NATIVE_REFLECT_APPLY(NATIVE_REFLECT_OWN_KEYS, CAPTURED_REFLECT, [descriptors]) as readonly PropertyKey[];
   } catch (cause) {
     unverified("$.options", "options could not be inspected without invoking accessors", cause);
   }
-  if (prototype !== CAPTURED_OBJECT.prototype) {
-    mismatch("$.options", "options must be a plain data record");
-  }
+  if (prototype !== CAPTURED_OBJECT.prototype) mismatch("$.options", "options must be a plain data record");
   if (keys.some((key) => key !== "signal")) mismatch("$.options", "options contain unknown fields");
   const descriptor = descriptors.signal;
   if (descriptor === undefined) return undefined;
@@ -264,10 +244,10 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
         signal,
         [],
       ) === true) {
-    throw new CppCuteBrowserLayoutAuthorizationError(
-      "BG-COMPILER-CPP-CUTE-BROWSER-LAYOUT-AUTHORIZATION-CANCELLED",
+    throw new CppCuteBrowserViewCopyAuthorizationError(
+      "BG-COMPILER-CPP-CUTE-BROWSER-VIEW-COPY-AUTHORIZATION-CANCELLED",
       "$.signal",
-      "browser layout authorization was cancelled",
+      "browser view-copy authorization was cancelled",
     );
   }
 }
@@ -281,16 +261,16 @@ function translateSemanticAuthorizationError(cause: unknown): never {
 }
 
 function mismatch(path: string, message: string): never {
-  throw new CppCuteBrowserLayoutAuthorizationError(
-    "BG-COMPILER-CPP-CUTE-BROWSER-LAYOUT-AUTHORIZATION-SUBJECT-MISMATCH",
+  throw new CppCuteBrowserViewCopyAuthorizationError(
+    "BG-COMPILER-CPP-CUTE-BROWSER-VIEW-COPY-AUTHORIZATION-SUBJECT-MISMATCH",
     path,
     message,
   );
 }
 
 function unverified(path: string, message: string, cause?: unknown): never {
-  throw new CppCuteBrowserLayoutAuthorizationError(
-    "BG-COMPILER-CPP-CUTE-BROWSER-LAYOUT-AUTHORIZATION-UNVERIFIED",
+  throw new CppCuteBrowserViewCopyAuthorizationError(
+    "BG-COMPILER-CPP-CUTE-BROWSER-VIEW-COPY-AUTHORIZATION-UNVERIFIED",
     path,
     message,
     cause === undefined ? undefined : { cause },

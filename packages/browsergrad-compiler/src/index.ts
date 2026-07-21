@@ -302,3 +302,22 @@ export {
   type LowerAuthorizedCppCuteViewCopyEntryOptions,
   type LowerAuthorizedCppCuteViewCopyEntryRequest,
 } from "./cpp_cute_view_copy_lowering.js";
+export {
+  CppCuteBrowserViewCopyCandidateError,
+  prepareObservedCppCuteBrowserViewCopyCandidate,
+  unwrapObservedCppCuteBrowserViewCopyCandidate,
+  type CppCuteBrowserViewCopyCandidateErrorCode,
+  type ObservedCppCuteBrowserViewCopyCandidate,
+  type ObservedCppCuteBrowserViewCopyCandidateRecord,
+  type PrepareObservedCppCuteBrowserViewCopyCandidateOptions,
+  type PrepareObservedCppCuteBrowserViewCopyCandidateRequest,
+} from "./cpp_cute_browser_view_copy_candidate.js";
+export {
+  CppCuteBrowserViewCopyAuthorizationError,
+  authorizeCppCuteBrowserViewCopyArtifact,
+  unwrapAuthorizedCppCuteBrowserViewCopyArtifact,
+  type AuthorizeCppCuteBrowserViewCopyArtifactOptions,
+  type AuthorizedCppCuteBrowserViewCopyArtifact,
+  type AuthorizedCppCuteBrowserViewCopyArtifactRecord,
+  type CppCuteBrowserViewCopyAuthorizationErrorCode,
+} from "./cpp_cute_browser_view_copy_authorization.js";

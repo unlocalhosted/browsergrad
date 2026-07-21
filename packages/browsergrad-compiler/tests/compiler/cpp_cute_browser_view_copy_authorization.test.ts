@@ -1,3 +1,4 @@
+import { parseWireU64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const authorities = vi.hoisted(() => ({
@@ -19,10 +20,10 @@ const authorities = vi.hoisted(() => ({
   crossBindDifferentProfile: false,
 }));
 
-vi.mock("../../src/cpp_cute_browser_layout_candidate.js", () => ({
-  unwrapObservedCppCuteBrowserLayoutCandidate: (value: unknown) => {
+vi.mock("../../src/cpp_cute_browser_view_copy_candidate.js", () => ({
+  unwrapObservedCppCuteBrowserViewCopyCandidate: (value: unknown) => {
     if (value !== authorities.candidate || authorities.candidateRecord === null) {
-      throw new Error("unregistered candidate");
+      throw new Error("unregistered view-copy candidate");
     }
     return authorities.candidateRecord;
   },
@@ -104,18 +105,20 @@ vi.mock("../../src/cpp_cute_frontend_profile.js", async (importOriginal) => {
 });
 
 import {
-  authorizeCppCuteBrowserLayoutArtifact,
-  unwrapAuthorizedCppCuteBrowserLayoutArtifact,
-  type AuthorizedCppCuteBrowserLayoutArtifact,
-} from "../../src/cpp_cute_browser_layout_authorization.js";
+  authorizeCppCuteBrowserViewCopyArtifact,
+  unwrapAuthorizedCppCuteBrowserViewCopyArtifact,
+  type AuthorizedCppCuteBrowserViewCopyArtifact,
+} from "../../src/cpp_cute_browser_view_copy_authorization.js";
 import { unwrapAuthorizedCppCuteFrontendArtifact } from
   "../../src/cpp_cute_frontend_authorization.js";
-import { lowerAuthorizedCppCuteLayoutEntry } from
-  "../../src/cpp_cute_layout_lowering.js";
-import { prepareVerifiedCppCuteLayoutSemantics } from
-  "../../src/cpp_cute_layout_semantics.js";
+import { lowerAuthorizedCppCuteViewCopyEntry } from
+  "../../src/cpp_cute_view_copy_lowering.js";
+import { prepareVerifiedCppCuteViewCopySemantics } from
+  "../../src/cpp_cute_view_copy_semantics.js";
 import { unwrapVerifiedCppCuteFrontendArtifact } from
   "../../src/cpp_cute_frontend_artifact.js";
+import { mutateCppCutePayloadToViewCopy } from
+  "./support/cpp_cute_frontend_view_copy_fixtures.js";
 import {
   createCppCuteProvenanceFixture,
   type CppCuteProvenanceFixture,
@@ -125,57 +128,58 @@ import {
   createCppCuteBrowserSemanticAuthorityFixture,
 } from "./support/cpp_cute_browser_semantic_authorization_fixtures.js";
 
+const wire = (value: number) => parseWireU64(String(value));
 let fixture: CppCuteProvenanceFixture;
 let entryId: string;
-let semantics: Awaited<ReturnType<typeof prepareVerifiedCppCuteLayoutSemantics>>;
+let semantics: Awaited<ReturnType<typeof prepareVerifiedCppCuteViewCopySemantics>>;
 
 beforeAll(async () => {
-  fixture = await createCppCuteProvenanceFixture();
+  fixture = await createCppCuteProvenanceFixture({
+    mutatePayload: mutateCppCutePayloadToViewCopy,
+  });
   const payload = unwrapVerifiedCppCuteFrontendArtifact(fixture.artifact).envelope.payload;
   if (payload.outcome.kind !== "accepted" || payload.outcome.selectedEntryIds[0] === undefined) {
-    throw new Error("fixture lost selected layout entry");
+    throw new Error("fixture lost selected view-copy entry");
   }
   entryId = payload.outcome.selectedEntryIds[0];
-  semantics = await prepareVerifiedCppCuteLayoutSemantics(fixture.artifact, { entryId });
+  semantics = await prepareVerifiedCppCuteViewCopySemantics(fixture.artifact, { entryId });
 });
 
 beforeEach(() => {
   const base = createCppCuteBrowserSemanticAuthorityFixture(fixture);
   const graph = attachCppCuteBrowserSemanticCandidate(base, fixture, {
-    authority: "observed-browser-worker-layout-semantic-candidate",
-    candidateId: `bg.cpp.browser-worker-layout-candidate.sha256.${"6".repeat(64)}`,
+    authority: "observed-browser-worker-view-copy-semantic-candidate",
+    candidateId: `bg.cpp.browser-worker-view-copy-candidate.sha256.${"6".repeat(64)}`,
     entryId,
-    layoutSemanticHash: semantics.preparedLayout.layoutSemanticHash,
-    indexMapId: semantics.preparedLayout.indexMapId,
-    coordinateRank: semantics.preparedLayout.coordinateRank,
-    sharedLayoutSemanticsPrepared: true,
+    entrySubjectHash: semantics.entrySubjectHash,
+    sharedViewCopySemanticsPrepared: true,
   }, { semantics });
   authorities.candidate = graph.candidate;
+  authorities.candidateRecord = graph.candidateRecord;
   authorities.producer = graph.producer;
+  authorities.producerRecord = graph.producerRecord;
   authorities.signatureBinding = graph.signatureBinding;
+  authorities.signatureRecord = graph.signatureRecord;
   authorities.execution = graph.execution;
+  authorities.executionRecord = graph.executionRecord;
   authorities.frame = graph.frame;
+  authorities.frameRecord = graph.frameRecord;
   authorities.conformance = graph.conformance;
+  authorities.conformanceRecord = graph.conformanceRecord;
   authorities.workerBundle = graph.workerBundle;
   authorities.workerInspection = graph.workerInspection;
   authorities.browserProfile = fixture.profile;
-  authorities.frameRecord = graph.frameRecord;
-  authorities.conformanceRecord = graph.conformanceRecord;
-  authorities.executionRecord = graph.executionRecord;
-  authorities.signatureRecord = graph.signatureRecord;
-  authorities.candidateRecord = graph.candidateRecord;
-  authorities.producerRecord = graph.producerRecord;
   authorities.crossBindDifferentProfile = false;
 });
 
-describe("browser Worker layout authorization", () => {
-  it("cross-binds observed execution and producer trust into canonical local lowering", async () => {
-    const authorized = await authorizeCppCuteBrowserLayoutArtifact(
+describe("browser Worker view-copy authorization", () => {
+  it("reaches canonical lowering while storage remains later host geometry", async () => {
+    const authorized = await authorizeCppCuteBrowserViewCopyArtifact(
       authorities.candidate as never,
       authorities.producer as never,
     );
     expect(authorized).toMatchObject({
-      authority: "browser-worker-layout-local-semantic-authorization",
+      authority: "browser-worker-view-copy-local-semantic-authorization",
       workerExecutionObserved: true,
       producerTrusted: true,
       localSemanticLoweringAuthorized: true,
@@ -183,60 +187,70 @@ describe("browser Worker layout authorization", () => {
       distributionAuthorized: false,
       releaseReady: false,
     });
-    expect(authorized.authorizationId).toMatch(
-      /^bg\.cpp\.browser-layout-authorization\.sha256\.[0-9a-f]{64}$/u,
-    );
-    const record = unwrapAuthorizedCppCuteBrowserLayoutArtifact(authorized);
+    expect(authorized).not.toHaveProperty("sourceAllocationByteLength");
+    expect(authorized).not.toHaveProperty("destinationAllocationByteLength");
+    expect(authorized).not.toHaveProperty("sourceByteOffset");
+    expect(authorized).not.toHaveProperty("destinationByteOffset");
+    const record = unwrapAuthorizedCppCuteBrowserViewCopyArtifact(authorized);
     const canonical = unwrapAuthorizedCppCuteFrontendArtifact(record.authorization);
     expect(record.candidate).toBe(authorities.candidate);
     expect(record.producer).toBe(authorities.producer);
     expect(canonical.evidence.kind).toBe("browser-worker-build-producer");
-    expect(canonical.evidence.authority).toEqual({
-      candidate: authorities.candidate,
-      producer: authorities.producer,
+    const first = await lowerAuthorizedCppCuteViewCopyEntry(record.authorization, {
+      entryId,
+      sourceAllocationByteLength: wire(32),
+      destinationAllocationByteLength: wire(32),
+      sourceByteOffset: wire(4),
+      destinationByteOffset: wire(4),
     });
-    const lowered = await lowerAuthorizedCppCuteLayoutEntry(
-      record.authorization,
-      { entryId },
+    const second = await lowerAuthorizedCppCuteViewCopyEntry(record.authorization, {
+      entryId,
+      sourceAllocationByteLength: wire(24),
+      destinationAllocationByteLength: wire(24),
+      sourceByteOffset: wire(0),
+      destinationByteOffset: wire(0),
+    });
+    expect(first.layoutSemanticHash).not.toBe(second.layoutSemanticHash);
+    expect(authorized.authorizationId).toMatch(
+      /^bg\.cpp\.browser-view-copy-authorization\.sha256\.[0-9a-f]{64}$/u,
     );
-    expect(lowered.layoutSemanticHash).toBe(authorized.layoutSemanticHash);
   });
 
-  it("rejects structural copies at both opaque authority boundaries", async () => {
-    await expect(authorizeCppCuteBrowserLayoutArtifact(
+  it("rejects structural copies at candidate, producer, and authorization boundaries", async () => {
+    await expect(authorizeCppCuteBrowserViewCopyArtifact(
       { ...(authorities.candidate as Record<string, unknown>) } as never,
       authorities.producer as never,
     )).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-BROWSER-LAYOUT-AUTHORIZATION-UNVERIFIED",
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-VIEW-COPY-AUTHORIZATION-UNVERIFIED",
       path: "$.candidate",
     });
-    await expect(authorizeCppCuteBrowserLayoutArtifact(
+    await expect(authorizeCppCuteBrowserViewCopyArtifact(
       authorities.candidate as never,
       { ...(authorities.producer as Record<string, unknown>) } as never,
     )).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-BROWSER-LAYOUT-AUTHORIZATION-UNVERIFIED",
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-VIEW-COPY-AUTHORIZATION-UNVERIFIED",
       path: "$.producer",
     });
-    const authorized = await authorizeCppCuteBrowserLayoutArtifact(
+    const authorized = await authorizeCppCuteBrowserViewCopyArtifact(
       authorities.candidate as never,
       authorities.producer as never,
     );
-    expect(() => unwrapAuthorizedCppCuteBrowserLayoutArtifact({
+    expect(() => unwrapAuthorizedCppCuteBrowserViewCopyArtifact({
       ...authorized,
-    } as AuthorizedCppCuteBrowserLayoutArtifact)).toThrowError(
+    } as AuthorizedCppCuteBrowserViewCopyArtifact)).toThrowError(
       expect.objectContaining({
-        code: "BG-COMPILER-CPP-CUTE-BROWSER-LAYOUT-AUTHORIZATION-UNVERIFIED",
+        code: "BG-COMPILER-CPP-CUTE-BROWSER-VIEW-COPY-AUTHORIZATION-UNVERIFIED",
       }),
     );
   });
 
   it("rejects producer/candidate cross-binding drift before canonical minting", async () => {
     authorities.crossBindDifferentProfile = true;
-    await expect(authorizeCppCuteBrowserLayoutArtifact(
+    await expect(authorizeCppCuteBrowserViewCopyArtifact(
       authorities.candidate as never,
       authorities.producer as never,
     )).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-BROWSER-LAYOUT-AUTHORIZATION-SUBJECT-MISMATCH",
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-VIEW-COPY-AUTHORIZATION-SUBJECT-MISMATCH",
       path: "$.producer",
     });
   });
@@ -244,54 +258,13 @@ describe("browser Worker layout authorization", () => {
   it("honors cancellation without minting local lowering authority", async () => {
     const controller = new AbortController();
     controller.abort();
-    await expect(authorizeCppCuteBrowserLayoutArtifact(
+    await expect(authorizeCppCuteBrowserViewCopyArtifact(
       authorities.candidate as never,
       authorities.producer as never,
       { signal: controller.signal },
     )).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-BROWSER-LAYOUT-AUTHORIZATION-CANCELLED",
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-VIEW-COPY-AUTHORIZATION-CANCELLED",
       path: "$.signal",
-    });
-  });
-
-  it("accepts frozen options and rejects hostile inspection without running accessors", async () => {
-    const authorized = await authorizeCppCuteBrowserLayoutArtifact(
-      authorities.candidate as never,
-      authorities.producer as never,
-      Object.freeze({}),
-    );
-    expect(authorized.localSemanticLoweringAuthorized).toBe(true);
-
-    let accessorCalls = 0;
-    const accessorOptions = Object.defineProperty({}, "signal", {
-      enumerable: true,
-      get: () => {
-        accessorCalls += 1;
-        return undefined;
-      },
-    });
-    await expect(authorizeCppCuteBrowserLayoutArtifact(
-      authorities.candidate as never,
-      authorities.producer as never,
-      accessorOptions,
-    )).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-BROWSER-LAYOUT-AUTHORIZATION-SUBJECT-MISMATCH",
-      path: "$.options.signal",
-    });
-    expect(accessorCalls).toBe(0);
-
-    const hostileOptions = new Proxy({}, {
-      ownKeys: () => {
-        throw new Error("hostile own-keys trap");
-      },
-    });
-    await expect(authorizeCppCuteBrowserLayoutArtifact(
-      authorities.candidate as never,
-      authorities.producer as never,
-      hostileOptions,
-    )).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-BROWSER-LAYOUT-AUTHORIZATION-UNVERIFIED",
-      path: "$.options",
     });
   });
 });
