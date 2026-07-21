@@ -26,6 +26,10 @@ Each package follows independent [SemVer](https://semver.org/).
   typed unary semantics across CPU, closure/symbolic autograd, functional grad,
   vmap, and ONNX. Their tensor-plan/WebGPU profile remains an explicit refusal
   until a portable lowering exists.
+- Migrates JIT `Tensor.sin` and `Tensor.cos` together to typed floating-only
+  unary semantics, removing integer declared/realized dtype drift and enabling
+  mutually typed closure/symbolic gradients, functional grad, vmap, and ONNX
+  while retaining explicit tensor-plan/WebGPU refusal.
 
 ## 2026-07 — semantic-core, kernels, compiler, and JIT semantic migration
 

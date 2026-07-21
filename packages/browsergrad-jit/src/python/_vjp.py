@@ -47,7 +47,8 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from ._ir import (
     UOp,
-    OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_ABS, OP_SIGN, OP_CAST,
+    OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
+    OP_ABS, OP_COS, OP_SIGN, OP_SIN, OP_CAST,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -65,6 +66,7 @@ from ._ir import (
 from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_real_numeric_unary_contract,
+    validate_typed_unary_contract,
 )
 
 
@@ -260,6 +262,25 @@ def _vjp_sign(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[U
         arg={"value": 0},
     )
     return (_vjp_uop(OP_MUL, (dy, zero), x.shape, x.dtype, output),)
+
+
+@register_vjp(OP_SIN)
+def _vjp_sin(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """d/dx sin(x) = cos(x)."""
+    validate_typed_unary_contract(output)
+    (x,) = inputs
+    cos = _vjp_uop(OP_COS, (x,), x.shape, x.dtype, output)
+    return (_vjp_uop(OP_MUL, (dy, cos), x.shape, x.dtype, output),)
+
+
+@register_vjp(OP_COS)
+def _vjp_cos(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """d/dx cos(x) = -sin(x)."""
+    validate_typed_unary_contract(output)
+    (x,) = inputs
+    sin = _vjp_uop(OP_SIN, (x,), x.shape, x.dtype, output)
+    product = _vjp_uop(OP_MUL, (dy, sin), x.shape, x.dtype, output)
+    return (_vjp_uop(OP_NEG, (product,), x.shape, x.dtype, output),)
 
 
 # ---------------------------------------------------------------------------

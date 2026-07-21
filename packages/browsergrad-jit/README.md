@@ -141,6 +141,13 @@ leading-axis vmap, and direct ONNX export. Their current backend profile is
 host-materialized only: tensor-plan and WebGPU execution fail explicitly until
 a portable lowering and kernel are admitted.
 
+`Tensor.sin()` and `Tensor.cos()` emit typed `SIN` and `COS`. They accept
+float16, float32, and float64 only, preserve exact shape/dtype, return owning
+CPU arrays, and provide mutually typed closure/symbolic gradients, functional
+grad, leading-axis vmap, and direct ONNX export. Integer and bool inputs fail
+before execution instead of realizing a dtype different from the graph. Their
+tensor-plan/WebGPU profile is also an explicit refusal.
+
 `bg.framework_operation_support()` returns the versioned public decision table
 for framework operations admitted to typed execution. The table is generated
 from the same package registry that binds executable validators at CPU,

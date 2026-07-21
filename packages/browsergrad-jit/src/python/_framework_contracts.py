@@ -53,17 +53,25 @@ _ENUMS = {
         "preserve-unary-input",
         "static-broadcast-with-existing-dim-minus-one",
     }),
-    "dtypeContract": frozenset({"preserve-input", "preserve-real-numeric-input"}),
+    "dtypeContract": frozenset({
+        "preserve-floating-input",
+        "preserve-input",
+        "preserve-real-numeric-input",
+    }),
     "cpu": frozenset({
         "supported-numpy-dtype-preserving",
         "supported-numpy-owning-copy",
     }),
     "closureAutograd": frozenset({
+        "supported-cos-derivative",
+        "supported-negative-sin-derivative",
         "supported-sign-derivative",
         "supported-unbroadcast-sum",
         "supported-zero-derivative",
     }),
     "symbolicVjp": frozenset({
+        "supported-cos-derivative",
+        "supported-negative-sin-derivative",
         "supported-sign-derivative",
         "supported-unbroadcast-sum",
         "supported-zero-derivative",
@@ -86,6 +94,11 @@ _ENUMS = {
 _REAL_NUMERIC_DTYPES = frozenset({
     "float16", "float32", "float64",
     "int8", "int16", "int32", "int64", "uint8",
+})
+_FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
+_UNARY_DTYPE_PROFILES = MappingProxyType({
+    "preserve-floating-input": (_FLOATING_DTYPES, "floating"),
+    "preserve-real-numeric-input": (_REAL_NUMERIC_DTYPES, "real numeric"),
 })
 
 
@@ -227,14 +240,21 @@ def _load_registry() -> Tuple[FrameworkOperationContract, ...]:
     return _parse_registry_payload(path.read_bytes())
 
 
+def _require_single_input_tuple(node: Any, opcode: str) -> tuple[Any, ...]:
+    inputs = getattr(node, "inputs", ())
+    if type(inputs) is not tuple:
+        raise ShapeError(f"{opcode} inputs must be a plain tuple")
+    if len(inputs) != 1:
+        raise ShapeError(f"{opcode} requires exactly one input, got {len(inputs)}")
+    return inputs
+
+
 def _validate_broadcast_to(node: Any, contract: FrameworkOperationContract) -> Tuple[int, ...]:
     if getattr(node, "op", None) != contract.opcode:
         raise ShapeError(
             f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
         )
-    inputs = getattr(node, "inputs", ())
-    if type(inputs) is not tuple or len(inputs) != 1:
-        raise ShapeError(f"BROADCAST_TO requires exactly one input, got {len(inputs)}")
+    inputs = _require_single_input_tuple(node, contract.opcode)
     arg = getattr(node, "arg", None)
     if type(arg) is not dict:
         raise ShapeError("BROADCAST_TO arg must be a plain dict")
@@ -282,14 +302,12 @@ def _validate_broadcast_to(node: Any, contract: FrameworkOperationContract) -> T
     return target
 
 
-def _validate_real_numeric_unary(node: Any, contract: FrameworkOperationContract) -> None:
+def _validate_typed_unary(node: Any, contract: FrameworkOperationContract) -> None:
     if getattr(node, "op", None) != contract.opcode:
         raise ShapeError(
             f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
         )
-    inputs = getattr(node, "inputs", ())
-    if type(inputs) is not tuple or len(inputs) != 1:
-        raise ShapeError(f"{contract.opcode} requires exactly one input, got {len(inputs)}")
+    inputs = _require_single_input_tuple(node, contract.opcode)
     arg = getattr(node, "arg", None)
     if type(arg) is not dict:
         raise ShapeError(f"{contract.opcode} arg must be a plain dict")
@@ -303,17 +321,25 @@ def _validate_real_numeric_unary(node: Any, contract: FrameworkOperationContract
         raise ShapeError(f"{contract.opcode} must preserve its input shape")
     if getattr(node, "dtype", None) != getattr(source, "dtype", None):
         raise ShapeError(f"{contract.opcode} must preserve its input dtype")
-    if getattr(node, "dtype", None) not in _REAL_NUMERIC_DTYPES:
+    dtype_profile = _UNARY_DTYPE_PROFILES.get(contract.dtype_contract)
+    if dtype_profile is None:
         raise ShapeError(
-            f"{contract.opcode} supports real numeric dtypes only, got "
+            f"{contract.opcode} has no unary dtype profile for {contract.dtype_contract!r}"
+        )
+    allowed_dtypes, dtype_label = dtype_profile
+    if getattr(node, "dtype", None) not in allowed_dtypes:
+        raise ShapeError(
+            f"{contract.opcode} supports {dtype_label} dtypes only, got "
             f"{getattr(node, 'dtype', None)!r}"
         )
 
 
 _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = MappingProxyType({
-    "browsergrad.jit.framework.tensor.abs.v1": _validate_real_numeric_unary,
+    "browsergrad.jit.framework.tensor.abs.v1": _validate_typed_unary,
+    "browsergrad.jit.framework.tensor.cos.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.expand.v1": _validate_broadcast_to,
-    "browsergrad.jit.framework.tensor.sign.v1": _validate_real_numeric_unary,
+    "browsergrad.jit.framework.tensor.sign.v1": _validate_typed_unary,
+    "browsergrad.jit.framework.tensor.sin.v1": _validate_typed_unary,
 })
 _RECORDS = _load_registry()
 if frozenset(_VALIDATORS) != frozenset(record.contract_id for record in _RECORDS):
@@ -349,13 +375,25 @@ def validate_broadcast_to_contract(node: Any) -> Tuple[int, ...]:
     return normalized
 
 
-def validate_real_numeric_unary_contract(node: Any) -> FrameworkOperationContract:
+_TYPED_UNARY_CONTRACT_IDS = frozenset({
+    "browsergrad.jit.framework.tensor.abs.v1",
+    "browsergrad.jit.framework.tensor.cos.v1",
+    "browsergrad.jit.framework.tensor.sign.v1",
+    "browsergrad.jit.framework.tensor.sin.v1",
+})
+
+
+def validate_typed_unary_contract(node: Any) -> FrameworkOperationContract:
     record, _ = validate_framework_operation_contract(node)
-    if record.contract_id not in {
-        "browsergrad.jit.framework.tensor.abs.v1",
-        "browsergrad.jit.framework.tensor.sign.v1",
-    }:
+    if record.contract_id not in _TYPED_UNARY_CONTRACT_IDS:
         raise ShapeError("unary node resolved to the wrong framework-operation contract")
+    return record
+
+
+def validate_real_numeric_unary_contract(node: Any) -> FrameworkOperationContract:
+    record = validate_typed_unary_contract(node)
+    if record.dtype_contract != "preserve-real-numeric-input":
+        raise ShapeError("real-numeric unary node resolved to the wrong dtype contract")
     return record
 
 
@@ -392,4 +430,5 @@ __all__ = [
     "validate_framework_operation_contract",
     "validate_broadcast_to_contract",
     "validate_real_numeric_unary_contract",
+    "validate_typed_unary_contract",
 ]

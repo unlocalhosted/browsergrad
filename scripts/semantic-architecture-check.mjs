@@ -735,10 +735,10 @@ function checkJitFrameworkOperationContracts(root, manifest, failures) {
   const allowed = {
     semanticState: new Set(["typed"]),
     shapeContract: new Set(["preserve-unary-input", "static-broadcast-with-existing-dim-minus-one"]),
-    dtypeContract: new Set(["preserve-input", "preserve-real-numeric-input"]),
+    dtypeContract: new Set(["preserve-floating-input", "preserve-input", "preserve-real-numeric-input"]),
     cpu: new Set(["supported-numpy-dtype-preserving", "supported-numpy-owning-copy"]),
-    closureAutograd: new Set(["supported-sign-derivative", "supported-unbroadcast-sum", "supported-zero-derivative"]),
-    symbolicVjp: new Set(["supported-sign-derivative", "supported-unbroadcast-sum", "supported-zero-derivative"]),
+    closureAutograd: new Set(["supported-cos-derivative", "supported-negative-sin-derivative", "supported-sign-derivative", "supported-unbroadcast-sum", "supported-zero-derivative"]),
+    symbolicVjp: new Set(["supported-cos-derivative", "supported-negative-sin-derivative", "supported-sign-derivative", "supported-unbroadcast-sum", "supported-zero-derivative"]),
     functionalGrad: new Set(["supported-via-symbolic-vjp"]),
     vmap: new Set(["supported-leading-batch-axis"]),
     onnxExport: new Set(["supported-opset17-direct-unary-export-dtypes", "supported-opset17-expand"]),

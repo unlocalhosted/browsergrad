@@ -51,7 +51,8 @@ import numpy as np
 from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
-    OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_ABS, OP_SIGN, OP_CMP,
+    OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
+    OP_ABS, OP_COS, OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -73,7 +74,7 @@ from ._ir import (
 from ._errors import JitNotImplementedError
 from ._framework_contracts import (
     validate_broadcast_to_contract,
-    validate_real_numeric_unary_contract,
+    validate_typed_unary_contract,
 )
 
 
@@ -176,8 +177,8 @@ def _vmap_log(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
                shape=inner.shape, dtype=node.dtype, arg=node.arg)
 
 
-def _vmap_real_numeric_unary(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
-    validate_real_numeric_unary_contract(node)
+def _vmap_typed_unary(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    validate_typed_unary_contract(node)
     inner = batched[id(node.inputs[0])]
     return UOp(
         op=node.op,
@@ -188,8 +189,10 @@ def _vmap_real_numeric_unary(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
     )
 
 
-_VMAP_RULES[OP_ABS] = _vmap_real_numeric_unary
-_VMAP_RULES[OP_SIGN] = _vmap_real_numeric_unary
+_VMAP_RULES[OP_ABS] = _vmap_typed_unary
+_VMAP_RULES[OP_COS] = _vmap_typed_unary
+_VMAP_RULES[OP_SIGN] = _vmap_typed_unary
+_VMAP_RULES[OP_SIN] = _vmap_typed_unary
 
 
 @register_vmap(OP_CAST)

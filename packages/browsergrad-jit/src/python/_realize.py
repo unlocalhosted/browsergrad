@@ -33,7 +33,7 @@ from ._ir import (
     UOp, ALL_OPS, toposort,
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM,
     OP_CAST, OP_ADD, OP_MUL, OP_DIV, OP_NEG,
-    OP_EXP, OP_LOG, OP_ABS, OP_SIGN, OP_CMP, OP_MATMUL,
+    OP_EXP, OP_LOG, OP_ABS, OP_COS, OP_SIGN, OP_SIN, OP_CMP, OP_MATMUL,
     OP_CONV1D, OP_CONV1D_BACKWARD_INPUT, OP_CONV1D_BACKWARD_WEIGHT,
     OP_CONV1D_BACKWARD_BIAS, OP_CONV2D,
     OP_CONV2D_BACKWARD_INPUT, OP_CONV2D_BACKWARD_WEIGHT,
@@ -58,6 +58,7 @@ from ._errors import RealizationError
 from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_real_numeric_unary_contract,
+    validate_typed_unary_contract,
 )
 
 
@@ -155,9 +156,19 @@ def _h_abs(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     return np.abs(vt[id(node.inputs[0])]).astype(np.dtype(node.dtype), copy=False)
 
 
+def _h_cos(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    validate_typed_unary_contract(node)
+    return np.cos(vt[id(node.inputs[0])]).astype(np.dtype(node.dtype), copy=False)
+
+
 def _h_sign(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     validate_real_numeric_unary_contract(node)
     return np.sign(vt[id(node.inputs[0])]).astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_sin(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    validate_typed_unary_contract(node)
+    return np.sin(vt[id(node.inputs[0])]).astype(np.dtype(node.dtype), copy=False)
 
 
 _CMP_OPS = {
@@ -1192,7 +1203,9 @@ _DISPATCH: dict[str, Handler] = {
     OP_EXP:     _h_exp,
     OP_LOG:     _h_log,
     OP_ABS:     _h_abs,
+    OP_COS:     _h_cos,
     OP_SIGN:    _h_sign,
+    OP_SIN:     _h_sin,
     OP_CMP:     _h_cmp,
     OP_MATMUL:  _h_matmul,
     OP_CONV1D:  _h_conv1d,

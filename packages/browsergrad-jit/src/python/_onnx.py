@@ -47,7 +47,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
-    OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_ABS, OP_SIGN, OP_CMP,
+    OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
+    OP_ABS, OP_COS, OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -66,7 +67,7 @@ from ._ir import (
 from ._errors import JitError
 from ._framework_contracts import (
     validate_broadcast_to_contract,
-    validate_real_numeric_unary_contract,
+    validate_typed_unary_contract,
 )
 
 
@@ -279,7 +280,9 @@ _SIMPLE_OPS: Dict[str, str] = {
 
 _TYPED_FRAMEWORK_SIMPLE_OPS: Dict[str, str] = {
     OP_ABS: "Abs",
+    OP_COS: "Cos",
     OP_SIGN: "Sign",
+    OP_SIN: "Sin",
 }
 
 _CMP_OP_MAP: Dict[str, str] = {
@@ -434,7 +437,7 @@ def export_inference(
         input_names = [uop_to_name[id(inp)] for inp in node.inputs]
 
         if node.op in _TYPED_FRAMEWORK_SIMPLE_OPS:
-            validate_real_numeric_unary_contract(node)
+            validate_typed_unary_contract(node)
             nodes.append(
                 _emit_node(
                     input_names,

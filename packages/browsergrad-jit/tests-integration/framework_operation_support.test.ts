@@ -28,6 +28,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.abs.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.tensor.cos.v1",
+      publicSurface: "Tensor.cos",
+      opcode: "COS",
+      semanticState: "typed",
+      shapeContract: "preserve-unary-input",
+      dtypeContract: "preserve-floating-input",
+      decisions: {
+        cpu: "supported-numpy-dtype-preserving",
+        closureAutograd: "supported-negative-sin-derivative",
+        symbolicVjp: "supported-negative-sin-derivative",
+        functionalGrad: "supported-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis",
+        onnxExport: "supported-opset17-direct-unary-export-dtypes",
+        tensorPlan: "refused-no-portable-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-array",
+      },
+      retiredOpaqueOperationId: "jit.custom.cos.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.expand.v1",
       publicSurface: "Tensor.expand",
       opcode: "BROADCAST_TO",
@@ -68,6 +89,27 @@ const FRAMEWORK_SUPPORT = {
         materialization: "cpu-owning-array",
       },
       retiredOpaqueOperationId: "jit.custom.sign.v0",
+    },
+    {
+      contractId: "browsergrad.jit.framework.tensor.sin.v1",
+      publicSurface: "Tensor.sin",
+      opcode: "SIN",
+      semanticState: "typed",
+      shapeContract: "preserve-unary-input",
+      dtypeContract: "preserve-floating-input",
+      decisions: {
+        cpu: "supported-numpy-dtype-preserving",
+        closureAutograd: "supported-cos-derivative",
+        symbolicVjp: "supported-cos-derivative",
+        functionalGrad: "supported-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis",
+        onnxExport: "supported-opset17-direct-unary-export-dtypes",
+        tensorPlan: "refused-no-portable-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-array",
+      },
+      retiredOpaqueOperationId: "jit.custom.sin.v0",
     },
   ],
 };
@@ -110,7 +152,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(4);
+    expect(result.first.operations).toHaveLength(6);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

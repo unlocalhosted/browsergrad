@@ -16,13 +16,17 @@ contract in the README](README.md#compatibility-contract).
   real-numeric shape/dtype preservation, owning CPU results, closure and
   symbolic gradients, functional grad, vmap, direct ONNX export, and explicit
   tensor-plan/WebGPU refusal until a portable kernel exists.
+- `Tensor.sin` and `Tensor.cos` now emit typed `SIN` and `COS`, preserve
+  float16/32/64 shape and dtype, reject bool/integer dtype drift, and support
+  owning CPU realization, mutually typed closure/symbolic gradients,
+  functional grad, vmap, direct ONNX export, and explicit plan/WebGPU refusal.
 
 ### Added
 
 - Added the bounded v1 executable framework-operation registry and detached
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
-  current table contains `ABS`, `BROADCAST_TO`, and `SIGN`.
+  current table contains `ABS`, `COS`, `BROADCAST_TO`, `SIGN`, and `SIN`.
 
 ## [0.9.0] — 2026-07-15
 

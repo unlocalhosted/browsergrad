@@ -280,7 +280,6 @@ a = leaf([0.25, 0.75]); check("binary_cross_entropy", F.binary_cross_entropy(a, 
 a = leaf([-1.0, 1.0]); check("binary_cross_entropy_with_logits", F.binary_cross_entropy_with_logits(a, constant([0.0, 1.0])), a)
 a = leaf([[1.0, 2.0]]); check("cat", bg.cat((a, constant([[3.0, 4.0]])), dim=0), a)
 a = leaf([-2.0, 0.5, 3.0]); check("clamp", a.clamp(-1.0, 1.0), a)
-a = leaf([0.0, 1.0]); check("cos", a.cos(), a)
 a = leaf([[1.0, 2.0], [3.0, 1.0]]); check("cross_entropy", F.cross_entropy(a, constant([1, 0], np.int64)), a)
 a = leaf([1.0, 2.0, 3.0]); check("cumsum", bg.cumsum(a, dim=0), a)
 np.random.seed(17)
@@ -296,7 +295,6 @@ a = leaf([[1.0, 2.0]]); check("pad", F.pad(a, (1, 1)), a)
 a = leaf([[1.0, 2.0], [3.0, 4.0]]); check("prod", a.prod(dim=0), a)
 a = leaf([1.0, 2.0]); check("repeat", a.repeat(2), a)
 a = leaf([[1.0, 2.0]]); check("repeat_interleave", a.repeat_interleave(2, dim=1), a)
-a = leaf([0.0, 1.0]); check("sin", a.sin(), a)
 a = leaf([1.0, 3.0]); check("smooth_l1_loss", F.smooth_l1_loss(a, constant([0.0, 1.0])), a)
 a = leaf([1.0, 2.0]); check("stack", bg.stack((a, constant([3.0, 4.0])), dim=0), a)
 a = leaf([[1.0, 2.0], [3.0, 4.0]]); check("tril", bg.tril(a), a)
@@ -309,11 +307,9 @@ def dtype_observation(output):
 int_values = constant([[1, 2], [3, 4]], np.int32)
 bool_values = constant([True, False, True], np.bool_)
 dtype_drift = {
-    "cos-int32": dtype_observation(int_values.cos()),
     "cumsum-bool": dtype_observation(bg.cumsum(bool_values, dim=0)),
     "cumsum-int32": dtype_observation(bg.cumsum(int_values, dim=0)),
     "prod-int32": dtype_observation(int_values.prod(dim=0)),
-    "sin-int32": dtype_observation(int_values.sin()),
     "var-int32": dtype_observation(int_values.var(dim=0)),
 }
 
