@@ -114,8 +114,8 @@ jobs:
       - name: Verify compiler source, build-harness, and native architecture
         run: pnpm --filter @unlocalhosted/browsergrad-compiler architecture:check
 
-  integration:
-    name: Pyodide integration tests
+  integration-jit:
+    name: Pyodide JIT integration tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -133,6 +133,23 @@ jobs:
 
       - name: Run jit integration suite
         run: pnpm --filter @unlocalhosted/browsergrad-jit test:integration
+
+  integration-grad:
+    name: Pyodide Grad integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
 
       - name: Run blocking Grad Gate 0 contract
         run: pnpm --filter @unlocalhosted/browsergrad-grad exec vitest run --config vitest.integration.config.ts tests-integration/gate0_dtype_view_contract.test.ts
