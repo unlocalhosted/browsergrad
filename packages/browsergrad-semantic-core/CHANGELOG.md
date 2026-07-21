@@ -23,6 +23,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   masks that exclude invalid or logical-mask keys before online-state updates.
   The schedule owns no logical dtype, scale, view, comparison, backend, or
   performance claim.
+- Schedule-independent attention-forward specialization and CPU execution with
+  bounded dense-address proof, scalar-work limits, fixed unshared input
+  snapshots, cooperative yielding/cancellation, finite-domain enforcement,
+  atomic destination commit, canonical stepwise f32 stable-softmax evaluation,
+  causal/non-causal traces, and the declared abs-or-relative comparator.
+- Shared hardened CPU binding admission for direct fixed unshared `Uint8Array`
+  values, exact property capture, length/alignment proof, overlap checks, and
+  native byte snapshots. Logical GEMM CPU execution now uses the same helper
+  instead of retaining a second binding parser.
 - Closed `browsergrad.kernel.gemm-tile@1` artifacts for dense static rank-2 f32
   operands with exact logical tiles, boundary masks, pairwise-disjoint effects,
   increasing-K round-to-nearest-even accumulation, and explicit prohibitions on

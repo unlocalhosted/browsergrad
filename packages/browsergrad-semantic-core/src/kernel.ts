@@ -127,3 +127,17 @@ export {
   type CreateVerifiedDenseAttentionForwardArtifactsRequest,
   type VerifiedAttentionForwardArtifacts,
 } from "./kernel/attention-forward-construction.js";
+export {
+  prepareAttentionForwardSpecialization,
+  type PreparedAttentionForwardSpecialization,
+  type PrepareAttentionForwardSpecializationRequest,
+} from "./kernel/attention-forward-prepare.js";
+export {
+  prepareAttentionForwardCpu,
+  type AttentionForwardComparisonTrace,
+  type AttentionForwardCpuBuffers,
+  type AttentionForwardCpuExecutionOptions,
+  type AttentionForwardCpuTrace,
+  type PreparedAttentionForwardCpu,
+  type PrepareAttentionForwardCpuRequest,
+} from "./kernel/attention-forward-cpu.js";

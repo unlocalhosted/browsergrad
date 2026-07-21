@@ -7,6 +7,14 @@ import {
   type PreparedLogicalGemmTileSpecialization,
   type PrepareLogicalGemmTileSpecializationRequest,
 } from "./gemm-tile-prepare.js";
+import {
+  captureExactUint8Bindings,
+  nativeRangesOverlap,
+  nativeUint8Slots,
+  requireExactNativeByteLength,
+  requireNativeAlignment,
+  type NativeUint8Slots,
+} from "./native-buffer.js";
 
 export interface PrepareLogicalGemmTileCpuRequest extends PrepareLogicalGemmTileSpecializationRequest {}
 
@@ -102,111 +110,42 @@ export async function prepareLogicalGemmTileCpu(
   });
 }
 
-interface NativeSlots {
-  readonly buffer: ArrayBuffer;
-  readonly byteOffset: number;
-  readonly byteLength: number;
-}
-
 function validateBuffers(
   buffers: LogicalGemmTileCpuBuffers,
   prepared: PreparedLogicalGemmTileSpecialization,
-): { readonly lhs: NativeSlots; readonly rhs: NativeSlots; readonly destination: NativeSlots } {
-  const captured = captureBufferBindings(buffers);
-  const lhs = typedArraySlots(captured.lhs, "$.buffers.lhs");
-  const rhs = typedArraySlots(captured.rhs, "$.buffers.rhs");
-  const destination = typedArraySlots(captured.destination, "$.buffers.destination");
-  requireExactLength(lhs, prepared.lhs.allocationByteLength, "$.buffers.lhs");
-  requireExactLength(rhs, prepared.rhs.allocationByteLength, "$.buffers.rhs");
-  requireExactLength(destination, prepared.destination.allocationByteLength, "$.buffers.destination");
-  requireAlignment(lhs, prepared.lhs.allocationAlignmentBytes, "$.buffers.lhs");
-  requireAlignment(rhs, prepared.rhs.allocationAlignmentBytes, "$.buffers.rhs");
-  requireAlignment(destination, prepared.destination.allocationAlignmentBytes, "$.buffers.destination");
-  if (rangesOverlap(lhs, rhs) || rangesOverlap(lhs, destination) || rangesOverlap(rhs, destination)) {
+): {
+  readonly lhs: NativeUint8Slots;
+  readonly rhs: NativeUint8Slots;
+  readonly destination: NativeUint8Slots;
+} {
+  const captured = captureExactUint8Bindings(
+    buffers,
+    ["lhs", "rhs", "destination"] as const,
+    "$.buffers",
+  );
+  const lhs = nativeUint8Slots(captured.lhs, "$.buffers.lhs");
+  const rhs = nativeUint8Slots(captured.rhs, "$.buffers.rhs");
+  const destination = nativeUint8Slots(captured.destination, "$.buffers.destination");
+  requireExactNativeByteLength(lhs, prepared.lhs.allocationByteLength, "$.buffers.lhs");
+  requireExactNativeByteLength(rhs, prepared.rhs.allocationByteLength, "$.buffers.rhs");
+  requireExactNativeByteLength(
+    destination,
+    prepared.destination.allocationByteLength,
+    "$.buffers.destination",
+  );
+  requireNativeAlignment(lhs, prepared.lhs.allocationAlignmentBytes, "$.buffers.lhs");
+  requireNativeAlignment(rhs, prepared.rhs.allocationAlignmentBytes, "$.buffers.rhs");
+  requireNativeAlignment(
+    destination,
+    prepared.destination.allocationAlignmentBytes,
+    "$.buffers.destination",
+  );
+  if (nativeRangesOverlap(lhs, rhs)
+    || nativeRangesOverlap(lhs, destination)
+    || nativeRangesOverlap(rhs, destination)) {
     invalid(KERNEL_DIAGNOSTIC_CODES.aliasConflict, "$.buffers", "forbid-all logical GEMM bindings must not overlap");
   }
   return Object.freeze({ lhs, rhs, destination });
-}
-
-const TYPED_ARRAY_PROTOTYPE = Object.getPrototypeOf(Uint8Array.prototype) as object;
-const BUFFER_GETTER = requiredGetter(TYPED_ARRAY_PROTOTYPE, "buffer");
-const BYTE_OFFSET_GETTER = requiredGetter(TYPED_ARRAY_PROTOTYPE, "byteOffset");
-const BYTE_LENGTH_GETTER = requiredGetter(TYPED_ARRAY_PROTOTYPE, "byteLength");
-const ARRAY_BUFFER_SLICE = ArrayBuffer.prototype.slice;
-const BUFFER_BINDING_NAMES = ["lhs", "rhs", "destination"] as const;
-const BUFFER_BINDING_NAME_SET = new Set<string>(BUFFER_BINDING_NAMES);
-
-function captureBufferBindings(value: LogicalGemmTileCpuBuffers): LogicalGemmTileCpuBuffers {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, "$.buffers", "CPU bindings must be a plain data object");
-  }
-  let prototype: object | null;
-  let descriptors: PropertyDescriptorMap;
-  try {
-    prototype = Object.getPrototypeOf(value);
-    descriptors = Object.getOwnPropertyDescriptors(value);
-  } catch {
-    invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, "$.buffers", "CPU bindings must expose ordinary own data properties");
-  }
-  if (prototype !== Object.prototype && prototype !== null) {
-    invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, "$.buffers", "CPU bindings must be a plain data object");
-  }
-  const capturedKeys = Reflect.ownKeys(descriptors);
-  if (capturedKeys.length !== BUFFER_BINDING_NAMES.length
-    || capturedKeys.some((key) => typeof key !== "string" || !BUFFER_BINDING_NAME_SET.has(key))) {
-    invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, "$.buffers", "CPU bindings require exactly lhs, rhs, and destination own properties");
-  }
-  const captured = Object.create(null) as Record<"lhs" | "rhs" | "destination", Uint8Array>;
-  for (const name of BUFFER_BINDING_NAMES) {
-    const descriptor = descriptors[name];
-    if (descriptor === undefined || descriptor.enumerable !== true || !("value" in descriptor)) {
-      invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, `$.buffers.${name}`, "CPU bindings must use enumerable own data properties without accessors");
-    }
-    captured[name] = descriptor.value as Uint8Array;
-  }
-  return captured;
-}
-
-function typedArraySlots(value: Uint8Array, path: string): NativeSlots {
-  if (!(value instanceof Uint8Array) || Object.getPrototypeOf(value) !== Uint8Array.prototype) {
-    invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, path, "CPU bindings must be direct Uint8Array values");
-  }
-  try {
-    const buffer = BUFFER_GETTER.call(value) as ArrayBufferLike;
-    if (!(buffer instanceof ArrayBuffer)) invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, path, "CPU bindings must use unshared ArrayBuffer storage");
-    try {
-      ARRAY_BUFFER_SLICE.call(buffer, 0, 0);
-    } catch {
-      invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, path, "CPU binding storage must not be detached");
-    }
-    return {
-      buffer,
-      byteOffset: BYTE_OFFSET_GETTER.call(value) as number,
-      byteLength: BYTE_LENGTH_GETTER.call(value) as number,
-    };
-  } catch (error) {
-    if (error instanceof SemanticSchemaError) throw error;
-    invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, path, "CPU binding does not expose native typed-array slots");
-  }
-}
-
-function requiredGetter(target: object, name: string): (this: unknown) => unknown {
-  const getter = Object.getOwnPropertyDescriptor(target, name)?.get;
-  if (getter === undefined) throw new Error(`internal: missing typed-array ${name} getter`);
-  return getter;
-}
-
-function requireExactLength(slots: NativeSlots, expected: bigint, path: string): void {
-  if (BigInt(slots.byteLength) !== expected) invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, path, `binding length ${slots.byteLength} does not equal declared allocation length ${expected}`);
-}
-
-function requireAlignment(slots: NativeSlots, alignment: number, path: string): void {
-  if (slots.byteOffset % alignment !== 0) invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, path, `binding byte offset does not satisfy ${alignment}-byte alignment`);
-}
-
-function rangesOverlap(left: NativeSlots, right: NativeSlots): boolean {
-  if (left.buffer !== right.buffer) return false;
-  return left.byteOffset < right.byteOffset + right.byteLength && right.byteOffset < left.byteOffset + left.byteLength;
 }
 
 function requireCpuIndexRange(prepared: PreparedLogicalGemmTileSpecialization): void {

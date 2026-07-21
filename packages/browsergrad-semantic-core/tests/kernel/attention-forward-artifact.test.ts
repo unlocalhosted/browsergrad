@@ -186,6 +186,24 @@ describe("attention-forward artifact", () => {
     });
   });
 
+  it("derives exact scale bits from module-captured numerical intrinsics", async () => {
+    const originalFround = Math.fround;
+    const originalSqrt = Math.sqrt;
+    const originalFinite = Number.isFinite;
+    try {
+      Math.fround = () => 123;
+      Math.sqrt = () => 99;
+      Number.isFinite = () => false;
+      const artifacts = await createVerifiedDenseAttentionForwardArtifacts(request());
+      expect(attentionForwardArtifactPayload(artifacts.kernel).operation.scale.value.bits)
+        .toBe("3f000000");
+    } finally {
+      Math.fround = originalFround;
+      Math.sqrt = originalSqrt;
+      Number.isFinite = originalFinite;
+    }
+  });
+
   it("keeps canonical identity independent of transport metadata and sensitive to semantics", async () => {
     const first = await createVerifiedDenseAttentionForwardArtifacts(request(), {
       producer: { id: "frontend-a", version: "7" },

@@ -194,6 +194,8 @@ try {
     "verifyKernelArtifact",
     "verifyInitialPortableViewCopyProfile",
     "prepareViewCopyCpu",
+    "prepareAttentionForwardCpu",
+    "prepareAttentionForwardSpecialization",
     "verifyAttentionForwardArtifact",
   ]) {
     assert(exportName in semanticKernel, `semantic-core kernel export missing ${exportName}`);
@@ -338,6 +340,29 @@ try {
       && packedAttentionSchedulePayload.schedule.masks.logicalMask
         === "exclude-before-online-state-update",
     "semantic-core packed attention schedule lost logical binding, staging, masks, or distinct tiling",
+  );
+  const packedAttentionCpu = await semanticKernel.prepareAttentionForwardCpu(
+    packedAttention.layout,
+    packedAttention.kernel,
+    { operationId: packedAttention.operationId },
+  );
+  const packedAttentionBuffers = {
+    query: new Uint8Array(96),
+    key: new Uint8Array(160),
+    value: new Uint8Array(240),
+    destination: new Uint8Array(144).fill(0xff),
+  };
+  const packedAttentionTrace = await packedAttentionCpu.execute(packedAttentionBuffers);
+  assert(
+    packedAttentionTrace.mask === "causal-upper-left"
+      && packedAttentionTrace.validScoreElements === "12"
+      && packedAttentionTrace.scoreMultiplyAdds === "48"
+      && packedAttentionTrace.weightedValueMultiplyAdds === "72"
+      && packedAttentionCpu.compare(
+        packedAttentionBuffers.destination,
+        new Uint8Array(144),
+      ).passed,
+    "semantic-core packed attention CPU reference lost causal work accounting or f32 output meaning",
   );
   const packedArtifacts = await semanticKernel.createVerifiedDensePermutationViewCopyArtifacts({
     inputShape: ["2", "2"],

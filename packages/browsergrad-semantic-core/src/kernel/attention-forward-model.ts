@@ -1,6 +1,24 @@
 import type { NumericalPolicy } from "../layout/numerical-policy.js";
 import type { FloatBits } from "../schema/float-bits.js";
 
+const MATH_FROUND = Math.fround;
+const MATH_SQRT = Math.sqrt;
+const NUMBER_CONSTRUCTOR = Number;
+const NUMBER_IS_FINITE = Number.isFinite;
+const FLOAT32_ARRAY_CONSTRUCTOR = Float32Array;
+const UINT32_ARRAY_CONSTRUCTOR = Uint32Array;
+const HEX_DIGITS = "0123456789abcdef";
+const REFLECT_APPLY = Reflect.apply;
+const TYPED_ARRAY_PROTOTYPE = Object.getPrototypeOf(Float32Array.prototype) as object;
+const RAW_TYPED_ARRAY_BUFFER_GETTER = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  "buffer",
+)?.get;
+if (RAW_TYPED_ARRAY_BUFFER_GETTER === undefined) {
+  throw new Error("internal: missing typed-array buffer getter");
+}
+const TYPED_ARRAY_BUFFER_GETTER = RAW_TYPED_ARRAY_BUFFER_GETTER;
+
 export const INITIAL_ATTENTION_FORWARD_MAX_DIMENSION = 0xffff_ffffn;
 export const INITIAL_ATTENTION_FORWARD_MAX_DEPTH = 256n;
 
@@ -37,19 +55,28 @@ export function attentionForwardDefaultScaleBits(queryDepth: bigint): FloatBits 
   if (queryDepth <= 0n || queryDepth > INITIAL_ATTENTION_FORWARD_MAX_DEPTH) {
     throw new RangeError("attention-forward query depth is outside the initial profile");
   }
-  const value = Math.fround(1 / Math.sqrt(Number(queryDepth)));
-  if (!Number.isFinite(value) || value <= 0) {
+  const value = MATH_FROUND(1 / MATH_SQRT(NUMBER_CONSTRUCTOR(queryDepth)));
+  if (!NUMBER_IS_FINITE(value) || value <= 0) {
     throw new RangeError("attention-forward query depth produced an invalid default scale");
   }
-  const float = new Float32Array(1);
+  const float = new FLOAT32_ARRAY_CONSTRUCTOR(1);
   float[0] = value;
-  const word = new Uint32Array(float.buffer)[0];
+  const buffer = REFLECT_APPLY(TYPED_ARRAY_BUFFER_GETTER, float, []) as ArrayBuffer;
+  const word = new UINT32_ARRAY_CONSTRUCTOR(buffer)[0];
   if (word === undefined) throw new Error("internal: failed to encode attention-forward scale");
   return Object.freeze({
     kind: "float-bits",
     dtype: "f32",
-    bits: word.toString(16).padStart(8, "0"),
+    bits: u32Hex(word),
   });
+}
+
+function u32Hex(word: number): string {
+  let result = "";
+  for (let shift = 28; shift >= 0; shift -= 4) {
+    result += HEX_DIGITS[(word >>> shift) & 0xf] as string;
+  }
+  return result;
 }
 
 export interface AttentionForwardReadEffect {

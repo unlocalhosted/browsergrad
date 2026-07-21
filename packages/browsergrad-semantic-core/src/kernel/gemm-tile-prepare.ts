@@ -2,7 +2,7 @@ import { prepareViewAccessor, type PreparedViewAccessor } from "../layout/prepar
 import type { VerifiedLayoutArtifact } from "../layout/artifact.js";
 import { KERNEL_DIAGNOSTIC_CODES, SemanticSchemaError } from "../schema/diagnostics.js";
 import { hashNamedComponents, hashSemanticArtifact } from "../schema/hash.js";
-import { encodeWireU64, parseWireI64, type WireI64 } from "../schema/integers.js";
+import { encodeWireU64, type WireI64 } from "../schema/integers.js";
 import type { JsonObject } from "../schema/json.js";
 import type { DecodeLimits } from "../schema/limits.js";
 import {
@@ -10,6 +10,14 @@ import {
   type VerifiedLogicalGemmTileArtifact,
 } from "./gemm-tile-artifact.js";
 import type { LogicalGemmTileOperation } from "./gemm-tile-model.js";
+import {
+  ensureKernelPreparationActive,
+  kernelMonotonicNow,
+  normalizeKernelBindings,
+  proveDenseRowMajorAccessor,
+  resolveKernelBudget,
+  type KernelPreparationControl,
+} from "./preparation.js";
 
 const DEFAULT_MAX_ELEMENTS = 1_000_000;
 const MAX_CONFIGURABLE_ELEMENTS = 16_777_216;
@@ -19,7 +27,6 @@ const DEFAULT_MAX_EVALUATION_STEPS = 25_000_000;
 const MAX_CONFIGURABLE_EVALUATION_STEPS = 250_000_000;
 const DEFAULT_MAX_PREPARATION_MS = 5_000;
 const MAX_CONFIGURABLE_PREPARATION_MS = 60_000;
-const YIELD_INTERVAL_MS = 16;
 const PREPARED_LOGICAL_GEMM_TILES = new WeakSet<object>();
 
 export interface PrepareLogicalGemmTileSpecializationRequest {
@@ -62,7 +69,7 @@ export async function prepareLogicalGemmTileSpecialization(
   kernelArtifact: VerifiedLogicalGemmTileArtifact,
   request: PrepareLogicalGemmTileSpecializationRequest,
 ): Promise<PreparedLogicalGemmTileSpecialization> {
-  const preparationStartedAt = monotonicNow();
+  const preparationStartedAt = kernelMonotonicNow();
   const kernel = logicalGemmTileArtifactPayload(kernelArtifact);
   const hashOptions = request.evaluationLimits === undefined ? {} : { limits: request.evaluationLimits };
   const layoutSemanticHash = await hashSemanticArtifact(layoutArtifact, hashOptions);
@@ -72,7 +79,7 @@ export async function prepareLogicalGemmTileSpecialization(
   if (kernel.operation.operationId !== request.operationId) {
     invalid(KERNEL_DIAGNOSTIC_CODES.danglingReference, "$.operationId", `unknown verified logical GEMM tile operation ${request.operationId}`);
   }
-  const bindings = normalizeBindings(request.bindings ?? {});
+  const bindings = normalizeKernelBindings(request.bindings ?? {});
   const accessorRequest = {
     bindings,
     ...(request.evaluationLimits === undefined ? {} : { limits: request.evaluationLimits }),
@@ -91,19 +98,24 @@ export async function prepareLogicalGemmTileSpecialization(
   const rhsElements = k * n;
   const outputElements = m * n;
   const aggregateElements = lhsElements + rhsElements + outputElements;
-  const maxElements = resolveBudget(request.maxElements, DEFAULT_MAX_ELEMENTS, MAX_CONFIGURABLE_ELEMENTS, "maxElements");
+  const maxElements = resolveKernelBudget(request.maxElements, DEFAULT_MAX_ELEMENTS, MAX_CONFIGURABLE_ELEMENTS, "maxElements");
   if (aggregateElements > BigInt(maxElements)) {
     invalid(KERNEL_DIAGNOSTIC_CODES.resourceLimit, "$.maxElements", `logical GEMM tile preparation requires ${aggregateElements} aggregate elements; limit is ${maxElements}`);
   }
   const multiplyAdds = outputElements * k;
-  const maxMultiplyAdds = resolveBudget(request.maxMultiplyAdds, DEFAULT_MAX_MULTIPLY_ADDS, MAX_CONFIGURABLE_MULTIPLY_ADDS, "maxMultiplyAdds");
+  const maxMultiplyAdds = resolveKernelBudget(
+    request.maxMultiplyAdds,
+    DEFAULT_MAX_MULTIPLY_ADDS,
+    MAX_CONFIGURABLE_MULTIPLY_ADDS,
+    "maxMultiplyAdds",
+  );
   if (multiplyAdds > BigInt(maxMultiplyAdds)) {
     invalid(KERNEL_DIAGNOSTIC_CODES.resourceLimit, "$.maxMultiplyAdds", `logical GEMM tile requires ${multiplyAdds} multiply-adds; limit is ${maxMultiplyAdds}`);
   }
   const evaluationSteps = (lhsElements * BigInt(lhs.evaluationStepsPerAccess))
     + (rhsElements * BigInt(rhs.evaluationStepsPerAccess))
     + (outputElements * BigInt(destination.evaluationStepsPerAccess));
-  const maxEvaluationSteps = resolveBudget(
+  const maxEvaluationSteps = resolveKernelBudget(
     request.maxEvaluationSteps,
     DEFAULT_MAX_EVALUATION_STEPS,
     MAX_CONFIGURABLE_EVALUATION_STEPS,
@@ -112,19 +124,24 @@ export async function prepareLogicalGemmTileSpecialization(
   if (evaluationSteps > BigInt(maxEvaluationSteps)) {
     invalid(KERNEL_DIAGNOSTIC_CODES.resourceLimit, "$.maxEvaluationSteps", `logical GEMM address proof requires ${evaluationSteps} evaluation steps; limit is ${maxEvaluationSteps}`);
   }
-  const maxPreparationMs = resolveBudget(
+  const maxPreparationMs = resolveKernelBudget(
     request.maxPreparationMs,
     DEFAULT_MAX_PREPARATION_MS,
     MAX_CONFIGURABLE_PREPARATION_MS,
     "maxPreparationMs",
   );
-  ensurePreparationActive(preparationStartedAt, maxPreparationMs, request.signal);
-  await proveDenseAccessor(lhs, [m, k], preparationStartedAt, maxPreparationMs, request.signal, "lhs");
-  await proveDenseAccessor(rhs, [k, n], preparationStartedAt, maxPreparationMs, request.signal, "rhs");
-  await proveDenseAccessor(destination, [m, n], preparationStartedAt, maxPreparationMs, request.signal, "destination");
+  const control: KernelPreparationControl = {
+    startedAt: preparationStartedAt,
+    maxPreparationMs,
+    ...(request.signal === undefined ? {} : { signal: request.signal }),
+  };
+  ensureKernelPreparationActive(control);
+  await proveDenseRowMajorAccessor(lhs, [m, k], control, "lhs");
+  await proveDenseRowMajorAccessor(rhs, [k, n], control, "rhs");
+  await proveDenseRowMajorAccessor(destination, [m, n], control, "destination");
 
   const kernelSemanticHash = await hashSemanticArtifact(kernelArtifact, hashOptions);
-  ensurePreparationActive(preparationStartedAt, maxPreparationMs, request.signal);
+  ensureKernelPreparationActive(control);
   const specializationHash = await hashNamedComponents({
     profile: "browsergrad.logical-gemm-tile.dense-rank2-f32@1",
     layout: layoutSemanticHash,
@@ -146,7 +163,7 @@ export async function prepareLogicalGemmTileSpecialization(
       destinationAllocationBytes: encodeWireU64(destination.allocationByteLength),
     },
   }, hashOptions);
-  ensurePreparationActive(preparationStartedAt, maxPreparationMs, request.signal);
+  ensureKernelPreparationActive(control);
   const prepared = Object.freeze({
     operation: kernel.operation,
     bindings,
@@ -203,92 +220,6 @@ function ensurePreparedContract(
     || new Set([lhs.aliasSetId, rhs.aliasSetId, destination.aliasSetId]).size !== 3) {
     invalid(KERNEL_DIAGNOSTIC_CODES.aliasConflict, "$.operation.overlap", "logical GEMM tile requires pairwise-disjoint allocations and alias sets");
   }
-}
-
-async function proveDenseAccessor(
-  accessor: PreparedViewAccessor,
-  shape: readonly [bigint, bigint],
-  startedAt: number,
-  maxPreparationMs: number,
-  signal: AbortSignal | undefined,
-  role: string,
-): Promise<void> {
-  let yieldAt = startedAt + YIELD_INTERVAL_MS;
-  let linear = 0n;
-  for (let row = 0n; row < shape[0]; row += 1n) {
-    for (let column = 0n; column < shape[1]; column += 1n) {
-      if ((linear & 1023n) === 0n) {
-        ensurePreparationActive(startedAt, maxPreparationMs, signal);
-        const now = monotonicNow();
-        if (now >= yieldAt) {
-          await yieldToMainThread();
-          ensurePreparationActive(startedAt, maxPreparationMs, signal);
-          yieldAt = monotonicNow() + YIELD_INTERVAL_MS;
-        }
-      }
-      const access = accessor.access([row, column]);
-      if (!access.accessInBounds) invalid(KERNEL_DIAGNOSTIC_CODES.invalidAccess, `$.${role}[${row},${column}]`, "dense logical GEMM coordinate is not a valid allocation access");
-      const expected = accessor.viewByteOffset + (linear * 4n);
-      if (access.rootByteStart !== expected) {
-        invalid(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile, `$.${role}[${row},${column}]`, "initial logical GEMM tile profile requires dense row-major views");
-      }
-      if (access.rootByteStart > BigInt(Number.MAX_SAFE_INTEGER)) {
-        invalid(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile, `$.${role}[${row},${column}]`, "CPU-addressable logical GEMM offsets must fit exact JavaScript indexes");
-      }
-      linear += 1n;
-    }
-  }
-  ensurePreparationActive(startedAt, maxPreparationMs, signal);
-}
-
-function normalizeBindings(bindings: Readonly<Record<string, WireI64>>): Readonly<Record<string, WireI64>> {
-  if (typeof bindings !== "object" || bindings === null || Array.isArray(bindings)) {
-    invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, "$.bindings", "bindings must be a plain data object");
-  }
-  const prototype = Object.getPrototypeOf(bindings);
-  if (prototype !== Object.prototype && prototype !== null) invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, "$.bindings", "bindings must be a plain data object");
-  const descriptors = Object.getOwnPropertyDescriptors(bindings);
-  const result = Object.create(null) as Record<string, WireI64>;
-  for (const key of Reflect.ownKeys(bindings)) {
-    if (typeof key !== "string") invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, "$.bindings", "binding keys must be strings");
-    const descriptor = descriptors[key];
-    if (descriptor === undefined || descriptor.enumerable !== true || !("value" in descriptor)) {
-      invalid(KERNEL_DIAGNOSTIC_CODES.invalidBinding, `$.bindings.${key}`, "bindings must use enumerable data properties without accessors");
-    }
-    result[key] = parseWireI64(descriptor.value, `$.bindings.${key}`);
-  }
-  return Object.freeze(result);
-}
-
-function resolveBudget(value: number | undefined, fallback: number, maximum: number, name: string): number {
-  const resolved = value ?? fallback;
-  if (!Number.isSafeInteger(resolved) || resolved <= 0 || resolved > maximum) {
-    resource(`$.${name}`, `${name} must be a positive safe integer no greater than ${maximum}`);
-  }
-  return resolved;
-}
-
-function monotonicNow(): number {
-  return globalThis.performance?.now() ?? Date.now();
-}
-
-function isAborted(signal: AbortSignal | undefined): boolean {
-  return signal?.aborted === true;
-}
-
-function ensurePreparationActive(startedAt: number, maxPreparationMs: number, signal: AbortSignal | undefined): void {
-  if (isAborted(signal)) resource("$.signal", "logical GEMM tile preparation was aborted");
-  if (monotonicNow() - startedAt > maxPreparationMs) {
-    resource("$.maxPreparationMs", `logical GEMM tile preparation exceeded ${maxPreparationMs} ms`);
-  }
-}
-
-async function yieldToMainThread(): Promise<void> {
-  await new Promise<void>((resolve) => setTimeout(resolve, 0));
-}
-
-function resource(path: string, message: string): never {
-  invalid(KERNEL_DIAGNOSTIC_CODES.resourceLimit, path, message);
 }
 
 function invalid(code: `BG-KERNEL-${string}`, path: string, message: string): never {

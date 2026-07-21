@@ -66,6 +66,17 @@ makes them scores. The schedule remains backend-neutral and scalar. It does
 not claim target legality, numerical preservation, execution, performance, or
 a named fused-attention implementation tier.
 
+The schedule-independent CPU oracle prepares the logical artifact directly. It
+proves the initial dense row-major address profile under explicit element,
+scalar-operation, evaluation-step, time, and cancellation limits; snapshots
+fixed unshared Q/K/V bytes before yielding; rejects non-finite inputs, scores,
+exponentials, denominators, or outputs; and delays every destination write
+until the complete result is valid. Its canonical f32 evaluation rounds each
+product, sum, scale, exponential result, probability, and weighted-value step.
+The accompanying comparator implements the declared `1e-4` absolute-or-
+relative policy and rejects non-finite outputs. This is CPU reference evidence,
+not WebGPU execution or preservation evidence.
+
 Frontends construct the operation through one `/kernel` sink rather than
 assembling allocation, alias, index-map, view, and operation IDs themselves.
 `createVerifiedViewCopyArtifacts` accepts layout construction algebra plus
