@@ -9,6 +9,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Semantic attention preparation consumes exact verified rank-4 f32 logical
+  meaning plus an independently authorized online K/V-tile schedule. Generated
+  WGSL cooperatively stages K/V rows, keeps one Q/output row private per lane,
+  applies causal and tail masks before online-state updates, and places two
+  all-lane uniform barriers around every staged tile.
+- Preparation binds full logical, schedule, backend, and WGSL identities and
+  bounds WGSL bytes, workgroup invocations/storage, private elements, key-tile
+  count, dispatch workgroups, and aggregate host/GPU transient storage. It
+  reports only `block-tiled-kv-online-softmax-forward` and
+  `portable-relegalized`; no device execution, numerical preservation,
+  performance, FlashAttention-v2, frontend, or resident-buffer claim is made.
 - Production semantic GEMM preparation and WebGPU execution consume the exact
   verified layout, logical GEMM, physical schedule, and concrete-input
   certificate authorities. Cooperative scalar workgroup staging uses uniform

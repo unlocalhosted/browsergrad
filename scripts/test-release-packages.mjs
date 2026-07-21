@@ -425,7 +425,7 @@ try {
     semanticCoreRange === workspaceSemanticCoreVersion,
     `kernels package semantic-core dependency should be ${workspaceSemanticCoreVersion}, got ${semanticCoreRange}`,
   );
-  for (const subpath of ["./wgsl_program", "./float16", "./cuda_concepts", "./cuda_program", "./rubric", "./semantic_view_copy", "./semantic_gemm"]) {
+  for (const subpath of ["./wgsl_program", "./float16", "./cuda_concepts", "./cuda_program", "./rubric", "./semantic_view_copy", "./semantic_gemm", "./semantic_attention"]) {
     assert(kernelsPkg.exports?.[subpath], `kernels package missing export ${subpath}`);
   }
   for (const file of [
@@ -433,6 +433,8 @@ try {
     "dist/semantic_view_copy.d.ts",
     "dist/semantic_gemm.js",
     "dist/semantic_gemm.d.ts",
+    "dist/semantic_attention.js",
+    "dist/semantic_attention.d.ts",
   ]) {
     assert(existsSync(join(kernels, file)), `kernels tarball missing ${file}`);
   }
@@ -468,6 +470,7 @@ try {
     "runSemanticViewCopyWebGpu",
     "prepareSemanticGemmWgsl",
     "runSemanticGemmWebGpu",
+    "prepareSemanticAttentionWgsl",
   ]) {
     assert(exportName in kernelsRoot, `kernels root export missing ${exportName}`);
   }
@@ -480,6 +483,7 @@ try {
     ["rubric", "createKernelRubric"],
     ["semantic_view_copy", "prepareSemanticViewCopyWgsl"],
     ["semantic_gemm", "prepareSemanticGemmWgsl"],
+    ["semantic_attention", "prepareSemanticAttentionWgsl"],
   ]) {
     const mod = await import(pathToFileURL(join(kernels, `dist/${subpath}.js`)));
     assert(exportName in mod, `kernels ${subpath} export missing ${exportName}`);
@@ -512,6 +516,23 @@ try {
   assert(
     packedSemanticGemm.program.wgsl.match(/workgroupBarrier\(\);/gu)?.length === 2,
     "packed semantic GEMM lost its two uniform staging barriers",
+  );
+  const kernelsSemanticAttention = await import(pathToFileURL(join(kernels, "dist/semantic_attention.js")));
+  const packedSemanticAttention = await kernelsSemanticAttention.prepareSemanticAttentionWgsl(
+    packedAttention.layout,
+    packedAttention.kernel,
+    packedAttentionSchedule8.artifact,
+    { operationId: packedAttention.operationId },
+  );
+  assert(
+    packedSemanticAttention.semantic.specializationHash
+      === packedAttentionLogical.specializationHash
+      && packedSemanticAttention.algorithmProfile
+        === "block-tiled-kv-online-softmax-forward"
+      && packedSemanticAttention.program.wgsl.includes("var<workgroup> key_tile")
+      && packedSemanticAttention.program.wgsl.includes("var<workgroup> value_tile")
+      && packedSemanticAttention.program.wgsl.match(/workgroupBarrier\(\);/gu)?.length === 2,
+    "packed semantic attention lost logical authority, K/V staging, or uniform barriers",
   );
   const installedConsumer = installPackedConsumer(
     "semantic-view-copy",

@@ -63,6 +63,10 @@
       "types": "./dist/semantic_gemm.d.ts",
       "import": "./dist/semantic_gemm.js"
     },
+    "./semantic_attention": {
+      "types": "./dist/semantic_attention.d.ts",
+      "import": "./dist/semantic_attention.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

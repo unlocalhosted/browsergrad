@@ -207,6 +207,16 @@ export {
 } from "./semantic_gemm.js";
 
 export {
+  SEMANTIC_ATTENTION_WEBGPU_BACKEND_VERSION,
+  SEMANTIC_ATTENTION_WEBGPU_PROFILE,
+  SemanticAttentionWebGpuError,
+  prepareSemanticAttentionWgsl,
+  type PreparedSemanticAttentionWgsl,
+  type PrepareSemanticAttentionWgslRequest,
+  type SemanticAttentionWebGpuErrorCode,
+} from "./semantic_attention.js";
+
+export {
   defineCuda1DProgram,
   defineKernel1DProgram,
   emitCuda1DProgramWgsl,

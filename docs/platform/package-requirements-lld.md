@@ -117,9 +117,16 @@ implements the named absolute-or-relative policy and rejects non-finite output.
 This grants CPU reference evidence only. Schedule specialization now composes the
 exact prepared logical and schedule authorities and derives bounded workgroup,
 K/V staging, private-state, key-tile, and dispatch geometry without granting
-device legality or preservation. Block-tiled WebGPU execution is the next
-slice; the existing row-wise online-softmax
-implementation remains named only as a baseline. Two
+device legality or preservation. Kernels now consumes that exact composition
+to prepare a bounded scalar WGSL module with cooperative K/V workgroup staging,
+two uniform barriers per key tile, private Q/output state, tile-wise online
+softmax, pre-update causal/tail masks, and suppressed boundary stores. The
+backend identity reports `block-tiled-kv-online-softmax-forward` and
+`portable-relegalized`; preparation alone grants no device execution,
+numerical-preservation, performance, FlashAttention-v2, or frontend claim.
+Authority-bound host execution and actual-device evidence are the next slice;
+the existing row-wise online-softmax implementation remains named only as a
+baseline. Two
 distinct cache-free builds now prove exact
 extractor Wasm/factory reproducibility; the package binds their canonical v3
 evidence without claiming reproducibility of the still-incomplete distributed
