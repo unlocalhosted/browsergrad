@@ -9,6 +9,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Closed `browsergrad.kernel.attention-forward@1` artifacts for backend-neutral
+  rank-4 f32 scaled-dot-product attention. The canonical dense constructor
+  derives disjoint Q/K/V/output layouts, exact inverse-square-root scale bits,
+  stable-softmax phases, finite-domain requirements, non-causal or upper-left
+  causal meaning, the initial abs-or-relative comparison policy, and an
+  explicit forward-only VJP refusal without admitting schedule or backend
+  fields.
 - Closed `browsergrad.kernel.gemm-tile@1` artifacts for dense static rank-2 f32
   operands with exact logical tiles, boundary masks, pairwise-disjoint effects,
   increasing-K round-to-nearest-even accumulation, and explicit prohibitions on

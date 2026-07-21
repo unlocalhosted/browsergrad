@@ -44,6 +44,18 @@ Certificates retain private snapshots and return fresh copies for immediate
 upload; they do not authorize arbitrary or previously resident GPU buffers and
 make no general-f32 preservation claim.
 
+`/kernel` also owns the closed, frontend-neutral
+`browsergrad.kernel.attention-forward@1` meaning. It binds verified rank-4
+Q/K/V/output views, non-causal or upper-left causal masking, the exact f32
+inverse-square-root query-depth scale, stable softmax phases, finite-score and
+finite-online-state preconditions, a named `1e-4` absolute-or-relative
+comparison policy, pairwise-disjoint effects, and an explicit forward-only VJP
+refusal. The dense constructor admits positive portable-u32 dimensions and
+limits query/value depths to 256. Workgroups, tiles, staging, barriers, WGSL,
+backend facilities, and performance claims are absent by construction; those
+require separate schedule and execution artifacts. No CPU or WebGPU execution
+claim is made by this semantic slice.
+
 Frontends construct the operation through one `/kernel` sink rather than
 assembling allocation, alias, index-map, view, and operation IDs themselves.
 `createVerifiedViewCopyArtifacts` accepts layout construction algebra plus

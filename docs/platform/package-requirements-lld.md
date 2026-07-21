@@ -15,8 +15,8 @@ general emphasis.
 
 ## Implementation Checkpoint — Active 2026-07-21
 
-Gates 0 through 2 and Gate 4 are verified; Gate 3 remains active; Gates 5
-through 7 have not started. Gate 4 is verified for its initial closed portable
+Gates 0 through 2 and Gate 4 are verified; Gate 3 remains active; Gate 5 is
+partial; Gates 6 and 7 have not started. Gate 4 is verified for its initial closed portable
 profile only: dense row-major, 4-byte-aligned, certified exact-input `f32`
 GEMM. The strict native producer, pinned no-shell Clang-Wasm executor,
 isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
@@ -94,9 +94,16 @@ record because the required-native lane exposed the stale package Worker pin.
 Commit `343523fe` regenerates and repins the deterministic zero-import compiler
 Worker at 571,098 bytes and SHA-256
 `01a4c1d10d606773bfa241284160f3af787dec856e1a17e22edd7c34dae043a3`.
-Gate 5's first software slice is
-the tiled-attention semantic baseline and schedule contract; the existing
-row-wise online-softmax implementation remains named only as a baseline. Two
+Gate 5's first software slice now defines the closed frontend-neutral
+`browsergrad.kernel.attention-forward@1` artifact. It binds verified rank-4
+Q/K/V/output views, exact f32 inverse-square-root scale bits, non-causal or
+upper-left causal masking, stable-softmax phases, finite scaled-score and
+online-state preconditions, a named `1e-4` absolute-or-relative comparison
+policy, pairwise-disjoint effects, and explicit VJP refusal. The artifact
+contains no physical tiles, staging, barriers, WGSL, backend, or performance
+meaning and grants no CPU or WebGPU execution claim. The separate tiled
+schedule contract is the next slice; the existing row-wise online-softmax
+implementation remains named only as a baseline. Two
 distinct cache-free builds now prove exact
 extractor Wasm/factory reproducibility; the package binds their canonical v3
 evidence without claiming reproducibility of the still-incomplete distributed

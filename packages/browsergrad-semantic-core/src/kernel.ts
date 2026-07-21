@@ -99,3 +99,31 @@ export {
   type ConstructedLogicalGemmExactF32InputCertificate,
   type LogicalGemmExactF32InputCertificateConstructionOptions,
 } from "./kernel/gemm-exact-input-construction.js";
+export {
+  INITIAL_ATTENTION_FORWARD_COMPARISON_POLICY,
+  INITIAL_ATTENTION_FORWARD_MAX_DEPTH,
+  INITIAL_ATTENTION_FORWARD_MAX_DIMENSION,
+  INITIAL_ATTENTION_FORWARD_NUMERICAL_POLICY,
+  type AttentionForwardMask,
+  type AttentionForwardOperation,
+  type AttentionForwardReadEffect,
+  type AttentionForwardWriteEffect,
+} from "./kernel/attention-forward-model.js";
+export {
+  ATTENTION_FORWARD_ARTIFACT_MAJOR,
+  ATTENTION_FORWARD_ARTIFACT_MINOR,
+  ATTENTION_FORWARD_ARTIFACT_SCHEMA,
+  attentionForwardArtifactPayload,
+  decodeAttentionForwardArtifact,
+  verifyAttentionForwardArtifact,
+  type AttentionForwardArtifactPayloadV1,
+  type AttentionForwardArtifactVerificationOptions,
+  type VerifiedAttentionForwardArtifact,
+} from "./kernel/attention-forward-artifact.js";
+export {
+  createVerifiedDenseAttentionForwardArtifacts,
+  type AttentionForwardArtifactConstructionOptions,
+  type AttentionForwardArtifactRole,
+  type CreateVerifiedDenseAttentionForwardArtifactsRequest,
+  type VerifiedAttentionForwardArtifacts,
+} from "./kernel/attention-forward-construction.js";

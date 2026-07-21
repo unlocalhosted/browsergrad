@@ -184,13 +184,17 @@ try {
     assert(exportName in semanticLayout, `semantic-core layout export missing ${exportName}`);
   }
   for (const exportName of [
+    "INITIAL_ATTENTION_FORWARD_COMPARISON_POLICY",
+    "attentionForwardArtifactPayload",
     "copyCertifiedLogicalGemmExactF32Inputs",
+    "createVerifiedDenseAttentionForwardArtifacts",
     "createVerifiedLogicalGemmExactF32InputCertificate",
     "createVerifiedDensePermutationViewCopyArtifacts",
     "createVerifiedViewCopyArtifacts",
     "verifyKernelArtifact",
     "verifyInitialPortableViewCopyProfile",
     "prepareViewCopyCpu",
+    "verifyAttentionForwardArtifact",
   ]) {
     assert(exportName in semanticKernel, `semantic-core kernel export missing ${exportName}`);
   }
@@ -282,6 +286,31 @@ try {
       packedExactInput.certificate,
     ).proof.maximumOutputSum === "15",
     "semantic-core packed exact-input certificate lost its exact arithmetic proof",
+  );
+  const packedAttention = await semanticKernel.createVerifiedDenseAttentionForwardArtifacts({
+    batch: "1",
+    heads: "2",
+    queryLength: "3",
+    keyLength: "5",
+    queryDepth: "4",
+    valueDepth: "6",
+    causal: true,
+  });
+  const packedAttentionPayload = semanticKernel.attentionForwardArtifactPayload(
+    packedAttention.kernel,
+  );
+  assert(
+    packedAttentionPayload.layoutSemanticHash
+      === await semanticSchema.hashSemanticArtifact(packedAttention.layout)
+      && packedAttentionPayload.operation.mask.kind === "causal"
+      && packedAttentionPayload.operation.scale.value.bits === "3f000000",
+    "semantic-core packed attention-forward artifact lost layout, mask, or exact-scale meaning",
+  );
+  assert(
+    semanticKernel.INITIAL_ATTENTION_FORWARD_COMPARISON_POLICY.absoluteTolerance === 0.0001
+      && semanticKernel.INITIAL_ATTENTION_FORWARD_COMPARISON_POLICY.relativeTolerance === 0.0001
+      && !JSON.stringify(packedAttentionPayload).match(/workgroup|staging|barrier|wgsl|webgpu|cuda|flash/iu),
+    "semantic-core packed attention-forward contract gained schedule/backend meaning or lost its comparison policy",
   );
   const packedArtifacts = await semanticKernel.createVerifiedDensePermutationViewCopyArtifacts({
     inputShape: ["2", "2"],
