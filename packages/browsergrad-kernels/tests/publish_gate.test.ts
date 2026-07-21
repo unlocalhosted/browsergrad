@@ -9,11 +9,22 @@ describe("kernels publish evidence gate", () => {
     expect(() => validate("0000000000000000000000000000000000000000")).toThrow(/does not match HEAD/u);
     expect(() => validateViewCopyPublishGate({
       evidenceCommit: head,
+      semanticGemmEvidenceCommit: head,
       jitEvidenceCommit: undefined,
       githubSha: undefined,
       head,
       relevantStatus: "",
     })).toThrow(/semantic-permute:required/u);
+    expect(() => validateViewCopyPublishGate({
+      evidenceCommit: head,
+      semanticGemmEvidenceCommit: undefined,
+      jitEvidenceCommit: head,
+      githubSha: undefined,
+      head,
+      relevantStatus: "",
+    })).toThrow(/semantic-gemm:required/u);
+    expect(() => validate(head, "", undefined, head, "0000000000000000000000000000000000000000"))
+      .toThrow(/semantic GEMM evidence commit/u);
     expect(() => validate(head, "", undefined, "0000000000000000000000000000000000000000"))
       .toThrow(/JIT semantic-permute evidence commit/u);
   });
@@ -30,9 +41,11 @@ function validate(
   relevantStatus = "",
   githubSha?: string,
   jitEvidenceCommit: string | undefined = evidenceCommit,
+  semanticGemmEvidenceCommit: string | undefined = evidenceCommit,
 ) {
   return validateViewCopyPublishGate({
     evidenceCommit,
+    semanticGemmEvidenceCommit,
     jitEvidenceCommit,
     githubSha,
     head,

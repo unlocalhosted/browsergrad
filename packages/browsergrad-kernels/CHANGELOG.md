@@ -35,8 +35,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   receives a private, non-exported synchronous issue capability so future
   consumers cannot bypass diagnostic ownership accidentally.
 - Kernels publication runs build/typecheck/lint/tests before its final clean-
-  commit gate and requires both kernels view-copy and JIT semantic-permutation
-  evidence markers for the exact source revision.
+  commit gate and requires kernels view-copy, kernels semantic-GEMM, and JIT
+  semantic-permutation evidence markers for the exact source revision.
 
 ## [0.2.0] - 2026-07-15
 

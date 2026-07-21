@@ -79,6 +79,21 @@ jobs:
           path: semantic-view-copy-webgpu-evidence.log
           if-no-files-found: error
 
+      - name: Run required semantic GEMM WebGPU gate
+        run: |
+          set -o pipefail
+          pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:semantic-gemm:required 2>&1 | tee semantic-gemm-webgpu-evidence.log
+        env:
+          BG_BROWSER_HEADLESS: '1'
+
+      - name: Retain semantic GEMM WebGPU evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semantic-gemm-webgpu-evidence-${{ github.sha }}
+          path: semantic-gemm-webgpu-evidence.log
+          if-no-files-found: error
+
       - name: Run required compiler layout-binding WebGPU gate
         run: |
           set -o pipefail
@@ -140,6 +155,7 @@ jobs:
         run: node scripts/publish-missing-npm.mjs --stage-dir npm-release-artifacts
         env:
           BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
+          BG_REQUIRED_SEMANTIC_GEMM_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_COMPILER_LAYOUT_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_COMPILER_VIEW_COPY_BINDINGS_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_JIT_SEMANTIC_PERMUTE_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
