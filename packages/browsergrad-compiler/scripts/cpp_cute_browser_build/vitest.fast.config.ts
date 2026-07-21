@@ -8,6 +8,8 @@ export default defineConfig({
       "scripts/cpp_cute_browser_build/*.test.ts",
       "tests/compiler/cpp_cute_browser_build_provenance.test.ts",
       "tests/compiler/cpp_cute_browser_build_provenance_syntax.test.ts",
+      "tests/compiler/cpp_cute_browser_producer_trust_policy.test.ts",
+      "tests/compiler/cpp_cute_browser_producer_trust.test.ts",
       "tests/compiler/cpp_cute_browser_build_lock.test.ts",
       "tests/compiler/cpp_cute_browser_runtime_abi.test.ts",
       "tests/compiler/cpp_cute_browser_runtime_profile.test.ts",
