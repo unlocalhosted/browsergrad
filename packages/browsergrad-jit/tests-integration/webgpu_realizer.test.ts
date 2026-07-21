@@ -1465,7 +1465,7 @@ w_gpu = bg.from_numpy(w_np.copy(), requires_grad=True)
     expect(result.legacy_matmul).toBe(0);
   });
 
-  it("backward(device='webgpu') refuses closure-only ops instead of falling back to CPU", async () => {
+  it("backward(device='webgpu') refuses typed ops without a portable plan lowering", async () => {
     const target = await getJitTarget();
     const result = await target.run<{ message: string; tensor_plan: number }>(`
 import browsergrad_jit as bg
@@ -1478,8 +1478,8 @@ except Exception as e:
     msg = str(e)
 {"message": msg, "tensor_plan": _mock.tensor_plan_count}
 `);
-    expect(result.message).toMatch(/requires symbolic VJP coverage/);
-    expect(result.message).toMatch(/CUSTOM/);
+    expect(result.message).toMatch(/does not support opcode/);
+    expect(result.message).toMatch(/SIGN/);
     expect(result.tensor_plan).toBe(0);
   });
 

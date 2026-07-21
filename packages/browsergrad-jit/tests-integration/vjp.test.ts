@@ -41,9 +41,9 @@ list(list_registered())
     // CNN/norm IR adds CONV1D/CONV2D/CONV_TRANSPOSE2D/CONV3D/LAYER_NORM, which emit
     // explicit backward UOps.
     const expected = [
-      "ADD", "BROADCAST_TO", "CAST", "CONV1D", "CONV2D", "CONV3D", "CONV_TRANSPOSE2D",
+      "ABS", "ADD", "BROADCAST_TO", "CAST", "CONV1D", "CONV2D", "CONV3D", "CONV_TRANSPOSE2D",
       "DIV", "EXP", "ISNAN", "LAYER_NORM", "LOG", "MATMUL", "MUL",
-      "NEG", "PERMUTE", "REDUCE", "RESHAPE",
+      "NEG", "PERMUTE", "REDUCE", "RESHAPE", "SIGN",
     ];
     expect(registered).toEqual(expected);
   });

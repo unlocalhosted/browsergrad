@@ -44,7 +44,7 @@ import numpy as np
 from ._ir import (
     UOp,
     OP_BUFFER,
-    OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CMP,
+    OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_ABS, OP_SIGN, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO,
 )
@@ -611,15 +611,12 @@ class TensorProxy:
                            requires_grad=requires, ctx=ctx)
 
     def abs(self) -> "TensorProxy":
-        def _abs_forward(x_arr: np.ndarray) -> np.ndarray:
-            return np.abs(x_arr)
-
         uop = UOp(
-            op=OP_CUSTOM,
+            op=OP_ABS,
             inputs=(self._uop,),
             shape=self._uop.shape,
             dtype=self._uop.dtype,
-            arg={"fn": _abs_forward, "captures": (), "name": "abs"},
+            arg={},
         )
 
         def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
@@ -680,15 +677,12 @@ class TensorProxy:
                            requires_grad=requires, ctx=ctx)
 
     def sign(self) -> "TensorProxy":
-        def _sign_forward(x_arr: np.ndarray) -> np.ndarray:
-            return np.sign(x_arr)
-
         uop = UOp(
-            op=OP_CUSTOM,
+            op=OP_SIGN,
             inputs=(self._uop,),
             shape=self._uop.shape,
             dtype=self._uop.dtype,
-            arg={"fn": _sign_forward, "captures": (), "name": "sign"},
+            arg={},
         )
 
         def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:

@@ -12,12 +12,17 @@ contract in the README](README.md#compatibility-contract).
 - `Tensor.expand` now emits typed `BROADCAST_TO` instead of `CUSTOM`, with
   strict shape capture, shared contract revalidation, symbolic VJP, vmap,
   ONNX `Expand`, and materializing/resident tensor-plan coverage.
+- `Tensor.abs` and `Tensor.sign` now emit typed `ABS` and `SIGN`, with strict
+  real-numeric shape/dtype preservation, owning CPU results, closure and
+  symbolic gradients, functional grad, vmap, direct ONNX export, and explicit
+  tensor-plan/WebGPU refusal until a portable kernel exists.
 
 ### Added
 
 - Added the bounded v1 executable framework-operation registry and detached
   `framework_operation_support()` table. Typed-operation support decisions now
-  come from the same validator bindings used by execution boundaries.
+  come from the same validator bindings used by execution boundaries; the
+  current table contains `ABS`, `BROADCAST_TO`, and `SIGN`.
 
 ## [0.9.0] — 2026-07-15
 

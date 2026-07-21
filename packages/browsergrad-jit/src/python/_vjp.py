@@ -47,7 +47,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from ._ir import (
     UOp,
-    OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CAST,
+    OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_ABS, OP_SIGN, OP_CAST,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -62,7 +62,10 @@ from ._ir import (
     OP_CONST, OP_BROADCAST_TO,
     OP_ISNAN,
 )
-from ._framework_contracts import validate_broadcast_to_contract
+from ._framework_contracts import (
+    validate_broadcast_to_contract,
+    validate_real_numeric_unary_contract,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +235,31 @@ def _vjp_log(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UO
     """d/dx log(x) = 1/x."""
     (x,) = inputs
     return (_vjp_uop(OP_DIV, (dy, x), x.shape, x.dtype, output),)
+
+
+@register_vjp(OP_ABS)
+def _vjp_abs(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """d/dx abs(x) = sign(x), with the zero subgradient selected at x=0."""
+    validate_real_numeric_unary_contract(output)
+    (x,) = inputs
+    sign = _vjp_uop(OP_SIGN, (x,), x.shape, x.dtype, output)
+    return (_vjp_uop(OP_MUL, (dy, sign), x.shape, x.dtype, output),)
+
+
+@register_vjp(OP_SIGN)
+def _vjp_sign(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """The selected first derivative of sign is zero everywhere."""
+    validate_real_numeric_unary_contract(output)
+    (x,) = inputs
+    zero = _vjp_uop(
+        OP_CONST,
+        (),
+        (),
+        x.dtype,
+        output,
+        arg={"value": 0},
+    )
+    return (_vjp_uop(OP_MUL, (dy, zero), x.shape, x.dtype, output),)
 
 
 # ---------------------------------------------------------------------------

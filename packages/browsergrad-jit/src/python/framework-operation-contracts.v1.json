@@ -6,6 +6,27 @@
   },
   "operations": [
     {
+      "contractId": "browsergrad.jit.framework.tensor.abs.v1",
+      "publicSurface": "Tensor.abs",
+      "opcode": "ABS",
+      "semanticState": "typed",
+      "shapeContract": "preserve-unary-input",
+      "dtypeContract": "preserve-real-numeric-input",
+      "decisions": {
+        "cpu": "supported-numpy-dtype-preserving",
+        "closureAutograd": "supported-sign-derivative",
+        "symbolicVjp": "supported-sign-derivative",
+        "functionalGrad": "supported-via-symbolic-vjp",
+        "vmap": "supported-leading-batch-axis",
+        "onnxExport": "supported-opset17-direct-unary-export-dtypes",
+        "tensorPlan": "refused-no-portable-lowering",
+        "webgpu": "refused-no-tensor-plan-kernel",
+        "residency": "host-materialized",
+        "materialization": "cpu-owning-array"
+      },
+      "retiredOpaqueOperationId": "jit.custom.abs.v0"
+    },
+    {
       "contractId": "browsergrad.jit.framework.tensor.expand.v1",
       "publicSurface": "Tensor.expand",
       "opcode": "BROADCAST_TO",
@@ -25,6 +46,27 @@
         "materialization": "cpu-owning-copy"
       },
       "retiredOpaqueOperationId": "jit.custom.expand.v0"
+    },
+    {
+      "contractId": "browsergrad.jit.framework.tensor.sign.v1",
+      "publicSurface": "Tensor.sign",
+      "opcode": "SIGN",
+      "semanticState": "typed",
+      "shapeContract": "preserve-unary-input",
+      "dtypeContract": "preserve-real-numeric-input",
+      "decisions": {
+        "cpu": "supported-numpy-dtype-preserving",
+        "closureAutograd": "supported-zero-derivative",
+        "symbolicVjp": "supported-zero-derivative",
+        "functionalGrad": "supported-via-symbolic-vjp",
+        "vmap": "supported-leading-batch-axis",
+        "onnxExport": "supported-opset17-direct-unary-export-dtypes",
+        "tensorPlan": "refused-no-portable-lowering",
+        "webgpu": "refused-no-tensor-plan-kernel",
+        "residency": "host-materialized",
+        "materialization": "cpu-owning-array"
+      },
+      "retiredOpaqueOperationId": "jit.custom.sign.v0"
     }
   ]
 }

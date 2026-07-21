@@ -5,10 +5,10 @@
     {
       "id": "jit.custom.shared-refusals.v0",
       "expected": {
-        "label": "abs",
+        "label": "clamp",
         "labelField": "name",
-        "cpuValues": [1, 2],
-        "cpuGradient": [-1, 1],
+        "cpuValues": [-1, 1],
+        "cpuGradient": [0, 0],
         "symbolicVjpRegistered": false,
         "functionalGradError": "JitNotImplementedError",
         "vmapError": "JitNotImplementedError",
@@ -77,7 +77,6 @@
       "expected": {
         "environment": {"pyodide": "0.26.4", "numpy": "1.26.4"},
         "observedLabels": [
-          "abs",
           "batch_norm1d",
           "binary_cross_entropy",
           "binary_cross_entropy_with_logits",
@@ -98,7 +97,6 @@
           "prod",
           "repeat",
           "repeat_interleave",
-          "sign",
           "sin",
           "smooth_l1_loss",
           "stack",
@@ -108,7 +106,6 @@
         ],
         "allLabelsMatch": true,
         "closureGradientLabels": [
-          "abs",
           "batch_norm1d",
           "binary_cross_entropy",
           "binary_cross_entropy_with_logits",
@@ -129,7 +126,6 @@
           "prod",
           "repeat",
           "repeat_interleave",
-          "sign",
           "sin",
           "smooth_l1_loss",
           "stack",

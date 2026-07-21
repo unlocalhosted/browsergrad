@@ -134,6 +134,13 @@ map the same node; and the materializing/resident tensor-plan routes accept its
 current f32 rank-at-most-four WebGPU profile. Invalid, non-integral, rank-
 reducing, or incompatible shapes fail before execution.
 
+`Tensor.abs()` and `Tensor.sign()` emit typed `ABS` and `SIGN` primitives.
+They preserve the exact shape and real numeric dtype, reject bool before
+execution, return owning CPU arrays, support closure and symbolic gradients,
+leading-axis vmap, and direct ONNX export. Their current backend profile is
+host-materialized only: tensor-plan and WebGPU execution fail explicitly until
+a portable lowering and kernel are admitted.
+
 `bg.framework_operation_support()` returns the versioned public decision table
 for framework operations admitted to typed execution. The table is generated
 from the same package registry that binds executable validators at CPU,

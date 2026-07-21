@@ -2,30 +2,74 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { clearNamespace, getJitTarget } from "./pyodide-host";
 
-const EXPAND_SUPPORT = {
+const FRAMEWORK_SUPPORT = {
   schema: "browsergrad.jit.framework-operation-contracts",
   version: { major: 1, minor: 0 },
-  operations: [{
-    contractId: "browsergrad.jit.framework.tensor.expand.v1",
-    publicSurface: "Tensor.expand",
-    opcode: "BROADCAST_TO",
-    semanticState: "typed",
-    shapeContract: "static-broadcast-with-existing-dim-minus-one",
-    dtypeContract: "preserve-input",
-    decisions: {
-      cpu: "supported-numpy-owning-copy",
-      closureAutograd: "supported-unbroadcast-sum",
-      symbolicVjp: "supported-unbroadcast-sum",
-      functionalGrad: "supported-via-symbolic-vjp",
-      vmap: "supported-leading-batch-axis",
-      onnxExport: "supported-opset17-expand",
-      tensorPlan: "supported-primitive",
-      webgpu: "profile-nonempty-f32-rank-at-most-4",
-      residency: "supported-materializing-and-resident",
-      materialization: "cpu-owning-copy",
+  operations: [
+    {
+      contractId: "browsergrad.jit.framework.tensor.abs.v1",
+      publicSurface: "Tensor.abs",
+      opcode: "ABS",
+      semanticState: "typed",
+      shapeContract: "preserve-unary-input",
+      dtypeContract: "preserve-real-numeric-input",
+      decisions: {
+        cpu: "supported-numpy-dtype-preserving",
+        closureAutograd: "supported-sign-derivative",
+        symbolicVjp: "supported-sign-derivative",
+        functionalGrad: "supported-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis",
+        onnxExport: "supported-opset17-direct-unary-export-dtypes",
+        tensorPlan: "refused-no-portable-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-array",
+      },
+      retiredOpaqueOperationId: "jit.custom.abs.v0",
     },
-    retiredOpaqueOperationId: "jit.custom.expand.v0",
-  }],
+    {
+      contractId: "browsergrad.jit.framework.tensor.expand.v1",
+      publicSurface: "Tensor.expand",
+      opcode: "BROADCAST_TO",
+      semanticState: "typed",
+      shapeContract: "static-broadcast-with-existing-dim-minus-one",
+      dtypeContract: "preserve-input",
+      decisions: {
+        cpu: "supported-numpy-owning-copy",
+        closureAutograd: "supported-unbroadcast-sum",
+        symbolicVjp: "supported-unbroadcast-sum",
+        functionalGrad: "supported-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis",
+        onnxExport: "supported-opset17-expand",
+        tensorPlan: "supported-primitive",
+        webgpu: "profile-nonempty-f32-rank-at-most-4",
+        residency: "supported-materializing-and-resident",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.expand.v0",
+    },
+    {
+      contractId: "browsergrad.jit.framework.tensor.sign.v1",
+      publicSurface: "Tensor.sign",
+      opcode: "SIGN",
+      semanticState: "typed",
+      shapeContract: "preserve-unary-input",
+      dtypeContract: "preserve-real-numeric-input",
+      decisions: {
+        cpu: "supported-numpy-dtype-preserving",
+        closureAutograd: "supported-zero-derivative",
+        symbolicVjp: "supported-zero-derivative",
+        functionalGrad: "supported-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis",
+        onnxExport: "supported-opset17-direct-unary-export-dtypes",
+        tensorPlan: "refused-no-portable-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-array",
+      },
+      retiredOpaqueOperationId: "jit.custom.sign.v0",
+    },
+  ],
 };
 
 describe("Gate 6 executable framework-operation support", () => {
@@ -40,8 +84,8 @@ describe("Gate 6 executable framework-operation support", () => {
   it("reports detached public decisions from the contract used to validate execution", async () => {
     const target = await getJitTarget();
     const result = await target.run<{
-      first: typeof EXPAND_SUPPORT;
-      second: typeof EXPAND_SUPPORT;
+      first: typeof FRAMEWORK_SUPPORT;
+      second: typeof FRAMEWORK_SUPPORT;
       validatedContractId: string;
       normalizedShape: number[];
       values: number[][];
@@ -66,10 +110,10 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(2);
+    expect(result.first.operations).toHaveLength(4);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
-    expect(result.second).toEqual(EXPAND_SUPPORT);
-    expect(result.validatedContractId).toBe(EXPAND_SUPPORT.operations[0]?.contractId);
+    expect(result.second).toEqual(FRAMEWORK_SUPPORT);
+    expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");
     expect(result.normalizedShape).toEqual([2, 3]);
     expect(result.values).toEqual([[1, 1, 1], [2, 2, 2]]);
   });

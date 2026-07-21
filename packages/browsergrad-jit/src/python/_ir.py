@@ -38,7 +38,10 @@ from dataclasses import dataclass
 from typing import Any, Tuple, FrozenSet
 
 from ._errors import ShapeError
-from ._framework_contracts import validate_framework_operation_contract
+from ._framework_contracts import (
+    has_framework_operation_contract,
+    validate_framework_operation_contract,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +85,8 @@ OP_DIV     = "DIV"
 OP_NEG     = "NEG"
 OP_EXP     = "EXP"
 OP_LOG     = "LOG"
+OP_ABS     = "ABS"
+OP_SIGN    = "SIGN"
 OP_CMP     = "CMP"      # arg: {op: 'eq'|'lt'|'le'|'gt'|'ge'|'ne'}
 OP_MATMUL  = "MATMUL"
 OP_CONV1D  = "CONV1D"   # arg: {n,c_in,l_in,c_out,k,stride,padding,dilation,groups,l_out,has_bias}
@@ -152,7 +157,7 @@ OP_ADAM_UPDATE_PARAM = "ADAM_UPDATE_PARAM"  # inputs: (param, m_new, v_new), arg
 
 ALL_OPS: FrozenSet[str] = frozenset({
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM, OP_CAST,
-    OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CMP,
+    OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_ABS, OP_SIGN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
@@ -173,7 +178,7 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 })
-assert len(ALL_OPS) == 55, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
+assert len(ALL_OPS) == 57, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -266,7 +271,7 @@ class UOp:
                 f"{self.op}: unknown dtype {self.dtype!r}; expected one of "
                 f"{sorted(_KNOWN_DTYPES)}"
             )
-        if self.op == OP_BROADCAST_TO:
+        if has_framework_operation_contract(self.op):
             validate_framework_operation_contract(self)
 
 
@@ -396,7 +401,7 @@ __all__ = [
     # Opcode strings
     "OP_BUFFER", "OP_LOAD", "OP_STORE", "OP_CONST", "OP_RANDOM",
     "OP_CAST", "OP_ADD", "OP_MUL", "OP_DIV", "OP_NEG",
-    "OP_EXP", "OP_LOG", "OP_CMP", "OP_MATMUL",
+    "OP_EXP", "OP_LOG", "OP_ABS", "OP_SIGN", "OP_CMP", "OP_MATMUL",
     "OP_CONV1D", "OP_CONV1D_BACKWARD_INPUT",
     "OP_CONV1D_BACKWARD_WEIGHT", "OP_CONV1D_BACKWARD_BIAS",
     "OP_CONV2D",

@@ -22,6 +22,10 @@ Each package follows independent [SemVer](https://semver.org/).
 - Adds the first versioned executable JIT framework-operation registry and
   generates detached public support reporting from its validator-bound typed
   records rather than method presence or hand-written tables.
+- Migrates JIT `Tensor.abs` and `Tensor.sign` together from opaque callbacks to
+  typed unary semantics across CPU, closure/symbolic autograd, functional grad,
+  vmap, and ONNX. Their tensor-plan/WebGPU profile remains an explicit refusal
+  until a portable lowering exists.
 
 ## 2026-07 — semantic-core, kernels, compiler, and JIT semantic migration
 

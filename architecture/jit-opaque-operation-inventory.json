@@ -185,14 +185,6 @@
       "operationIds": ["jit.custom.batch-norm-1d.v0"]
     },
     {
-      "id": "tensor.abs",
-      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
-      "definition": "TensorProxy.abs",
-      "constructorCount": 1,
-      "labelBinding": "static-name",
-      "operationIds": ["jit.custom.abs.v0"]
-    },
-    {
       "id": "tensor.sin",
       "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
       "definition": "TensorProxy.sin",
@@ -207,14 +199,6 @@
       "constructorCount": 1,
       "labelBinding": "static-name",
       "operationIds": ["jit.custom.cos.v0"]
-    },
-    {
-      "id": "tensor.sign",
-      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
-      "definition": "TensorProxy.sign",
-      "constructorCount": 1,
-      "labelBinding": "static-name",
-      "operationIds": ["jit.custom.sign.v0"]
     },
     {
       "id": "tensor.clamp",
@@ -408,7 +392,6 @@
     "packages/browsergrad-jit/src/python/_vmap.py:_refuse"
   ],
   "operations": [
-    {"id":"jit.custom.abs.v0","label":"abs","labelField":"name","constructorSite":"tensor.abs","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.batch-norm-1d.v0","label":"batch_norm1d","labelField":"name","constructorSite":"nn.batch-norm-1d-forward","policy":"cpu-callback-with-closure","constructorReachability":"always-after-shape-validation","effectCondition":"arity-three-when-affine-else-one;running-stats-mutate-only-when-training-and-tracked;batch-stats-used-when-training-or-untracked","effectClass":"module-stateful","replayContract":"tracked-training-reexecution-mutates-running-stats-and-captured-state","inputArity":"one-without-affine-or-three-with-affine","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"tracked training closure realization may update running statistics more than once","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.binary-cross-entropy.v0","label":"binary_cross_entropy","labelField":"name","constructorSite":"functional.elementwise-loss-helper","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-first-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.binary-cross-entropy-with-logits.v0","label":"binary_cross_entropy_with_logits","labelField":"name","constructorSite":"functional.binary-cross-entropy-with-logits","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-first-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
@@ -432,7 +415,6 @@
     {"id":"jit.custom.repeat.v0","label":"repeat","labelField":"name","constructorSite":"tensor.repeat","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"tile-multipliers","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.repeat-interleave.v0","label":"repeat_interleave","labelField":"name","constructorSite":"tensor.repeat-interleave","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"selected-axis-times-repeat-count","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.scatter.v0","label":"scatter","labelField":"name","constructorSite":"tensor.scatter","policy":"cpu-callback-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"3","shapeRule":"preserve-target-shape","declaredDtypeRule":"preserve-target-dtype","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"autograd silently disconnects","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
-    {"id":"jit.custom.sign.v0","label":"sign","labelField":"name","constructorSite":"tensor.sign","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.sin.v0","label":"sin","labelField":"name","constructorSite":"tensor.sin","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.smooth-l1-loss.v0","label":"smooth_l1_loss","labelField":"name","constructorSite":"functional.elementwise-loss-helper","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-first-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.sort-indices.v0","label":"sort_indices","labelField":"name","constructorSite":"tensor.sort-indices","policy":"cpu-callback-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"int64","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"autograd silently disconnects","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},

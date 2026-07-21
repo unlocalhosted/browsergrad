@@ -41,8 +41,8 @@ def error_name(fn):
     except Exception as exc:
         return type(exc).__name__
 
-x = bg.from_numpy(np.array([-1.0, 2.0], dtype=np.float32), requires_grad=True)
-y = x.abs()
+x = bg.from_numpy(np.array([-2.0, 2.0], dtype=np.float32), requires_grad=True)
+y = x.clamp(-1.0, 1.0)
 cpu_values = y.numpy().tolist()
 y.sum().backward()
 custom_plan = bg.gpu_plan_summary(y, allow_custom=True)
@@ -56,7 +56,7 @@ class PlanOnlyGpuBuffers:
     "cpuValues": cpu_values,
     "cpuGradient": x.grad.numpy().tolist(),
     "symbolicVjpRegistered": _vjp.get_rule("CUSTOM") is not None,
-    "functionalGradError": error_name(lambda: bg.func.grad(lambda value: value.abs().sum())(x)),
+    "functionalGradError": error_name(lambda: bg.func.grad(lambda value: value.clamp(-1.0, 1.0).sum())(x)),
     "vmapError": error_name(lambda: _vmap._VMAP_RULES["CUSTOM"](y._uop, {}, 2)),
     "onnxError": error_name(lambda: bg.onnx.export_inference(y, input_buffers=(x,))),
     "tensorPlanError": error_name(lambda: bg.gpu_plan_summary(y)),
@@ -275,7 +275,6 @@ def check(label, output, source):
     output.sum().backward()
     gradient_present[label] = source.grad is not None
 
-a = leaf([-1.0, 2.0]); check("abs", a.abs(), a)
 a = leaf([[1.0, 3.0], [5.0, 7.0]]); check("batch_norm1d", bg.nn.BatchNorm1d(2, affine=False)(a), a)
 a = leaf([0.25, 0.75]); check("binary_cross_entropy", F.binary_cross_entropy(a, constant([0.0, 1.0])), a)
 a = leaf([-1.0, 1.0]); check("binary_cross_entropy_with_logits", F.binary_cross_entropy_with_logits(a, constant([0.0, 1.0])), a)
@@ -297,7 +296,6 @@ a = leaf([[1.0, 2.0]]); check("pad", F.pad(a, (1, 1)), a)
 a = leaf([[1.0, 2.0], [3.0, 4.0]]); check("prod", a.prod(dim=0), a)
 a = leaf([1.0, 2.0]); check("repeat", a.repeat(2), a)
 a = leaf([[1.0, 2.0]]); check("repeat_interleave", a.repeat_interleave(2, dim=1), a)
-a = leaf([-1.0, 0.0, 2.0]); check("sign", a.sign(), a)
 a = leaf([0.0, 1.0]); check("sin", a.sin(), a)
 a = leaf([1.0, 3.0]); check("smooth_l1_loss", F.smooth_l1_loss(a, constant([0.0, 1.0])), a)
 a = leaf([1.0, 2.0]); check("stack", bg.stack((a, constant([3.0, 4.0])), dim=0), a)

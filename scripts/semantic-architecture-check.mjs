@@ -734,18 +734,18 @@ function checkJitFrameworkOperationContracts(root, manifest, failures) {
   ];
   const allowed = {
     semanticState: new Set(["typed"]),
-    shapeContract: new Set(["static-broadcast-with-existing-dim-minus-one"]),
-    dtypeContract: new Set(["preserve-input"]),
-    cpu: new Set(["supported-numpy-owning-copy"]),
-    closureAutograd: new Set(["supported-unbroadcast-sum"]),
-    symbolicVjp: new Set(["supported-unbroadcast-sum"]),
+    shapeContract: new Set(["preserve-unary-input", "static-broadcast-with-existing-dim-minus-one"]),
+    dtypeContract: new Set(["preserve-input", "preserve-real-numeric-input"]),
+    cpu: new Set(["supported-numpy-dtype-preserving", "supported-numpy-owning-copy"]),
+    closureAutograd: new Set(["supported-sign-derivative", "supported-unbroadcast-sum", "supported-zero-derivative"]),
+    symbolicVjp: new Set(["supported-sign-derivative", "supported-unbroadcast-sum", "supported-zero-derivative"]),
     functionalGrad: new Set(["supported-via-symbolic-vjp"]),
     vmap: new Set(["supported-leading-batch-axis"]),
-    onnxExport: new Set(["supported-opset17-expand"]),
-    tensorPlan: new Set(["supported-primitive"]),
-    webgpu: new Set(["profile-nonempty-f32-rank-at-most-4"]),
-    residency: new Set(["supported-materializing-and-resident"]),
-    materialization: new Set(["cpu-owning-copy"]),
+    onnxExport: new Set(["supported-opset17-direct-unary-export-dtypes", "supported-opset17-expand"]),
+    tensorPlan: new Set(["refused-no-portable-lowering", "supported-primitive"]),
+    webgpu: new Set(["profile-nonempty-f32-rank-at-most-4", "refused-no-tensor-plan-kernel"]),
+    residency: new Set(["host-materialized", "supported-materializing-and-resident"]),
+    materialization: new Set(["cpu-owning-array", "cpu-owning-copy"]),
   };
   const irSource = fs.readFileSync(
     path.join(root, "packages/browsergrad-jit/src/python/_ir.py"),

@@ -49,19 +49,44 @@ _DECISION_FIELDS = (
 _DECISION_FIELD_SET = frozenset(_DECISION_FIELDS)
 _ENUMS = {
     "semanticState": frozenset({"typed"}),
-    "shapeContract": frozenset({"static-broadcast-with-existing-dim-minus-one"}),
-    "dtypeContract": frozenset({"preserve-input"}),
-    "cpu": frozenset({"supported-numpy-owning-copy"}),
-    "closureAutograd": frozenset({"supported-unbroadcast-sum"}),
-    "symbolicVjp": frozenset({"supported-unbroadcast-sum"}),
+    "shapeContract": frozenset({
+        "preserve-unary-input",
+        "static-broadcast-with-existing-dim-minus-one",
+    }),
+    "dtypeContract": frozenset({"preserve-input", "preserve-real-numeric-input"}),
+    "cpu": frozenset({
+        "supported-numpy-dtype-preserving",
+        "supported-numpy-owning-copy",
+    }),
+    "closureAutograd": frozenset({
+        "supported-sign-derivative",
+        "supported-unbroadcast-sum",
+        "supported-zero-derivative",
+    }),
+    "symbolicVjp": frozenset({
+        "supported-sign-derivative",
+        "supported-unbroadcast-sum",
+        "supported-zero-derivative",
+    }),
     "functionalGrad": frozenset({"supported-via-symbolic-vjp"}),
     "vmap": frozenset({"supported-leading-batch-axis"}),
-    "onnxExport": frozenset({"supported-opset17-expand"}),
-    "tensorPlan": frozenset({"supported-primitive"}),
-    "webgpu": frozenset({"profile-nonempty-f32-rank-at-most-4"}),
-    "residency": frozenset({"supported-materializing-and-resident"}),
-    "materialization": frozenset({"cpu-owning-copy"}),
+    "onnxExport": frozenset({
+        "supported-opset17-direct-unary-export-dtypes",
+        "supported-opset17-expand",
+    }),
+    "tensorPlan": frozenset({"refused-no-portable-lowering", "supported-primitive"}),
+    "webgpu": frozenset({
+        "profile-nonempty-f32-rank-at-most-4",
+        "refused-no-tensor-plan-kernel",
+    }),
+    "residency": frozenset({"host-materialized", "supported-materializing-and-resident"}),
+    "materialization": frozenset({"cpu-owning-array", "cpu-owning-copy"}),
 }
+
+_REAL_NUMERIC_DTYPES = frozenset({
+    "float16", "float32", "float64",
+    "int8", "int16", "int32", "int64", "uint8",
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,8 +282,38 @@ def _validate_broadcast_to(node: Any, contract: FrameworkOperationContract) -> T
     return target
 
 
+def _validate_real_numeric_unary(node: Any, contract: FrameworkOperationContract) -> None:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = getattr(node, "inputs", ())
+    if type(inputs) is not tuple or len(inputs) != 1:
+        raise ShapeError(f"{contract.opcode} requires exactly one input, got {len(inputs)}")
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError(f"{contract.opcode} arg must be a plain dict")
+    fields = set(arg)
+    if not fields.issubset({"vjp_of"}):
+        raise ShapeError(f"{contract.opcode} arg fields must be empty plus optional 'vjp_of'")
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError(f"{contract.opcode} arg.vjp_of must reference a UOp")
+    source = inputs[0]
+    if getattr(node, "shape", None) != getattr(source, "shape", None):
+        raise ShapeError(f"{contract.opcode} must preserve its input shape")
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError(f"{contract.opcode} must preserve its input dtype")
+    if getattr(node, "dtype", None) not in _REAL_NUMERIC_DTYPES:
+        raise ShapeError(
+            f"{contract.opcode} supports real numeric dtypes only, got "
+            f"{getattr(node, 'dtype', None)!r}"
+        )
+
+
 _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = MappingProxyType({
+    "browsergrad.jit.framework.tensor.abs.v1": _validate_real_numeric_unary,
     "browsergrad.jit.framework.tensor.expand.v1": _validate_broadcast_to,
+    "browsergrad.jit.framework.tensor.sign.v1": _validate_real_numeric_unary,
 })
 _RECORDS = _load_registry()
 if frozenset(_VALIDATORS) != frozenset(record.contract_id for record in _RECORDS):
@@ -270,6 +325,10 @@ _BY_OPCODE: Mapping[str, _ExecutableFrameworkOperationContract] = MappingProxyTy
     )
     for record in _RECORDS
 })
+
+
+def has_framework_operation_contract(opcode: str) -> bool:
+    return opcode in _BY_OPCODE
 
 
 def validate_framework_operation_contract(
@@ -288,6 +347,16 @@ def validate_broadcast_to_contract(node: Any) -> Tuple[int, ...]:
     if record.contract_id != "browsergrad.jit.framework.tensor.expand.v1":
         raise ShapeError("BROADCAST_TO resolved to the wrong framework-operation contract")
     return normalized
+
+
+def validate_real_numeric_unary_contract(node: Any) -> FrameworkOperationContract:
+    record, _ = validate_framework_operation_contract(node)
+    if record.contract_id not in {
+        "browsergrad.jit.framework.tensor.abs.v1",
+        "browsergrad.jit.framework.tensor.sign.v1",
+    }:
+        raise ShapeError("unary node resolved to the wrong framework-operation contract")
+    return record
 
 
 def framework_operation_support() -> dict[str, Any]:
@@ -319,6 +388,8 @@ __all__ = [
     "FRAMEWORK_OPERATION_SUPPORT_VERSION",
     "FrameworkOperationContract",
     "framework_operation_support",
+    "has_framework_operation_contract",
     "validate_framework_operation_contract",
     "validate_broadcast_to_contract",
+    "validate_real_numeric_unary_contract",
 ]

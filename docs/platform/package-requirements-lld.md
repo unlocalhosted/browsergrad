@@ -146,8 +146,9 @@ extractor Wasm/factory reproducibility; the package binds their canonical v3
 evidence without claiming reproducibility of the still-incomplete distributed
 asset set.
 
-Gate 6 has started by retiring public `Tensor.expand` from the frozen opaque
-callback inventory. The surface now emits the existing typed `BROADCAST_TO`
+Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`, and
+`Tensor.sign` from the frozen opaque callback inventory. Expand emits the
+existing typed `BROADCAST_TO`
 primitive. One shared contract validates exact arity, closed shape arguments,
 output-shape identity, dtype preservation, rank direction, and broadcast
 compatibility at construction and again at CPU, VJP, vmap, ONNX, and
@@ -159,16 +160,21 @@ contain no `CUSTOM`. Grad eager `Tensor.expand` consumes the same cross-package
 shape/dtype conformance fixture, rejects the same invalid dimension classes
 before NumPy execution, preserves float16 and integer dtypes, and explicitly
 retains owning contiguous materialization rather than claiming PyTorch view
-aliasing. The opaque baseline is therefore narrowed to 35 constructor calls
-and 38 operations under ADR-0002. This is one migrated operation, not Gate 6
-completion: remaining Grad view/dtype debt, runtime/profile consumption, the
-remaining advertised opaque operations, and contract-generated public support
-tables remain open.
+aliasing. `abs` and `sign` now emit typed `ABS` and `SIGN`; their shared unary
+profile preserves real-numeric shape and dtype, rejects bool, returns owning
+CPU arrays, defines closure and symbolic gradients, supports leading-axis
+vmap, and exports direct ONNX unary nodes. Tensor-plan and WebGPU execution
+remain explicit refusals because this slice adds no portable kernel. The opaque
+baseline is therefore narrowed to 33 constructor calls and 36 operations under
+ADR-0002 and ADR-0004. This is three migrated operations, not Gate 6
+completion: remaining Grad view/dtype debt, runtime/profile consumption, and
+the remaining advertised opaque operations remain open.
 
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
-record binds `Tensor.expand` to the same validator invoked by construction,
-CPU, VJP, vmap, ONNX, and tensor-plan execution. Import rejects duplicate keys,
+records bind `Tensor.abs`, `Tensor.expand`, and `Tensor.sign` to the same
+validators invoked by construction and every admitted execution, transform,
+export, or plan boundary. Import rejects duplicate keys,
 open fields, unknown decisions, invalid versions, duplicate identities, and
 records without an exact executable validator. Public
 `framework_operation_support()` returns a detached deterministic table with
@@ -176,8 +182,8 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 38 still-opaque and one typed retirement. ADR-0003 records this
-public contract. The table currently covers typed migrations only; completing
+opaque IDs into 36 still-opaque and three typed retirements. ADR-0003 records
+this public contract. The table currently covers typed migrations only; completing
 the remaining operation families and making runtime/profile UI consume these
 records remain Gate 6 work.
 
