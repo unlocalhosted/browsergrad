@@ -43,3 +43,39 @@ export {
   verifyInitialPortableViewCopyProfile,
   type PortableViewCopyProfile,
 } from "./kernel/profile.js";
+export type {
+  LogicalGemmTileExtent,
+  LogicalGemmTileOperation,
+  LogicalGemmTileReadEffect,
+  LogicalGemmTileWriteEffect,
+} from "./kernel/gemm-tile-model.js";
+export {
+  LOGICAL_GEMM_TILE_ARTIFACT_MAJOR,
+  LOGICAL_GEMM_TILE_ARTIFACT_MINOR,
+  LOGICAL_GEMM_TILE_ARTIFACT_SCHEMA,
+  decodeLogicalGemmTileArtifact,
+  logicalGemmTileArtifactPayload,
+  verifyLogicalGemmTileArtifact,
+  type LogicalGemmTileArtifactPayloadV1,
+  type LogicalGemmTileArtifactVerificationOptions,
+  type VerifiedLogicalGemmTileArtifact,
+} from "./kernel/gemm-tile-artifact.js";
+export {
+  createVerifiedDenseLogicalGemmTileArtifacts,
+  type CreateVerifiedDenseLogicalGemmTileArtifactsRequest,
+  type LogicalGemmTileArtifactConstructionOptions,
+  type LogicalGemmTileArtifactRole,
+  type VerifiedLogicalGemmTileArtifacts,
+} from "./kernel/gemm-tile-construction.js";
+export {
+  prepareLogicalGemmTileSpecialization,
+  type PreparedLogicalGemmTileSpecialization,
+  type PrepareLogicalGemmTileSpecializationRequest,
+} from "./kernel/gemm-tile-prepare.js";
+export {
+  prepareLogicalGemmTileCpu,
+  type LogicalGemmTileCpuBuffers,
+  type LogicalGemmTileCpuTrace,
+  type PreparedLogicalGemmTileCpu,
+  type PrepareLogicalGemmTileCpuRequest,
+} from "./kernel/gemm-tile-cpu.js";
