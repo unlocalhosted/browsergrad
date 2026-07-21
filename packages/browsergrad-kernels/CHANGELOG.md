@@ -20,6 +20,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   reports only `block-tiled-kv-online-softmax-forward` and
   `portable-relegalized`; no device execution, numerical preservation,
   performance, FlashAttention-v2, frontend, or resident-buffer claim is made.
+- Semantic attention host execution admits only exact fixed unshared finite-f32
+  Q/K/V bindings, snapshots all inputs before yielding or touching the device,
+  rejects overlap/accessors/subclasses/resizable or detached storage, checks
+  device limits, bounds validation and execution waits, and drains scoped GPU
+  diagnostics before publishing a complete finite destination.
+- The required browser lane executes irregular `(B=1,H=2,Sq=9,Sk=11,D=4,Dv=6)`
+  causal and non-causal attention under 8x8 and 8x16 schedules on Apple Metal
+  3. Every complete output passes the semantic-core absolute-or-relative CPU
+  comparator and same-mask cross-schedule comparison. Execution traces still
+  require declared-policy comparison and do not self-assert preservation.
 - Production semantic GEMM preparation and WebGPU execution consume the exact
   verified layout, logical GEMM, physical schedule, and concrete-input
   certificate authorities. Cooperative scalar workgroup staging uses uniform

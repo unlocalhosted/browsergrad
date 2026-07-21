@@ -471,6 +471,7 @@ try {
     "prepareSemanticGemmWgsl",
     "runSemanticGemmWebGpu",
     "prepareSemanticAttentionWgsl",
+    "runSemanticAttentionWebGpu",
   ]) {
     assert(exportName in kernelsRoot, `kernels root export missing ${exportName}`);
   }
@@ -930,6 +931,7 @@ try {
   );
   for (const [workflowName, workflow] of [["release", releaseWorkflow], ["publish", publishWorkflow]]) {
     assertSemanticGemmEvidenceWorkflowOrder(workflowName, workflow);
+    assertSemanticAttentionEvidenceWorkflowOrder(workflowName, workflow);
     assertCompilerViewCopyEvidenceWorkflowOrder(workflowName, workflow);
     assertJitEvidenceWorkflowOrder(workflowName, workflow);
   }
@@ -1587,52 +1589,81 @@ function assertCompilerViewCopyEvidenceWorkflowOrder(workflowName, workflow) {
 }
 
 function assertSemanticGemmEvidenceWorkflowOrder(workflowName, workflow) {
+  assertKernelsSemanticEvidenceWorkflowOrder(workflowName, workflow, {
+    label: "semantic GEMM",
+    releaseEvidence: "Required semantic GEMM WebGPU gate (kernels release)",
+    releaseUpload: "Retain semantic GEMM WebGPU evidence (kernels release)",
+    publishEvidence: "Run required semantic GEMM WebGPU gate",
+    publishUpload: "Retain semantic GEMM WebGPU evidence",
+    command: "test:browser:semantic-gemm:required",
+    log: "semantic-gemm-webgpu-evidence.log",
+    artifact: "semantic-gemm-webgpu-evidence-${{ github.sha }}",
+    evidenceEnvironment: "BG_REQUIRED_SEMANTIC_GEMM_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}",
+  });
+}
+
+function assertSemanticAttentionEvidenceWorkflowOrder(workflowName, workflow) {
+  assertKernelsSemanticEvidenceWorkflowOrder(workflowName, workflow, {
+    label: "semantic attention",
+    releaseEvidence: "Required semantic attention WebGPU gate (kernels release)",
+    releaseUpload: "Retain semantic attention WebGPU evidence (kernels release)",
+    publishEvidence: "Run required semantic attention WebGPU gate",
+    publishUpload: "Retain semantic attention WebGPU evidence",
+    command: "test:browser:semantic-attention:required",
+    log: "semantic-attention-webgpu-evidence.log",
+    artifact: "semantic-attention-webgpu-evidence-${{ github.sha }}",
+    evidenceEnvironment: "BG_REQUIRED_SEMANTIC_ATTENTION_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}",
+  });
+}
+
+function assertKernelsSemanticEvidenceWorkflowOrder(workflowName, workflow, config) {
   const steps = workflowSteps(workflow);
   const names = workflowName === "release"
     ? {
       dependency: "Verify selected package dependency closure is published and equivalent",
-      evidence: "Required semantic GEMM WebGPU gate (kernels release)",
-      upload: "Retain semantic GEMM WebGPU evidence (kernels release)",
+      evidence: config.releaseEvidence,
+      upload: config.releaseUpload,
       stage: "Stage immutable npm artifact",
     }
     : {
       dependency: "Verify publication plan and existing dependency artifacts",
-      evidence: "Run required semantic GEMM WebGPU gate",
-      upload: "Retain semantic GEMM WebGPU evidence",
+      evidence: config.publishEvidence,
+      upload: config.publishUpload,
       stage: "Stage immutable npm artifacts",
     };
   const indexes = Object.fromEntries(Object.entries(names).map(([role, name]) => {
     const matches = steps
       .map((step, index) => ({ step, index }))
       .filter(({ step }) => step.name === name);
-    assert(matches.length === 1, `${workflowName} workflow must contain exactly one semantic GEMM ${role} step`);
+    assert(
+      matches.length === 1,
+      `${workflowName} workflow must contain exactly one ${config.label} ${role} step`,
+    );
     return [role, matches[0].index];
   }));
   assert(
     indexes.dependency < indexes.evidence
       && indexes.evidence < indexes.upload
       && indexes.upload < indexes.stage,
-    `${workflowName} workflow must order dependency preflight, semantic GEMM evidence, then immutable staging`,
+    `${workflowName} workflow must order dependency preflight, ${config.label} evidence, then immutable staging`,
   );
   assert(
     steps[indexes.evidence].body.includes("set -o pipefail")
-      && steps[indexes.evidence].body.includes("test:browser:semantic-gemm:required")
-      && steps[indexes.evidence].body.includes("semantic-gemm-webgpu-evidence.log"),
-    `${workflowName} semantic GEMM evidence step must run and retain the required browser lane`,
+      && steps[indexes.evidence].body.includes(config.command)
+      && steps[indexes.evidence].body.includes(config.log),
+    `${workflowName} ${config.label} evidence step must run and retain the required browser lane`,
   );
   assert(
-    steps[indexes.upload].body.includes("semantic-gemm-webgpu-evidence-${{ github.sha }}"),
-    `${workflowName} semantic GEMM upload must retain evidence by exact SHA`,
+    steps[indexes.upload].body.includes(config.artifact),
+    `${workflowName} ${config.label} upload must retain evidence by exact SHA`,
   );
   assert(
-    steps[indexes.stage].body.includes(
-      "BG_REQUIRED_SEMANTIC_GEMM_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}",
-    ),
-    `${workflowName} staging must authorize only the semantic GEMM evidenced SHA`,
+    steps[indexes.stage].body.includes(config.evidenceEnvironment),
+    `${workflowName} staging must authorize only the ${config.label} evidenced SHA`,
   );
   assert(
     !/^        continue-on-error:/mu.test(steps[indexes.evidence].body),
-    `${workflowName} semantic GEMM evidence cannot continue on error`,
+    `${workflowName} ${config.label} evidence cannot continue on error`,
   );
   const evidenceCondition = stepField(steps[indexes.evidence], "if");
   const uploadCondition = stepField(steps[indexes.upload], "if");
@@ -1640,15 +1671,21 @@ function assertSemanticGemmEvidenceWorkflowOrder(workflowName, workflow) {
     const releaseCondition = "steps.parse.outputs.shortname == 'kernels'";
     assert(
       evidenceCondition === releaseCondition,
-      "release semantic GEMM evidence must be kernels-only",
+      `release ${config.label} evidence must be kernels-only`,
     );
     assert(
       uploadCondition === `always() && ${releaseCondition}`,
-      "release semantic GEMM upload must always run for kernels releases",
+      `release ${config.label} upload must always run for kernels releases`,
     );
   } else {
-    assert(evidenceCondition === undefined, "publish semantic GEMM evidence must be unconditional");
-    assert(uploadCondition === "always()", "publish semantic GEMM upload must always run");
+    assert(
+      evidenceCondition === undefined,
+      `publish ${config.label} evidence must be unconditional`,
+    );
+    assert(
+      uploadCondition === "always()",
+      `publish ${config.label} upload must always run`,
+    );
   }
 }
 

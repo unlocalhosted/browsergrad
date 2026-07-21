@@ -19,6 +19,7 @@ import {
   referenceSaxpy,
   prepareSemanticGemmWgsl,
   prepareSemanticAttentionWgsl,
+  runSemanticAttentionWebGpu,
   runPreparedSemanticGemmResident,
   runSemanticGemmWebGpu,
   runCuda1DProgramWebGpu,
@@ -67,6 +68,7 @@ describe("public surface", () => {
     expect(typeof referenceFlashAttentionBackward).toBe("function");
     expect(typeof prepareSemanticGemmWgsl).toBe("function");
     expect(typeof prepareSemanticAttentionWgsl).toBe("function");
+    expect(typeof runSemanticAttentionWebGpu).toBe("function");
     expect(typeof runSemanticGemmWebGpu).toBe("function");
     expect(typeof runPreparedSemanticGemmResident).toBe("function");
   });

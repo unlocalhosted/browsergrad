@@ -10,7 +10,10 @@ import { parseWireU64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
   SEMANTIC_ATTENTION_WEBGPU_PROFILE,
   prepareSemanticAttentionWgsl,
+  runSemanticAttentionWebGpu,
+  type PreparedSemanticAttentionWgsl,
 } from "../src/semantic_attention";
+import type { KernelDevice } from "../src/types";
 
 const wire = (value: number) => parseWireU64(String(value));
 
@@ -215,4 +218,179 @@ describe("semantic attention WebGPU preparation", () => {
       path: "$.request",
     });
   });
+
+  it("rejects copied plans, hostile bindings, and non-finite inputs before device effects", async () => {
+    const fixture = await executionFixture();
+    let deviceTouched = false;
+    const untouchedDevice = {
+      get gpu() {
+        deviceTouched = true;
+        throw new Error("device must not be touched");
+      },
+    } as unknown as KernelDevice;
+
+    await expect(runSemanticAttentionWebGpu(
+      untouchedDevice,
+      { ...fixture.prepared } as PreparedSemanticAttentionWgsl,
+      fixture.inputs,
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-ATTENTION-INVALID-BINDING",
+      path: "$.prepared",
+    });
+    expect(deviceTouched).toBe(false);
+
+    let getterRead = false;
+    const accessorInputs = Object.defineProperties({}, {
+      query: { enumerable: true, value: fixture.inputs.query },
+      key: {
+        enumerable: true,
+        get() {
+          getterRead = true;
+          return fixture.inputs.key;
+        },
+      },
+      value: { enumerable: true, value: fixture.inputs.value },
+    });
+    await expect(runSemanticAttentionWebGpu(
+      untouchedDevice,
+      fixture.prepared,
+      accessorInputs as never,
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-ATTENTION-INVALID-BINDING",
+      path: "$.inputs.key",
+    });
+    expect(getterRead).toBe(false);
+    expect(deviceTouched).toBe(false);
+
+    const nonFinite = {
+      ...fixture.inputs,
+      query: new Uint8Array(fixture.inputs.query),
+    };
+    new DataView(nonFinite.query.buffer).setFloat32(0, Number.NaN, true);
+    await expect(runSemanticAttentionWebGpu(
+      untouchedDevice,
+      fixture.prepared,
+      nonFinite,
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-ATTENTION-NUMERICAL-DOMAIN",
+      path: "$.inputs.query",
+    });
+    expect(deviceTouched).toBe(false);
+  });
+
+  it("honors cancellation and validates native options before inputs or device access", async () => {
+    const fixture = await executionFixture();
+    const controller = new AbortController();
+    controller.abort();
+    let inputRead = false;
+    const untouchedInputs = Object.defineProperty({}, "query", {
+      enumerable: true,
+      get() {
+        inputRead = true;
+        throw new Error("inputs must not be read");
+      },
+    });
+    let deviceTouched = false;
+    const untouchedDevice = {
+      get gpu() {
+        deviceTouched = true;
+        throw new Error("device must not be touched");
+      },
+    } as unknown as KernelDevice;
+    await expect(runSemanticAttentionWebGpu(
+      untouchedDevice,
+      fixture.prepared,
+      untouchedInputs as never,
+      { signal: controller.signal },
+    )).rejects.toMatchObject({ code: "BG-WEBGPU-ATTENTION-CANCELLED" });
+    expect(inputRead).toBe(false);
+    expect(deviceTouched).toBe(false);
+
+    let optionRead = false;
+    const accessorOptions = Object.defineProperty({}, "timeoutMs", {
+      enumerable: true,
+      get() {
+        optionRead = true;
+        return 1;
+      },
+    });
+    await expect(runSemanticAttentionWebGpu(
+      untouchedDevice,
+      fixture.prepared,
+      fixture.inputs,
+      accessorOptions,
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-ATTENTION-INVALID-BINDING",
+      path: "$.options.timeoutMs",
+    });
+    expect(optionRead).toBe(false);
+    expect(deviceTouched).toBe(false);
+  });
+
+  it("checks device storage limits after retaining finite input snapshots", async () => {
+    const fixture = await executionFixture();
+    const lost = new Promise<GPUDeviceLostInfo>(() => undefined);
+    const gpu = {
+      features: new Set<string>(),
+      limits: {
+        maxBufferSize: 64,
+        maxStorageBufferBindingSize: 64,
+        maxComputeWorkgroupsPerDimension: 65_535,
+        maxComputeInvocationsPerWorkgroup: 256,
+        maxComputeWorkgroupSizeX: 256,
+        maxComputeWorkgroupStorageSize: 16_384,
+        maxBindingsPerBindGroup: 8,
+        maxStorageBuffersPerShaderStage: 8,
+      },
+      lost,
+    } as unknown as GPUDevice;
+    const device = {
+      gpu,
+      clearCache() {},
+    } as unknown as KernelDevice;
+
+    await expect(runSemanticAttentionWebGpu(
+      device,
+      fixture.prepared,
+      fixture.inputs,
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-ATTENTION-DEVICE-LIMIT",
+      path: "$.device.limits.maxBufferSize",
+    });
+  });
 });
+
+async function executionFixture() {
+  const semantics = await createVerifiedDenseAttentionForwardArtifacts({
+    batch: wire(1),
+    heads: wire(1),
+    queryLength: wire(3),
+    keyLength: wire(5),
+    queryDepth: wire(4),
+    valueDepth: wire(6),
+    causal: true,
+  });
+  const schedule = await createVerifiedAttentionOnlineKvTileSchedule(semantics.kernel, {
+    physicalTile: { queryRows: wire(4), keyRows: wire(4) },
+  });
+  const prepared = await prepareSemanticAttentionWgsl(
+    semantics.layout,
+    semantics.kernel,
+    schedule.artifact,
+    { operationId: semantics.operationId },
+  );
+  return {
+    prepared,
+    inputs: {
+      query: filledF32Bytes(12, 0.25),
+      key: filledF32Bytes(20, -0.5),
+      value: filledF32Bytes(30, 0.75),
+    },
+  };
+}
+
+function filledF32Bytes(length: number, value: number): Uint8Array {
+  const array = new Float32Array(length);
+  array.fill(value);
+  return new Uint8Array(array.buffer);
+}

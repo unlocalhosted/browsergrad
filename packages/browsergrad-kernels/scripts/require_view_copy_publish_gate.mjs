@@ -5,6 +5,7 @@ import { SEMANTIC_PERMUTE_EVIDENCE_SOURCE_PATHS } from "../../../scripts/semanti
 export function validateViewCopyPublishGate({
   evidenceCommit,
   semanticGemmEvidenceCommit,
+  semanticAttentionEvidenceCommit,
   jitEvidenceCommit,
   githubSha,
   head,
@@ -28,6 +29,17 @@ export function validateViewCopyPublishGate({
   if (!/^[0-9a-f]{40}$/u.test(semanticGemmEvidenceCommit) || semanticGemmEvidenceCommit !== head) {
     throw new Error(
       `kernels publish blocked: semantic GEMM evidence commit ${semanticGemmEvidenceCommit || "<missing>"} does not match HEAD ${head}`,
+    );
+  }
+  if (!semanticAttentionEvidenceCommit) {
+    throw new Error(
+      "kernels publish blocked: run test:browser:semantic-attention:required for this commit and set BG_REQUIRED_SEMANTIC_ATTENTION_WEBGPU_EVIDENCE_COMMIT to its full commit SHA",
+    );
+  }
+  if (!/^[0-9a-f]{40}$/u.test(semanticAttentionEvidenceCommit)
+    || semanticAttentionEvidenceCommit !== head) {
+    throw new Error(
+      `kernels publish blocked: semantic attention evidence commit ${semanticAttentionEvidenceCommit || "<missing>"} does not match HEAD ${head}`,
     );
   }
   if (!jitEvidenceCommit) {
@@ -61,6 +73,7 @@ function main() {
   validateViewCopyPublishGate({
     evidenceCommit: process.env.BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT?.trim(),
     semanticGemmEvidenceCommit: process.env.BG_REQUIRED_SEMANTIC_GEMM_WEBGPU_EVIDENCE_COMMIT?.trim(),
+    semanticAttentionEvidenceCommit: process.env.BG_REQUIRED_SEMANTIC_ATTENTION_WEBGPU_EVIDENCE_COMMIT?.trim(),
     jitEvidenceCommit: process.env.BG_REQUIRED_JIT_SEMANTIC_PERMUTE_WEBGPU_EVIDENCE_COMMIT?.trim(),
     githubSha: process.env.GITHUB_SHA?.trim(),
     head: git("rev-parse", "HEAD"),

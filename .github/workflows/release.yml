@@ -130,6 +130,22 @@ jobs:
           path: semantic-gemm-webgpu-evidence.log
           if-no-files-found: error
 
+      - name: Required semantic attention WebGPU gate (kernels release)
+        if: steps.parse.outputs.shortname == 'kernels'
+        run: |
+          set -o pipefail
+          pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:semantic-attention:required 2>&1 | tee semantic-attention-webgpu-evidence.log
+        env:
+          BG_BROWSER_HEADLESS: '1'
+
+      - name: Retain semantic attention WebGPU evidence (kernels release)
+        if: always() && steps.parse.outputs.shortname == 'kernels'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semantic-attention-webgpu-evidence-${{ github.sha }}
+          path: semantic-attention-webgpu-evidence.log
+          if-no-files-found: error
+
       - name: Provision pinned real-world CUDA corpora (compiler release)
         if: steps.parse.outputs.shortname == 'compiler'
         run: pnpm --filter @unlocalhosted/browsergrad-compiler provision:real-world-cuda
@@ -199,6 +215,7 @@ jobs:
         env:
           BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_SEMANTIC_GEMM_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
+          BG_REQUIRED_SEMANTIC_ATTENTION_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_COMPILER_LAYOUT_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_COMPILER_VIEW_COPY_BINDINGS_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_JIT_SEMANTIC_PERMUTE_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}

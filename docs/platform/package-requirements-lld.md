@@ -123,10 +123,18 @@ two uniform barriers per key tile, private Q/output state, tile-wise online
 softmax, pre-update causal/tail masks, and suppressed boundary stores. The
 backend identity reports `block-tiled-kv-online-softmax-forward` and
 `portable-relegalized`; preparation alone grants no device execution,
-numerical-preservation, performance, FlashAttention-v2, or frontend claim.
-Authority-bound host execution and actual-device evidence are the next slice;
-the existing row-wise online-softmax implementation remains named only as a
-baseline. Two
+numerical-preservation, performance, FlashAttention-v2, or frontend claim. The
+host execution path now snapshots exact fixed unshared finite Q/K/V allocations
+before yielding or touching WebGPU, verifies device limits, scopes asynchronous
+pipeline/dispatch errors, bounds waits, and publishes only a complete finite
+destination. Required headed Chromium evidence on Apple Metal 3 executes
+causal and non-causal irregular rank-4 inputs under 8x8 and 8x16 schedules; all
+four complete outputs pass the semantic-core `1e-4` absolute-or-relative CPU
+comparator and same-mask cross-schedule comparison. The trace reports that
+comparison is required rather than converting one successful run into a global
+numerical claim. Separate named baseline/performance evidence is the remaining
+Gate 5 slice; the existing row-wise online-softmax implementation remains named
+only as a baseline. Two
 distinct cache-free builds now prove exact
 extractor Wasm/factory reproducibility; the package binds their canonical v3
 evidence without claiming reproducibility of the still-incomplete distributed

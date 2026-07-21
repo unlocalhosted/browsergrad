@@ -211,9 +211,15 @@ export {
   SEMANTIC_ATTENTION_WEBGPU_PROFILE,
   SemanticAttentionWebGpuError,
   prepareSemanticAttentionWgsl,
+  runSemanticAttentionWebGpu,
   type PreparedSemanticAttentionWgsl,
   type PrepareSemanticAttentionWgslRequest,
+  type SemanticAttentionWebGpuDeviceFacts,
   type SemanticAttentionWebGpuErrorCode,
+  type SemanticAttentionWebGpuInputs,
+  type SemanticAttentionWebGpuResult,
+  type SemanticAttentionWebGpuRunOptions,
+  type SemanticAttentionWebGpuTrace,
 } from "./semantic_attention.js";
 
 export {

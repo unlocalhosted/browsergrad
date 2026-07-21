@@ -13,9 +13,12 @@ import {
 import {
   encodeWireU64,
   hashNamedComponents,
+  type JsonObject,
   type WireU64,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import type { KernelDevice } from "./types.js";
 import {
+  clearWgslPipelineCache,
   defineWgslKernelProgram,
   type WgslKernelLaunch,
   type WgslKernelProgram,
@@ -24,6 +27,11 @@ import {
   emitSemanticAttentionWgsl,
   SemanticAttentionWgslLoweringError,
 } from "./semantic_attention_wgsl.js";
+import { captureFiniteF32Snapshots } from "./native_f32_snapshots.js";
+import {
+  runPreparedSemanticWebGpuHostReadback,
+  SemanticWebGpuHostError,
+} from "./semantic_webgpu_host.js";
 
 export const SEMANTIC_ATTENTION_WEBGPU_PROFILE =
   "browsergrad.webgpu.attention.block-tiled-online-softmax-f32@1";
@@ -43,7 +51,14 @@ const DEFAULT_MAX_DISPATCH_WORKGROUPS = 16_777_216;
 const MAX_CONFIGURABLE_DISPATCH_WORKGROUPS = 1_073_741_824;
 const DEFAULT_MAX_TRANSIENT_WORKING_SET_BYTES = 256 * 1024 * 1024;
 const MAX_CONFIGURABLE_TRANSIENT_WORKING_SET_BYTES = 1024 * 1024 * 1024;
+const DEFAULT_MAX_INPUT_VALIDATION_MS = 30_000;
+const MAX_INPUT_VALIDATION_MS = 5 * 60_000;
+const DEFAULT_EXECUTION_TIMEOUT_MS = 30_000;
+const MAX_EXECUTION_TIMEOUT_MS = 5 * 60_000;
 const PREPARED_SEMANTIC_ATTENTIONS = new WeakSet<object>();
+const LOST_SEMANTIC_ATTENTION_DEVICES = new WeakSet<GPUDevice>();
+const WATCHED_SEMANTIC_ATTENTION_DEVICES = new WeakSet<object>();
+const ACTIVE_SEMANTIC_ATTENTION_DEVICES = new WeakSet<GPUDevice>();
 const OBJECT_GET_PROTOTYPE_OF = Object.getPrototypeOf;
 const OBJECT_GET_OWN_PROPERTY_DESCRIPTORS = Object.getOwnPropertyDescriptors;
 const REFLECT_OWN_KEYS = Reflect.ownKeys;
@@ -57,6 +72,32 @@ const ABORT_SIGNAL_PROTOTYPE = typeof globalThis.AbortSignal === "undefined"
 const ABORT_SIGNAL_ABORTED_GETTER = ABORT_SIGNAL_PROTOTYPE === undefined
   ? undefined
   : Object.getOwnPropertyDescriptor(ABORT_SIGNAL_PROTOTYPE, "aborted")?.get;
+const EVENT_TARGET_PROTOTYPE = typeof globalThis.EventTarget === "undefined"
+  ? undefined
+  : globalThis.EventTarget.prototype;
+const EVENT_TARGET_ADD_EVENT_LISTENER = EVENT_TARGET_PROTOTYPE === undefined
+  ? undefined
+  : EVENT_TARGET_PROTOTYPE.addEventListener;
+const EVENT_TARGET_REMOVE_EVENT_LISTENER = EVENT_TARGET_PROTOTYPE === undefined
+  ? undefined
+  : EVENT_TARGET_PROTOTYPE.removeEventListener;
+const FLOAT32_ARRAY_PROTOTYPE = Float32Array.prototype;
+const FLOAT32_ARRAY_CONSTRUCTOR = Float32Array;
+const UINT8_ARRAY_CONSTRUCTOR = Uint8Array;
+const TYPED_ARRAY_PROTOTYPE = OBJECT_GET_PROTOTYPE_OF(FLOAT32_ARRAY_PROTOTYPE) as object;
+const TYPED_ARRAY_BUFFER_GETTER = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  "buffer",
+)?.get;
+const TYPED_ARRAY_BYTE_OFFSET_GETTER = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  "byteOffset",
+)?.get;
+const TYPED_ARRAY_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  "byteLength",
+)?.get;
+const NUMBER_IS_FINITE = Number.isFinite;
 
 export interface PrepareSemanticAttentionWgslRequest
   extends PrepareAttentionForwardSpecializationRequest {
@@ -88,10 +129,101 @@ export interface PreparedSemanticAttentionWgsl {
   readonly maxTransientWorkingSetBytes: WireU64;
 }
 
+export interface SemanticAttentionWebGpuInputs {
+  readonly query: Uint8Array;
+  readonly key: Uint8Array;
+  readonly value: Uint8Array;
+}
+
+export interface SemanticAttentionWebGpuRunOptions {
+  /** Stops queued work or suppresses publication from work already submitted. */
+  readonly signal?: AbortSignal;
+  /** Bounds finite-domain validation over the private input snapshots. */
+  readonly maxInputValidationMs?: number;
+  /** Caller-visible wait budget; submitted work completes cleanup in the background. */
+  readonly timeoutMs?: number;
+}
+
+export interface SemanticAttentionWebGpuDeviceFacts {
+  readonly features: readonly string[];
+  readonly limits: Readonly<{
+    readonly maxBufferSize: number;
+    readonly maxStorageBufferBindingSize: number;
+    readonly maxComputeWorkgroupsPerDimension: number;
+    readonly maxComputeInvocationsPerWorkgroup: number;
+    readonly maxComputeWorkgroupSizeX: number;
+    readonly maxComputeWorkgroupStorageSize: number;
+    readonly maxBindingsPerBindGroup: number;
+    readonly maxStorageBuffersPerShaderStage: number;
+  }>;
+}
+
+export interface SemanticAttentionWebGpuTrace {
+  readonly operationId: string;
+  readonly semanticSpecializationHash: string;
+  readonly scheduleSpecializationHash: string;
+  readonly backendPreparationHash: string;
+  readonly backendSpecializationHash: string;
+  readonly layoutSemanticHash: string;
+  readonly kernelSemanticHash: string;
+  readonly scheduleSemanticHash: string;
+  readonly wgslModuleHash: string;
+  readonly backendProfile: typeof SEMANTIC_ATTENTION_WEBGPU_PROFILE;
+  readonly backendVersion: typeof SEMANTIC_ATTENTION_WEBGPU_BACKEND_VERSION;
+  readonly algorithmProfile: "block-tiled-kv-online-softmax-forward";
+  readonly executionTier: "portable-webgpu-core";
+  readonly preservationLevel: "portable-relegalized";
+  readonly numericalPreservation: "requires-declared-policy-comparison";
+  readonly comparisonPolicyId: "browsergrad.attention-forward.f32-abs-relative@1";
+  readonly mask: "none" | "causal-upper-left";
+  readonly batch: WireU64;
+  readonly heads: WireU64;
+  readonly queryLength: WireU64;
+  readonly keyLength: WireU64;
+  readonly queryDepth: WireU64;
+  readonly valueDepth: WireU64;
+  readonly physicalTile: Readonly<{
+    readonly queryRows: WireU64;
+    readonly keyRows: WireU64;
+  }>;
+  readonly dispatchWorkgroups: Readonly<{
+    readonly x: WireU64;
+    readonly y: WireU64;
+    readonly z: WireU64;
+  }>;
+  readonly validScoreElements: WireU64;
+  readonly scoreMultiplyAdds: WireU64;
+  readonly weightedValueMultiplyAdds: WireU64;
+  readonly logicalBytesRead: WireU64;
+  readonly logicalBytesWritten: WireU64;
+  readonly plannedTransientGpuBytes: WireU64;
+  readonly plannedTransientHostBytes: WireU64;
+  readonly plannedTransientWorkingSetBytes: WireU64;
+  readonly maxTransientWorkingSetBytes: WireU64;
+  readonly submitted: true;
+  readonly device: SemanticAttentionWebGpuDeviceFacts;
+}
+
+export interface SemanticAttentionWebGpuResult {
+  readonly destination: Uint8Array;
+  readonly trace: SemanticAttentionWebGpuTrace;
+}
+
 export type SemanticAttentionWebGpuErrorCode =
   | "BG-WEBGPU-ATTENTION-UNSUPPORTED-PROFILE"
   | "BG-WEBGPU-ATTENTION-RESOURCE-LIMIT"
-  | "BG-WEBGPU-ATTENTION-INVALID-BINDING";
+  | "BG-WEBGPU-ATTENTION-INVALID-BINDING"
+  | "BG-WEBGPU-ATTENTION-NUMERICAL-DOMAIN"
+  | "BG-WEBGPU-ATTENTION-DEVICE-LIMIT"
+  | "BG-WEBGPU-ATTENTION-SHADER"
+  | "BG-WEBGPU-ATTENTION-PIPELINE"
+  | "BG-WEBGPU-ATTENTION-VALIDATION"
+  | "BG-WEBGPU-ATTENTION-OUT-OF-MEMORY"
+  | "BG-WEBGPU-ATTENTION-INTERNAL"
+  | "BG-WEBGPU-ATTENTION-DEVICE-LOST"
+  | "BG-WEBGPU-ATTENTION-CANCELLED"
+  | "BG-WEBGPU-ATTENTION-TIMEOUT"
+  | "BG-WEBGPU-ATTENTION-EXECUTION";
 
 export class SemanticAttentionWebGpuError extends Error {
   constructor(
@@ -279,6 +411,277 @@ export async function prepareSemanticAttentionWgsl(
   return prepared;
 }
 
+/**
+ * Snapshots and validates finite Q/K/V host inputs before device access, runs
+ * the exact prepared block-tiled module, and returns the complete dense output.
+ * Numerical preservation remains a conformance comparison, not a run-time
+ * self-assertion.
+ */
+export async function runSemanticAttentionWebGpu(
+  device: KernelDevice,
+  prepared: PreparedSemanticAttentionWgsl,
+  inputs: SemanticAttentionWebGpuInputs,
+  options: SemanticAttentionWebGpuRunOptions = {},
+): Promise<SemanticAttentionWebGpuResult> {
+  requirePrepared(prepared);
+  const capturedOptions = captureRunOptions(options);
+  throwIfCancelled(capturedOptions.signal);
+  const maxInputValidationMs = positiveInteger(
+    capturedOptions.maxInputValidationMs,
+    DEFAULT_MAX_INPUT_VALIDATION_MS,
+    MAX_INPUT_VALIDATION_MS,
+    "$.maxInputValidationMs",
+  );
+  const timeoutMs = positiveInteger(
+    capturedOptions.timeoutMs,
+    DEFAULT_EXECUTION_TIMEOUT_MS,
+    MAX_EXECUTION_TIMEOUT_MS,
+    "$.timeoutMs",
+  );
+  const snapshots = await captureFiniteF32Snapshots(
+    inputs,
+    [
+      {
+        name: "query",
+        expectedByteLength: prepared.semantic.query.allocationByteLength,
+        alignmentBytes: prepared.semantic.query.allocationAlignmentBytes,
+      },
+      {
+        name: "key",
+        expectedByteLength: prepared.semantic.key.allocationByteLength,
+        alignmentBytes: prepared.semantic.key.allocationAlignmentBytes,
+      },
+      {
+        name: "value",
+        expectedByteLength: prepared.semantic.value.allocationByteLength,
+        alignmentBytes: prepared.semantic.value.allocationAlignmentBytes,
+      },
+    ] as const,
+    "$.inputs",
+    {
+      maxValidationMs: maxInputValidationMs,
+      ...(capturedOptions.signal === undefined ? {} : { signal: capturedOptions.signal }),
+      fail: snapshotFailure,
+    },
+  );
+  throwIfCancelled(capturedOptions.signal);
+  requireAvailableDevice(device);
+  const deviceFacts = readAndVerifyDeviceFacts(device.gpu, prepared);
+  throwIfCancelled(capturedOptions.signal);
+
+  ACTIVE_SEMANTIC_ATTENTION_DEVICES.add(device.gpu);
+  const execution = executeHostReadback(device, prepared, snapshots);
+  void execution.then(
+    () => ACTIVE_SEMANTIC_ATTENTION_DEVICES.delete(device.gpu),
+    () => ACTIVE_SEMANTIC_ATTENTION_DEVICES.delete(device.gpu),
+  );
+  try {
+    const backendSpecializationHashPromise = hashNamedComponents({
+      backendPreparation: prepared.backendPreparationHash,
+      deviceFeatures: [...deviceFacts.features],
+      deviceLimits: deviceFacts.limits as unknown as JsonObject,
+    });
+    const [destination, backendSpecializationHash] = await Promise.all([
+      awaitBoundedExecution(
+        execution,
+        device.gpu,
+        capturedOptions.signal,
+        timeoutMs,
+      ),
+      backendSpecializationHashPromise,
+    ]);
+    throwIfCancelled(capturedOptions.signal);
+    return Object.freeze({
+      destination,
+      trace: createTrace(prepared, backendSpecializationHash, deviceFacts),
+    });
+  } catch (error) {
+    throw classifyExecutionError(error);
+  }
+}
+
+async function executeHostReadback(
+  device: KernelDevice,
+  prepared: PreparedSemanticAttentionWgsl,
+  inputs: Readonly<Record<"query" | "key" | "value", Uint8Array>>,
+): Promise<Uint8Array> {
+  const destinationBytes = safeNumber(
+    prepared.semantic.destination.allocationByteLength,
+    "$.semantic.destination.allocationByteLength",
+  );
+  const result = await runPreparedSemanticWebGpuHostReadback(
+    device,
+    [{ program: prepared.program, launch: prepared.launch }],
+    {
+      buffers: {
+        query_values: new FLOAT32_ARRAY_CONSTRUCTOR(
+          inputs.query.buffer,
+          0,
+          inputs.query.byteLength / 4,
+        ),
+        key_values: new FLOAT32_ARRAY_CONSTRUCTOR(
+          inputs.key.buffer,
+          0,
+          inputs.key.byteLength / 4,
+        ),
+        value_values: new FLOAT32_ARRAY_CONSTRUCTOR(
+          inputs.value.buffer,
+          0,
+          inputs.value.byteLength / 4,
+        ),
+        destination_values: new FLOAT32_ARRAY_CONSTRUCTOR(destinationBytes / 4),
+      },
+      readback: ["destination_values"],
+    },
+  );
+  const destination = result.buffers.destination_values;
+  if (
+    !(destination instanceof FLOAT32_ARRAY_CONSTRUCTOR)
+    || OBJECT_GET_PROTOTYPE_OF(destination) !== FLOAT32_ARRAY_PROTOTYPE
+    || TYPED_ARRAY_BUFFER_GETTER === undefined
+    || TYPED_ARRAY_BYTE_OFFSET_GETTER === undefined
+    || TYPED_ARRAY_BYTE_LENGTH_GETTER === undefined
+  ) {
+    fail(
+      "BG-WEBGPU-ATTENTION-INTERNAL",
+      "$.result.destination",
+      "WGSL runner returned an invalid f32 destination allocation",
+    );
+  }
+  let buffer: ArrayBuffer;
+  let byteOffset: number;
+  let byteLength: number;
+  try {
+    buffer = REFLECT_APPLY(TYPED_ARRAY_BUFFER_GETTER, destination, []) as ArrayBuffer;
+    byteOffset = REFLECT_APPLY(TYPED_ARRAY_BYTE_OFFSET_GETTER, destination, []) as number;
+    byteLength = REFLECT_APPLY(TYPED_ARRAY_BYTE_LENGTH_GETTER, destination, []) as number;
+  } catch (error) {
+    throw new SemanticAttentionWebGpuError(
+      "BG-WEBGPU-ATTENTION-INTERNAL",
+      "$.result.destination",
+      "WGSL destination does not expose native typed-array slots",
+      { cause: error },
+    );
+  }
+  if (byteLength !== destinationBytes || byteLength % 4 !== 0) {
+    fail(
+      "BG-WEBGPU-ATTENTION-INTERNAL",
+      "$.result.destination",
+      `WGSL destination length ${byteLength} does not equal ${destinationBytes}`,
+    );
+  }
+  for (let index = 0; index < destination.length; index += 1) {
+    if (!NUMBER_IS_FINITE(destination[index])) {
+      fail(
+        "BG-WEBGPU-ATTENTION-NUMERICAL-DOMAIN",
+        "$.result.destination",
+        `WebGPU attention output element ${index} is not finite f32`,
+      );
+    }
+  }
+  const output = new UINT8_ARRAY_CONSTRUCTOR(byteLength);
+  output.set(new UINT8_ARRAY_CONSTRUCTOR(buffer, byteOffset, byteLength));
+  return output;
+}
+
+function createTrace(
+  prepared: PreparedSemanticAttentionWgsl,
+  backendSpecializationHash: string,
+  device: SemanticAttentionWebGpuDeviceFacts,
+): SemanticAttentionWebGpuTrace {
+  const validScoreElements = attentionValidScoreElements(prepared.semantic);
+  const scoreMultiplyAdds = validScoreElements * prepared.semantic.queryDepth;
+  const weightedValueMultiplyAdds = validScoreElements * prepared.semantic.valueDepth;
+  return Object.freeze({
+    operationId: prepared.semantic.operation.operationId,
+    semanticSpecializationHash: prepared.semantic.specializationHash,
+    scheduleSpecializationHash: prepared.scheduled.scheduleSpecializationHash,
+    backendPreparationHash: prepared.backendPreparationHash,
+    backendSpecializationHash,
+    layoutSemanticHash: prepared.semantic.layoutSemanticHash,
+    kernelSemanticHash: prepared.semantic.kernelSemanticHash,
+    scheduleSemanticHash: prepared.scheduled.scheduleSemanticHash,
+    wgslModuleHash: prepared.wgslModuleHash,
+    backendProfile: prepared.backendProfile,
+    backendVersion: prepared.backendVersion,
+    algorithmProfile: prepared.algorithmProfile,
+    executionTier: "portable-webgpu-core",
+    preservationLevel: prepared.preservationLevel,
+    numericalPreservation: "requires-declared-policy-comparison",
+    comparisonPolicyId: "browsergrad.attention-forward.f32-abs-relative@1",
+    mask: prepared.semantic.operation.mask.kind === "causal" ? "causal-upper-left" : "none",
+    batch: encodeWireU64(prepared.semantic.batch),
+    heads: encodeWireU64(prepared.semantic.heads),
+    queryLength: encodeWireU64(prepared.semantic.queryLength),
+    keyLength: encodeWireU64(prepared.semantic.keyLength),
+    queryDepth: encodeWireU64(prepared.semantic.queryDepth),
+    valueDepth: encodeWireU64(prepared.semantic.valueDepth),
+    physicalTile: Object.freeze({
+      queryRows: encodeWireU64(prepared.scheduled.queryRows),
+      keyRows: encodeWireU64(prepared.scheduled.keyRows),
+    }),
+    dispatchWorkgroups: Object.freeze({
+      x: encodeWireU64(prepared.scheduled.dispatchX),
+      y: encodeWireU64(prepared.scheduled.dispatchY),
+      z: encodeWireU64(prepared.scheduled.dispatchZ),
+    }),
+    validScoreElements: encodeWireU64(validScoreElements),
+    scoreMultiplyAdds: encodeWireU64(scoreMultiplyAdds),
+    weightedValueMultiplyAdds: encodeWireU64(weightedValueMultiplyAdds),
+    logicalBytesRead: encodeWireU64((scoreMultiplyAdds * 8n) + (weightedValueMultiplyAdds * 4n)),
+    logicalBytesWritten: encodeWireU64(prepared.semantic.outputElements * 4n),
+    plannedTransientGpuBytes: prepared.plannedTransientGpuBytes,
+    plannedTransientHostBytes: prepared.plannedTransientHostBytes,
+    plannedTransientWorkingSetBytes: prepared.plannedTransientWorkingSetBytes,
+    maxTransientWorkingSetBytes: prepared.maxTransientWorkingSetBytes,
+    submitted: true,
+    device,
+  });
+}
+
+function attentionValidScoreElements(
+  semantic: PreparedAttentionForwardSpecialization,
+): bigint {
+  if (semantic.operation.mask.kind === "none") return semantic.maximumScoreElements;
+  let scoresPerBatchHead = 0n;
+  for (let query = 0n; query < semantic.queryLength; query += 1n) {
+    const causalKeys = query + 1n;
+    scoresPerBatchHead += causalKeys < semantic.keyLength ? causalKeys : semantic.keyLength;
+  }
+  return semantic.batch * semantic.heads * scoresPerBatchHead;
+}
+
+function snapshotFailure(
+  issue: "invalid-binding" | "numerical-domain" | "resource-limit" | "cancelled" | "internal",
+  path: string,
+  message: string,
+  cause?: unknown,
+): never {
+  const codes: Readonly<Record<typeof issue, SemanticAttentionWebGpuErrorCode>> = {
+    "invalid-binding": "BG-WEBGPU-ATTENTION-INVALID-BINDING",
+    "numerical-domain": "BG-WEBGPU-ATTENTION-NUMERICAL-DOMAIN",
+    "resource-limit": "BG-WEBGPU-ATTENTION-RESOURCE-LIMIT",
+    cancelled: "BG-WEBGPU-ATTENTION-CANCELLED",
+    internal: "BG-WEBGPU-ATTENTION-INTERNAL",
+  };
+  throw new SemanticAttentionWebGpuError(
+    codes[issue],
+    path,
+    message,
+    cause === undefined ? undefined : { cause },
+  );
+}
+
+function requirePrepared(prepared: PreparedSemanticAttentionWgsl): void {
+  if (!PREPARED_SEMANTIC_ATTENTIONS.has(prepared as object)) {
+    fail(
+      "BG-WEBGPU-ATTENTION-INVALID-BINDING",
+      "$.prepared",
+      "prepared plan was not produced by prepareSemanticAttentionWgsl in this module instance",
+    );
+  }
+}
+
 const PREPARE_REQUEST_FIELDS = Object.freeze([
   "operationId",
   "bindings",
@@ -308,6 +711,19 @@ function capturePrepareRequest(
     "$.request",
   ) as unknown as PrepareSemanticAttentionWgslRequest;
   validateOptionalAbortSignal(captured.signal, "$.request.signal");
+  return captured;
+}
+
+function captureRunOptions(
+  value: SemanticAttentionWebGpuRunOptions,
+): SemanticAttentionWebGpuRunOptions {
+  const captured = captureClosedDataRecord(
+    value,
+    ["signal", "maxInputValidationMs", "timeoutMs"],
+    [],
+    "$.options",
+  ) as unknown as SemanticAttentionWebGpuRunOptions;
+  validateOptionalAbortSignal(captured.signal, "$.options.signal");
   return captured;
 }
 
@@ -447,6 +863,234 @@ function requireInitialWebGpuProfile(
       "host/readback attention requires a zero-offset dense destination that overwrites the complete root allocation",
     );
   }
+}
+
+function readAndVerifyDeviceFacts(
+  gpu: GPUDevice,
+  prepared: PreparedSemanticAttentionWgsl,
+): SemanticAttentionWebGpuDeviceFacts {
+  const limits = Object.freeze({
+    maxBufferSize: gpu.limits.maxBufferSize,
+    maxStorageBufferBindingSize: gpu.limits.maxStorageBufferBindingSize,
+    maxComputeWorkgroupsPerDimension: gpu.limits.maxComputeWorkgroupsPerDimension,
+    maxComputeInvocationsPerWorkgroup: gpu.limits.maxComputeInvocationsPerWorkgroup,
+    maxComputeWorkgroupSizeX: gpu.limits.maxComputeWorkgroupSizeX,
+    maxComputeWorkgroupStorageSize: gpu.limits.maxComputeWorkgroupStorageSize,
+    maxBindingsPerBindGroup: gpu.limits.maxBindingsPerBindGroup,
+    maxStorageBuffersPerShaderStage: gpu.limits.maxStorageBuffersPerShaderStage,
+  });
+  const allocations = [
+    prepared.semantic.query.allocationByteLength,
+    prepared.semantic.key.allocationByteLength,
+    prepared.semantic.value.allocationByteLength,
+    prepared.semantic.destination.allocationByteLength,
+  ];
+  const maximumAllocation = allocations.reduce(
+    (maximum, value) => value > maximum ? value : maximum,
+    0n,
+  );
+  if (maximumAllocation > BigInt(limits.maxBufferSize)) {
+    fail(
+      "BG-WEBGPU-ATTENTION-DEVICE-LIMIT",
+      "$.device.limits.maxBufferSize",
+      `allocation requires ${maximumAllocation} bytes; device limit is ${limits.maxBufferSize}`,
+    );
+  }
+  if (maximumAllocation > BigInt(limits.maxStorageBufferBindingSize)) {
+    fail(
+      "BG-WEBGPU-ATTENTION-DEVICE-LIMIT",
+      "$.device.limits.maxStorageBufferBindingSize",
+      `allocation requires ${maximumAllocation} bytes; device limit is ${limits.maxStorageBufferBindingSize}`,
+    );
+  }
+  const workgroupX = prepared.program.workgroupSize[0];
+  if (
+    workgroupX > limits.maxComputeInvocationsPerWorkgroup
+    || workgroupX > limits.maxComputeWorkgroupSizeX
+  ) {
+    fail(
+      "BG-WEBGPU-ATTENTION-DEVICE-LIMIT",
+      "$.device.limits.workgroupSize",
+      `workgroup size ${workgroupX} exceeds device limits`,
+    );
+  }
+  if (BigInt(prepared.workgroupStorageBytes) > BigInt(limits.maxComputeWorkgroupStorageSize)) {
+    fail(
+      "BG-WEBGPU-ATTENTION-DEVICE-LIMIT",
+      "$.device.limits.maxComputeWorkgroupStorageSize",
+      `K/V staging requires ${prepared.workgroupStorageBytes} bytes; device limit is ${limits.maxComputeWorkgroupStorageSize}`,
+    );
+  }
+  if (limits.maxBindingsPerBindGroup < 4 || limits.maxStorageBuffersPerShaderStage < 4) {
+    fail(
+      "BG-WEBGPU-ATTENTION-DEVICE-LIMIT",
+      "$.device.limits.bindings",
+      "device cannot bind the four required storage allocations",
+    );
+  }
+  const dispatchLimit = BigInt(limits.maxComputeWorkgroupsPerDimension);
+  if (
+    prepared.scheduled.dispatchX > dispatchLimit
+    || prepared.scheduled.dispatchY > dispatchLimit
+    || prepared.scheduled.dispatchZ > dispatchLimit
+  ) {
+    fail(
+      "BG-WEBGPU-ATTENTION-DEVICE-LIMIT",
+      "$.launch",
+      `dispatch requires ${prepared.scheduled.dispatchX}x${prepared.scheduled.dispatchY}x${prepared.scheduled.dispatchZ} workgroups; per-dimension limit is ${limits.maxComputeWorkgroupsPerDimension}`,
+    );
+  }
+  return Object.freeze({
+    features: Object.freeze([...gpu.features].map(String).sort()),
+    limits,
+  });
+}
+
+function watchDeviceLoss(device: KernelDevice): void {
+  if (WATCHED_SEMANTIC_ATTENTION_DEVICES.has(device.gpu)) return;
+  WATCHED_SEMANTIC_ATTENTION_DEVICES.add(device.gpu);
+  void device.gpu.lost.then(
+    () => invalidateLostDevice(device),
+    () => invalidateLostDevice(device),
+  );
+}
+
+function invalidateLostDevice(device: KernelDevice): void {
+  LOST_SEMANTIC_ATTENTION_DEVICES.add(device.gpu);
+  clearWgslPipelineCache(device);
+  device.clearCache();
+}
+
+function requireAvailableDevice(device: KernelDevice): void {
+  watchDeviceLoss(device);
+  if (LOST_SEMANTIC_ATTENTION_DEVICES.has(device.gpu)) {
+    fail(
+      "BG-WEBGPU-ATTENTION-DEVICE-LOST",
+      "$.device",
+      "WebGPU device was previously lost and cannot execute this prepared plan",
+    );
+  }
+  if (ACTIVE_SEMANTIC_ATTENTION_DEVICES.has(device.gpu)) {
+    fail(
+      "BG-WEBGPU-ATTENTION-RESOURCE-LIMIT",
+      "$.device.inFlight",
+      "only one semantic attention operation may be in flight per GPUDevice",
+    );
+  }
+}
+
+async function awaitBoundedExecution<T>(
+  execution: Promise<T>,
+  gpu: GPUDevice,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let removeAbortListener: () => void = () => undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => reject(new SemanticAttentionWebGpuError(
+      "BG-WEBGPU-ATTENTION-TIMEOUT",
+      "$.timeoutMs",
+      `semantic attention exceeded caller wait budget of ${timeoutMs} ms`,
+    )), timeoutMs);
+  });
+  const cancellationPromise = signal === undefined
+    ? new Promise<never>(() => undefined)
+    : new Promise<never>((_resolve, reject) => {
+        const onAbort = () => reject(cancelledError());
+        if (EVENT_TARGET_ADD_EVENT_LISTENER === undefined
+          || EVENT_TARGET_REMOVE_EVENT_LISTENER === undefined) {
+          reject(new SemanticAttentionWebGpuError(
+            "BG-WEBGPU-ATTENTION-INTERNAL",
+            "$.signal",
+            "native EventTarget methods are unavailable",
+          ));
+          return;
+        }
+        REFLECT_APPLY(EVENT_TARGET_ADD_EVENT_LISTENER, signal, [
+          "abort",
+          onAbort,
+          { once: true },
+        ]);
+        removeAbortListener = () => {
+          REFLECT_APPLY(EVENT_TARGET_REMOVE_EVENT_LISTENER, signal, ["abort", onAbort]);
+        };
+        if (abortSignalAborted(signal)) onAbort();
+      });
+  const deviceLostPromise = gpu.lost.then((info) => {
+    throw new SemanticAttentionWebGpuError(
+      "BG-WEBGPU-ATTENTION-DEVICE-LOST",
+      "$.device",
+      `WebGPU device lost (${info.reason}): ${info.message}`,
+    );
+  });
+  try {
+    return await Promise.race([
+      execution,
+      timeoutPromise,
+      cancellationPromise,
+      deviceLostPromise,
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+    removeAbortListener();
+  }
+}
+
+function classifyExecutionError(error: unknown): Error {
+  if (error instanceof SemanticAttentionWebGpuError) return error;
+  if (error instanceof SemanticWebGpuHostError) {
+    const codes: Readonly<Record<SemanticWebGpuHostError["issue"], SemanticAttentionWebGpuErrorCode>> = {
+      shader: "BG-WEBGPU-ATTENTION-SHADER",
+      pipeline: "BG-WEBGPU-ATTENTION-PIPELINE",
+      validation: "BG-WEBGPU-ATTENTION-VALIDATION",
+      "out-of-memory": "BG-WEBGPU-ATTENTION-OUT-OF-MEMORY",
+      internal: "BG-WEBGPU-ATTENTION-INTERNAL",
+      "device-lost": "BG-WEBGPU-ATTENTION-DEVICE-LOST",
+      "error-scope": "BG-WEBGPU-ATTENTION-INTERNAL",
+      execution: "BG-WEBGPU-ATTENTION-EXECUTION",
+    };
+    return new SemanticAttentionWebGpuError(
+      codes[error.issue],
+      error.path,
+      error.message,
+      { cause: error },
+    );
+  }
+  return new SemanticAttentionWebGpuError(
+    "BG-WEBGPU-ATTENTION-EXECUTION",
+    "$.dispatch",
+    error instanceof Error ? error.message : String(error),
+    { cause: error },
+  );
+}
+
+function throwIfCancelled(signal: AbortSignal | undefined): void {
+  if (signal !== undefined && abortSignalAborted(signal)) throw cancelledError();
+}
+
+function abortSignalAborted(signal: AbortSignal): boolean {
+  if (ABORT_SIGNAL_ABORTED_GETTER === undefined) {
+    fail("BG-WEBGPU-ATTENTION-INTERNAL", "$.signal", "native AbortSignal getter is unavailable");
+  }
+  try {
+    return REFLECT_APPLY(ABORT_SIGNAL_ABORTED_GETTER, signal, []) as boolean;
+  } catch (error) {
+    throw new SemanticAttentionWebGpuError(
+      "BG-WEBGPU-ATTENTION-INVALID-BINDING",
+      "$.signal",
+      "signal does not expose native AbortSignal state",
+      { cause: error },
+    );
+  }
+}
+
+function cancelledError(): SemanticAttentionWebGpuError {
+  return new SemanticAttentionWebGpuError(
+    "BG-WEBGPU-ATTENTION-CANCELLED",
+    "$.signal",
+    "semantic attention was cancelled",
+  );
 }
 
 function positiveInteger(
