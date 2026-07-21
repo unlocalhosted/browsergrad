@@ -5,6 +5,7 @@ import {
 } from "./cpp_cute_frontend_artifact.js";
 import { findCppCutePreparedFrontendProfileBindingMismatch } from "./cpp_cute_frontend_profile_binding.js";
 import {
+  unwrapPreparedCppCuteBrowserFrontendProfile,
   unwrapPreparedCppCuteAotFrontendProfile,
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
@@ -17,10 +18,24 @@ import {
   type VerifiedCppCuteFrontendAttestation,
 } from "./cpp_cute_frontend_provenance.js";
 import { unwrapVerifiedCppCuteAotRunnerReceipt } from "./cpp_cute_aot_receipt.js";
+import {
+  unwrapObservedCppCuteBrowserLayoutCandidate,
+  type ObservedCppCuteBrowserLayoutCandidate,
+} from "./cpp_cute_browser_layout_candidate.js";
+import {
+  unwrapVerifiedCppCuteBrowserBuildProducer,
+  type VerifiedCppCuteBrowserBuildProducer,
+} from "./cpp_cute_browser_producer_trust.js";
+import { unwrapVerifiedCppCuteBrowserBuildSignatureBinding } from
+  "./cpp_cute_browser_build_provenance.js";
+import { unwrapValidatedCppCuteBrowserWorkerResultFrame } from
+  "./cpp_cute_browser_worker_protocol.js";
 
 declare const authorizedArtifactBrand: unique symbol;
 
-export type CppCuteFrontendAuthorizationEvidenceKind = "aot-attestation";
+export type CppCuteFrontendAuthorizationEvidenceKind =
+  | "aot-attestation"
+  | "browser-worker-build-producer";
 
 /**
  * Producer-neutral authority accepted by semantic lowering. Producer-specific
@@ -43,11 +58,20 @@ export interface AuthorizedCppCuteFrontendArtifact {
   readonly evidenceHash: string;
 }
 
-export type CppCuteFrontendAuthorizationEvidence = {
-  readonly kind: "aot-attestation";
-  readonly authority: VerifiedCppCuteFrontendAttestation;
-  readonly requestBinding: PreparedCppCuteFrontendRequestBinding;
-};
+export type CppCuteFrontendAuthorizationEvidence =
+  | {
+      readonly kind: "aot-attestation";
+      readonly authority: VerifiedCppCuteFrontendAttestation;
+      readonly requestBinding: PreparedCppCuteFrontendRequestBinding;
+    }
+  | {
+      readonly kind: "browser-worker-build-producer";
+      readonly authority: {
+        readonly candidate: ObservedCppCuteBrowserLayoutCandidate;
+        readonly producer: VerifiedCppCuteBrowserBuildProducer;
+      };
+      readonly requestBinding: PreparedCppCuteFrontendRequestBinding;
+    };
 
 export interface AuthorizedCppCuteFrontendArtifactRecord {
   readonly artifact: VerifiedCppCuteFrontendArtifact;
@@ -59,6 +83,12 @@ export interface AuthorizedCppCuteFrontendArtifactRecord {
 export interface AuthorizeAotCppCuteFrontendArtifactRequest {
   readonly attestation: VerifiedCppCuteFrontendAttestation;
   readonly requestBinding: PreparedCppCuteFrontendRequestBinding;
+}
+
+export interface IssueBrowserCppCuteFrontendArtifactAuthorizationRequest {
+  readonly candidate: ObservedCppCuteBrowserLayoutCandidate;
+  readonly producer: VerifiedCppCuteBrowserBuildProducer;
+  readonly evidenceHash: string;
 }
 
 export type CppCuteFrontendAuthorizationErrorCode =
@@ -124,6 +154,97 @@ export function authorizeAotCppCuteFrontendArtifact(
     profile,
     { kind: "aot-attestation", authority: request.attestation, requestBinding: request.requestBinding },
     request.attestation.evidenceHash,
+  );
+}
+
+/**
+ * Package-internal issuer for the browser composition module. This rechecks
+ * the complete artifact/profile/request semantic subject before entering the
+ * canonical lowering authority side table; the caller retains and validates
+ * the browser-specific execution/producer evidence.
+ */
+export function issueBrowserCppCuteFrontendArtifactAuthorization(
+  request: IssueBrowserCppCuteFrontendArtifactAuthorizationRequest,
+): AuthorizedCppCuteFrontendArtifact {
+  const candidate = request.candidate;
+  const producer = request.producer;
+  const evidenceHash = request.evidenceHash;
+  const candidateRecord = unwrapObservedCppCuteBrowserLayoutCandidate(candidate);
+  const producerRecord = unwrapVerifiedCppCuteBrowserBuildProducer(producer);
+  const signatureRecord = unwrapVerifiedCppCuteBrowserBuildSignatureBinding(
+    producerRecord.signatureBinding,
+  );
+  const frameRecord = unwrapValidatedCppCuteBrowserWorkerResultFrame(
+    candidateRecord.validatedResultFrame,
+  );
+  const artifact = candidateRecord.artifact;
+  const profile = candidateRecord.profile;
+  const requestBinding = candidateRecord.requestBinding;
+  const bindingRecord = unwrapPreparedCppCuteFrontendRequestBinding(requestBinding);
+  const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
+  const profileRecord = unwrapPreparedCppCuteBrowserFrontendProfile(profile);
+  if (artifact.outcome !== "accepted") {
+    fail(
+      "BG-COMPILER-CPP-CUTE-AUTHORIZATION-ARTIFACT-REJECTED",
+      "$.artifact.outcome",
+      "rejected frontend artifact cannot receive semantic-lowering authority",
+    );
+  }
+  if (bindingRecord.artifact !== artifact ||
+      requestBinding.requestId !== bindingRecord.request.requestId ||
+      bindingRecord.request.profileHash !== profile.profileHash) {
+    mismatch(
+      "$.requestBinding",
+      "browser authorization requires the exact artifact, request binding, and prepared profile chain",
+    );
+  }
+  if (frameRecord.artifact !== artifact ||
+      frameRecord.profile !== profile ||
+      frameRecord.requestBinding !== requestBinding ||
+      signatureRecord.profile !== profile ||
+      signatureRecord.assetManifest !== frameRecord.assetManifest ||
+      candidate.profileHash !== producer.profileHash ||
+      producer.producerTrusted !== true ||
+      producer.distributionAuthorized !== false ||
+      producer.releaseReady !== false) {
+    mismatch(
+      "$.producer",
+      "exact observed candidate and independently admitted producer do not share one browser build subject",
+    );
+  }
+  if (artifact.compilationContractHash !== profile.compilationContractHash) {
+    mismatch(
+      "$.artifact.compilationContractHash",
+      "artifact compilation contract differs from prepared browser profile",
+    );
+  }
+  const extractor = profileRecord.profile.deployment.extractor;
+  if (artifactRecord.envelope.producer.id !== extractor.id ||
+      artifactRecord.envelope.producer.version !== extractor.version) {
+    mismatch(
+      "$.artifact.producer",
+      "artifact transport producer differs from prepared browser extractor profile",
+    );
+  }
+  const profileBindingMismatch = findCppCutePreparedFrontendProfileBindingMismatch(
+    artifactRecord.envelope.payload,
+    profileRecord,
+  );
+  if (profileBindingMismatch !== null) {
+    mismatch(profileBindingMismatch.path, profileBindingMismatch.message);
+  }
+  return mintAuthorizedCppCuteFrontendArtifact(
+    artifact,
+    profile,
+    {
+      kind: "browser-worker-build-producer",
+      authority: Object.freeze({
+        candidate,
+        producer,
+      }),
+      requestBinding,
+    },
+    evidenceHash,
   );
 }
 

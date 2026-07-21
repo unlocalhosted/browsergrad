@@ -286,3 +286,12 @@ export {
   type PreparedCompiledKernelWebGpuRunOptions,
   type PrepareCompiledKernelWebGpuOptions,
 } from "./runner.js";
+export {
+  CppCuteBrowserLayoutAuthorizationError,
+  authorizeCppCuteBrowserLayoutArtifact,
+  unwrapAuthorizedCppCuteBrowserLayoutArtifact,
+  type AuthorizeCppCuteBrowserLayoutArtifactOptions,
+  type AuthorizedCppCuteBrowserLayoutArtifact,
+  type AuthorizedCppCuteBrowserLayoutArtifactRecord,
+  type CppCuteBrowserLayoutAuthorizationErrorCode,
+} from "./cpp_cute_browser_layout_authorization.js";

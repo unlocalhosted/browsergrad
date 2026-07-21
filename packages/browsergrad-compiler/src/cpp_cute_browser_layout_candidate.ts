@@ -29,7 +29,7 @@ import {
   type LowerAuthorizedCppCuteLayoutEntryOptions,
   type LowerAuthorizedCppCuteLayoutEntryRequest,
   type PreparedVerifiedCppCuteLayoutSemantics,
-} from "./cpp_cute_layout_lowering.js";
+} from "./cpp_cute_layout_semantics.js";
 
 const NATIVE_OBJECT_FREEZE = Object.freeze;
 const NATIVE_OBJECT_GET_OWN_PROPERTY_DESCRIPTOR = Object.getOwnPropertyDescriptor;
