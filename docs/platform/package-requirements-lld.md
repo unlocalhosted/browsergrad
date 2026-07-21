@@ -1,7 +1,7 @@
 # BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
 - **Status:** normative platform architecture; implementation status is not implied
-- **Last reviewed:** 2026-07-20
+- **Last reviewed:** 2026-07-21
 - **Implementation ledger:**
   [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
 - **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
@@ -13,7 +13,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
 describe requirement strength. They are used deliberately rather than as
 general emphasis.
 
-## Implementation Checkpoint — Active 2026-07-20
+## Implementation Checkpoint — Active 2026-07-21
 
 Gates 0 through 2 remain verified; Gate 3 is active; Gates 4 through 7 have not
 started. The strict native producer, pinned no-shell Clang-Wasm executor,
@@ -36,25 +36,36 @@ cannot substitute for that authority. Validated terminal frames retain the
 exact observed-execution, invocation, request, profile, asset-manifest, VFS,
 runtime-ABI, package-Worker, and verifier authority chain. An accepted layout
 from that exact chain can be prepared through the shared Gate 2 layout seam as
-an opaque observed semantic candidate, but preparation grants no producer
-trust, lowering, backend, or release authority. Hostile view-copy graphs are
-checked with non-recursive, target-intrinsic cycle detection before any
-semantic authority can be minted. Two distinct cache-free builds now prove
-exact extractor Wasm/factory reproducibility; the package binds their canonical
-v3 evidence without claiming reproducibility of the still-incomplete
-distributed asset set.
+an opaque observed semantic candidate. A separate host-only policy authority
+can now independently admit the exact predicate, trust-store digest, builder,
+key, and policy version without changing the signature binding's
+`producerTrusted=false` claim. Only that exact opaque producer authority plus
+the exact observed candidate may mint canonical local semantic-lowering
+authority. The transition re-authenticates the retained profile, manifest,
+asset-set, package-Worker, invocation, request, artifact, and prepared layout;
+backend execution, distribution, and release remain false. Current tests use a
+synthetic key and policy, so no real production producer or valid
+browser-Worker lowering has been observed. Hostile view-copy graphs are checked
+with non-recursive, target-intrinsic cycle detection before any semantic
+authority can be minted. Two distinct cache-free builds now prove exact
+extractor Wasm/factory reproducibility; the package binds their canonical v3
+evidence without claiming reproducibility of the still-incomplete distributed
+asset set.
 
 Browser asset manifest v1.4 now binds one build-signature predicate, exact
 trust-store digest, and canonical builder allowlist into the profile-pinned
 asset-set identity. One strict DSSE/in-toto verifier rebinds a valid P-256
 signature to the exact profile/compilation contract, manifest, build-input
-lock and recipe, package Worker/factory, and cycle-free build subject. This is
-only a manifest-policy signature binding: the opaque result explicitly keeps
-`producerTrusted`, exact-asset verification, complete reproducibility, legal
-approval, distribution, Worker execution, and release readiness false. The
-tests use ephemeral synthetic keys. An independent package-owned trust-root
-authority and a real externally issued exact-build statement remain required
-before producer trust can be claimed.
+lock and recipe, package Worker/factory, and cycle-free build subject. This
+remains a manifest-policy signature binding: the opaque signature result
+explicitly keeps `producerTrusted`, exact-asset verification, complete
+reproducibility, legal approval, distribution, Worker execution, and release
+readiness false. The separate trust-policy transition is implemented and
+cannot mutate that narrower authority. The tests still use ephemeral synthetic
+keys and policy bytes. A package-controlled production policy, externally
+controlled key, and externally issued statement over the exact current build
+subject remain required before the current distributed producer can be claimed
+as trusted.
 
 The header-pack harness now binds seven exact source archives to the build lock:
 LLVM 22.1.8, CUTLASS 3.7.0, CUDA 12.6.3 CCCL/cudart/nvcc, and Ubuntu Noble
@@ -167,19 +178,20 @@ source identities no longer invalidate the expensive toolchain cache, and all
 temporary cache-migration shims have been removed. The canonical local command
 `pnpm --filter @unlocalhosted/browsergrad-compiler run
 verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 600 tests across 66 files covering the build plan, runtime ABI,
+clean, then runs 614 tests across 69 files covering the build plan, runtime ABI,
 browser profile, browser asset identity chain, exact Worker-bundle authoring,
 package invocation, Worker entry, production controller, verifier evidence,
-observed layout-candidate preparation, exact header-tree
+observed layout-candidate preparation, independently admitted producer trust,
+producer-authorized local layout lowering, exact header-tree
 inventory/materialization, seven-archive admission, strict archive
 normalization/extraction, the reviewed builder identity, CUDA-index admission,
 the complete header distribution review input, distribution-notice
 verification, exact notice-output materialization, two-root distribution
 reproducibility, exact package admission of that evidence, browser build-subject
 syntax, and signature/build-subject binding. The current Node 25 focused Vitest
-phase passes 600 tests across the same 66 files in 10.62 seconds, and the whole
-fast command completes in 21.80 seconds. The complete local compiler suite
-passes 88 files and 1,559 tests in 9.81 seconds when run after the package
+phase passes 614 tests across the same 69 files in 10.58 seconds, and the whole
+fast command completes in 21.70 seconds. The complete local compiler suite
+passes 91 files and 1,573 tests in 10.82 seconds when run after the package
 build. The local feedback loop remains measured in tens of seconds.
 Clean validation and two-build
 reproducibility still restore no cache and remain intentionally more expensive.
@@ -248,13 +260,19 @@ owned-output cleanup. Tests cover output beyond pipe capacity and malformed
 tar rejection without weakening the two-zero-block requirement.
 
 The remaining cache-free build cost is inside the LLVM/Clang dependency graph,
-not JavaScript verification or workflow queueing. The two reproducibility
-builds already occupy separate runners and each CMake build uses all four cores
-of the current standard runner. Moving to a larger pinned runner and repinning
-the build parallelism is the next low-risk wall-clock lever. Removing the one
-LibTooling use would prune only the small Tooling/DependencyScanning closure;
-a deeper direct-`cc1` refactor reaches more files but changes CUDA invocation
-semantics and is not an iteration-speed shortcut.
+not JavaScript verification or workflow queueing. Successful clean run
+`29681845216` spent 45 minutes 37 seconds in the locked build: about 12 seconds
+in native configure, 3 minutes 26 seconds in native TableGen, 1 minute 49
+seconds in Wasm configure, and 40 minutes 6 seconds in the four-way Wasm
+compile/link. LLVM acquisition/extraction plus builder-image acquisition took
+about 37 seconds. The two reproducibility builds already occupy separate
+runners and each CMake build uses all four cores of the current standard
+runner. Moving to a larger pinned runner and repinning build parallelism is the
+next low-risk wall-clock lever; a pinned Ninja graph is the next build-system
+experiment. Removing the one LibTooling use would prune only the small
+Tooling/DependencyScanning closure; a deeper direct-`cc1` refactor reaches more
+files but changes CUDA invocation semantics and is not an iteration-speed
+shortcut.
 
 The current CMake-stable primary cache is now proved at exact source.
 Migration run `29680686426` completed in 4 minutes 14 seconds and populated the
