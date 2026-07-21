@@ -101,6 +101,11 @@ __global__ void floatMath(float *x, float *out) {
 }
 `;
 
+// This fixture accumulates 17 separately rounded transcendental/arithmetic
+// operations. Native GPU math implementations are not bit-identical, so keep
+// the bound tight while allowing the observed Metal/SwiftShader variation.
+const FLOAT_MATH_ABSOLUTE_TOLERANCE = 5e-4;
+
 const DEVICE_POINTER_HELPERS = `
 __device__ float loadAt(const float* ptr, int offset) {
   return ptr[offset];
@@ -665,8 +670,8 @@ __global__ void localOut(float *out) {
 
     const expectedValues = [...expected.buffers.out as Float32Array];
     const actualValues = [...actual.buffers.out as Float32Array];
-    expect(Math.abs(actualValues[0]! - expectedValues[0]!)).toBeLessThan(1e-4);
-    expect(Math.abs(actualValues[1]! - expectedValues[1]!)).toBeLessThan(1e-4);
+    expect(Math.abs(actualValues[0]! - expectedValues[0]!)).toBeLessThanOrEqual(FLOAT_MATH_ABSOLUTE_TOLERANCE);
+    expect(Math.abs(actualValues[1]! - expectedValues[1]!)).toBeLessThanOrEqual(FLOAT_MATH_ABSOLUTE_TOLERANCE);
   });
 
   it("runs CUDA named constants through WebGPU", async () => {
@@ -5739,7 +5744,7 @@ __global__ void semantic_wmma(float *A, float *B, float *C) {
   });
 
   it("runs packed half2 views over local uint arrays on real WebGPU", async () => {
-    if (!deviceCheck.available) return;
+    if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
     const compiled = compileCudaLiteKernel(`
 #define HALF2(value) (reinterpret_cast<half2 *>(&(value))[0])
 __global__ void local_half2_to_float2(float *out) {
@@ -5948,7 +5953,7 @@ __global__ void selectedPackedCopy(const uchar* left, const uchar* right, int* o
   });
 
   it("loads float WMMA tiles from half-backed shared bit storage on real WebGPU", async () => {
-    if (!deviceCheck.available) return;
+    if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
     const compiled = compileCudaLiteKernel(`
 __global__ void sharedFloatTile(const float* input, float* out) {
   __shared__ half backing[8];
