@@ -79,3 +79,23 @@ export {
   type PreparedLogicalGemmTileCpu,
   type PrepareLogicalGemmTileCpuRequest,
 } from "./kernel/gemm-tile-cpu.js";
+export {
+  LOGICAL_GEMM_EXACT_F32_INPUT_CERTIFICATE_MAJOR,
+  LOGICAL_GEMM_EXACT_F32_INPUT_CERTIFICATE_MINOR,
+  LOGICAL_GEMM_EXACT_F32_INPUT_CERTIFICATE_SCHEMA,
+  LOGICAL_GEMM_EXACT_F32_INPUT_PROFILE,
+  LOGICAL_GEMM_EXACT_F32_INTEGER_LIMIT,
+  copyCertifiedLogicalGemmExactF32Inputs,
+  decodeLogicalGemmExactF32InputCertificate,
+  logicalGemmExactF32InputCertificatePayload,
+  verifyLogicalGemmExactF32InputCertificate,
+  type CertifyLogicalGemmExactF32InputsRequest,
+  type LogicalGemmExactF32InputCertificatePayloadV1,
+  type LogicalGemmExactF32Inputs,
+  type VerifiedLogicalGemmExactF32InputCertificate,
+} from "./kernel/gemm-exact-input-artifact.js";
+export {
+  createVerifiedLogicalGemmExactF32InputCertificate,
+  type ConstructedLogicalGemmExactF32InputCertificate,
+  type LogicalGemmExactF32InputCertificateConstructionOptions,
+} from "./kernel/gemm-exact-input-construction.js";

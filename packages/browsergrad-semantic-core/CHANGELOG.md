@@ -14,6 +14,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   increasing-K round-to-nearest-even accumulation, and explicit prohibitions on
   contraction and reassociation. The package includes one canonical constructor,
   resource-bounded specialization, and exact CPU reference executor.
+- Closed `browsergrad.kernel.gemm-exact-f32-input@1` certificates bind one
+  logical GEMM specialization to private snapshots and SHA-256 commitments of
+  exact host allocation bytes. The bounded proof admits only finite
+  nonnegative integer f32 inputs whose every product and output sum is at most
+  2^24, making contraction/reassociation value preserving for that input
+  domain without weakening the strict logical policy. Existing resident GPU
+  buffers are deliberately not authorized by a host-byte certificate.
 - Closed `browsergrad.schedule.gemm-tile@1` artifacts that bind one exact
   verified logical GEMM semantic hash to backend-neutral physical tiling,
   cooperative workgroup staging, full-workgroup boundary participation,

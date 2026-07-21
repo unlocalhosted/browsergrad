@@ -34,6 +34,16 @@ logical dtype, numerical, frontend, or backend meaning. Device backends must
 either prove the logical numerical contract for a declared input domain or
 refuse it; selecting a schedule cannot weaken the contract.
 
+The initial `/kernel` numerical proof is the closed
+`browsergrad.kernel.gemm-exact-f32-input@1` certificate. It synchronously
+snapshots direct, fixed, unshared host allocation bytes and admits only finite
+nonnegative integer f32 inputs whose products and complete output sums remain
+at most 2^24. On that narrow domain every relevant f32 operation is exact, so
+WGSL contraction or reassociation cannot change the strict logical result.
+Certificates retain private snapshots and return fresh copies for immediate
+upload; they do not authorize arbitrary or previously resident GPU buffers and
+make no general-f32 preservation claim.
+
 Frontends construct the operation through one `/kernel` sink rather than
 assembling allocation, alias, index-map, view, and operation IDs themselves.
 `createVerifiedViewCopyArtifacts` accepts layout construction algebra plus

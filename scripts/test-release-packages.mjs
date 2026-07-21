@@ -184,6 +184,8 @@ try {
     assert(exportName in semanticLayout, `semantic-core layout export missing ${exportName}`);
   }
   for (const exportName of [
+    "copyCertifiedLogicalGemmExactF32Inputs",
+    "createVerifiedLogicalGemmExactF32InputCertificate",
     "createVerifiedDensePermutationViewCopyArtifacts",
     "createVerifiedViewCopyArtifacts",
     "verifyKernelArtifact",
@@ -246,6 +248,40 @@ try {
     packedPreparedSchedule8.scheduleSpecializationHash
       !== packedPreparedSchedule16.scheduleSpecializationHash,
     "semantic-core packed /schedule collapsed distinct specialized schedule geometry",
+  );
+  const packedExactLogicalGemm = await semanticKernel.createVerifiedDenseLogicalGemmTileArtifacts({
+    m: "1",
+    n: "1",
+    k: "1",
+    logicalTile: { m: "1", n: "1", k: "1" },
+  });
+  const packedExactLhs = new Uint8Array(4);
+  const packedExactRhs = new Uint8Array(4);
+  new DataView(packedExactLhs.buffer).setFloat32(0, 3, true);
+  new DataView(packedExactRhs.buffer).setFloat32(0, 5, true);
+  const packedExactInput = await semanticKernel.createVerifiedLogicalGemmExactF32InputCertificate(
+    packedExactLogicalGemm.layout,
+    packedExactLogicalGemm.kernel,
+    {
+      operationId: packedExactLogicalGemm.operationId,
+      inputs: { lhs: packedExactLhs, rhs: packedExactRhs },
+    },
+  );
+  packedExactLhs.fill(0xff);
+  packedExactRhs.fill(0xff);
+  const packedCertifiedCopies = semanticKernel.copyCertifiedLogicalGemmExactF32Inputs(
+    packedExactInput.certificate,
+  );
+  assert(
+    new DataView(packedCertifiedCopies.lhs.buffer).getFloat32(0, true) === 3
+      && new DataView(packedCertifiedCopies.rhs.buffer).getFloat32(0, true) === 5,
+    "semantic-core packed exact-input certificate did not retain authoritative input snapshots",
+  );
+  assert(
+    semanticKernel.logicalGemmExactF32InputCertificatePayload(
+      packedExactInput.certificate,
+    ).proof.maximumOutputSum === "15",
+    "semantic-core packed exact-input certificate lost its exact arithmetic proof",
   );
   const packedArtifacts = await semanticKernel.createVerifiedDensePermutationViewCopyArtifacts({
     inputShape: ["2", "2"],
