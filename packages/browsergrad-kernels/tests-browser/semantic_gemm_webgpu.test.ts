@@ -1,11 +1,14 @@
 import { it } from "vitest";
 import {
-  EXECUTION_ENVIRONMENT_SCHEMA,
   EXECUTION_EVIDENCE_SCHEMA,
   acquireWebGpuEvidenceDevice,
+  createWebGpuExecutionEnvironmentRecord,
   createTerminalEvidenceEmitter,
+  nextWebGpuEvidenceTask,
   requiredEvidenceFailure,
   requiresWebGpuEvidence,
+  webGpuSemanticDeviceLimits,
+  withWebGpuEvidenceTimeout,
 } from "../../../test-support/webgpu-evidence";
 
 import {
@@ -85,7 +88,7 @@ it("emits required evidence for irregular semantic GEMM under two schedules", as
   let currentCaseId: string | undefined;
   let artifactHash = await hashNamedComponents({ suiteId: SUITE_ID, plannedCaseIds: CASE_IDS });
   let caseSetHash: string | undefined;
-  let environment = environmentRecord({ acquisition: "not-attempted" });
+  let environment = createWebGpuExecutionEnvironmentRecord({ acquisition: "not-attempted" });
   let environmentId = await hashNamedComponents({ environment });
   let deviceProfileHash: string | undefined;
   let terminalEmitted = false;
@@ -186,7 +189,7 @@ it("emits required evidence for irregular semantic GEMM under two schedules", as
     stage = "device-acquisition";
     const acquisition = await acquireWebGpuEvidenceDevice();
     if (acquisition.kind === "unavailable") {
-      environment = environmentRecord({
+      environment = createWebGpuExecutionEnvironmentRecord({
         acquisition: "navigator.gpu.requestAdapter/requestDevice",
         unavailableReason: acquisition.reason,
       });
@@ -214,8 +217,8 @@ it("emits required evidence for irregular semantic GEMM under two schedules", as
     device = acquired.device;
     const adapterFeatures = Object.freeze([...acquired.adapter.features].map(String).sort());
     const deviceFeatures = Object.freeze([...device.features].map(String).sort());
-    const negotiatedLimits = deviceLimits(device);
-    environment = environmentRecord({
+    const negotiatedLimits = webGpuSemanticDeviceLimits(device);
+    environment = createWebGpuExecutionEnvironmentRecord({
       acquisition: "navigator.gpu.requestAdapter/requestDevice",
       adapter: acquired.adapterInfo as unknown as JsonObject,
       adapterSupportedFeatures: adapterFeatures,
@@ -243,7 +246,7 @@ it("emits required evidence for irregular semantic GEMM under two schedules", as
         preparedCase.prepared,
         certificate.certificate,
       );
-      await withEvidenceTimeout(device.queue.onSubmittedWorkDone(), 10_000, "queue-drain");
+      await withGemmEvidenceTimeout(device.queue.onSubmittedWorkDone(), 10_000, "queue-drain");
       assertEqualBytes(result.destination, expected, `${preparedCase.caseId} CPU`);
       if (firstOutput === undefined) firstOutput = new Uint8Array(result.destination);
       else assertEqualBytes(result.destination, firstOutput, `${preparedCase.caseId} cross-schedule`);
@@ -271,8 +274,8 @@ it("emits required evidence for irregular semantic GEMM under two schedules", as
 
     stage = "late-error-drain";
     currentCaseId = undefined;
-    await withEvidenceTimeout(device.queue.onSubmittedWorkDone(), 10_000, "final-queue-drain");
-    await nextTask();
+    await withGemmEvidenceTimeout(device.queue.onSubmittedWorkDone(), 10_000, "final-queue-drain");
+    await nextWebGpuEvidenceTask();
     if (uncapturedErrors.length > 0) {
       throw new EvidenceLaneError(
         "BG-WEBGPU-GEMM-EVIDENCE-UNCAUGHT-GPU-ERROR",
@@ -366,41 +369,6 @@ function assertEqualBytes(actual: Uint8Array, expected: Uint8Array, label: strin
   }
 }
 
-function environmentRecord(input: Readonly<{
-  acquisition: string;
-  adapter?: JsonObject;
-  adapterSupportedFeatures?: readonly string[];
-  negotiatedDeviceFeatures?: readonly string[];
-  negotiatedDeviceLimits?: JsonObject;
-  unavailableReason?: string;
-}>): JsonObject {
-  return Object.freeze({
-    schema: EXECUTION_ENVIRONMENT_SCHEMA,
-    acquisition: input.acquisition,
-    userAgent: navigator.userAgent,
-    platform: navigator.platform,
-    ...(input.adapter === undefined ? {} : { adapter: Object.freeze({ ...input.adapter }) }),
-    ...(input.adapterSupportedFeatures === undefined ? {} : { adapterSupportedFeatures: Object.freeze([...input.adapterSupportedFeatures]) }),
-    ...(input.negotiatedDeviceFeatures === undefined ? {} : { negotiatedDeviceFeatures: Object.freeze([...input.negotiatedDeviceFeatures]) }),
-    ...(input.negotiatedDeviceLimits === undefined ? {} : { negotiatedDeviceLimits: Object.freeze({ ...input.negotiatedDeviceLimits }) }),
-    ...(input.unavailableReason === undefined ? {} : { unavailableReason: input.unavailableReason }),
-  });
-}
-
-function deviceLimits(device: GPUDevice): JsonObject {
-  return Object.freeze({
-    maxBufferSize: device.limits.maxBufferSize,
-    maxStorageBufferBindingSize: device.limits.maxStorageBufferBindingSize,
-    maxComputeWorkgroupsPerDimension: device.limits.maxComputeWorkgroupsPerDimension,
-    maxComputeInvocationsPerWorkgroup: device.limits.maxComputeInvocationsPerWorkgroup,
-    maxComputeWorkgroupSizeX: device.limits.maxComputeWorkgroupSizeX,
-    maxComputeWorkgroupSizeY: device.limits.maxComputeWorkgroupSizeY,
-    maxComputeWorkgroupStorageSize: device.limits.maxComputeWorkgroupStorageSize,
-    maxBindingsPerBindGroup: device.limits.maxBindingsPerBindGroup,
-    maxStorageBuffersPerShaderStage: device.limits.maxStorageBuffersPerShaderStage,
-  });
-}
-
 function emitTerminal(input: Readonly<{
   required: boolean;
   artifactHash: string;
@@ -476,29 +444,17 @@ function errorRecord(error: unknown): JsonObject {
   return { name: "UnknownError", message: String(error) };
 }
 
-async function withEvidenceTimeout<T>(
+function withGemmEvidenceTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
   label: string,
 ): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => reject(new EvidenceLaneError(
-          "BG-WEBGPU-GEMM-EVIDENCE-TIMEOUT",
-          `${label} did not settle within ${timeoutMs}ms`,
-        )), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeout !== undefined) clearTimeout(timeout);
-  }
-}
-
-function nextTask(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+  return withWebGpuEvidenceTimeout(
+    promise,
+    timeoutMs,
+    label,
+    (message) => new EvidenceLaneError("BG-WEBGPU-GEMM-EVIDENCE-TIMEOUT", message),
+  );
 }
 
 class EvidenceLaneError extends Error {

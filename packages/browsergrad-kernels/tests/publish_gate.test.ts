@@ -11,6 +11,7 @@ describe("kernels publish evidence gate", () => {
       evidenceCommit: head,
       semanticGemmEvidenceCommit: head,
       semanticAttentionEvidenceCommit: head,
+      semanticAttentionPerformanceEvidenceCommit: head,
       jitEvidenceCommit: undefined,
       githubSha: undefined,
       head,
@@ -20,6 +21,7 @@ describe("kernels publish evidence gate", () => {
       evidenceCommit: head,
       semanticGemmEvidenceCommit: undefined,
       semanticAttentionEvidenceCommit: head,
+      semanticAttentionPerformanceEvidenceCommit: head,
       jitEvidenceCommit: head,
       githubSha: undefined,
       head,
@@ -29,11 +31,22 @@ describe("kernels publish evidence gate", () => {
       evidenceCommit: head,
       semanticGemmEvidenceCommit: head,
       semanticAttentionEvidenceCommit: undefined,
+      semanticAttentionPerformanceEvidenceCommit: head,
       jitEvidenceCommit: head,
       githubSha: undefined,
       head,
       relevantStatus: "",
     })).toThrow(/semantic-attention:required/u);
+    expect(() => validateViewCopyPublishGate({
+      evidenceCommit: head,
+      semanticGemmEvidenceCommit: head,
+      semanticAttentionEvidenceCommit: head,
+      semanticAttentionPerformanceEvidenceCommit: undefined,
+      jitEvidenceCommit: head,
+      githubSha: undefined,
+      head,
+      relevantStatus: "",
+    })).toThrow(/semantic-attention:performance:required/u);
     expect(() => validate(head, "", undefined, head, "0000000000000000000000000000000000000000"))
       .toThrow(/semantic GEMM evidence commit/u);
     expect(() => validate(
@@ -44,6 +57,15 @@ describe("kernels publish evidence gate", () => {
       head,
       "0000000000000000000000000000000000000000",
     )).toThrow(/semantic attention evidence commit/u);
+    expect(() => validate(
+      head,
+      "",
+      undefined,
+      head,
+      head,
+      head,
+      "0000000000000000000000000000000000000000",
+    )).toThrow(/semantic attention performance evidence commit/u);
     expect(() => validate(head, "", undefined, "0000000000000000000000000000000000000000"))
       .toThrow(/JIT semantic-permute evidence commit/u);
   });
@@ -62,11 +84,13 @@ function validate(
   jitEvidenceCommit: string | undefined = evidenceCommit,
   semanticGemmEvidenceCommit: string | undefined = evidenceCommit,
   semanticAttentionEvidenceCommit: string | undefined = evidenceCommit,
+  semanticAttentionPerformanceEvidenceCommit: string | undefined = evidenceCommit,
 ) {
   return validateViewCopyPublishGate({
     evidenceCommit,
     semanticGemmEvidenceCommit,
     semanticAttentionEvidenceCommit,
+    semanticAttentionPerformanceEvidenceCommit,
     jitEvidenceCommit,
     githubSha,
     head,

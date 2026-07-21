@@ -31,6 +31,87 @@ export interface TerminalEvidenceEmitter {
   emit(record: unknown): void;
 }
 
+export type EvidenceJsonPrimitive = null | boolean | string | number;
+export type EvidenceJsonValue = EvidenceJsonPrimitive | EvidenceJsonObject | readonly EvidenceJsonValue[];
+export interface EvidenceJsonObject {
+  readonly [key: string]: EvidenceJsonValue;
+}
+
+export interface WebGpuExecutionEnvironmentInput {
+  readonly acquisition: string;
+  readonly adapter?: EvidenceJsonObject;
+  readonly adapterSupportedFeatures?: readonly string[];
+  readonly negotiatedDeviceFeatures?: readonly string[];
+  readonly negotiatedDeviceLimits?: EvidenceJsonObject;
+  readonly unavailableReason?: string;
+}
+
+/** Canonical named browser/device record shared by required WebGPU evidence lanes. */
+export function createWebGpuExecutionEnvironmentRecord(
+  input: WebGpuExecutionEnvironmentInput,
+): EvidenceJsonObject {
+  return Object.freeze({
+    schema: EXECUTION_ENVIRONMENT_SCHEMA,
+    acquisition: input.acquisition,
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    ...(input.adapter === undefined ? {} : { adapter: Object.freeze({ ...input.adapter }) }),
+    ...(input.adapterSupportedFeatures === undefined
+      ? {}
+      : { adapterSupportedFeatures: Object.freeze([...input.adapterSupportedFeatures]) }),
+    ...(input.negotiatedDeviceFeatures === undefined
+      ? {}
+      : { negotiatedDeviceFeatures: Object.freeze([...input.negotiatedDeviceFeatures]) }),
+    ...(input.negotiatedDeviceLimits === undefined
+      ? {}
+      : { negotiatedDeviceLimits: Object.freeze({ ...input.negotiatedDeviceLimits }) }),
+    ...(input.unavailableReason === undefined
+      ? {}
+      : { unavailableReason: input.unavailableReason }),
+  });
+}
+
+/** Device limits that can change semantic compute admission for current lanes. */
+export function webGpuSemanticDeviceLimits(device: GPUDevice): EvidenceJsonObject {
+  return Object.freeze({
+    maxBufferSize: device.limits.maxBufferSize,
+    maxStorageBufferBindingSize: device.limits.maxStorageBufferBindingSize,
+    maxComputeWorkgroupsPerDimension: device.limits.maxComputeWorkgroupsPerDimension,
+    maxComputeInvocationsPerWorkgroup: device.limits.maxComputeInvocationsPerWorkgroup,
+    maxComputeWorkgroupSizeX: device.limits.maxComputeWorkgroupSizeX,
+    maxComputeWorkgroupSizeY: device.limits.maxComputeWorkgroupSizeY,
+    maxComputeWorkgroupStorageSize: device.limits.maxComputeWorkgroupStorageSize,
+    maxBindingsPerBindGroup: device.limits.maxBindingsPerBindGroup,
+    maxStorageBuffersPerShaderStage: device.limits.maxStorageBuffersPerShaderStage,
+  });
+}
+
+export async function withWebGpuEvidenceTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+  timeoutError: (message: string) => Error,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(timeoutError(`${label} did not settle within ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
+export function nextWebGpuEvidenceTask(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 export function requiresWebGpuEvidence(): boolean {
   return __BG_REQUIRE_WEBGPU__;
 }

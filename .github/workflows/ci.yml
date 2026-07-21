@@ -1,6 +1,6 @@
 # CI — build + test on every push and pull request.
 #
-# Eight job families, run in parallel:
+# Nine job families, run in parallel:
 #   1. surface — fast `vitest run` on each package (~5s wall-clock each)
 #   2. compiler-native — the required LLVM/Clang harness, isolated from the
 #      ordinary Node-24 surface so neither lane queues behind the other.
@@ -13,7 +13,9 @@
 #   6. real-world-audits — one full-corpus compile/codegen audit lane.
 #   7. semantic-attention-webgpu — required causal/non-causal block-tiled
 #      attention evidence, isolated from the broad browser lane.
-#   8. browser-real-world — source and dist CUDA browser gates on separate
+#   8. semantic-attention-performance-webgpu — observational block-tiled versus
+#      row-wise host-API timing, isolated from correctness and broad browser work.
+#   9. browser-real-world — source and dist CUDA browser gates on separate
 #      runners, each retaining full fixture and auto-corpus execution coverage.
 #
 # Build matrix:
@@ -193,6 +195,7 @@ jobs:
           --config vitest.browser.config.ts
           --exclude tests-browser/semantic_gemm_webgpu.test.ts
           --exclude tests-browser/semantic_attention_webgpu.test.ts
+          --exclude tests-browser/semantic_attention_performance_webgpu.test.ts
 
       - name: Run compiler browser suite
         run: pnpm --filter @unlocalhosted/browsergrad-compiler test:browser
@@ -276,6 +279,45 @@ jobs:
         with:
           name: semantic-attention-webgpu-evidence-${{ github.sha }}
           path: semantic-attention-webgpu-evidence.log
+          if-no-files-found: error
+
+  semantic-attention-performance-webgpu:
+    name: Required semantic attention WebGPU performance observation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BG_BROWSER_HEADLESS: '1'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build semantic attention performance dependency closure
+        run: |
+          pnpm --filter @unlocalhosted/browsergrad-semantic-core build
+          pnpm --filter @unlocalhosted/browsergrad-kernels build
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @unlocalhosted/browsergrad-kernels exec playwright install --with-deps chromium
+
+      - name: Run required block-tiled attention performance observation
+        run: |
+          set -o pipefail
+          pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:semantic-attention:performance:required 2>&1 | tee semantic-attention-performance-webgpu-evidence.log
+
+      - name: Retain semantic attention WebGPU performance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semantic-attention-performance-webgpu-evidence-${{ github.sha }}
+          path: semantic-attention-performance-webgpu-evidence.log
           if-no-files-found: error
 
   real-world-audits:

@@ -609,6 +609,7 @@ try {
   );
   const releaseWorkflow = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");
   const publishWorkflow = readFileSync(join(root, ".github/workflows/publish-npm.yml"), "utf8");
+  const ciWorkflow = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
   const workspaceRootPkg = readPackage(root);
   assert(
     workspaceRootPkg.packageManager === "pnpm@10.34.5",
@@ -932,9 +933,25 @@ try {
   for (const [workflowName, workflow] of [["release", releaseWorkflow], ["publish", publishWorkflow]]) {
     assertSemanticGemmEvidenceWorkflowOrder(workflowName, workflow);
     assertSemanticAttentionEvidenceWorkflowOrder(workflowName, workflow);
+    assertSemanticAttentionPerformanceEvidenceWorkflowOrder(workflowName, workflow);
     assertCompilerViewCopyEvidenceWorkflowOrder(workflowName, workflow);
     assertJitEvidenceWorkflowOrder(workflowName, workflow);
   }
+  const performanceCiStart = ciWorkflow.indexOf("\n  semantic-attention-performance-webgpu:\n");
+  const performanceCiEnd = ciWorkflow.indexOf("\n  real-world-audits:\n", performanceCiStart);
+  assert(
+    performanceCiStart >= 0
+      && performanceCiEnd > performanceCiStart
+      && ciWorkflow.includes("--exclude tests-browser/semantic_attention_performance_webgpu.test.ts"),
+    "CI must isolate semantic attention performance from the broad browser lane",
+  );
+  const performanceCiJob = ciWorkflow.slice(performanceCiStart, performanceCiEnd);
+  assert(
+    performanceCiJob.includes("test:browser:semantic-attention:performance:required")
+      && performanceCiJob.includes("semantic-attention-performance-webgpu-evidence-${{ github.sha }}")
+      && !/^    needs:/mu.test(performanceCiJob),
+    "CI semantic attention performance evidence must be required, retained, and independently parallel",
+  );
   const compilerRoot = await import(pathToFileURL(join(compiler, "dist/index.js")));
   const packedCompilerEntries = listRelativeEntries(compiler);
   assert(
@@ -1613,6 +1630,21 @@ function assertSemanticAttentionEvidenceWorkflowOrder(workflowName, workflow) {
     log: "semantic-attention-webgpu-evidence.log",
     artifact: "semantic-attention-webgpu-evidence-${{ github.sha }}",
     evidenceEnvironment: "BG_REQUIRED_SEMANTIC_ATTENTION_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}",
+  });
+}
+
+function assertSemanticAttentionPerformanceEvidenceWorkflowOrder(workflowName, workflow) {
+  assertKernelsSemanticEvidenceWorkflowOrder(workflowName, workflow, {
+    label: "semantic attention performance",
+    releaseEvidence: "Required semantic attention WebGPU performance gate (kernels release)",
+    releaseUpload: "Retain semantic attention WebGPU performance evidence (kernels release)",
+    publishEvidence: "Run required semantic attention WebGPU performance gate",
+    publishUpload: "Retain semantic attention WebGPU performance evidence",
+    command: "test:browser:semantic-attention:performance:required",
+    log: "semantic-attention-performance-webgpu-evidence.log",
+    artifact: "semantic-attention-performance-webgpu-evidence-${{ github.sha }}",
+    evidenceEnvironment:
+      "BG_REQUIRED_SEMANTIC_ATTENTION_WEBGPU_PERFORMANCE_EVIDENCE_COMMIT: ${{ github.sha }}",
   });
 }
 

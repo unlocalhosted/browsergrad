@@ -30,6 +30,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   3. Every complete output passes the semantic-core absolute-or-relative CPU
   comparator and same-mask cross-schedule comparison. Execution traces still
   require declared-policy comparison and do not self-assert preservation.
+- A separate required performance lane records the named
+  `block-tiled-kv-online-softmax-forward` implementation against the frozen
+  `row-wise-online-softmax-baseline` on `(B=1,H=2,Sq=256,Sk=256,D=Dv=32)`.
+  It uses 16 warmups, 20 alternating paired samples, complete output readback,
+  and a named browser/device/configuration. Raw samples and lifecycle
+  differences are retained; the record makes no superiority or regression
+  claim and correctness remains a separate required lane.
 - Production semantic GEMM preparation and WebGPU execution consume the exact
   verified layout, logical GEMM, physical schedule, and concrete-input
   certificate authorities. Cooperative scalar workgroup staging uses uniform

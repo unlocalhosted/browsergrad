@@ -132,9 +132,15 @@ causal and non-causal irregular rank-4 inputs under 8x8 and 8x16 schedules; all
 four complete outputs pass the semantic-core `1e-4` absolute-or-relative CPU
 comparator and same-mask cross-schedule comparison. The trace reports that
 comparison is required rather than converting one successful run into a global
-numerical claim. Separate named baseline/performance evidence is the remaining
-Gate 5 slice; the existing row-wise online-softmax implementation remains named
-only as a baseline. Two
+numerical claim. A separate required performance record compares the production
+host APIs for `(B=1,H=2,Sq=256,Sk=256,D=Dv=32)` after 16 warmups with 20
+alternating paired samples, complete readback, and queue drain. It names the
+existing row-wise online-softmax implementation only as a baseline, retains raw
+samples and lifecycle differences, and explicitly makes no superiority or
+regression-threshold claim. Correctness remains in the separate conformance
+record. The initial closed f32 Gate 5 profile therefore meets its exit without
+claiming FlashAttention-v2, general dtype/layout coverage, or frontend schedule
+preservation. Two
 distinct cache-free builds now prove exact
 extractor Wasm/factory reproducibility; the package binds their canonical v3
 evidence without claiming reproducibility of the still-incomplete distributed

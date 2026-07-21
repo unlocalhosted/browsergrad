@@ -89,6 +89,8 @@
     "test:browser:semantic-gemm:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_gemm_webgpu.test.ts",
     "test:browser:semantic-attention": "vitest run --config vitest.browser.config.ts tests-browser/semantic_attention_webgpu.test.ts",
     "test:browser:semantic-attention:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_attention_webgpu.test.ts",
+    "test:browser:semantic-attention:performance": "vitest run --config vitest.browser.config.ts tests-browser/semantic_attention_performance_webgpu.test.ts",
+    "test:browser:semantic-attention:performance:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_attention_performance_webgpu.test.ts",
     "test:browser:open": "vitest --config vitest.browser.config.ts --watch --browser.headless=false",
     "lint": "oxlint src",
     "clean": "rm -rf dist *.tsbuildinfo",
