@@ -60,11 +60,18 @@ facts into the canonical Gate 2 layout/kernel artifacts. The initial profile
 is positive flat static rank 2, two distinct non-null global pointers,
 synchronous portable copy, reject on an invalid source, and forbid overlap.
 Its CPU reference proves the pinned transpose bit-for-bit with nonzero
-allocation offsets; real WebGPU evidence for this path remains absent.
-Capability commit `a8a861e2` and exact-source CI run `29807986545` prove this
-candidate/authorization boundary. The next software slice is required
-real-WebGPU convergence using the exact canonical payload, without upgrading
-backend, distribution, or release authority prematurely. Two distinct
+allocation offsets. The exact canonical payload reproduced by that
+authorization path now also executes bit-for-bit through the canonical WebGPU
+backend on Apple Metal 3 and required CI SwiftShader, including complete
+destination comparison and nonzero-offset canaries. This browser evidence is
+fixture-payload convergence across realms: it explicitly records
+`productionBrowserCompileObserved=false` and does not mint backend,
+distribution, or release authority. Capability commits `a8a861e2`,
+`c4e2d799`, `08f4b102`, `6355289c`, and `e546a124`, plus exact-source CI run
+`29810488096`, prove the candidate/authorization and required-WebGPU
+boundaries. The next software slice expands the same static positive-affine
+view-copy lowering from rank 2 to rank 3 without widening the unsupported
+layout profile. Two distinct
 cache-free builds now prove exact
 extractor Wasm/factory reproducibility; the package binds their canonical v3
 evidence without claiming reproducibility of the still-incomplete distributed
