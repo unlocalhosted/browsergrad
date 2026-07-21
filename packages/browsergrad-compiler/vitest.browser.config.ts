@@ -38,17 +38,15 @@ export default defineConfig(({ mode }) => ({
     hookTimeout: 60_000,
     browser: {
       enabled: true,
-      provider: playwright(),
+      provider: playwright({
+        // Match the required real-world browser gate. Vitest forwards browser
+        // process flags only through provider launchOptions.
+        launchOptions: { args: ["--enable-unsafe-webgpu"] },
+      }),
       headless: process.env.BG_BROWSER_HEADLESS === "1",
       instances: [
         {
           browser: "chromium",
-          launch: {
-            // This is the same minimal profile used by the required real-world
-            // browser gate. Forcing Vulkan, ANGLE, and SwiftShader together
-            // makes current headless Chromium expose no WebGPU adapter.
-            args: ["--enable-unsafe-webgpu"],
-          },
         },
       ],
     },

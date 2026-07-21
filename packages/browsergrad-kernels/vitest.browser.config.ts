@@ -41,7 +41,9 @@ export default defineConfig(({ mode }) => ({
     hookTimeout: 60_000,
     browser: {
       enabled: true,
-      provider: playwright(),
+      provider: playwright({
+        launchOptions: { args: ["--enable-unsafe-webgpu"] },
+      }),
       // Headless Chromium on macOS doesn't expose a GPU adapter for
       // WebGPU. Run headed locally to get the real Metal driver; CI on
       // Linux needs xvfb. The CI workflow flips this via an env var.
@@ -49,7 +51,6 @@ export default defineConfig(({ mode }) => ({
       instances: [
         {
           browser: "chromium",
-          launch: { args: ["--enable-unsafe-webgpu"] },
         },
       ],
     },

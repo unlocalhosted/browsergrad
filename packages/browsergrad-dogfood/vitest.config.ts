@@ -15,15 +15,14 @@ export default defineConfig({
     hookTimeout: 60_000,
     browser: {
       enabled: true,
-      provider: playwright(),
+      provider: playwright({
+        launchOptions: { args: ["--enable-unsafe-webgpu"] },
+      }),
       // Headed on macOS to get the real Metal driver. CI can flip headless.
       headless: process.env.BG_BROWSER_HEADLESS === "1",
       instances: [
         {
           browser: "chromium",
-          launch: {
-            args: ["--enable-unsafe-webgpu"],
-          },
         },
       ],
     },

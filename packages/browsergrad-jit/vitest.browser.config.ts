@@ -53,14 +53,14 @@ export default defineConfig(({ mode }) => ({
     hookTimeout: 120_000,
     browser: {
       enabled: true,
-      provider: playwright(),
+      provider: playwright({
+        // Match the required real-world browser gate. Vitest forwards these
+        // process flags from provider launchOptions, not an instance field.
+        launchOptions: { args: ["--enable-unsafe-webgpu"] },
+      }),
       headless: process.env.BG_BROWSER_HEADLESS === "1",
       instances: [{
         browser: "chromium",
-        launch: {
-          // Keep this aligned with the required real-world browser gate.
-          args: ["--enable-unsafe-webgpu"],
-        },
       }],
     },
   },
