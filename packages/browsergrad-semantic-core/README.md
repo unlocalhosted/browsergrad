@@ -9,6 +9,7 @@ Only explicit subpaths exist:
 - `@unlocalhosted/browsergrad-semantic-core/schema`
 - `@unlocalhosted/browsergrad-semantic-core/layout`
 - `@unlocalhosted/browsergrad-semantic-core/kernel`
+- `@unlocalhosted/browsergrad-semantic-core/schedule`
 
 There is no root barrel. The package must remain browser-safe and cannot import
 compiler frontends, framework packages, runtimes, or device APIs. Public
@@ -22,6 +23,16 @@ same-dtype f32, rank 2 or 3, global-memory views, explicit source-read and
 destination-write effects, disjoint alias sets, and either reject or exact-bit
 fill behavior for invalid source coordinates. Generic operation verification
 is separate from this lowering profile.
+
+`/kernel` also defines one frontend-neutral logical GEMM tile with exact dense
+f32 operand/view roles, boundary policy, increasing-K accumulation order, and
+an explicit prohibition on contraction and reassociation. `/schedule` binds an
+exact verified logical GEMM semantic hash to physical tiles, cooperative
+workgroup staging, full-workgroup boundary participation, uniform
+acquire-release barriers, scalar vectors, and masked memory effects. It owns no
+logical dtype, numerical, frontend, or backend meaning. Device backends must
+either prove the logical numerical contract for a declared input domain or
+refuse it; selecting a schedule cannot weaken the contract.
 
 Frontends construct the operation through one `/kernel` sink rather than
 assembling allocation, alias, index-map, view, and operation IDs themselves.
@@ -57,8 +68,9 @@ zero-fill.
 This is the semantic/reference contract, not a blanket GPU-support claim.
 Kernels-owned WGSL plus the compiler and JIT adapters have strict actual-device
 evidence for their declared Gate 2 profiles at the exact revisions recorded in
-the implementation ledger. Version `0.2.0` is locally packed and tested but has
-not been published; release CI must repeat the exact-source evidence gates.
+the implementation ledger. Version `0.3.0` is the selected identity for the
+new logical-GEMM and schedule API and has not been published. Release CI must
+repeat the exact-source evidence gates.
 
 Current status and evidence live in
 [`docs/internal/package-requirements-implementation-ledger.md`](../../docs/internal/package-requirements-implementation-ledger.md).

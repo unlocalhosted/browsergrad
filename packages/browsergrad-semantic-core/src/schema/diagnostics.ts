@@ -62,8 +62,19 @@ export const KERNEL_DIAGNOSTIC_CODES = {
 export type KernelDiagnosticCode =
   (typeof KERNEL_DIAGNOSTIC_CODES)[keyof typeof KERNEL_DIAGNOSTIC_CODES];
 
+export const SCHEDULE_DIAGNOSTIC_CODES = {
+  invalidArtifact: "BG-SCHEDULE-INVALID-ARTIFACT",
+  unknownField: "BG-SCHEDULE-UNKNOWN-FIELD",
+  kernelHashMismatch: "BG-SCHEDULE-KERNEL-HASH-MISMATCH",
+  unsupportedProfile: "BG-SCHEDULE-UNSUPPORTED-PROFILE",
+} as const;
+
+export type ScheduleDiagnosticCode =
+  (typeof SCHEDULE_DIAGNOSTIC_CODES)[keyof typeof SCHEDULE_DIAGNOSTIC_CODES];
+
 export interface SemanticDiagnostic {
-  readonly code: SchemaDiagnosticCode | LayoutDiagnosticCode | KernelDiagnosticCode | `BG-LAYOUT-${string}` | `BG-KERNEL-${string}`;
+  readonly code: SchemaDiagnosticCode | LayoutDiagnosticCode | KernelDiagnosticCode | ScheduleDiagnosticCode
+    | `BG-LAYOUT-${string}` | `BG-KERNEL-${string}` | `BG-SCHEDULE-${string}`;
   readonly stage: "verification";
   readonly severity: "error" | "warning" | "note";
   readonly message: string;

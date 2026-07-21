@@ -5,10 +5,22 @@ All notable changes to `@unlocalhosted/browsergrad-semantic-core`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - Unreleased
 
 ### Added
 
+- Closed `browsergrad.kernel.gemm-tile@1` artifacts for dense static rank-2 f32
+  operands with exact logical tiles, boundary masks, pairwise-disjoint effects,
+  increasing-K round-to-nearest-even accumulation, and explicit prohibitions on
+  contraction and reassociation. The package includes one canonical constructor,
+  resource-bounded specialization, and exact CPU reference executor.
+- Closed `browsergrad.schedule.gemm-tile@1` artifacts that bind one exact
+  verified logical GEMM semantic hash to backend-neutral physical tiling,
+  cooperative workgroup staging, full-workgroup boundary participation,
+  uniform acquire-release barriers, masks, and scalar memory vectors.
+- Explicit `/schedule` package export. Schedule verification rejects logical
+  numerical policy and backend-specific fields rather than weakening or
+  reconstructing the referenced kernel meaning.
 - Allocation-free, authority-bound standalone layout preparation and coordinate
   tracing. The API verifies shared index semantics without inventing dtype,
   allocation, alias, byte-address, effect, or backend claims.

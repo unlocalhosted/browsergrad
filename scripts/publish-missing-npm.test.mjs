@@ -9,7 +9,7 @@ import { test } from "node:test";
 const root = resolve(new URL("..", import.meta.url).pathname);
 const publisher = join(root, "scripts/publish-missing-npm.mjs");
 const semanticCore = "@unlocalhosted/browsergrad-semantic-core";
-const semanticCoreVersion = "0.2.0";
+const semanticCoreVersion = "0.3.0";
 const compiler = "@unlocalhosted/browsergrad-compiler";
 const compilerVersion = "0.2.0";
 const manifestName = "browsergrad-release-manifest.json";

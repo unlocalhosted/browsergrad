@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 const root = resolve(new URL("..", import.meta.url).pathname);
 const tmp = mkdtempSync(join(tmpdir(), "browsergrad-release-pack-"));
 const packedTarballs = new Map();
+const packedPackageDirectories = new Map();
 
 try {
   const primitives = packAndExtract("browsergrad-primitives");
@@ -128,6 +129,7 @@ try {
   assert(semanticCorePkg.exports?.["./schema"], "semantic-core package missing ./schema export");
   assert(semanticCorePkg.exports?.["./layout"], "semantic-core package missing ./layout export");
   assert(semanticCorePkg.exports?.["./kernel"], "semantic-core package missing ./kernel export");
+  assert(semanticCorePkg.exports?.["./schedule"], "semantic-core package missing ./schedule export");
   const densePermutationFixtureExport = "./fixtures/kernel-v1/dense-permutation-view-copy.cases.json";
   assert(
     semanticCorePkg.exports?.[densePermutationFixtureExport] === densePermutationFixtureExport,
@@ -142,6 +144,8 @@ try {
     "dist/layout.d.ts",
     "dist/kernel.js",
     "dist/kernel.d.ts",
+    "dist/schedule.js",
+    "dist/schedule.d.ts",
     "python/browsergrad_semantic_core.py",
     "fixtures/layout-v1/row-major-rank2.input.json",
     "fixtures/layout-v1/symbolic-byte-rank3.input.json",
@@ -172,7 +176,8 @@ try {
   const semanticSchema = await import(pathToFileURL(join(semanticCore, "dist/schema.js")));
   const semanticLayout = await import(pathToFileURL(join(semanticCore, "dist/layout.js")));
   const semanticKernel = await import(pathToFileURL(join(semanticCore, "dist/kernel.js")));
-  for (const exportName of ["canonicalizeJson", "hashSemanticArtifact", "validateWireEnvelope"]) {
+  const semanticSchedule = await import(pathToFileURL(join(semanticCore, "dist/schedule.js")));
+  for (const exportName of ["canonicalizeJson", "hashSemanticArtifact", "SCHEDULE_DIAGNOSTIC_CODES", "validateWireEnvelope"]) {
     assert(exportName in semanticSchema, `semantic-core schema export missing ${exportName}`);
   }
   for (const exportName of ["normalizeLayoutExpr", "traceViewCoordinate", "verifyLayoutArtifact"]) {
@@ -187,6 +192,35 @@ try {
   ]) {
     assert(exportName in semanticKernel, `semantic-core kernel export missing ${exportName}`);
   }
+  for (const exportName of [
+    "createVerifiedLogicalGemmTileSchedule",
+    "logicalGemmTileScheduleArtifactPayload",
+    "verifyLogicalGemmTileScheduleArtifact",
+  ]) {
+    assert(exportName in semanticSchedule, `semantic-core schedule export missing ${exportName}`);
+  }
+  const packedLogicalGemm = await semanticKernel.createVerifiedDenseLogicalGemmTileArtifacts({
+    m: "16",
+    n: "16",
+    k: "16",
+    logicalTile: { m: "16", n: "16", k: "16" },
+  });
+  const packedSchedule8 = await semanticSchedule.createVerifiedLogicalGemmTileSchedule(
+    packedLogicalGemm.kernel,
+    { physicalTile: { m: "8", n: "8", k: "8" } },
+  );
+  const packedSchedule16 = await semanticSchedule.createVerifiedLogicalGemmTileSchedule(
+    packedLogicalGemm.kernel,
+    { physicalTile: { m: "16", n: "16", k: "16" } },
+  );
+  assert(
+    packedSchedule8.logicalGemmSemanticHash === await semanticSchema.hashSemanticArtifact(packedLogicalGemm.kernel),
+    "semantic-core packed /schedule lost the exact logical GEMM semantic reference",
+  );
+  assert(
+    packedSchedule8.scheduleSemanticHash !== packedSchedule16.scheduleSemanticHash,
+    "semantic-core packed /schedule collapsed distinct physical GEMM schedules",
+  );
   const packedArtifacts = await semanticKernel.createVerifiedDensePermutationViewCopyArtifacts({
     inputShape: ["2", "2"],
     axes: [1, 0],
@@ -820,7 +854,9 @@ function packAndExtract(packageDirName) {
   const extractDir = join(tmp, packageDirName);
   run("mkdir", ["-p", extractDir], root);
   run("tar", ["-xzf", tarballPath, "-C", extractDir], root);
-  return join(extractDir, "package");
+  const packageDirectory = join(extractDir, "package");
+  packedPackageDirectories.set(packageDirName, packageDirectory);
+  return packageDirectory;
 }
 
 function installPackedConsumer(consumerId, packageNames) {
@@ -832,14 +868,13 @@ function installPackedConsumer(consumerId, packageNames) {
     assert(tarball, `missing packed tarball for ${name}`);
     dependencies[`@unlocalhosted/${name}`] = `file:${tarball}`;
   }
+  const overrides = packedRuntimeDependencyOverrides(packageNames);
   writeFileSync(join(consumer, "package.json"), JSON.stringify({
     name: "browsergrad-release-consumer",
     private: true,
     type: "module",
     dependencies,
-    pnpm: {
-      overrides: dependencies,
-    },
+    pnpm: { overrides },
   }));
   run("pnpm", [
     "install",
@@ -849,6 +884,28 @@ function installPackedConsumer(consumerId, packageNames) {
     "--config.auto-install-peers=false",
   ], consumer);
   return consumer;
+}
+
+function packedRuntimeDependencyOverrides(packageNames) {
+  const selected = new Set(packageNames);
+  const overrides = {};
+  for (const parentName of packageNames) {
+    const packageDirectory = packedPackageDirectories.get(parentName);
+    assert(packageDirectory, `missing extracted packed package for ${parentName}`);
+    const parent = readPackage(packageDirectory);
+    for (const field of ["dependencies", "optionalDependencies"]) {
+      for (const dependencyName of Object.keys(parent[field] ?? {})) {
+        const dependencyDirectoryName = dependencyName.startsWith("@unlocalhosted/")
+          ? dependencyName.slice("@unlocalhosted/".length)
+          : undefined;
+        if (dependencyDirectoryName === undefined || !selected.has(dependencyDirectoryName)) continue;
+        const dependencyTarball = packedTarballs.get(dependencyDirectoryName);
+        assert(dependencyTarball, `missing packed tarball for ${dependencyDirectoryName}`);
+        overrides[`${parent.name}@${parent.version}>${dependencyName}`] = `file:${dependencyTarball}`;
+      }
+    }
+  }
+  return overrides;
 }
 
 function installPackedNpmConsumer(consumerId, packageNames, additionalDependencies = {}) {
