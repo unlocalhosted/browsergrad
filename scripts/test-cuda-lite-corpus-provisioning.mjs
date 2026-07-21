@@ -508,17 +508,126 @@ try {
   const snapshotResiduesAfterCrash = readdirSync(testRoot)
     .filter((entry) => entry.startsWith(".browsergrad-corpus-snapshot-"));
   assert.equal(snapshotResiduesAfterCrash.length, snapshotResiduesBeforeCrash.length + 1);
+  const crashedSnapshotName = snapshotResiduesAfterCrash.find((entry) =>
+    !snapshotResiduesBeforeCrash.includes(entry));
+  assert.ok(crashedSnapshotName);
+  const crashedSnapshotPath = path.join(testRoot, crashedSnapshotName);
+  const crashedSnapshotMarker = JSON.parse(readFileSync(
+    path.join(crashedSnapshotPath, ".browsergrad-owned-audit-snapshot"),
+    "utf8",
+  ));
+  for (let index = 1; index <= 5; index += 1) {
+    const basename = `.browsergrad-corpus-snapshot-` +
+      `${crashedSnapshotMarker.targetPathSha256.slice(0, 16)}-` +
+      index.toString(16).padStart(32, "0");
+    const duplicatePath = path.join(testRoot, basename);
+    mkdirSync(duplicatePath, { mode: 0o700 });
+    writeFileSync(
+      path.join(duplicatePath, ".browsergrad-owned-audit-snapshot"),
+      `${JSON.stringify({
+        ...crashedSnapshotMarker,
+        token: index.toString(16).padStart(64, "0"),
+        basename,
+      })}\n`,
+      { mode: 0o600 },
+    );
+    writeFileSync(
+      path.join(duplicatePath, "kernel.cu"),
+      readFileSync(path.join(crashedSnapshotPath, "kernel.cu")),
+      { mode: 0o600 },
+    );
+  }
+  const boundedResiduesBeforeRecovery = readdirSync(testRoot)
+    .filter((entry) => entry.startsWith(".browsergrad-corpus-snapshot-"));
+  assert.equal(boundedResiduesBeforeRecovery.length, snapshotResiduesBeforeCrash.length + 6);
   const recoveredAfterCrash = verifyCudaLiteCorpusCheckout({
     root: testRoot,
     corpus: refreshedCorpus,
   });
   assert.equal(recoveredAfterCrash.action, "verified");
+  assert.equal(recoveredAfterCrash.residueReclamation.reclaimLimit, 4);
+  assert.equal(recoveredAfterCrash.residueReclamation.reclaimedCount, 4);
+  const boundedResiduesAfterFirstRecovery = readdirSync(testRoot)
+    .filter((entry) => entry.startsWith(".browsergrad-corpus-snapshot-"));
+  assert.equal(
+    boundedResiduesAfterFirstRecovery.length,
+    boundedResiduesBeforeRecovery.length - 4,
+    "one lease must reclaim no more than its declared residue bound",
+  );
+  const drainedAfterCrash = verifyCudaLiteCorpusCheckout({
+    root: testRoot,
+    corpus: refreshedCorpus,
+  });
+  assert.equal(drainedAfterCrash.residueReclamation.reclaimedCount, 2);
   assert.deepEqual(
     readdirSync(testRoot).filter((entry) =>
       entry.startsWith(".browsergrad-corpus-snapshot-")),
-    snapshotResiduesAfterCrash,
-    "stale lease recovery must preserve ambiguous crash-created snapshot residue",
+    snapshotResiduesBeforeCrash,
   );
+
+  const interruptedReservationPath = path.join(testRoot, "interrupted-reservation-checkout");
+  const interruptedReservationCorpus = corpus({
+    path: interruptedReservationPath,
+    repo: source,
+    commit: secondCommit,
+  });
+  const reservationResiduesBeforeCrash = reservationResidues(testRoot);
+  const abruptReservationOwner = spawnSync(process.execPath, [
+    "--input-type=module", "-e", `
+      import { provisionCudaLiteCorpusCheckout } from ${JSON.stringify(crashModuleUrl)};
+      const options = JSON.parse(process.argv[1]);
+      provisionCudaLiteCorpusCheckout({
+        ...options,
+        testOnlyAfterDestinationReservation: () => process.kill(process.pid, "SIGKILL"),
+      });
+    `,
+    JSON.stringify({
+      root: testRoot,
+      corpus: interruptedReservationCorpus,
+      gitStdio: "pipe",
+    }),
+  ], { encoding: "utf8", shell: false });
+  assert.equal(abruptReservationOwner.status, null);
+  assert.equal(abruptReservationOwner.signal, "SIGKILL");
+  const reservationResiduesAfterCrash = reservationResidues(testRoot);
+  assert.equal(reservationResiduesAfterCrash.length, reservationResiduesBeforeCrash.length + 1);
+  const interruptedReservationResidue = reservationResiduesAfterCrash.find((entry) =>
+    !reservationResiduesBeforeCrash.includes(entry));
+  assert.ok(interruptedReservationResidue);
+  const recoveredReservation = provisionCudaLiteCorpusCheckout({
+    root: testRoot,
+    corpus: interruptedReservationCorpus,
+    gitStdio: "pipe",
+  });
+  assert.equal(recoveredReservation.action, "created");
+  assert.equal(recoveredReservation.residueReclamation.reclaimedCount, 1);
+  assert.equal(existsSync(path.join(testRoot, interruptedReservationResidue)), false);
+
+  const failedReservationPath = path.join(testRoot, "failed-owned-reservation-checkout");
+  const failedOwnedReservationCorpus = corpus({
+    path: failedReservationPath,
+    repo: source,
+    commit: secondCommit,
+  });
+  const reservationResiduesBeforeFailure = reservationResidues(testRoot);
+  assert.throws(() => provisionCudaLiteCorpusCheckout({
+    root: testRoot,
+    corpus: failedOwnedReservationCorpus,
+    gitStdio: "pipe",
+    testOnlyAfterDestinationReservation: () => {
+      throw new Error("fixture failure before Git initialization");
+    },
+  }));
+  const reservationResiduesAfterFailure = reservationResidues(testRoot);
+  assert.equal(reservationResiduesAfterFailure.length, reservationResiduesBeforeFailure.length + 1);
+  const recoveredFailedReservation = provisionCudaLiteCorpusCheckout({
+    root: testRoot,
+    corpus: failedOwnedReservationCorpus,
+    gitStdio: "pipe",
+  });
+  assert.equal(recoveredFailedReservation.action, "created");
+  assert.equal(recoveredFailedReservation.residueReclamation.reclaimedCount, 1);
+  assert.deepEqual(reservationResidues(testRoot), reservationResiduesBeforeFailure);
 
   const kernelPath = path.join(checkoutPath, "kernel.cu");
   assertProvisioningError(
@@ -587,6 +696,85 @@ try {
     "__global__ void refreshed() {}\n");
   assert.equal(
     existsSync(path.join(movedOwnedSnapshot, ".browsergrad-owned-audit-snapshot")),
+    true,
+  );
+
+  const symlinkResidueTarget = path.join(testRoot, "foreign-symlink-residue-target");
+  mkdirSync(symlinkResidueTarget);
+  writeFileSync(path.join(symlinkResidueTarget, "FOREIGN"), "symlink target must survive\n");
+  const symlinkResiduePath = path.join(
+    testRoot,
+    `.browsergrad-corpus-snapshot-` +
+      `${crashedSnapshotMarker.targetPathSha256.slice(0, 16)}-${"a".repeat(32)}`,
+  );
+  symlinkSync(symlinkResidueTarget, symlinkResiduePath, "dir");
+
+  const malformedResiduePath = path.join(
+    testRoot,
+    `.browsergrad-corpus-snapshot-` +
+      `${crashedSnapshotMarker.targetPathSha256.slice(0, 16)}-${"b".repeat(32)}`,
+  );
+  mkdirSync(malformedResiduePath, { mode: 0o700 });
+  writeFileSync(
+    path.join(malformedResiduePath, ".browsergrad-owned-audit-snapshot"),
+    "not-an-ownership-record\n",
+    { mode: 0o600 },
+  );
+
+  const ambiguousMarkerResiduePath = writeSyntheticSnapshotResidue(
+    testRoot,
+    crashedSnapshotMarker,
+    "c".repeat(32),
+  );
+  writeFileSync(
+    path.join(ambiguousMarkerResiduePath, ".browsergrad-failed-corpus-reservation"),
+    "ambiguous second marker\n",
+    { mode: 0o600 },
+  );
+  const foreignUidResiduePath = writeSyntheticSnapshotResidue(
+    testRoot,
+    crashedSnapshotMarker,
+    "d".repeat(32),
+    { ownerUid: process.getuid() + 1 },
+  );
+  const replacementResiduePath = writeSyntheticSnapshotResidue(
+    testRoot,
+    crashedSnapshotMarker,
+    "e".repeat(32),
+  );
+  const liveOwnerResiduePath = writeSyntheticSnapshotResidue(
+    testRoot,
+    crashedSnapshotMarker,
+    "f".repeat(32),
+    { ownerPid: process.pid },
+  );
+  const movedReplacementResidue = path.join(testRoot, "moved-owned-replacement-residue");
+  let replacementHookCalled = false;
+  const adversarialResidueAdmission = verifyCudaLiteCorpusCheckout({
+    root: testRoot,
+    corpus: refreshedCorpus,
+    testOnlyBeforeResidueReclamation: (candidatePath) => {
+      if (path.basename(candidatePath) !== path.basename(replacementResiduePath)) return;
+      replacementHookCalled = true;
+      renameSync(candidatePath, movedReplacementResidue);
+      mkdirSync(candidatePath, { mode: 0o700 });
+      writeFileSync(path.join(candidatePath, "FOREIGN"), "replacement must survive\n");
+    },
+  });
+  assert.equal(replacementHookCalled, true);
+  assert.equal(adversarialResidueAdmission.residueReclamation.reclaimedCount, 0);
+  assert.ok(adversarialResidueAdmission.residueReclamation.retainedAmbiguousCount >= 6);
+  assert.equal(readFileSync(path.join(symlinkResidueTarget, "FOREIGN"), "utf8"),
+    "symlink target must survive\n");
+  assert.equal(existsSync(symlinkResiduePath), true);
+  assert.equal(existsSync(malformedResiduePath), true);
+  assert.equal(existsSync(ambiguousMarkerResiduePath), true);
+  assert.equal(existsSync(foreignUidResiduePath), true);
+  assert.equal(existsSync(liveOwnerResiduePath), true);
+  assert.equal(readFileSync(path.join(replacementResiduePath, "FOREIGN"), "utf8"),
+    "replacement must survive\n");
+  assert.equal(
+    existsSync(path.join(movedReplacementResidue, ".browsergrad-owned-audit-snapshot")),
     true,
   );
 
@@ -697,6 +885,18 @@ try {
     readdirSync(testRoot).filter((entry) => entry.startsWith(".browsergrad-corpus-lease-")),
     [],
   );
+  const retriedFailedReservation = provisionCudaLiteCorpusCheckout({
+    root: testRoot,
+    corpus: corpus({ path: failedPath, repo: source, commit: secondCommit }),
+    gitStdio: "pipe",
+  });
+  assert.equal(retriedFailedReservation.action, "created");
+  assert.equal(retriedFailedReservation.residueReclamation.reclaimedCount, 0);
+  assert.equal(retriedFailedReservation.residueReclamation.retainedAmbiguousCount, 1);
+  assert.equal(
+    readFileSync(path.join(preservedFailedReservation, "FOREIGN"), "utf8"),
+    "watcher-owned file must survive\n",
+  );
 
   const physicalRootA = path.join(testRoot, "physical-root-a");
   const physicalRootB = path.join(testRoot, "physical-root-b");
@@ -784,6 +984,35 @@ try {
   if (result.error) throw result.error;
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout.trim());
+}
+
+function reservationResidues(root) {
+  return readdirSync(root)
+    .filter((entry) => entry.startsWith(".browsergrad-corpus-reservation-"))
+    .sort();
+}
+
+function writeSyntheticSnapshotResidue(root, markerTemplate, suffix, overrides = {}) {
+  const basename = `.browsergrad-corpus-snapshot-` +
+    `${markerTemplate.targetPathSha256.slice(0, 16)}-${suffix}`;
+  const residuePath = path.join(root, basename);
+  mkdirSync(residuePath, { mode: 0o700 });
+  writeFileSync(
+    path.join(residuePath, ".browsergrad-owned-audit-snapshot"),
+    `${JSON.stringify({
+      ...markerTemplate,
+      token: `${suffix}${suffix}`,
+      basename,
+      ...overrides,
+    })}\n`,
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    path.join(residuePath, "kernel.cu"),
+    "__global__ void refreshed() {}\n",
+    { mode: 0o600 },
+  );
+  return residuePath;
 }
 
 function corpus({ path: checkoutPath, repo, commit }) {

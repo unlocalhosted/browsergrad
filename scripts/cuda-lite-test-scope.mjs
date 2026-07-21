@@ -42,6 +42,7 @@ const scopeAliases = new Map([
   ["surface", ["compiler-types", "wgsl-texture-surface"]],
   ["webgpu-fixtures", ["webgpu-fixture-scripts"]],
   ["real-world", ["real-world-verifier-scripts"]],
+  ["corpus-provisioning", ["corpus-provisioning-scripts"]],
   ["corpus-fixtures", ["corpus-execution-fixture-files"]],
   ["corpus-registry", ["corpus-execution-fixture-registry"]],
   ["source-normalizer", ["source-normalizer-scripts"]],
@@ -196,6 +197,18 @@ export const scopeRules = [
     commands: [
       command("pnpm", "--filter", COMPILER, "run", "test:verify-real-world-cli"),
       command("pnpm", "--filter", COMPILER, "run", "e2e:webgpu:fast"),
+    ],
+  },
+  {
+    id: "corpus-provisioning-scripts",
+    reason: "corpus provisioning, ownership, or reclamation changed",
+    matches: [
+      /^scripts\/cuda-lite-corpus-provisioning\.mjs$/u,
+      /^scripts\/cuda-lite-corpus-residue-reclaim\.py$/u,
+      /^scripts\/test-cuda-lite-corpus-provisioning\.mjs$/u,
+    ],
+    commands: [
+      command("pnpm", "--filter", COMPILER, "run", "test:corpus-provisioning:run"),
     ],
   },
   {

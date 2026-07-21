@@ -343,6 +343,23 @@ assert.deepEqual(realWorldVerifierPlan.commands.map(commandToString), [
   "pnpm --filter @unlocalhosted/browsergrad-compiler run e2e:webgpu:fast",
 ]);
 
+const corpusProvisioningPlan = planForChangedFiles([
+  "scripts/cuda-lite-corpus-provisioning.mjs",
+  "scripts/cuda-lite-corpus-residue-reclaim.py",
+  "scripts/test-cuda-lite-corpus-provisioning.mjs",
+]);
+assert.deepEqual(corpusProvisioningPlan.scopes.map((scope) => scope.id), [
+  "corpus-provisioning-scripts",
+]);
+assert.deepEqual(corpusProvisioningPlan.scopes[0].files, [
+  "scripts/cuda-lite-corpus-provisioning.mjs",
+  "scripts/cuda-lite-corpus-residue-reclaim.py",
+  "scripts/test-cuda-lite-corpus-provisioning.mjs",
+]);
+assert.deepEqual(corpusProvisioningPlan.commands.map(commandToString), [
+  "pnpm --filter @unlocalhosted/browsergrad-compiler run test:corpus-provisioning:run",
+]);
+
 const multiWgslPlan = planForChangedFiles([
   "packages/browsergrad-compiler/src/semantic_wgsl_pointers.ts",
   "packages/browsergrad-compiler/src/semantic_wgsl_atomic_analysis.ts",

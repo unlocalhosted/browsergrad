@@ -540,6 +540,16 @@ descriptor-relative/no-follow filesystem operations, and the host atomic
 no-replace primitive are available. The supported primitives are
 `renamex_np` on macOS and `renameat2` on Linux; no `/usr/bin` layout or silent
 fallback is assumed.
+Interrupted audit snapshots and pre-install reservations use canonical ownership
+records bound to the host UID, physical provisioning root, checkout target, and
+owner process. A later operation reclaims only residue for its own target while
+holding that target's single-writer lease. Cleanup is descriptor-relative,
+refuses symlinks, replacements, malformed/legacy markers, foreign files, and
+live owners, and is capped per lease at 32 inspected candidates, 4 removals, and
+4096 entries per candidate. Refused residue remains in place for inspection.
+This contract assumes cooperating processes under the same UID honor the lease;
+it does not claim protection from a hostile same-UID process swapping individual
+leaf entries during the final descriptor-relative unlink interval.
 
 ## Corpus Audit
 

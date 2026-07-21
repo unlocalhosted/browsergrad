@@ -26,6 +26,15 @@ const RESERVATION_MARKER = ".browsergrad-owned-corpus-reservation";
 const FAILED_RESERVATION_MARKER = ".browsergrad-failed-corpus-reservation";
 const SNAPSHOT_MARKER = ".browsergrad-owned-audit-snapshot";
 const LEASE_MARKER = "owner-token";
+const RESERVATION_RESIDUE = /^\.browsergrad-corpus-reservation-([0-9a-f]{16})-[0-9a-f]{32}$/u;
+const SNAPSHOT_RESIDUE = /^\.browsergrad-corpus-snapshot-([0-9a-f]{16})-[0-9a-f]{32}$/u;
+const RESIDUE_INSPECTION_LIMIT = 32;
+const RESIDUE_RECLAIM_LIMIT = 4;
+const RESIDUE_ENTRY_LIMIT = 4096;
+const RESIDUE_RECLAMATION_HELPER = readFileSync(
+  new URL("./cuda-lite-corpus-residue-reclaim.py", import.meta.url),
+  "utf8",
+);
 const GIT_EXECUTABLE_ENV = "BROWSERGRAD_CUDA_GIT_EXECUTABLE";
 const PYTHON_EXECUTABLE_ENV = "BROWSERGRAD_CUDA_PYTHON_EXECUTABLE";
 const WITHOUT_AUDIT_SNAPSHOT = Symbol("without-audit-snapshot");
@@ -191,11 +200,13 @@ export function withCudaLiteCorpusCheckoutLease(options, consume) {
     testOnlyAfterDestinationReservation: options?.testOnlyAfterDestinationReservation,
     testOnlyAfterExistingCheckoutPinned: options?.testOnlyAfterExistingCheckoutPinned,
     testOnlyBeforeAuditSnapshotCleanup: options?.testOnlyBeforeAuditSnapshotCleanup,
+    testOnlyBeforeResidueReclamation: options?.testOnlyBeforeResidueReclamation,
     hostToolchain,
   });
   const stdio = normalizeGitStdio(options?.gitStdio ?? "inherit");
   const materializeAuditSnapshot = options?.[WITHOUT_AUDIT_SNAPSHOT] !== true;
   const lease = acquireLease(input);
+  let residueReclamation = emptyResidueReclamationRecord();
   let snapshot;
   let output;
   let primaryError;
@@ -203,10 +214,17 @@ export function withCudaLiteCorpusCheckoutLease(options, consume) {
     const state = skipFetch
       ? verifyCheckoutUnderLease(input)
       : provisionCheckoutUnderLease(input, stdio);
+    residueReclamation = reclaimBoundedOwnedResidue(input, state.inspection);
     if (materializeAuditSnapshot) {
       snapshot = createOwnedAuditSnapshot(input, state.inspection);
     }
-    const admission = admissionRecord(input, state.action, state.inspection, snapshot);
+    const admission = admissionRecord(
+      input,
+      state.action,
+      state.inspection,
+      snapshot,
+      residueReclamation,
+    );
     const consumerAdmission = snapshot === undefined
       ? admission
       : snapshotAdmissionRecord(admission, snapshot);
@@ -605,16 +623,27 @@ function exactPhysicalTreeBinding(input, head, checkoutIdentity) {
 
 function createOwnedAuditSnapshot(input, inspection) {
   assertRootPin(input);
+  const entries = Object.freeze(inspection.binding.entries.filter(({ relative }) =>
+    AUDIT_SOURCE.test(relative)));
   const suffix = randomBytes(16).toString("hex");
-  const snapshotPath = path.join(input.root, `.browsergrad-corpus-snapshot-${suffix}`);
+  const snapshotPath = path.join(
+    input.root,
+    `.browsergrad-corpus-snapshot-${residueTargetTag(input)}-${suffix}`,
+  );
   mkdirSync(snapshotPath, { mode: 0o700 });
   const identity = fileIdentity(lstatSync(snapshotPath, { bigint: true }));
   const token = randomBytes(32).toString("hex");
   const markerPath = path.join(snapshotPath, SNAPSHOT_MARKER);
+  const markerText = residueMarkerText(
+    input,
+    "snapshot",
+    path.basename(snapshotPath),
+    token,
+  );
   let markerIdentity;
   let fd;
   try {
-    writeFileSync(markerPath, `${token}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    writeFileSync(markerPath, markerText, { encoding: "utf8", flag: "wx", mode: 0o600 });
     markerIdentity = fileIdentity(lstatSync(markerPath, { bigint: true }));
     fd = openSync(snapshotPath, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY);
     const openedIdentity = fileIdentity(fstatSync(fd, { bigint: true }));
@@ -641,14 +670,13 @@ function createOwnedAuditSnapshot(input, inspection) {
   }
 
   const started = process.hrtime.bigint();
-  const entries = Object.freeze(inspection.binding.entries.filter(({ relative }) =>
-    AUDIT_SOURCE.test(relative)));
   const snapshot = {
     path: snapshotPath,
     identity,
     token,
     markerPath,
     markerIdentity,
+    markerText,
     fd,
     entries,
   };
@@ -813,7 +841,7 @@ function assertOwnedAuditSnapshotIdentity(input, snapshot) {
   );
   const markerStat = lstatSync(snapshot.markerPath);
   if (!markerStat.isFile() || markerStat.isSymbolicLink() ||
-      readFileSync(snapshot.markerPath, "utf8") !== `${snapshot.token}\n`) {
+      readFileSync(snapshot.markerPath, "utf8") !== snapshot.markerText) {
     fail(
       "BG-CUDA-LITE-CORPUS-PROVISION-UNSAFE-CLEANUP",
       `${input.id} audit snapshot marker no longer proves ownership`,
@@ -828,7 +856,7 @@ function removeOwnedAuditSnapshot(input, snapshot) {
       rootIdentity: snapshot.identity,
       markerIdentity: snapshot.markerIdentity,
       markerName: SNAPSHOT_MARKER,
-      token: snapshot.token,
+      markerText: snapshot.markerText,
       basename: path.basename(snapshot.path),
       files: snapshot.binding.ownedFiles.map((file) => ({
         ...file,
@@ -857,7 +885,7 @@ try:
     marker_bytes = os.read(marker_fd, 4096)
 finally:
     os.close(marker_fd)
-if marker_bytes != (expected["token"] + "\\n").encode():
+if marker_bytes != expected["markerText"].encode():
     sys.exit(43)
 expected_files = {item["relative"]: item for item in expected["files"]}
 expected_directories = {item["relative"]: item for item in expected["directories"]}
@@ -933,6 +961,134 @@ os.rmdir(expected["basename"], dir_fd=4)
     closeSync(rootFd);
     closeSync(snapshot.fd);
   }
+}
+
+function emptyResidueReclamationRecord() {
+  return Object.freeze({
+    kind: "browsergrad-cuda-lite-corpus-residue-reclamation",
+    version: 1,
+    inspectedCount: 0,
+    reclaimedCount: 0,
+    retainedAmbiguousCount: 0,
+    deferredCount: 0,
+    inspectionLimit: RESIDUE_INSPECTION_LIMIT,
+    reclaimLimit: RESIDUE_RECLAIM_LIMIT,
+    entryLimit: RESIDUE_ENTRY_LIMIT,
+  });
+}
+
+function reclaimBoundedOwnedResidue(input, inspection) {
+  assertRootPin(input);
+  const targetTag = residueTargetTag(input);
+  const names = readdirSync(input.root)
+    .filter((name) => residueTypeForTarget(name, targetTag) !== undefined)
+    .sort(compareCodeUnits);
+  if (names.length === 0) return emptyResidueReclamationRecord();
+
+  const currentUid = process.getuid?.();
+  if (!Number.isSafeInteger(currentUid) || currentUid < 0) {
+    fail(
+      "BG-CUDA-LITE-CORPUS-PROVISION-HOST-TOOLCHAIN",
+      "corpus residue reclamation requires a numeric host user id",
+    );
+  }
+  const targetPathSha256 = createHash("sha256").update(input.path).digest("hex");
+  const expectedSnapshotFiles = inspection.binding.entries
+    .filter(({ relative }) => AUDIT_SOURCE.test(relative))
+    .map(({ relative, objectId }) => ({ relative, objectId }));
+  const rootFd = openSync(
+    input.root,
+    fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW,
+  );
+  let inspectedCount = 0;
+  let reclaimedCount = 0;
+  let retainedAmbiguousCount = 0;
+  try {
+    for (const basename of names) {
+      if (inspectedCount >= RESIDUE_INSPECTION_LIMIT ||
+          reclaimedCount >= RESIDUE_RECLAIM_LIMIT) break;
+      inspectedCount += 1;
+      const candidatePath = path.join(input.root, basename);
+      let candidateFd;
+      try {
+        const candidateStat = lstatSync(candidatePath, { bigint: true });
+        if (!candidateStat.isDirectory() || candidateStat.isSymbolicLink() ||
+            candidateStat.uid !== BigInt(currentUid) ||
+            (candidateStat.mode & 0o777n) !== 0o700n) {
+          retainedAmbiguousCount += 1;
+          continue;
+        }
+        candidateFd = openSync(
+          candidatePath,
+          fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW,
+        );
+        const openedStat = fstatSync(candidateFd, { bigint: true });
+        if (openedStat.dev !== candidateStat.dev || openedStat.ino !== candidateStat.ino) {
+          retainedAmbiguousCount += 1;
+          continue;
+        }
+        input.testOnlyBeforeResidueReclamation?.(candidatePath);
+        const reclaimed = runOwnedResidueReclamationHelper(input, candidateFd, rootFd, {
+          basename,
+          candidateIdentity: fileIdentity(candidateStat),
+          currentUid,
+          targetPathSha256,
+          residueType: residueTypeForTarget(basename, targetTag),
+          expectedSnapshotFiles,
+        });
+        if (reclaimed) reclaimedCount += 1;
+        else retainedAmbiguousCount += 1;
+      } catch (cause) {
+        if (cause?.code === "ENOENT" || cause?.code === "ELOOP" || cause?.code === "ENOTDIR") {
+          retainedAmbiguousCount += 1;
+        } else {
+          throw cause;
+        }
+      } finally {
+        if (candidateFd !== undefined) closeSync(candidateFd);
+      }
+    }
+  } finally {
+    closeSync(rootFd);
+  }
+  return Object.freeze({
+    kind: "browsergrad-cuda-lite-corpus-residue-reclamation",
+    version: 1,
+    inspectedCount,
+    reclaimedCount,
+    retainedAmbiguousCount,
+    deferredCount: names.length - inspectedCount,
+    inspectionLimit: RESIDUE_INSPECTION_LIMIT,
+    reclaimLimit: RESIDUE_RECLAIM_LIMIT,
+    entryLimit: RESIDUE_ENTRY_LIMIT,
+  });
+}
+
+function runOwnedResidueReclamationHelper(input, candidateFd, rootFd, candidate) {
+  const result = spawnSync(
+    input.hostToolchain.python.executable,
+    ["-I", "-c", RESIDUE_RECLAMATION_HELPER],
+    {
+      cwd: input.root,
+      encoding: "utf8",
+      env: safeHelperEnvironment(),
+      input: JSON.stringify({
+        ...candidate,
+        rootIdentity: input.rootIdentity,
+        commit: input.commit,
+        snapshotFiles: candidate.expectedSnapshotFiles,
+        snapshotMarker: SNAPSHOT_MARKER,
+        reservationMarker: RESERVATION_MARKER,
+        failedReservationMarker: FAILED_RESERVATION_MARKER,
+        entryLimit: RESIDUE_ENTRY_LIMIT,
+        nowMs: Date.now(),
+      }),
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe", candidateFd, rootFd],
+    },
+  );
+  if (result.error) throw result.error;
+  return result.status === 0;
 }
 
 function walkPhysicalFiles(root, prefix, input, files) {
@@ -1053,7 +1209,7 @@ function assertSameBinding(before, after, input) {
   }
 }
 
-function admissionRecord(input, action, inspection, snapshot) {
+function admissionRecord(input, action, inspection, snapshot, residueReclamation) {
   return Object.freeze({
     kind: "browsergrad-cuda-lite-corpus-checkout-admission",
     version: 2,
@@ -1068,6 +1224,7 @@ function admissionRecord(input, action, inspection, snapshot) {
     }),
     action,
     hostToolchainCapability: input.hostToolchain,
+    residueReclamation,
     configuredOriginUrlMatched: true,
     exactCommitObserved: true,
     exactPhysicalHeadTreeObserved: true,
@@ -1176,6 +1333,7 @@ function normalizeInput(rootValue, corpusValue, options) {
     options.testOnlyAfterDestinationReservation,
     options.testOnlyAfterExistingCheckoutPinned,
     options.testOnlyBeforeAuditSnapshotCleanup,
+    options.testOnlyBeforeResidueReclamation,
   ].some((hook) => hook !== undefined &&
     (!options.allowLocalFixtureRepo || typeof hook !== "function"))) {
     fail(
@@ -1198,6 +1356,7 @@ function normalizeInput(rootValue, corpusValue, options) {
     testOnlyAfterDestinationReservation: options.testOnlyAfterDestinationReservation,
     testOnlyAfterExistingCheckoutPinned: options.testOnlyAfterExistingCheckoutPinned,
     testOnlyBeforeAuditSnapshotCleanup: options.testOnlyBeforeAuditSnapshotCleanup,
+    testOnlyBeforeResidueReclamation: options.testOnlyBeforeResidueReclamation,
   });
 }
 
@@ -1401,6 +1560,42 @@ function leaseMarkerText(pid, token) {
   })}\n`;
 }
 
+function residueMarkerText(input, type, basename, token) {
+  const ownerUid = process.getuid?.();
+  if (!Number.isSafeInteger(ownerUid) || ownerUid < 0) {
+    fail(
+      "BG-CUDA-LITE-CORPUS-PROVISION-HOST-TOOLCHAIN",
+      "corpus residue ownership requires a numeric host user id",
+    );
+  }
+  return `${JSON.stringify({
+    kind: "browsergrad-corpus-residue-owner",
+    version: 1,
+    type,
+    ownerUid,
+    ownerPid: process.pid,
+    token,
+    targetPathSha256: createHash("sha256").update(input.path).digest("hex"),
+    rootDevice: input.rootIdentity.device,
+    rootInode: input.rootIdentity.inode,
+    commit: type === "snapshot" ? input.commit : null,
+    basename,
+    createdAtMs: Date.now(),
+  })}\n`;
+}
+
+function residueTargetTag(input) {
+  return createHash("sha256").update(input.path).digest("hex").slice(0, 16);
+}
+
+function residueTypeForTarget(basename, targetTag) {
+  const snapshot = SNAPSHOT_RESIDUE.exec(basename);
+  if (snapshot?.[1] === targetTag) return "snapshot";
+  const reservation = RESERVATION_RESIDUE.exec(basename);
+  if (reservation?.[1] === targetTag) return "reservation";
+  return undefined;
+}
+
 function reserveDestination(input) {
   assertRootPin(input);
   if (lstatIfPresent(input.path) !== undefined) {
@@ -1411,14 +1606,21 @@ function reserveDestination(input) {
   }
   const stagingPath = path.join(
     input.root,
-    `.browsergrad-corpus-reservation-${randomBytes(24).toString("hex")}`,
+    `.browsergrad-corpus-reservation-${residueTargetTag(input)}-` +
+      randomBytes(16).toString("hex"),
   );
   mkdirSync(stagingPath, { mode: 0o700 });
   const identity = fileIdentity(lstatSync(stagingPath, { bigint: true }));
   const token = randomBytes(32).toString("hex");
   const markerPath = path.join(stagingPath, RESERVATION_MARKER);
+  const markerText = residueMarkerText(
+    input,
+    "reservation",
+    path.basename(stagingPath),
+    token,
+  );
   try {
-    writeFileSync(markerPath, `${token}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    writeFileSync(markerPath, markerText, { encoding: "utf8", flag: "wx", mode: 0o600 });
   } catch (cause) {
     try {
       assertSameFileIdentity(
@@ -1447,6 +1649,7 @@ function reserveDestination(input) {
     fd,
     identity,
     token,
+    markerText,
     markerIdentity,
     markerRelative: RESERVATION_MARKER,
     stagingPath,
@@ -1524,7 +1727,7 @@ function runOwnedReservationHelper(input, reservation, operation, nextRelative) 
   assertReservationHandleIdentity(input, reservation);
   const helper = `
 import os, stat, sys
-operation, marker, next_marker, expected_dev, expected_ino, token = sys.argv[1:]
+operation, marker, next_marker, expected_dev, expected_ino, marker_text = sys.argv[1:]
 os.fchdir(3)
 root = os.fstat(3)
 if str(root.st_dev) != expected_dev or str(root.st_ino) != expected_ino:
@@ -1538,7 +1741,7 @@ try:
     data = os.read(marker_fd, 4096)
 finally:
     os.close(marker_fd)
-if data != (token + "\\n").encode():
+if data != marker_text.encode():
     raise RuntimeError("reservation marker token changed")
 if operation == "rename":
     os.rename(marker, next_marker)
@@ -1554,7 +1757,7 @@ else:
     nextRelative,
     reservation.identity.device,
     reservation.identity.inode,
-    reservation.token,
+    reservation.markerText,
   ], {
     cwd: input.root,
     encoding: "utf8",
