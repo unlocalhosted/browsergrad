@@ -21,6 +21,7 @@ import {
 import {
   executeCppCuteClangWasmBuild,
   materializeCppCuteClangWasmSidecar,
+  observeCppCuteClangWasmBuildTiming,
   prepareCppCuteClangWasmBuildSource,
 } from "./cpp_cute_browser_build_executor.mjs";
 import {
@@ -277,14 +278,14 @@ export async function runCppCuteBrowserBuild(argv) {
         : "fast-validation-observation.v1.json",
     );
     await writeExclusiveReadOnlyFile(evidencePath, evidenceBytes);
-    return Object.freeze({
+    return projectCppCuteBrowserBuildRunnerResult({
       evidencePath,
-      evidenceSha256: createHash("sha256").update(evidenceBytes).digest("hex"),
-      evidenceByteLength: evidenceBytes.byteLength,
+      evidenceBytes,
       wasmSha256: executed.wasmSha256,
       wasmByteLength: executed.wasmByteLength,
       factoryModuleSha256: executed.factoryModuleSha256,
       factoryModuleByteLength: executed.factoryModuleByteLength,
+      timing: observeCppCuteClangWasmBuildTiming(executed),
     });
   } catch (cause) {
     try {
@@ -304,6 +305,44 @@ export async function runCppCuteBrowserBuild(argv) {
     }
     throw cause;
   }
+}
+
+/**
+ * Keeps mutable diagnostic timing outside the canonical build observation
+ * while exposing it in the runner result printed to stdout.
+ *
+ * @param {Readonly<{
+ *   evidencePath: string;
+ *   evidenceBytes: Uint8Array;
+ *   wasmSha256: string;
+ *   wasmByteLength: number;
+ *   factoryModuleSha256: string;
+ *   factoryModuleByteLength: number;
+ *   timing: import("./cpp_cute_browser_build_executor.mjs").ExecutedCppCuteClangWasmBuildTiming;
+ * }>} input
+ */
+export function projectCppCuteBrowserBuildRunnerResult(input) {
+  return Object.freeze({
+    evidencePath: input.evidencePath,
+    evidenceSha256: createHash("sha256").update(input.evidenceBytes).digest("hex"),
+    evidenceByteLength: input.evidenceBytes.byteLength,
+    wasmSha256: input.wasmSha256,
+    wasmByteLength: input.wasmByteLength,
+    factoryModuleSha256: input.factoryModuleSha256,
+    factoryModuleByteLength: input.factoryModuleByteLength,
+    diagnosticTiming: Object.freeze({
+      authority: "non-authoritative-build-timing-observation-only",
+      clock: input.timing.clock,
+      unit: input.timing.unit,
+      phases: Object.freeze(input.timing.phases.map((phase) => Object.freeze({
+        id: phase.id,
+        stageId: phase.stageId,
+        kind: phase.kind,
+        durationMs: phase.durationMs,
+      }))),
+      totalDurationMs: input.timing.totalDurationMs,
+    }),
+  });
 }
 
 async function discoverPinnedBuilderTools() {

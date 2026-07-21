@@ -71,6 +71,20 @@ export interface ExecutedCppCuteClangWasmNativeTool {
   readonly byteLength: number;
 }
 
+export interface ExecutedCppCuteClangWasmBuildPhaseTiming {
+  readonly id: string;
+  readonly stageId: "native-tablegen" | "clang-extractor-wasm";
+  readonly kind: "configure" | "build";
+  readonly durationMs: number;
+}
+
+export interface ExecutedCppCuteClangWasmBuildTiming {
+  readonly clock: "monotonic-performance-now";
+  readonly unit: "milliseconds";
+  readonly phases: readonly ExecutedCppCuteClangWasmBuildPhaseTiming[];
+  readonly totalDurationMs: number;
+}
+
 declare const executedCppCuteClangWasmBuildBrand: unique symbol;
 
 /**
@@ -170,6 +184,14 @@ export function executeCppCuteClangWasmBuild(
   prepared: PreparedCppCuteClangWasmBuildSource,
   options?: CppCuteBrowserBuildExecutionOptions,
 ): Promise<ExecutedCppCuteClangWasmBuild>;
+
+/**
+ * Non-authoritative direct-call observability kept outside canonical build
+ * evidence and reproducibility identities.
+ */
+export function observeCppCuteClangWasmBuildTiming(
+  executed: ExecutedCppCuteClangWasmBuild,
+): ExecutedCppCuteClangWasmBuildTiming;
 
 export function materializeCppCuteClangWasmSidecar(
   prepared: PreparedCppCuteClangWasmBuildSource,

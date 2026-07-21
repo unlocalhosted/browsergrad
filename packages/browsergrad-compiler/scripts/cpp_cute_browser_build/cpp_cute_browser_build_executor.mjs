@@ -11,6 +11,7 @@ import {
   rm,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize } from "node:path/posix";
+import { performance } from "node:perf_hooks";
 import { TextDecoder } from "node:util";
 
 import { hashCanonicalJson } from "@unlocalhosted/browsergrad-semantic-core/schema";
@@ -55,6 +56,7 @@ const WASM_HEADER = Uint8Array.of(
 );
 const PREPARED_SOURCES = new WeakMap();
 const EXECUTED_BUILDS = new WeakMap();
+const EXECUTION_TIMINGS = new WeakMap();
 const MATERIALIZED_SIDECARS = new WeakMap();
 const ABORTED_GETTER = typeof AbortSignal === "undefined"
   ? undefined
@@ -212,6 +214,7 @@ export async function prepareCppCuteClangWasmBuildSource(input, options = {}) {
  * @returns {Promise<import("./cpp_cute_browser_build_executor.mjs").ExecutedCppCuteClangWasmBuild>}
  */
 export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
+  const totalStartedAt = performance.now();
   const { signal, mirrorOutput, buildDirectoryPolicy } =
     normalizeCppCuteBrowserBuildExecutorOptions(options, true, invalid);
   throwIfAborted(signal);
@@ -247,9 +250,11 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
   const evidenceRoot = join(roots.stateRoot, "evidence");
   const logRoot = join(evidenceRoot, "build-logs");
   const receipts = [];
+  const phaseTimings = [];
   let nativeToolBindings;
   let configuredTargetReview;
   for (const [index, step] of plan.steps.entries()) {
+    const phaseStartedAt = performance.now();
     throwIfAborted(signal);
     await verifyBuildInputBindings(inputBindings);
     await verifyStagedSourceClosure(
@@ -348,6 +353,12 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
         { path: plan.nativeTools.llvmTablegen, executable: true, diagnosticPath: "$.nativeTools.llvmTablegen" },
       ]);
     }
+    phaseTimings.push(Object.freeze({
+      id: step.id,
+      stageId: step.stageId,
+      kind: step.kind,
+      durationMs: performance.now() - phaseStartedAt,
+    }));
   }
   if (receipts.length !== 4 || nativeToolBindings === undefined ||
       configuredTargetReview === undefined) {
@@ -429,6 +440,12 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
   );
   throwIfAborted(signal);
 
+  const timing = Object.freeze({
+    clock: "monotonic-performance-now",
+    unit: "milliseconds",
+    phases: Object.freeze(phaseTimings),
+    totalDurationMs: performance.now() - totalStartedAt,
+  });
   const executed = Object.freeze({
     authority: "clang-wasm-build-execution-observation-only",
     lockId: plan.lockId,
@@ -469,7 +486,24 @@ export async function executeCppCuteClangWasmBuild(prepared, options = {}) {
     wasmIdentity: wasm.identity,
     linkMapIdentity: linkMap.identity,
   }));
+  EXECUTION_TIMINGS.set(executed, timing);
   return /** @type {import("./cpp_cute_browser_build_executor.mjs").ExecutedCppCuteClangWasmBuild} */ (executed);
+}
+
+/**
+ * Returns non-authoritative monotonic timing for an executor-issued successful
+ * build. Timings live outside the execution object so canonical evidence and
+ * reproducibility identities cannot include them accidentally.
+ *
+ * @param {import("./cpp_cute_browser_build_executor.mjs").ExecutedCppCuteClangWasmBuild} executed
+ * @returns {import("./cpp_cute_browser_build_executor.mjs").ExecutedCppCuteClangWasmBuildTiming}
+ */
+export function observeCppCuteClangWasmBuildTiming(executed) {
+  const timing = EXECUTION_TIMINGS.get(executed);
+  if (timing === undefined) {
+    unverified("$executed", "expected executor-issued successful build timing observation");
+  }
+  return timing;
 }
 
 /**

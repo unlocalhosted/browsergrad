@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   decodeCppCuteBuilderContainerObservation,
   parseCppCuteBrowserBuildRunnerArguments,
+  projectCppCuteBrowserBuildRunnerResult,
 } from "./cpp_cute_browser_build_runner.mjs";
 
 const expectedBuilder = Object.freeze({
@@ -20,6 +21,79 @@ const builderObservation = Object.freeze({
 });
 
 describe("Clang-Wasm build runner boundary", () => {
+  it("exposes timing in the diagnostic stdout result without changing evidence identity", () => {
+    const evidenceBytes = new TextEncoder().encode('{"canonical":"evidence"}');
+    const common = {
+      evidencePath: "/work/output/build-execution-observation.v2.json",
+      evidenceBytes,
+      wasmSha256: "a".repeat(64),
+      wasmByteLength: 8,
+      factoryModuleSha256: "b".repeat(64),
+      factoryModuleByteLength: 128,
+    };
+    const timing = {
+      clock: "monotonic-performance-now" as const,
+      unit: "milliseconds" as const,
+      phases: [
+        {
+          id: "native-tablegen-configure",
+          stageId: "native-tablegen" as const,
+          kind: "configure" as const,
+          durationMs: 1_250.5,
+        },
+        {
+          id: "native-tablegen-build",
+          stageId: "native-tablegen" as const,
+          kind: "build" as const,
+          durationMs: 42_000,
+        },
+        {
+          id: "clang-extractor-wasm-configure",
+          stageId: "clang-extractor-wasm" as const,
+          kind: "configure" as const,
+          durationMs: 2_500,
+        },
+        {
+          id: "clang-extractor-wasm-build",
+          stageId: "clang-extractor-wasm" as const,
+          kind: "build" as const,
+          durationMs: 180_000,
+        },
+      ],
+      totalDurationMs: 226_000,
+    };
+
+    const first = projectCppCuteBrowserBuildRunnerResult({ ...common, timing });
+    const second = projectCppCuteBrowserBuildRunnerResult({
+      ...common,
+      timing: {
+        ...timing,
+        phases: timing.phases.map((phase) => ({
+          ...phase,
+          durationMs: phase.durationMs + 10_000,
+        })),
+        totalDurationMs: timing.totalDurationMs + 40_000,
+      },
+    });
+
+    expect(first).toMatchObject({
+      evidencePath: common.evidencePath,
+      evidenceByteLength: evidenceBytes.byteLength,
+      diagnosticTiming: {
+        authority: "non-authoritative-build-timing-observation-only",
+        clock: "monotonic-performance-now",
+        unit: "milliseconds",
+        phases: timing.phases,
+        totalDurationMs: timing.totalDurationMs,
+      },
+    });
+    expect(first.evidenceSha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(second.evidenceSha256).toBe(first.evidenceSha256);
+    expect(second.evidenceByteLength).toBe(first.evidenceByteLength);
+    expect(second.diagnosticTiming).not.toEqual(first.diagnosticTiming);
+    expect(JSON.parse(JSON.stringify(first))).toHaveProperty("diagnosticTiming.phases", timing.phases);
+  });
+
   it("parses only the exact named absolute-path arguments", () => {
     expect(parseCppCuteBrowserBuildRunnerArguments([
       "--workspace-root=/workspace",

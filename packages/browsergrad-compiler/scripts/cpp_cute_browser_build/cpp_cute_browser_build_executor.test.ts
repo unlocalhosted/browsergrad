@@ -240,6 +240,7 @@ import {
   CppCuteBrowserBuildExecutorError,
   executeCppCuteClangWasmBuild,
   materializeCppCuteClangWasmSidecar,
+  observeCppCuteClangWasmBuildTiming,
   prepareCppCuteClangWasmBuildSource,
   type PrepareCppCuteClangWasmBuildSourceInput,
 } from "./cpp_cute_browser_build_executor.mjs";
@@ -599,6 +600,34 @@ describe("exact Clang-Wasm build executor", () => {
       call.maximumDurationMs === 4 * 60 * 60 * 1_000
     ))).toBe(true);
     expect(executed.steps.map((step) => step.id)).toEqual(expectedPlan.steps.map((step) => step.id));
+    const canonicalExecutionBytes = canonicalJsonBytes(executed);
+    const timing = observeCppCuteClangWasmBuildTiming(executed);
+    expect(timing).toMatchObject({
+      clock: "monotonic-performance-now",
+      unit: "milliseconds",
+      phases: expectedPlan.steps.map((step) => ({
+        id: step.id,
+        stageId: step.stageId,
+        kind: step.kind,
+        durationMs: expect.any(Number),
+      })),
+      totalDurationMs: expect.any(Number),
+    });
+    expect(timing.phases.every(({ durationMs }) => (
+      Number.isFinite(durationMs) && durationMs >= 0
+    ))).toBe(true);
+    expect(Number.isFinite(timing.totalDurationMs)).toBe(true);
+    expect(timing.totalDurationMs).toBeGreaterThanOrEqual(0);
+    expect(timing.phases.reduce((total, phase) => total + phase.durationMs, 0))
+      .toBeLessThanOrEqual(timing.totalDurationMs + 0.001);
+    expect(Reflect.ownKeys(executed)).not.toContain("timing");
+    expect(canonicalJsonBytes(executed)).toEqual(canonicalExecutionBytes);
+    expect(() => observeCppCuteClangWasmBuildTiming({ ...executed })).toThrowError(
+      expect.objectContaining({
+        code: "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-EXECUTOR-UNVERIFIED",
+        path: "$executed",
+      }),
+    );
     expect(executed.steps.map((step) => ({
       executable: step.executable,
       arguments: step.arguments,
