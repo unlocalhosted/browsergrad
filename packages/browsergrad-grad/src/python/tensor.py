@@ -28,6 +28,38 @@ _EXACT_INTEGER_SCALAR_TYPES = (
 )
 
 
+def _normalize_prod_axes(value, rank: int) -> tuple:
+    if value is None:
+        return tuple(range(rank))
+    if type(value) in _EXACT_INTEGER_SCALAR_TYPES:
+        values = (value,)
+    elif type(value) in (tuple, list):
+        if not value:
+            raise ValueError("prod: axis sequence must be non-empty")
+        values = tuple(value)
+    else:
+        raise ValueError(
+            "prod: axis must be None, an integer scalar, or a plain tuple/list, "
+            f"got {type(value).__name__}"
+        )
+    normalized = []
+    for index, raw_axis in enumerate(values):
+        if type(raw_axis) not in _EXACT_INTEGER_SCALAR_TYPES:
+            raise ValueError(
+                f"prod: axis {index} must be a built-in or NumPy integer scalar, "
+                f"got {type(raw_axis).__name__}"
+            )
+        axis = int(raw_axis)
+        if axis < 0:
+            axis += rank
+        if axis < 0 or axis >= rank:
+            raise ValueError(f"prod: axis {raw_axis} out of range for rank {rank}")
+        normalized.append(axis)
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("prod: axes must be unique after normalization")
+    return tuple(sorted(normalized))
+
+
 def _resolve_dtype(spec):
     """Normalize a torch-style dtype spec to a numpy dtype.
 
@@ -430,6 +462,10 @@ class Tensor:
     def prod(self, dim=None, axis=None, keepdim: bool = False,
              keepdims: bool = False) -> "Tensor":
         """Product reduction along dim."""
+        if dim is not None and axis is not None:
+            raise ValueError("prod: specify only one of axis or dim")
+        if type(keepdim) is not bool or type(keepdims) is not bool:
+            raise ValueError("prod: keepdim and keepdims must be booleans")
         return _prod(self, dim=dim if dim is not None else axis,
                      keepdims=keepdim or keepdims)
 
@@ -1027,27 +1063,48 @@ def _masked_fill(a: Tensor, mask, value: float) -> Tensor:
 
 def _prod(a: Tensor, dim=None, keepdims: bool = False) -> Tensor:
     a_data = a.data
-    out_data = np.prod(a_data, axis=dim, keepdims=keepdims).astype(np.float32)
-    out = Tensor(out_data)
+    axes = _normalize_prod_axes(dim, a_data.ndim)
+    out_data = np.prod(
+        a_data,
+        axis=axes,
+        keepdims=keepdims,
+        dtype=a_data.dtype,
+    )
+    out = Tensor(np.array(out_data, dtype=a_data.dtype, copy=True), dtype=a.dtype)
     a_shape = a_data.shape
-    if dim is None:
-        out_kd = out_data  # scalar, broadcasts to any shape
-    elif keepdims:
-        out_kd = out_data
-    else:
-        axes = (dim,) if isinstance(dim, int) else tuple(dim)
-        out_kd = np.expand_dims(out_data, axis=axes)
+    expanded_shape = tuple(
+        1 if axis in axes else extent
+        for axis, extent in enumerate(a_shape)
+    )
     def backward(g):
-        gd = g.data
-        if not keepdims and dim is not None:
-            axes = (dim,) if isinstance(dim, int) else tuple(dim)
-            for ax in sorted(ax % len(a_shape) for ax in axes):
-                gd = np.expand_dims(gd, ax)
-        gd_b = np.broadcast_to(gd, a_shape)
-        out_b = np.broadcast_to(out_kd, a_shape)
+        zero_mask = a_data == 0
+        safe_a = np.where(zero_mask, np.ones((), dtype=a_data.dtype), a_data)
+        nonzero_product = np.prod(
+            safe_a,
+            axis=axes,
+            keepdims=True,
+            dtype=a_data.dtype,
+        )
+        zero_count = np.sum(
+            zero_mask,
+            axis=axes,
+            keepdims=True,
+            dtype=np.int64,
+        )
         with np.errstate(divide="ignore", invalid="ignore"):
-            grad = np.where(a_data != 0, gd_b * out_b / a_data, 0.0)
-        return (grad.astype(np.float32),)
+            no_zero = nonzero_product / safe_a
+        local = np.where(
+            zero_count == 0,
+            no_zero,
+            np.where(
+                (zero_count == 1) & zero_mask,
+                nonzero_product,
+                np.zeros((), dtype=a_data.dtype),
+            ),
+        )
+        upstream = g.data if keepdims else g.data.reshape(expanded_shape)
+        grad = np.broadcast_to(upstream, a_shape) * local
+        return (grad.astype(a_data.dtype, copy=False),)
     return _build_ctx(out, (a,), backward)
 
 
@@ -1401,6 +1458,10 @@ def std(x, dim=None, axis=None, keepdim: bool = False, keepdims: bool = False,
 
 
 def prod(x, dim=None, axis=None, keepdim: bool = False, keepdims: bool = False) -> Tensor:
+    if dim is not None and axis is not None:
+        raise ValueError("prod: specify only one of axis or dim")
+    if type(keepdim) is not bool or type(keepdims) is not bool:
+        raise ValueError("prod: keepdim and keepdims must be booleans")
     return _prod(_wrap(x), dim=dim if dim is not None else axis,
                  keepdims=keepdim or keepdims)
 

@@ -734,14 +734,14 @@ function checkJitFrameworkOperationContracts(root, manifest, failures) {
   ];
   const allowed = {
     semanticState: new Set(["typed"]),
-    shapeContract: new Set(["preserve-single-axis-reverse", "preserve-unary-input", "selected-axis-times-repeat-count", "static-broadcast-with-existing-dim-minus-one", "tile-multipliers-with-left-rank-padding"]),
+    shapeContract: new Set(["preserve-single-axis-reverse", "preserve-unary-input", "selected-axis-times-repeat-count", "static-broadcast-with-existing-dim-minus-one", "static-product-reduction", "tile-multipliers-with-left-rank-padding"]),
     dtypeContract: new Set(["preserve-floating-input", "preserve-input", "preserve-real-numeric-input"]),
     cpu: new Set(["supported-numpy-dtype-preserving", "supported-numpy-owning-copy"]),
-    closureAutograd: new Set(["supported-cos-derivative", "supported-inclusive-bound-mask", "supported-involutive-flip", "supported-negative-sin-derivative", "supported-selected-axis-block-sum", "supported-sign-derivative", "supported-tile-block-sum", "supported-unbroadcast-sum", "supported-zero-derivative"]),
-    symbolicVjp: new Set(["supported-cos-derivative", "supported-inclusive-bound-mask", "supported-involutive-flip", "supported-negative-sin-derivative", "supported-selected-axis-block-sum", "supported-sign-derivative", "supported-tile-block-sum", "supported-unbroadcast-sum", "supported-zero-derivative"]),
+    closureAutograd: new Set(["supported-cos-derivative", "supported-inclusive-bound-mask", "supported-involutive-flip", "supported-negative-sin-derivative", "supported-selected-axis-block-sum", "supported-sign-derivative", "supported-tile-block-sum", "supported-unbroadcast-sum", "supported-zero-aware-product-rule", "supported-zero-derivative"]),
+    symbolicVjp: new Set(["supported-cos-derivative", "supported-inclusive-bound-mask", "supported-involutive-flip", "supported-negative-sin-derivative", "supported-selected-axis-block-sum", "supported-sign-derivative", "supported-tile-block-sum", "supported-unbroadcast-sum", "supported-zero-aware-product-rule", "supported-zero-derivative"]),
     functionalGrad: new Set(["supported-via-symbolic-vjp"]),
     vmap: new Set(["supported-leading-batch-axis", "supported-leading-batch-axis-with-axis-shift", "supported-leading-batch-axis-with-unit-repeat"]),
-    onnxExport: new Set(["supported-opset17-clip-export-dtypes", "supported-opset17-direct-unary-export-dtypes", "supported-opset17-expand", "supported-opset17-slice-float32-int32-int64-bool", "supported-opset17-tile-float32-int32-int64-bool", "supported-opset17-unsqueeze-tile-reshape-float32-int32-int64-bool"]),
+    onnxExport: new Set(["supported-opset17-clip-export-dtypes", "supported-opset17-direct-unary-export-dtypes", "supported-opset17-expand", "supported-opset17-reduce-prod-float32-int32-int64", "supported-opset17-slice-float32-int32-int64-bool", "supported-opset17-tile-float32-int32-int64-bool", "supported-opset17-unsqueeze-tile-reshape-float32-int32-int64-bool"]),
     tensorPlan: new Set(["refused-negative-stride-profile", "refused-no-canonical-selected-axis-replication-profile", "refused-no-canonical-tile-layout-profile", "refused-no-portable-lowering", "supported-primitive"]),
     webgpu: new Set(["profile-nonempty-f32-rank-at-most-4", "refused-negative-stride-profile", "refused-no-canonical-selected-axis-replication-profile", "refused-no-canonical-tile-layout-profile", "refused-no-tensor-plan-kernel"]),
     residency: new Set(["host-materialized", "supported-materializing-and-resident"]),

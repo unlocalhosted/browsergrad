@@ -17,8 +17,9 @@ Scope (v0):
     REDUCE (sum/mean/max), RESHAPE, PERMUTE, CAST, WHERE, CMP
     (→Equal/Greater/Less), and BROADCAST_TO (→Expand). Registry-admitted
     framework operations additionally cover ABS, SIGN, SIN, COS, CLAMP
-    (→Clip), FLIP (→Slice), REPEAT (→Tile), and REPEAT_INTERLEAVE
-    (→Unsqueeze/Tile/Reshape). Plus lifecycle (BUFFER/LOAD/CONST).
+    (→Clip), FLIP (→Slice), PROD (→ReduceProd), REPEAT (→Tile), and
+    REPEAT_INTERLEAVE (→Unsqueeze/Tile/Reshape). Plus lifecycle
+    (BUFFER/LOAD/CONST).
   * Opset 17 (axes as attribute on ReduceSum/Mean/Max — opset 18 made
     axes a runtime input, which would require initializer plumbing).
   * float32, int32, int64, and bool graph dtypes only; each typed framework
@@ -52,7 +53,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -74,6 +75,7 @@ from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_clamp_contract,
     validate_flip_contract,
+    validate_prod_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
     validate_typed_unary_contract,
@@ -539,6 +541,18 @@ def export_inference(
                 ))
                 slice_inputs.append(initializer_name)
             nodes.append(_emit_node(slice_inputs, [out_name], nm, "Slice"))
+        elif node.op == OP_PROD:
+            axes, keepdims, _ = validate_prod_contract(node)
+            if node.dtype not in ("float32", "int32", "int64"):
+                raise OnnxUnmappableOp(
+                    f"export_inference: PROD dtype {node.dtype!r} is not exportable; "
+                    "supported dtypes are float32, int32, and int64"
+                )
+            attrs = [
+                _emit_attr_ints("axes", axes),
+                _emit_attr_int("keepdims", 1 if keepdims else 0),
+            ]
+            nodes.append(_emit_node(input_names, [out_name], nm, "ReduceProd", attrs))
         elif node.op == OP_REPEAT:
             repeats, _ = validate_repeat_contract(node)
             _dtype_or_die(node.dtype)
@@ -602,7 +616,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_PROD, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

@@ -37,6 +37,10 @@ contract in the README](README.md#compatibility-contract).
   selected-axis block-sum closure/symbolic VJP, functional grad, batch-safe
   vmap, exact ONNX `Unsqueeze`/`Tile`/`Reshape`, and explicit refusal until
   canonical selected-axis replication semantics exist.
+- `Tensor.prod` now emits typed `PROD` with strict canonical reduction axes,
+  exact boolean keepdims, owning dtype-preserving scalar/tensor CPU results,
+  a zero-aware closure/symbolic product derivative, functional grad,
+  batch-safe vmap, ONNX `ReduceProd`, and explicit tensor-plan/WebGPU refusal.
 
 ### Added
 
@@ -44,7 +48,7 @@ contract in the README](README.md#compatibility-contract).
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
   current table contains `ABS`, `CLAMP`, `COS`, `BROADCAST_TO`, `FLIP`,
-  `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, and `SIN`.
+  `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, and `SIN`.
 
 ## [0.9.0] — 2026-07-15
 

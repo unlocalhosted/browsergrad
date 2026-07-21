@@ -21,6 +21,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   JIT surface, rejects hostile, non-integral, out-of-range, and oversized
   requests before NumPy, and preserves input dtype in owning results and
   gradients instead of silently casting them to float32.
+- `Tensor.prod` now shares canonical reduction-axis and keepdims conformance
+  with the JIT surface, returns owning scalar/tensor products in the input
+  dtype, and uses the same zero-aware derivative instead of returning zero for
+  every zero input or silently casting results and gradients to float32.
 
 ## [0.5.2] — 2026-07-15
 

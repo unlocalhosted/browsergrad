@@ -147,10 +147,10 @@ evidence without claiming reproducibility of the still-incomplete distributed
 asset set.
 
 Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
-`Tensor.sign`, `Tensor.sin`, `Tensor.cos`, `Tensor.clamp`, `Tensor.flip`, and
-`Tensor.repeat`, and `Tensor.repeat_interleave` from the frozen opaque callback
-inventory. Expand emits the existing typed `BROADCAST_TO` primitive. One shared contract validates exact
-arity, closed shape arguments,
+`Tensor.sign`, `Tensor.sin`, `Tensor.cos`, `Tensor.clamp`, `Tensor.flip`,
+`Tensor.prod`, `Tensor.repeat`, and `Tensor.repeat_interleave` from the frozen
+opaque callback inventory. Expand emits the existing typed `BROADCAST_TO`
+primitive. One shared contract validates exact arity, closed shape arguments,
 output-shape identity, dtype preservation, rank direction, and broadcast
 compatibility at construction and again at CPU, VJP, vmap, ONNX, and
 tensor-plan boundaries so mutation of the legacy argument dictionary fails
@@ -175,8 +175,8 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 27 constructor calls and 30 operations under ADR-0002
-and ADR-0004 through ADR-0009. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 26 constructor calls and 29 operations under ADR-0002
+and ADR-0004 through ADR-0010. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -198,16 +198,23 @@ ONNX emits an exact `Unsqueeze`/`Tile`/`Reshape` decomposition for
 float32/int32/int64/bool. Its tensor-plan/WebGPU profile explicitly refuses
 execution until canonical selected-axis replication semantics exist. Grad
 consumes the shared repeat-interleave conformance fixture and preserves output
-and gradient dtype. This is nine migrated operations, not Gate 6 completion:
-remaining Grad view/dtype debt,
+and gradient dtype. Product now emits typed `PROD` with canonical static axes,
+exact keepdims, owning dtype-preserving scalar/tensor CPU results, and a
+zero-aware closure/symbolic derivative. Vmap shifts every reduction axis past
+its batch dimension, and ONNX emits `ReduceProd` for float32/int32/int64 while
+other exporter dtypes fail explicitly. Tensor-plan/WebGPU remain explicit
+refusals until portable product reduction exists. Grad consumes the shared
+product fixture, preserves output and gradient dtype, and corrects the
+single-zero derivative. This is ten migrated operations, not Gate 6
+completion: remaining Grad view/dtype debt,
 runtime/profile consumption, and the remaining advertised opaque operations
 remain open.
 
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
 records bind `Tensor.abs`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
-`Tensor.flip`, `Tensor.repeat_interleave`, `Tensor.repeat`, `Tensor.sign`, and
-`Tensor.sin` to the same
+`Tensor.flip`, `Tensor.prod`, `Tensor.repeat_interleave`, `Tensor.repeat`,
+`Tensor.sign`, and `Tensor.sin` to the same
 validators invoked by construction and every admitted execution, transform,
 export, or plan boundary. Import rejects duplicate keys,
 open fields, unknown decisions, invalid versions, duplicate identities, and
@@ -217,7 +224,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 30 still-opaque and nine typed retirements. ADR-0003 records
+opaque IDs into 29 still-opaque and ten typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.

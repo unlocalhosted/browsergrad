@@ -57,6 +57,7 @@ _ENUMS = {
         "preserve-single-axis-reverse",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
+        "static-product-reduction",
         "tile-multipliers-with-left-rank-padding",
     }),
     "dtypeContract": frozenset({
@@ -77,6 +78,7 @@ _ENUMS = {
         "supported-selected-axis-block-sum",
         "supported-tile-block-sum",
         "supported-unbroadcast-sum",
+        "supported-zero-aware-product-rule",
         "supported-zero-derivative",
     }),
     "symbolicVjp": frozenset({
@@ -88,6 +90,7 @@ _ENUMS = {
         "supported-selected-axis-block-sum",
         "supported-tile-block-sum",
         "supported-unbroadcast-sum",
+        "supported-zero-aware-product-rule",
         "supported-zero-derivative",
     }),
     "functionalGrad": frozenset({"supported-via-symbolic-vjp"}),
@@ -100,6 +103,7 @@ _ENUMS = {
         "supported-opset17-clip-export-dtypes",
         "supported-opset17-direct-unary-export-dtypes",
         "supported-opset17-expand",
+        "supported-opset17-reduce-prod-float32-int32-int64",
         "supported-opset17-slice-float32-int32-int64-bool",
         "supported-opset17-tile-float32-int32-int64-bool",
         "supported-opset17-unsqueeze-tile-reshape-float32-int32-int64-bool",
@@ -486,6 +490,65 @@ def _validate_repeat(
     return repeats, padded_shape
 
 
+def _validate_prod(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> Tuple[Tuple[int, ...], bool, Tuple[int, ...]]:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = _require_single_input_tuple(node, contract.opcode)
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("PROD arg must be a plain dict")
+    fields = set(arg)
+    if not {"axes", "keepdims"}.issubset(fields) or not fields.issubset(
+        {"axes", "keepdims", "vjp_of"}
+    ):
+        raise ShapeError(
+            "PROD arg fields must be exactly 'axes' and 'keepdims' plus optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("PROD arg.vjp_of must reference a UOp")
+    source = inputs[0]
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("PROD must preserve its input dtype")
+    source_shape = tuple(getattr(source, "shape", ()))
+    axes = arg["axes"]
+    keepdims = arg["keepdims"]
+    if type(axes) is not tuple:
+        raise ShapeError("PROD arg.axes must be a canonical tuple")
+    if type(keepdims) is not bool:
+        raise ShapeError("PROD arg.keepdims must be a boolean")
+    if source_shape and not axes:
+        raise ShapeError("PROD arg.axes must be non-empty for a non-scalar input")
+    if tuple(sorted(axes)) != axes or len(set(axes)) != len(axes):
+        raise ShapeError("PROD arg.axes must be strictly increasing and unique")
+    for axis in axes:
+        if type(axis) is not int:
+            raise ShapeError("PROD arg.axes must contain normalized integers")
+        if axis < 0 or axis >= len(source_shape):
+            raise ShapeError(
+                f"PROD arg axis {axis} out of range for rank {len(source_shape)}"
+            )
+    expected_shape = tuple(
+        1 if keepdims and axis in axes else extent
+        for axis, extent in enumerate(source_shape)
+        if keepdims or axis not in axes
+    )
+    if getattr(node, "shape", None) != expected_shape:
+        raise ShapeError(
+            f"PROD declared shape {getattr(node, 'shape', None)!r} does not match "
+            f"derived shape {expected_shape!r}"
+        )
+    expanded_shape = tuple(
+        1 if axis in axes else extent
+        for axis, extent in enumerate(source_shape)
+    )
+    return axes, keepdims, expanded_shape
+
+
 def _validate_repeat_interleave(
     node: Any,
     contract: FrameworkOperationContract,
@@ -544,6 +607,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.cos.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.expand.v1": _validate_broadcast_to,
     "browsergrad.jit.framework.tensor.flip.v1": _validate_flip,
+    "browsergrad.jit.framework.tensor.prod.v1": _validate_prod,
     "browsergrad.jit.framework.tensor.repeat.v1": _validate_repeat,
     "browsergrad.jit.framework.tensor.repeat-interleave.v1": _validate_repeat_interleave,
     "browsergrad.jit.framework.tensor.sign.v1": _validate_typed_unary,
@@ -601,6 +665,13 @@ def validate_repeat_contract(node: Any) -> Tuple[Tuple[int, ...], Tuple[int, ...
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.repeat.v1":
         raise ShapeError("REPEAT resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_prod_contract(node: Any) -> Tuple[Tuple[int, ...], bool, Tuple[int, ...]]:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.prod.v1":
+        raise ShapeError("PROD resolved to the wrong framework-operation contract")
     return normalized
 
 
@@ -671,6 +742,7 @@ __all__ = [
     "validate_broadcast_to_contract",
     "validate_clamp_contract",
     "validate_flip_contract",
+    "validate_prod_contract",
     "validate_repeat_contract",
     "validate_repeat_interleave_contract",
     "validate_real_numeric_unary_contract",

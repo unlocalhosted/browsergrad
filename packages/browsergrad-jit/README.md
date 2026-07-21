@@ -180,6 +180,15 @@ ONNX emits an exact `Unsqueeze`/`Tile`/`Reshape` decomposition for float32,
 int32, int64, and bool graphs. Tensor-plan and WebGPU explicitly refuse the
 operation until a canonical selected-axis replication profile exists.
 
+`Tensor.prod()` emits typed `PROD` for a canonical static set of normalized
+reduction axes and an exact boolean keepdims flag. CPU realization always
+returns an owning input-dtype array, including scalar results. Closure and
+symbolic gradients correctly distinguish zero-free, one-zero, and multi-zero
+reduction groups; vmap keeps the leading batch axis outside the reduction.
+ONNX emits `ReduceProd` for float32, int32, and int64 graphs. Tensor-plan and
+WebGPU explicitly refuse the operation until a portable product-reduction
+lowering exists.
+
 `bg.framework_operation_support()` returns the versioned public decision table
 for framework operations admitted to typed execution. The table is generated
 from the same package registry that binds executable validators at CPU,

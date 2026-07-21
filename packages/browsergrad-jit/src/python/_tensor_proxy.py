@@ -45,7 +45,7 @@ from ._ir import (
     UOp,
     OP_BUFFER,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO,
@@ -133,6 +133,38 @@ def _normalize_single_axis(op_name: str, value: Any, rank: int) -> int:
     if axis < 0 or axis >= rank:
         raise ShapeError(f"{op_name}: axis {value} out of range for rank {rank}")
     return axis
+
+
+def _normalize_reduction_axes(op_name: str, value: Any, rank: int) -> Tuple[int, ...]:
+    if value is None:
+        return tuple(range(rank))
+    if type(value) in _EXACT_INTEGER_SCALAR_TYPES:
+        values = (value,)
+    elif type(value) in (tuple, list):
+        if not value:
+            raise ShapeError(f"{op_name}: axis sequence must be non-empty")
+        values = tuple(value)
+    else:
+        raise ShapeError(
+            f"{op_name}: axis must be None, an integer scalar, or a plain tuple/list, "
+            f"got {type(value).__name__}"
+        )
+    normalized = []
+    for index, raw_axis in enumerate(values):
+        if type(raw_axis) not in _EXACT_INTEGER_SCALAR_TYPES:
+            raise ShapeError(
+                f"{op_name}: axis {index} must be a built-in or NumPy integer scalar, "
+                f"got {type(raw_axis).__name__}"
+            )
+        axis = int(raw_axis)
+        if axis < 0:
+            axis += rank
+        if axis < 0 or axis >= rank:
+            raise ShapeError(f"{op_name}: axis {raw_axis} out of range for rank {rank}")
+        normalized.append(axis)
+    if len(set(normalized)) != len(normalized):
+        raise ShapeError(f"{op_name}: axes must be unique after normalization")
+    return tuple(sorted(normalized))
 
 
 def _normalize_repeat_sizes(values: Tuple[Any, ...], input_rank: int) -> Tuple[int, ...]:
@@ -1028,51 +1060,61 @@ class TensorProxy:
         keepdims: bool = False,
         keepdim: bool = False,
     ) -> "TensorProxy":
+        if axis is not None and dim is not None:
+            raise ShapeError("prod: specify only one of axis or dim")
+        if type(keepdims) is not bool or type(keepdim) is not bool:
+            raise ShapeError("prod: keepdim and keepdims must be booleans")
         reduce_axis = dim if dim is not None else axis
         keep = keepdim or keepdims
-        axes = None if reduce_axis is None else (
-            (reduce_axis,) if isinstance(reduce_axis, int) else tuple(reduce_axis)
+        norm_axes = _normalize_reduction_axes("prod", reduce_axis, self.ndim)
+        out_shape = tuple(
+            1 if keep and index in norm_axes else extent
+            for index, extent in enumerate(self.shape)
+            if keep or index not in norm_axes
         )
-        norm_axes = None if axes is None else tuple(a % self.ndim for a in axes)
-        if norm_axes is None:
-            out_shape = (1,) * self.ndim if keep else ()
-        else:
-            out_dims = []
-            for i, d in enumerate(self.shape):
-                if i in norm_axes:
-                    if keep:
-                        out_dims.append(1)
-                else:
-                    out_dims.append(d)
-            out_shape = tuple(out_dims)
-
-        def _prod_forward(x_arr: np.ndarray) -> np.ndarray:
-            return np.prod(x_arr, axis=reduce_axis, keepdims=keep)
+        expanded_shape = tuple(
+            1 if index in norm_axes else extent
+            for index, extent in enumerate(self.shape)
+        )
 
         uop = UOp(
-            op=OP_CUSTOM,
+            op=OP_PROD,
             inputs=(self._uop,),
             shape=out_shape,
             dtype=self._uop.dtype,
-            arg={"fn": _prod_forward, "captures": (), "name": "prod"},
+            arg={"axes": norm_axes, "keepdims": keep},
         )
 
         def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
             (x_arr,) = ins
-            if norm_axes is None:
-                out_kd = np.prod(x_arr)
-                grad = np.broadcast_to(dy, x_arr.shape)
-            else:
-                out_kd = np.prod(x_arr, axis=norm_axes, keepdims=True)
-                grad = dy
-                if not keep:
-                    for ax in sorted(norm_axes):
-                        grad = np.expand_dims(grad, ax)
-                grad = np.broadcast_to(grad, x_arr.shape)
-            out_b = np.broadcast_to(out_kd, x_arr.shape)
+            zero_mask = x_arr == 0
+            safe_x = np.where(zero_mask, np.ones((), dtype=x_arr.dtype), x_arr)
+            nonzero_product = np.prod(
+                safe_x,
+                axis=norm_axes,
+                keepdims=True,
+                dtype=x_arr.dtype,
+            )
+            zero_count = np.sum(
+                zero_mask,
+                axis=norm_axes,
+                keepdims=True,
+                dtype=np.int64,
+            )
             with np.errstate(divide="ignore", invalid="ignore"):
-                grad = np.where(x_arr != 0, grad * out_b / x_arr, 0.0)
-            return (grad.astype(x_arr.dtype, copy=False),)
+                no_zero = nonzero_product / safe_x
+            local = np.where(
+                zero_count == 0,
+                no_zero,
+                np.where(
+                    (zero_count == 1) & zero_mask,
+                    nonzero_product,
+                    np.zeros((), dtype=x_arr.dtype),
+                ),
+            )
+            upstream = dy if keep else dy.reshape(expanded_shape)
+            gradient = np.broadcast_to(upstream, x_arr.shape) * local
+            return (gradient.astype(x_arr.dtype, copy=False),)
 
         requires = _should_track(self)
         ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None

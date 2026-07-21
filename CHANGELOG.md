@@ -46,6 +46,10 @@ Each package follows independent [SemVer](https://semver.org/).
   with strict scalar admission, block-sum VJP, batch-safe vmap, exact ONNX
   `Unsqueeze`/`Tile`/`Reshape`, and explicit layout/device refusal. Grad now
   shares its conformance fixture and preserves output and gradient dtype.
+- Migrates JIT `Tensor.prod` to typed static product reduction with canonical
+  axes, owning dtype-preserving scalar/tensor results, zero-aware VJP,
+  batch-safe vmap, ONNX `ReduceProd`, and explicit device refusal. Grad shares
+  the same conformance fixture and zero-aware dtype-preserving derivative.
 
 ## 2026-07 — semantic-core, kernels, compiler, and JIT semantic migration
 

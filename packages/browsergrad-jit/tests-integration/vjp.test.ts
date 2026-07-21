@@ -43,7 +43,7 @@ list(list_registered())
     const expected = [
       "ABS", "ADD", "BROADCAST_TO", "CAST", "CLAMP", "CONV1D", "CONV2D", "CONV3D", "CONV_TRANSPOSE2D", "COS",
       "DIV", "EXP", "FLIP", "ISNAN", "LAYER_NORM", "LOG", "MATMUL", "MUL",
-      "NEG", "PERMUTE", "REDUCE", "REPEAT", "REPEAT_INTERLEAVE", "RESHAPE", "SIGN", "SIN",
+      "NEG", "PERMUTE", "PROD", "REDUCE", "REPEAT", "REPEAT_INTERLEAVE", "RESHAPE", "SIGN", "SIN",
     ];
     expect(registered).toEqual(expected);
   });

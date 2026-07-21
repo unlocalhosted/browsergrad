@@ -52,7 +52,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -77,6 +77,7 @@ from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_clamp_contract,
     validate_flip_contract,
+    validate_prod_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
     validate_typed_unary_contract,
@@ -252,6 +253,22 @@ def _vmap_repeat(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
         shape=mapped_shape,
         dtype=node.dtype,
         arg={"repeats": mapped_repeats},
+    )
+
+
+@register_vmap(OP_PROD)
+def _vmap_prod(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    axes, keepdims, _ = validate_prod_contract(node)
+    inner = batched[id(node.inputs[0])]
+    is_batched = len(inner.shape) > len(node.inputs[0].shape)
+    mapped_axes = tuple(axis + 1 for axis in axes) if is_batched else axes
+    mapped_shape = (B,) + node.shape if is_batched else node.shape
+    return UOp(
+        op=OP_PROD,
+        inputs=(inner,),
+        shape=mapped_shape,
+        dtype=node.dtype,
+        arg={"axes": mapped_axes, "keepdims": keepdims},
     )
 
 

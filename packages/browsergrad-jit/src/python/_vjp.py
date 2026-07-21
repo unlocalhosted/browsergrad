@@ -48,7 +48,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from ._ir import (
     UOp,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_PROD, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CAST, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -61,13 +61,14 @@ from ._ir import (
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
-    OP_CONST, OP_BROADCAST_TO,
+    OP_CONST, OP_BROADCAST_TO, OP_WHERE,
     OP_ISNAN,
 )
 from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_clamp_contract,
     validate_flip_contract,
+    validate_prod_contract,
     validate_repeat_contract,
     validate_repeat_interleave_contract,
     validate_real_numeric_unary_contract,
@@ -360,6 +361,126 @@ def _vjp_repeat(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional
             arg={"new_shape": x.shape},
         )
     return (cur,)
+
+
+@register_vjp(OP_PROD)
+def _vjp_prod(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """Zero-aware product derivative for any static reduction-axis set."""
+    axes, keepdims, expanded_shape = validate_prod_contract(output)
+    (x,) = inputs
+
+    zero = _vjp_uop(
+        OP_CONST, (), (), x.dtype, output, arg={"value": 0}
+    )
+    one = _vjp_uop(
+        OP_CONST, (), (), x.dtype, output, arg={"value": 1}
+    )
+    zero_mask = _vjp_uop(
+        OP_CMP,
+        (x, zero),
+        x.shape,
+        "bool",
+        output,
+        arg={"op": "eq"},
+    )
+    zero_count_source = _vjp_uop(
+        OP_CAST,
+        (zero_mask,),
+        x.shape,
+        "int32",
+        output,
+        arg={"dtype": "int32"},
+    )
+    zero_count = _vjp_uop(
+        OP_REDUCE,
+        (zero_count_source,),
+        expanded_shape,
+        "int32",
+        output,
+        arg={"op": "sum", "axis": axes, "keepdims": True},
+    )
+    count_zero = _vjp_uop(
+        OP_CONST, (), (), "int32", output, arg={"value": 0}
+    )
+    count_one = _vjp_uop(
+        OP_CONST, (), (), "int32", output, arg={"value": 1}
+    )
+    no_zeros = _vjp_uop(
+        OP_CMP,
+        (zero_count, count_zero),
+        expanded_shape,
+        "bool",
+        output,
+        arg={"op": "eq"},
+    )
+    one_zero = _vjp_uop(
+        OP_CMP,
+        (zero_count, count_one),
+        expanded_shape,
+        "bool",
+        output,
+        arg={"op": "eq"},
+    )
+    safe_x = _vjp_uop(
+        OP_WHERE,
+        (zero_mask, one, x),
+        x.shape,
+        x.dtype,
+        output,
+    )
+    nonzero_product = _vjp_uop(
+        OP_PROD,
+        (safe_x,),
+        expanded_shape,
+        x.dtype,
+        output,
+        arg={"axes": axes, "keepdims": True},
+    )
+    quotient = _vjp_uop(
+        OP_DIV,
+        (nonzero_product, safe_x),
+        x.shape,
+        x.dtype,
+        output,
+    )
+    single_zero = _vjp_uop(
+        OP_WHERE,
+        (zero_mask, nonzero_product, zero),
+        x.shape,
+        x.dtype,
+        output,
+    )
+    one_or_many_zero = _vjp_uop(
+        OP_WHERE,
+        (one_zero, single_zero, zero),
+        x.shape,
+        x.dtype,
+        output,
+    )
+    local_derivative = _vjp_uop(
+        OP_WHERE,
+        (no_zeros, quotient, one_or_many_zero),
+        x.shape,
+        x.dtype,
+        output,
+    )
+    upstream = dy
+    if not keepdims and dy.shape != expanded_shape:
+        upstream = _vjp_uop(
+            OP_RESHAPE,
+            (dy,),
+            expanded_shape,
+            dy.dtype,
+            output,
+            arg={"new_shape": expanded_shape},
+        )
+    return (_vjp_uop(
+        OP_MUL,
+        (upstream, local_derivative),
+        x.shape,
+        x.dtype,
+        output,
+    ),)
 
 
 @register_vjp(OP_REPEAT_INTERLEAVE)

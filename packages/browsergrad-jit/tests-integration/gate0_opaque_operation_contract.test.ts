@@ -41,8 +41,9 @@ def error_name(fn):
     except Exception as exc:
         return type(exc).__name__
 
-x = bg.from_numpy(np.array([[2.0, 3.0], [4.0, 5.0]], dtype=np.float32), requires_grad=True)
-y = x.prod(dim=0)
+x = bg.from_numpy(np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32), requires_grad=True)
+index = bg.from_numpy(np.array([[1, 0], [0, 1]], dtype=np.int64))
+y = x.gather(1, index)
 cpu_values = y.numpy().tolist()
 y.sum().backward()
 custom_plan = bg.gpu_plan_summary(y, allow_custom=True)
@@ -56,7 +57,7 @@ class PlanOnlyGpuBuffers:
     "cpuValues": cpu_values,
     "cpuGradient": x.grad.numpy().tolist(),
     "symbolicVjpRegistered": _vjp.get_rule("CUSTOM") is not None,
-    "functionalGradError": error_name(lambda: bg.func.grad(lambda value: value.prod(dim=0).sum())(x)),
+    "functionalGradError": error_name(lambda: bg.func.grad(lambda value: value.gather(1, index).sum())(x)),
     "vmapError": error_name(lambda: _vmap._VMAP_RULES["CUSTOM"](y._uop, {}, 2)),
     "onnxError": error_name(lambda: bg.onnx.export_inference(y, input_buffers=(x,))),
     "tensorPlanError": error_name(lambda: bg.gpu_plan_summary(y)),
@@ -69,7 +70,13 @@ class PlanOnlyGpuBuffers:
         numpy_buffer_table=None,
         gpu_buffer_table=PlanOnlyGpuBuffers(),
     )),
-    "legacyWebgpuError": error_name(lambda: _h_custom(y._uop, {id(x._uop): "x"}, None, object(), None)),
+    "legacyWebgpuError": error_name(lambda: _h_custom(
+        y._uop,
+        {id(x._uop): "x", id(index._uop): "index"},
+        None,
+        object(),
+        None,
+    )),
 }
 `);
     expect(result).toEqual(expected("jit.custom.shared-refusals.v0"));
@@ -290,7 +297,6 @@ a = leaf([1.0, 3.0]); check("l1_loss", F.l1_loss(a, constant([0.0, 1.0])), a)
 a = leaf([[1.0, 2.0], [3.0, 4.0]]); check("masked_fill", a.masked_fill(constant([[True, False], [False, True]], np.bool_), 0.0), a)
 a = leaf([[-0.2, -1.6], [-0.3, -1.2]]); check("nll_loss", F.nll_loss(a, constant([0, 1], np.int64)), a)
 a = leaf([[1.0, 2.0]]); check("pad", F.pad(a, (1, 1)), a)
-a = leaf([[1.0, 2.0], [3.0, 4.0]]); check("prod", a.prod(dim=0), a)
 a = leaf([1.0, 3.0]); check("smooth_l1_loss", F.smooth_l1_loss(a, constant([0.0, 1.0])), a)
 a = leaf([1.0, 2.0]); check("stack", bg.stack((a, constant([3.0, 4.0])), dim=0), a)
 a = leaf([[1.0, 2.0], [3.0, 4.0]]); check("tril", bg.tril(a), a)
@@ -305,7 +311,6 @@ bool_values = constant([True, False, True], np.bool_)
 dtype_drift = {
     "cumsum-bool": dtype_observation(bg.cumsum(bool_values, dim=0)),
     "cumsum-int32": dtype_observation(bg.cumsum(int_values, dim=0)),
-    "prod-int32": dtype_observation(int_values.prod(dim=0)),
     "var-int32": dtype_observation(int_values.var(dim=0)),
 }
 
@@ -317,7 +322,6 @@ dtype_drift = {
     "allClosureGradientsPresent": all(gradient_present.values()),
     "realizedDtypeDrift": dtype_drift,
     "scalarReductionErrors": {
-        "prod": error_name(lambda: int_values.prod().numpy()),
         "var": error_name(lambda: int_values.var().numpy()),
     },
 }
