@@ -34,7 +34,7 @@ from ._ir import (
     UOp, ALL_OPS, toposort,
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM,
     OP_CAST, OP_ADD, OP_MUL, OP_DIV, OP_NEG,
-    OP_EXP, OP_LOG, OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT,
+    OP_EXP, OP_LOG, OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_NARROW, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT,
     OP_REPEAT_INTERLEAVE, OP_SIGN, OP_SIN, OP_CMP, OP_MATMUL,
     OP_CONV1D, OP_CONV1D_BACKWARD_INPUT, OP_CONV1D_BACKWARD_WEIGHT,
     OP_CONV1D_BACKWARD_BIAS, OP_CONV2D,
@@ -59,6 +59,7 @@ from ._buffer_table import BufferTable
 from ._errors import RealizationError
 from ._framework_contracts import (
     validate_broadcast_to_contract,
+    validate_cat_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -66,6 +67,7 @@ from ._framework_contracts import (
     validate_triu_contract,
     validate_gather_contract,
     validate_gather_scatter_add_contract,
+    validate_narrow_contract,
     validate_prod_contract,
     validate_var_contract,
     validate_where_contract,
@@ -202,6 +204,25 @@ def _h_cumsum(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     if reverse:
         scanned = np.flip(scanned, axis=axis)
     return np.array(scanned, dtype=np.dtype(node.dtype), copy=True)
+
+
+def _h_concat(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    axis, _, legacy_empty = validate_cat_contract(node)
+    arrays = []
+    for source_node, empty in zip(node.inputs, legacy_empty):
+        if empty and len(node.shape) != 1:
+            continue
+        arrays.append(np.asarray(vt[id(source_node)], dtype=np.dtype(node.dtype)))
+    concatenated = np.concatenate(arrays, axis=axis)
+    return np.array(concatenated, dtype=np.dtype(node.dtype), copy=True)
+
+
+def _h_narrow(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    axis, start, length = validate_narrow_contract(node)
+    slices = [slice(None)] * len(node.shape)
+    slices[axis] = slice(start, start + length)
+    narrowed = vt[id(node.inputs[0])][tuple(slices)]
+    return np.array(narrowed, dtype=np.dtype(node.dtype), copy=True)
 
 
 def _h_tril(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
@@ -1320,6 +1341,8 @@ _DISPATCH: dict[str, Handler] = {
     OP_COS:     _h_cos,
     OP_FLIP:    _h_flip,
     OP_CUMSUM:  _h_cumsum,
+    OP_CONCAT:  _h_concat,
+    OP_NARROW:  _h_narrow,
     OP_TRIL:    _h_tril,
     OP_TRIU:    _h_triu,
     OP_PROD:    _h_prod,

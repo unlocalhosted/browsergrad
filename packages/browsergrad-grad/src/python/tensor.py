@@ -68,6 +68,23 @@ _CUMSUM_DTYPE_ALIASES = {
     "uint8": "uint8",
     "bool": "bool",
 }
+_CAT_DTYPES = _MASKED_FILL_DTYPES
+_CAT_FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
+_CAT_FLOATING_RANK = {"float16": 0, "float32": 1, "float64": 2}
+_CAT_SIGNED_BITS = {"int8": 8, "int16": 16, "int32": 32, "int64": 64}
+_CAT_DTYPE_BYTES = {
+    "bool": 1,
+    "uint8": 1,
+    "int8": 1,
+    "int16": 2,
+    "float16": 2,
+    "int32": 4,
+    "float32": 4,
+    "int64": 8,
+    "float64": 8,
+}
+_CAT_INPUT_MAX = 1024
+_CAT_OUTPUT_BYTE_MAX = 1 << 28
 
 
 def _normalize_prod_axes(value, rank: int) -> tuple:
@@ -257,6 +274,75 @@ def _normalize_cumsum_dtype(spec, source_dtype: str) -> str:
             f"{sorted(_CUMSUM_DTYPE_ALIASES)}"
         )
     return normalized
+
+
+def _promote_cat_dtypes(dtypes: tuple) -> str:
+    for index, dtype in enumerate(dtypes):
+        if dtype not in _CAT_DTYPES:
+            raise ValueError(f"cat: input {index} has unsupported dtype {dtype!r}")
+    floating = [dtype for dtype in dtypes if dtype in _CAT_FLOATING_RANK]
+    if floating:
+        return max(floating, key=_CAT_FLOATING_RANK.__getitem__)
+    signed = [dtype for dtype in dtypes if dtype in _CAT_SIGNED_BITS]
+    has_uint8 = "uint8" in dtypes
+    if signed:
+        widest = max(signed, key=_CAT_SIGNED_BITS.__getitem__)
+        if has_uint8 and _CAT_SIGNED_BITS[widest] == 8:
+            return "int16"
+        return widest
+    if has_uint8:
+        return "uint8"
+    return "bool"
+
+
+def _infer_cat_contract(tensors: tuple, dim) -> tuple:
+    if type(dim) not in _EXACT_INTEGER_SCALAR_TYPES:
+        raise ValueError(
+            "cat: dim must be a built-in or NumPy integer scalar, "
+            f"got {type(dim).__name__}"
+        )
+    shapes = tuple(tensor.shape for tensor in tensors)
+    legacy_empty = tuple(shape == (0,) for shape in shapes)
+    substantive = [shape for shape, empty in zip(shapes, legacy_empty) if not empty]
+    reference = substantive[0] if substantive else (0,)
+    rank = len(reference)
+    if rank == 0:
+        raise ValueError("cat: scalar inputs are not supported")
+    axis = int(dim)
+    if axis < 0:
+        axis += rank
+    if axis < 0 or axis >= rank:
+        raise ValueError(f"cat: dim {dim} out of range for rank {rank}")
+    output_shape = list(reference)
+    output_shape[axis] = 0
+    sizes = []
+    for index, (shape, empty) in enumerate(zip(shapes, legacy_empty)):
+        if empty:
+            sizes.append(0)
+            continue
+        if len(shape) != rank:
+            raise ValueError(
+                f"cat: input {index} rank {len(shape)} does not match rank {rank}"
+            )
+        for shape_axis, (actual, expected) in enumerate(zip(shape, reference)):
+            if shape_axis != axis and actual != expected:
+                raise ValueError(
+                    f"cat: input {index} shape {shape} does not match {reference} "
+                    f"outside dim {axis}"
+                )
+        sizes.append(shape[axis])
+        output_shape[axis] += shape[axis]
+    output_dtype = _promote_cat_dtypes(tuple(tensor.dtype for tensor in tensors))
+    elements = 1
+    for extent in output_shape:
+        elements *= extent
+    output_bytes = elements * _CAT_DTYPE_BYTES[output_dtype]
+    if output_bytes > _CAT_OUTPUT_BYTE_MAX:
+        raise ValueError(
+            f"cat: output requires {output_bytes} bytes, exceeding the "
+            f"{_CAT_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    return axis, tuple(output_shape), output_dtype, tuple(sizes), legacy_empty
 
 
 def _normalize_triangular_diagonal(value, shape: tuple, *, upper: bool) -> int:
@@ -1572,27 +1658,66 @@ def pow(x, exponent) -> Tensor:
 
 # ─── Multi-tensor ops ──────────────────────────────────────
 
-def cat(tensors, dim: int = 0) -> Tensor:
+def cat(tensors, dim=0, *, out=None) -> Tensor:
     """Concatenate `tensors` along an existing axis.
 
     PyTorch behavior: all inputs must agree on every dim except `dim`.
     Backward splits the gradient along `dim` and distributes to each parent.
     """
-    if len(tensors) == 0:
+    if out is not None:
+        raise NotImplementedError(
+            "cat: out= is not supported because eager mutation has no shared effect contract"
+        )
+    if type(tensors) not in (tuple, list):
+        raise TypeError("cat: tensors must be a plain tuple or list of Tensor values")
+    if not tensors:
         raise ValueError("cat: empty tensor list")
-    tensors = tuple(_wrap(t) for t in tensors)
-    out_data = np.concatenate([t.data for t in tensors], axis=dim)
-    out = Tensor(out_data)
-    # Capture the split-point sizes so backward knows how to slice.
-    sizes = [t.data.shape[dim] for t in tensors]
+    if len(tensors) > _CAT_INPUT_MAX:
+        raise ValueError(
+            f"cat: tensor count {len(tensors)} exceeds the {_CAT_INPUT_MAX}-input ceiling"
+        )
+    if any(type(tensor) is not Tensor for tensor in tensors):
+        raise TypeError("cat: every input must be a Tensor")
+    tensors = tuple(tensors)
+    axis, output_shape, output_dtype, sizes, legacy_empty = _infer_cat_contract(
+        tensors,
+        dim,
+    )
+    arrays = []
+    for tensor, empty in zip(tensors, legacy_empty):
+        if empty and len(output_shape) != 1:
+            continue
+        arrays.append(tensor.data.astype(np.dtype(output_dtype), copy=False))
+    out_data = np.concatenate(arrays, axis=axis)
+    result = Tensor(
+        np.array(out_data, dtype=np.dtype(output_dtype), copy=True),
+        dtype=output_dtype,
+    )
 
     def backward(g):
-        # numpy.split takes split-points (cumulative), not section sizes.
         cuts = np.cumsum(sizes)[:-1].tolist()
-        parts = np.split(g.data, cuts, axis=dim)
-        return tuple(p.copy() for p in parts)
+        parts = np.split(g.data, cuts, axis=axis)
+        gradients = []
+        for part, tensor, empty in zip(parts, tensors, legacy_empty):
+            if tensor.dtype not in _CAT_FLOATING_DTYPES:
+                gradients.append(None)
+                continue
+            if empty and part.shape != tensor.shape:
+                part = part.reshape(tensor.shape)
+            gradients.append(
+                part.copy().astype(tensor.data.dtype, copy=False)
+            )
+        return tuple(gradients)
 
-    return _build_ctx(out, tensors, backward)
+    if (
+        output_dtype in _CAT_FLOATING_DTYPES
+        and any(
+            tensor.requires_grad and tensor.dtype in _CAT_FLOATING_DTYPES
+            for tensor in tensors
+        )
+    ):
+        return _build_ctx(result, tensors, backward)
+    return result
 
 
 def stack(tensors, dim: int = 0) -> Tensor:

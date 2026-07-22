@@ -33,15 +33,17 @@ from ._ir import (
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
-    OP_WHERE, OP_INDEX, OP_VAR, OP_CUMSUM, OP_TRIL, OP_TRIU, OP_MASK, OP_SCATTER_ADD, OP_BROADCAST_TO,
+    OP_WHERE, OP_INDEX, OP_VAR, OP_CUMSUM, OP_CONCAT, OP_NARROW, OP_TRIL, OP_TRIU, OP_MASK, OP_SCATTER_ADD, OP_BROADCAST_TO,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM, OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX, OP_CUSTOM,
 )
 from ._framework_contracts import (
     validate_broadcast_to_contract,
+    validate_cat_contract,
     validate_gather_contract,
     validate_gather_scatter_add_contract,
+    validate_narrow_contract,
     validate_var_contract,
     validate_cumsum_contract,
     validate_tril_contract,
@@ -273,6 +275,18 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
             raise GpuPlanUnsupported(
                 "GPU tensor plan does not support CUMSUM. "
                 "Add a portable scan lowering before GPU codegen."
+            )
+        elif node.op == OP_CONCAT:
+            validate_cat_contract(node)
+            raise GpuPlanUnsupported(
+                "GPU tensor plan does not support CONCAT. Add a canonical "
+                "variadic copy lowering before GPU codegen."
+            )
+        elif node.op == OP_NARROW:
+            validate_narrow_contract(node)
+            raise GpuPlanUnsupported(
+                "GPU tensor plan does not support NARROW. Add a canonical "
+                "bounds-checked slice lowering before GPU codegen."
             )
         elif node.op == OP_TRIL:
             validate_tril_contract(node)

@@ -28,6 +28,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.abs.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.tensor.cat.v1",
+      publicSurface: "torch.cat",
+      opcode: "CONCAT",
+      semanticState: "typed",
+      shapeContract: "variadic-existing-axis-concatenation-with-legacy-empty",
+      dtypeContract: "pytorch-dimensioned-tensor-promotion",
+      decisions: {
+        cpu: "supported-numpy-owning-concatenation-copy",
+        closureAutograd: "supported-static-axis-split",
+        symbolicVjp: "supported-static-axis-split",
+        functionalGrad: "supported-for-floating-output-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-axis-shift-and-captured-broadcast",
+        onnxExport: "supported-opset17-concat-with-casts-float32-int32-int64-bool",
+        tensorPlan: "refused-no-canonical-variadic-copy-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.cat.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.clamp.v1",
       publicSurface: "Tensor.clamp",
       opcode: "CLAMP",
@@ -383,7 +404,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(17);
+    expect(result.first.operations).toHaveLength(18);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");
@@ -419,7 +440,7 @@ boolean_version["version"]["major"] = True
 
 {
     "duplicate": error(b'{"schema":"a","schema":"b"}'),
-    "oversized": error(b"x" * (16 * 1024 + 1)),
+    "oversized": error(b"x" * (32 * 1024 + 1)),
     "mutable": error(bytearray(b"{}")),
     "extra": error(json.dumps(extra).encode("utf-8")),
     "unknownEnum": error(json.dumps(unknown_enum).encode("utf-8")),
@@ -429,7 +450,7 @@ boolean_version["version"]["major"] = True
 `);
 
     expect(errors.duplicate).toMatch(/^ValueError: .*duplicates field/u);
-    expect(errors.oversized).toMatch(/^ValueError: .*1\.\.16384 bytes/u);
+    expect(errors.oversized).toMatch(/^ValueError: .*1\.\.32768 bytes/u);
     expect(errors.mutable).toMatch(/^ValueError: .*immutable bytes/u);
     expect(errors.extra).toMatch(/^ValueError: .*fields changed/u);
     expect(errors.unknownEnum).toMatch(/^ValueError: .*not registered/u);

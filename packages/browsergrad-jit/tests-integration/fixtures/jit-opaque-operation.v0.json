@@ -5,9 +5,9 @@
     {
       "id": "jit.custom.shared-refusals.v0",
       "expected": {
-        "label": "cat",
+        "label": "stack",
         "labelField": "name",
-        "cpuValues": [[1, 2, 1, 2], [3, 4, 3, 4]],
+        "cpuValues": [[[1, 2], [3, 4]], [[1, 2], [3, 4]]],
         "cpuGradient": [[2, 2], [2, 2]],
         "symbolicVjpRegistered": false,
         "functionalGradError": "JitNotImplementedError",
@@ -80,7 +80,6 @@
           "batch_norm1d",
           "binary_cross_entropy",
           "binary_cross_entropy_with_logits",
-          "cat",
           "cross_entropy",
           "dropout",
           "interpolate",
@@ -96,7 +95,6 @@
           "batch_norm1d",
           "binary_cross_entropy",
           "binary_cross_entropy_with_logits",
-          "cat",
           "cross_entropy",
           "dropout",
           "interpolate",

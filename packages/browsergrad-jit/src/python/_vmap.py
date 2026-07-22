@@ -52,7 +52,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_NARROW, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -76,6 +76,7 @@ from ._errors import JitNotImplementedError
 from ._framework_contracts import (
     MASKED_FILL_CONTRACT_ID,
     validate_broadcast_to_contract,
+    validate_cat_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -83,6 +84,7 @@ from ._framework_contracts import (
     validate_triu_contract,
     validate_gather_contract,
     validate_gather_scatter_add_contract,
+    validate_narrow_contract,
     validate_prod_contract,
     validate_var_contract,
     validate_where_contract,
@@ -249,6 +251,81 @@ def _vmap_cumsum(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
         shape=inner.shape,
         dtype=node.dtype,
         arg={"axis": axis + 1, "reverse": reverse},
+    )
+
+
+@register_vmap(OP_CONCAT)
+def _vmap_concat(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    axis, _, legacy_empty = validate_cat_contract(node)
+    mapped_inputs = []
+    for source, empty in zip(node.inputs, legacy_empty):
+        inner = batched[id(source)]
+        if empty and len(node.shape) != 1:
+            continue
+        if inner.shape == (B,) + source.shape:
+            mapped_inputs.append(inner)
+            continue
+        if inner.shape != source.shape:
+            raise JitNotImplementedError(
+                "vmap concat requires each source to be captured or on the leading mapped axis"
+            )
+        singleton_shape = (1,) + source.shape
+        reshaped = UOp(
+            op=OP_RESHAPE,
+            inputs=(inner,),
+            shape=singleton_shape,
+            dtype=source.dtype,
+            arg={"new_shape": singleton_shape},
+        )
+        target_shape = (B,) + source.shape
+        mapped_inputs.append(UOp(
+            op=OP_BROADCAST_TO,
+            inputs=(reshaped,),
+            shape=target_shape,
+            dtype=source.dtype,
+            arg={"shape": target_shape},
+        ))
+    return UOp(
+        op=OP_CONCAT,
+        inputs=tuple(mapped_inputs),
+        shape=(B,) + node.shape,
+        dtype=node.dtype,
+        arg={"axis": axis + 1},
+    )
+
+
+@register_vmap(OP_NARROW)
+def _vmap_narrow(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    axis, start, length = validate_narrow_contract(node)
+    source = node.inputs[0]
+    inner = batched[id(source)]
+    if inner.shape == (B,) + source.shape:
+        return UOp(
+            op=OP_NARROW,
+            inputs=(inner,),
+            shape=(B,) + node.shape,
+            dtype=node.dtype,
+            arg={"axis": axis + 1, "start": start, "length": length},
+        )
+    if inner.shape != source.shape:
+        raise JitNotImplementedError(
+            "vmap narrow requires its source to be captured or on the leading mapped axis"
+        )
+    singleton_shape = (1,) + node.shape
+    reshaped = UOp(
+        op=OP_RESHAPE,
+        inputs=(node,),
+        shape=singleton_shape,
+        dtype=node.dtype,
+        arg={"new_shape": singleton_shape},
+    )
+    target_shape = (B,) + node.shape
+    return UOp(
+        op=OP_BROADCAST_TO,
+        inputs=(reshaped,),
+        shape=target_shape,
+        dtype=node.dtype,
+        arg={"shape": target_shape},
     )
 
 

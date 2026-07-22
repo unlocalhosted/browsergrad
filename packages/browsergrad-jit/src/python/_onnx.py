@@ -54,7 +54,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_NARROW, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -74,9 +74,11 @@ from ._ir import (
 from ._errors import JitError
 from ._framework_contracts import (
     validate_broadcast_to_contract,
+    validate_cat_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
+    validate_narrow_contract,
     validate_tril_contract,
     validate_triu_contract,
     validate_gather_contract,
@@ -551,6 +553,44 @@ def export_inference(
                 ))
                 slice_inputs.append(initializer_name)
             nodes.append(_emit_node(slice_inputs, [out_name], nm, "Slice"))
+        elif node.op == OP_CONCAT:
+            axis, _, legacy_empty = validate_cat_contract(node)
+            if node.dtype not in ("float32", "int32", "int64", "bool"):
+                raise OnnxUnmappableOp(
+                    f"export_inference: CONCAT dtype {node.dtype!r} is not exportable; "
+                    "supported output dtypes are float32, int32, int64, and bool"
+                )
+            suffix = next_node_id - 1
+            concat_inputs = []
+            for index, (source, source_name, empty) in enumerate(
+                zip(node.inputs, input_names, legacy_empty)
+            ):
+                if empty and len(node.shape) != 1:
+                    continue
+                concat_input = source_name
+                if source.dtype != node.dtype:
+                    cast_name = f"concat_cast_{suffix}_{index}"
+                    nodes.append(_emit_node(
+                        [source_name],
+                        [cast_name],
+                        f"{nm}_cast_{index}",
+                        "Cast",
+                        [_emit_attr_int("to", _dtype_or_die(node.dtype))],
+                    ))
+                    concat_input = cast_name
+                concat_inputs.append(concat_input)
+            nodes.append(_emit_node(
+                concat_inputs,
+                [out_name],
+                nm,
+                "Concat",
+                [_emit_attr_int("axis", axis)],
+            ))
+        elif node.op == OP_NARROW:
+            validate_narrow_contract(node)
+            raise OnnxUnmappableOp(
+                "export_inference: gradient-only NARROW is not exportable in v0"
+            )
         elif node.op == OP_CUMSUM:
             axis, reverse = validate_cumsum_contract(node)
             if node.dtype not in ("float32", "int32", "int64"):
@@ -751,7 +791,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

@@ -53,6 +53,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   contract, preserve floating dtype or promote integral defaults to int64,
   return owning exact-dtype results, and propagate the opposite-direction scan
   through autograd. Unsupported mutation through `out=` fails explicitly.
+- Top-level `cat` now shares JIT's strict variadic axis, shape, dtype-promotion,
+  legacy-empty, and allocation contract. It accepts exact tensors only,
+  returns an owning promoted-dtype result, splits floating gradients in source
+  dtype, and refuses unsupported `out=` mutation explicitly.
 
 ## [0.5.2] — 2026-07-15
 

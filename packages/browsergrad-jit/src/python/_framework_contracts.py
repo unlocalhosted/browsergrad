@@ -25,9 +25,10 @@ REPEAT_FACTOR_MAX = 1 << 30
 REPEAT_RANK_MAX = 32
 VAR_CORRECTION_MIN = -(1 << 31)
 VAR_CORRECTION_MAX = (1 << 31) - 1
+CAT_INPUT_MAX = 1024
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
-_REGISTRY_BYTE_LIMIT = 16 * 1024
+_REGISTRY_BYTE_LIMIT = 32 * 1024
 _ROOT_FIELDS = frozenset({"schema", "version", "operations"})
 _VERSION_FIELDS = frozenset({"major", "minor"})
 _OPERATION_FIELDS = frozenset({
@@ -61,6 +62,7 @@ _ENUMS = {
         "preserve-batched-lower-triangular",
         "preserve-batched-upper-triangular",
         "preserve-single-axis-inclusive-scan",
+        "variadic-existing-axis-concatenation-with-legacy-empty",
         "same-rank-index-shaped-gather",
         "preserve-source-with-broadcast-bool-mask",
         "static-broadcast-with-existing-dim-minus-one",
@@ -76,12 +78,14 @@ _ENUMS = {
         "preserve-real-numeric-input",
         "preserve-source-require-int64-index",
         "promote-integral-default-or-explicit-scan-dtype",
+        "pytorch-dimensioned-tensor-promotion",
     }),
     "cpu": frozenset({
         "supported-numpy-dtype-preserving",
         "supported-numpy-owning-copy",
         "supported-numpy-owning-copy-with-range-check",
         "supported-numpy-owning-scan-copy",
+        "supported-numpy-owning-concatenation-copy",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -99,6 +103,7 @@ _ENUMS = {
         "supported-zero-aware-product-rule",
         "supported-zero-derivative",
         "supported-opposite-direction-inclusive-scan-for-floating-source-and-output",
+        "supported-static-axis-split",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -116,10 +121,12 @@ _ENUMS = {
         "supported-zero-aware-product-rule",
         "supported-zero-derivative",
         "supported-opposite-direction-inclusive-scan-for-floating-source-and-output",
+        "supported-static-axis-split",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
         "supported-for-floating-source-and-output-via-symbolic-vjp",
+        "supported-for-floating-output-via-symbolic-vjp",
     }),
     "vmap": frozenset({
         "supported-leading-batch-axis",
@@ -129,6 +136,7 @@ _ENUMS = {
         "supported-leading-batch-axis-preserve-matrix-axes",
         "supported-leading-batch-axis-with-unit-repeat",
         "supported-leading-batch-axis-with-scan-axis-shift",
+        "supported-leading-batch-axis-with-axis-shift-and-captured-broadcast",
     }),
     "onnxExport": frozenset({
         "supported-opset17-clip-export-dtypes",
@@ -143,12 +151,14 @@ _ENUMS = {
         "supported-opset17-tile-float32-int32-int64-bool",
         "supported-opset17-unsqueeze-tile-reshape-float32-int32-int64-bool",
         "supported-opset17-cumsum-with-cast-float32-int32-int64",
+        "supported-opset17-concat-with-casts-float32-int32-int64-bool",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
         "refused-no-deterministic-index-lowering",
         "refused-no-portable-masked-selection",
         "refused-no-portable-triangular-selection",
+        "refused-no-canonical-variadic-copy-lowering",
         "refused-no-canonical-tile-layout-profile",
         "refused-no-canonical-selected-axis-replication-profile",
         "refused-no-portable-lowering",
@@ -174,6 +184,30 @@ _FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
 _MASKED_FILL_DTYPES = _REAL_NUMERIC_DTYPES | frozenset({"bool"})
 _TRIANGULAR_DTYPES = _MASKED_FILL_DTYPES
 _CUMSUM_DTYPES = _MASKED_FILL_DTYPES
+_CAT_DTYPES = _MASKED_FILL_DTYPES
+_CAT_FLOATING_RANK = MappingProxyType({
+    "float16": 0,
+    "float32": 1,
+    "float64": 2,
+})
+_CAT_SIGNED_BITS = MappingProxyType({
+    "int8": 8,
+    "int16": 16,
+    "int32": 32,
+    "int64": 64,
+})
+_CAT_DTYPE_BYTES = MappingProxyType({
+    "bool": 1,
+    "uint8": 1,
+    "int8": 1,
+    "int16": 2,
+    "float16": 2,
+    "int32": 4,
+    "float32": 4,
+    "int64": 8,
+    "float64": 8,
+})
+CAT_OUTPUT_BYTE_MAX = 1 << 28
 _UNARY_DTYPE_PROFILES = MappingProxyType({
     "preserve-floating-input": (_FLOATING_DTYPES, "floating"),
     "preserve-real-numeric-input": (_REAL_NUMERIC_DTYPES, "real numeric"),
@@ -478,6 +512,179 @@ def _validate_flip(node: Any, contract: FrameworkOperationContract) -> int:
     if axis < 0 or axis >= rank:
         raise ShapeError(f"FLIP arg.axis {axis} out of range for rank {rank}")
     return axis
+
+
+def promote_cat_dtypes(dtypes: tuple[str, ...]) -> str:
+    if type(dtypes) is not tuple or not dtypes:
+        raise ShapeError("CONCAT dtype promotion requires a non-empty tuple")
+    for index, dtype in enumerate(dtypes):
+        if dtype not in _CAT_DTYPES:
+            raise ShapeError(
+                f"CONCAT input {index} has unsupported dtype {dtype!r}"
+            )
+    floating = [dtype for dtype in dtypes if dtype in _CAT_FLOATING_RANK]
+    if floating:
+        return max(floating, key=_CAT_FLOATING_RANK.__getitem__)
+    signed = [dtype for dtype in dtypes if dtype in _CAT_SIGNED_BITS]
+    has_uint8 = "uint8" in dtypes
+    if signed:
+        widest = max(signed, key=_CAT_SIGNED_BITS.__getitem__)
+        if has_uint8 and _CAT_SIGNED_BITS[widest] == 8:
+            return "int16"
+        return widest
+    if has_uint8:
+        return "uint8"
+    return "bool"
+
+
+def infer_cat_contract(
+    inputs: tuple[Any, ...],
+    axis: int,
+) -> Tuple[int, Tuple[int, ...], str, Tuple[int, ...], Tuple[bool, ...]]:
+    if type(inputs) is not tuple:
+        raise ShapeError("CONCAT inputs must be a plain tuple")
+    if not inputs:
+        raise ShapeError("CONCAT requires at least one input")
+    if len(inputs) > CAT_INPUT_MAX:
+        raise ShapeError(
+            f"CONCAT input count {len(inputs)} exceeds the {CAT_INPUT_MAX}-input ceiling"
+        )
+    if type(axis) is not int:
+        raise ShapeError("CONCAT arg.axis must be a normalized integer")
+
+    shapes = []
+    dtypes = []
+    legacy_empty = []
+    for index, source in enumerate(inputs):
+        shape = getattr(source, "shape", None)
+        if type(shape) is not tuple:
+            raise ShapeError(f"CONCAT input {index} shape must be a tuple")
+        for shape_axis, extent in enumerate(shape):
+            if type(extent) is not int or extent < 0:
+                raise ShapeError(
+                    f"CONCAT input {index} shape[{shape_axis}] must be a non-negative integer"
+                )
+        shapes.append(shape)
+        dtypes.append(getattr(source, "dtype", None))
+        legacy_empty.append(shape == (0,))
+
+    substantive = [shape for shape, empty in zip(shapes, legacy_empty) if not empty]
+    reference = substantive[0] if substantive else (0,)
+    rank = len(reference)
+    if rank == 0:
+        raise ShapeError("CONCAT does not accept scalar inputs")
+    if axis < 0 or axis >= rank:
+        raise ShapeError(f"CONCAT arg.axis {axis} out of range for rank {rank}")
+
+    output_shape = list(reference)
+    output_shape[axis] = 0
+    sizes = []
+    for index, (shape, empty) in enumerate(zip(shapes, legacy_empty)):
+        if empty:
+            sizes.append(0)
+            continue
+        if len(shape) != rank:
+            raise ShapeError(
+                f"CONCAT input {index} rank {len(shape)} does not match rank {rank}"
+            )
+        for shape_axis, (actual, expected) in enumerate(zip(shape, reference)):
+            if shape_axis != axis and actual != expected:
+                raise ShapeError(
+                    f"CONCAT input {index} shape {shape} does not match {reference} "
+                    f"outside axis {axis}"
+                )
+        sizes.append(shape[axis])
+        output_shape[axis] += shape[axis]
+
+    output_dtype = promote_cat_dtypes(tuple(dtypes))
+    elements = 1
+    for extent in output_shape:
+        elements *= extent
+    output_bytes = elements * _CAT_DTYPE_BYTES[output_dtype]
+    if output_bytes > CAT_OUTPUT_BYTE_MAX:
+        raise ShapeError(
+            f"CONCAT output requires {output_bytes} bytes, exceeding the "
+            f"{CAT_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    return (
+        axis,
+        tuple(output_shape),
+        output_dtype,
+        tuple(sizes),
+        tuple(legacy_empty),
+    )
+
+
+def _validate_cat(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> Tuple[int, Tuple[int, ...], Tuple[bool, ...]]:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("CONCAT arg must be a plain dict")
+    fields = set(arg)
+    if "axis" not in fields or not fields.issubset({"axis", "vjp_of"}):
+        raise ShapeError("CONCAT arg fields must be exactly 'axis' plus optional 'vjp_of'")
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("CONCAT arg.vjp_of must reference a UOp")
+    _, output_shape, output_dtype, sizes, legacy_empty = infer_cat_contract(
+        getattr(node, "inputs", ()),
+        arg["axis"],
+    )
+    if getattr(node, "shape", None) != output_shape:
+        raise ShapeError(
+            f"CONCAT output shape must be {output_shape}, got {getattr(node, 'shape', None)}"
+        )
+    if getattr(node, "dtype", None) != output_dtype:
+        raise ShapeError(
+            f"CONCAT output dtype must be {output_dtype!r}, got {getattr(node, 'dtype', None)!r}"
+        )
+    return arg["axis"], sizes, legacy_empty
+
+
+def _validate_narrow(node: Any) -> Tuple[int, int, int]:
+    inputs = _require_single_input_tuple(node, "NARROW")
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("NARROW arg must be a plain dict")
+    fields = set(arg)
+    if not {"axis", "start", "length"}.issubset(fields) or not fields.issubset(
+        {"axis", "start", "length", "vjp_of"}
+    ):
+        raise ShapeError(
+            "NARROW arg fields must be exactly 'axis', 'start', and 'length' "
+            "plus optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("NARROW arg.vjp_of must reference a UOp")
+    source = inputs[0]
+    source_shape = getattr(source, "shape", None)
+    if type(source_shape) is not tuple or not source_shape:
+        raise ShapeError("NARROW requires an input with rank at least one")
+    axis = arg["axis"]
+    start = arg["start"]
+    length = arg["length"]
+    if type(axis) is not int or axis < 0 or axis >= len(source_shape):
+        raise ShapeError(f"NARROW arg.axis {axis!r} is invalid for rank {len(source_shape)}")
+    if type(start) is not int or start < 0:
+        raise ShapeError("NARROW arg.start must be a non-negative integer")
+    if type(length) is not int or length < 0:
+        raise ShapeError("NARROW arg.length must be a non-negative integer")
+    if start + length > source_shape[axis]:
+        raise ShapeError(
+            f"NARROW range [{start}, {start + length}) exceeds axis extent {source_shape[axis]}"
+        )
+    expected_shape = list(source_shape)
+    expected_shape[axis] = length
+    if getattr(node, "shape", None) != tuple(expected_shape):
+        raise ShapeError(f"NARROW output shape must be {tuple(expected_shape)}")
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("NARROW must preserve source dtype")
+    return axis, start, length
 
 
 def _validate_cumsum(
@@ -1001,6 +1208,7 @@ def _validate_repeat_interleave(
 
 _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = MappingProxyType({
     "browsergrad.jit.framework.tensor.abs.v1": _validate_typed_unary,
+    "browsergrad.jit.framework.tensor.cat.v1": _validate_cat,
     "browsergrad.jit.framework.tensor.clamp.v1": _validate_clamp,
     "browsergrad.jit.framework.tensor.cos.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.cumsum.v1": _validate_cumsum,
@@ -1027,10 +1235,25 @@ _BY_OPCODE: Mapping[str, _ExecutableFrameworkOperationContract] = MappingProxyTy
     )
     for record in _RECORDS
 })
+_INTERNAL_VALIDATORS: Mapping[str, Callable[[Any], Any]] = MappingProxyType({
+    "NARROW": _validate_narrow,
+})
 
 
 def has_framework_operation_contract(opcode: str) -> bool:
     return opcode in _BY_OPCODE
+
+
+def has_internal_operation_contract(opcode: str) -> bool:
+    return opcode in _INTERNAL_VALIDATORS
+
+
+def validate_internal_operation_contract(node: Any) -> Any:
+    opcode = getattr(node, "op", None)
+    validator = _INTERNAL_VALIDATORS.get(opcode)
+    if validator is None:
+        raise ShapeError(f"no typed internal-operation contract for opcode {opcode!r}")
+    return validator(node)
 
 
 def validate_framework_operation_contract(
@@ -1056,6 +1279,19 @@ def validate_clamp_contract(node: Any) -> Tuple[Optional[float], Optional[float]
     if record.contract_id != "browsergrad.jit.framework.tensor.clamp.v1":
         raise ShapeError("CLAMP resolved to the wrong framework-operation contract")
     return normalized
+
+
+def validate_cat_contract(
+    node: Any,
+) -> Tuple[int, Tuple[int, ...], Tuple[bool, ...]]:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.cat.v1":
+        raise ShapeError("CONCAT resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_narrow_contract(node: Any) -> Tuple[int, int, int]:
+    return validate_internal_operation_contract(node)
 
 
 def validate_flip_contract(node: Any) -> int:
@@ -1195,12 +1431,19 @@ __all__ = [
     "REPEAT_RANK_MAX",
     "VAR_CORRECTION_MIN",
     "VAR_CORRECTION_MAX",
+    "CAT_INPUT_MAX",
+    "CAT_OUTPUT_BYTE_MAX",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "framework_operation_support",
     "has_framework_operation_contract",
+    "has_internal_operation_contract",
+    "infer_cat_contract",
+    "promote_cat_dtypes",
     "validate_framework_operation_contract",
+    "validate_internal_operation_contract",
     "validate_broadcast_to_contract",
+    "validate_cat_contract",
     "validate_clamp_contract",
     "validate_cumsum_contract",
     "validate_flip_contract",
@@ -1209,6 +1452,7 @@ __all__ = [
     "validate_tril_contract",
     "validate_triu_contract",
     "validate_masked_fill_contract",
+    "validate_narrow_contract",
     "validate_where_contract",
     "validate_prod_contract",
     "validate_var_contract",

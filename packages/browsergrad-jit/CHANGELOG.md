@@ -68,13 +68,18 @@ contract in the README](README.md#compatibility-contract).
   dtype selection, owning CPU realization, opposite-direction closure and
   symbolic VJP, batch-axis-aware vmap, exact ONNX `Cast`/`CumSum`, and explicit
   tensor-plan/WebGPU refusal until portable scan lowering exists.
+- `cat` now emits typed variadic `CONCAT` with strict axis/shape/resource
+  validation, dimensioned-tensor dtype promotion, legacy `(0,)` empty support,
+  owning CPU realization, typed static-split closure/symbolic VJP,
+  captured-input-aware vmap, exact ONNX `Cast`/`Concat`, and explicit
+  tensor-plan/WebGPU refusal until canonical variadic copy lowering exists.
 
 ### Added
 
 - Added the bounded v1 executable framework-operation registry and detached
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
-  current table contains `ABS`, `CLAMP`, `COS`, `CUMSUM`, `BROADCAST_TO`, `FLIP`,
+  current table contains `ABS`, `CLAMP`, `CONCAT`, `COS`, `CUMSUM`, `BROADCAST_TO`, `FLIP`,
   `INDEX`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`, `TRIL`,
   `TRIU`, `VAR`, and masked-fill `WHERE`.
 
