@@ -70,7 +70,7 @@ from ._ir import (
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_PAD,
     OP_SORT_INDICES, OP_SORT_VALUES,
-    OP_TOPK_INDICES, OP_TOPK_VALUES,
+    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER,
     OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
@@ -85,6 +85,7 @@ from ._framework_contracts import (
     validate_sort_values_contract,
     validate_topk_indices_contract,
     validate_topk_values_contract,
+    validate_scatter_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -848,6 +849,37 @@ def export_inference(
                 "GatherElements",
                 [_emit_attr_int("axis", axis)],
             ))
+        elif node.op == OP_SCATTER:
+            axis = validate_scatter_contract(node)
+            if node.dtype not in ("float32", "int32", "int64", "bool"):
+                raise OnnxUnmappableOp(
+                    f"export_inference: SCATTER dtype {node.dtype!r} is not "
+                    "exportable; supported dtypes are float32, int32, int64, and bool"
+                )
+            updates_name = input_names[2]
+            if node.inputs[2].shape == ():
+                suffix = next_node_id - 1
+                shape_name = f"const_scatter_shape_{suffix}"
+                updates_name = f"expanded_scatter_source_{suffix}"
+                initializers.append(_emit_tensor_proto(
+                    shape_name,
+                    DT_INT64,
+                    (len(node.inputs[1].shape),),
+                    _i64_initializer_for_shape(node.inputs[1].shape),
+                ))
+                nodes.append(_emit_node(
+                    [input_names[2], shape_name],
+                    [updates_name],
+                    f"{nm}_expand_source",
+                    "Expand",
+                ))
+            nodes.append(_emit_node(
+                [input_names[0], input_names[1], updates_name],
+                [out_name],
+                nm,
+                "ScatterElements",
+                [_emit_attr_int("axis", axis)],
+            ))
         elif node.op == OP_PROD:
             axes, keepdims, _ = validate_prod_contract(node)
             if node.dtype not in ("float32", "int32", "int64"):
@@ -980,7 +1012,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES, OP_TOPK_INDICES, OP_TOPK_VALUES, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES, OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

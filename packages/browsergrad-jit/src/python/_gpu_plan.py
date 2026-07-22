@@ -34,7 +34,7 @@ from ._ir import (
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_SORT_INDICES, OP_SORT_VALUES,
-    OP_TOPK_INDICES, OP_TOPK_VALUES,
+    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER,
     OP_WHERE, OP_INDEX, OP_VAR, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_NARROW, OP_TRIL, OP_TRIU, OP_MASK, OP_SCATTER_ADD, OP_BROADCAST_TO,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
@@ -49,6 +49,7 @@ from ._framework_contracts import (
     validate_sort_values_contract,
     validate_topk_indices_contract,
     validate_topk_values_contract,
+    validate_scatter_contract,
     validate_gather_contract,
     validate_gather_scatter_add_contract,
     validate_narrow_contract,
@@ -275,6 +276,8 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
         validate_topk_indices_contract(root)
     elif root.op == OP_TOPK_VALUES:
         validate_topk_values_contract(root)
+    elif root.op == OP_SCATTER:
+        validate_scatter_contract(root)
     step_index: Dict[int, int] = {id(node): i for i, node in enumerate(order)}
     last_use: Dict[int, int] = {id(node): i for i, node in enumerate(order)}
     for i, node in enumerate(order):
@@ -282,6 +285,12 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
             validate_broadcast_to_contract(node)
         elif node.op == OP_INDEX:
             validate_gather_contract(node)
+        elif node.op == OP_SCATTER:
+            validate_scatter_contract(node)
+            raise GpuPlanUnsupported(
+                "GPU tensor plan does not support SCATTER. Add a canonical "
+                "deterministic overwrite lowering before GPU codegen."
+            )
         elif node.op == OP_SCATTER_ADD:
             validate_gather_scatter_add_contract(node)
         elif node.op == OP_VAR:

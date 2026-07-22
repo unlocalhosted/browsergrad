@@ -50,6 +50,7 @@ from ._ir import (
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_SORT_INDICES, OP_SORT_VALUES,
     OP_TOPK_INDICES, OP_TOPK_VALUES,
+    OP_SCATTER,
     OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO, OP_INDEX,
 )
 from ._errors import JitNotImplementedError, ShapeError, RealizationError
@@ -63,6 +64,8 @@ from ._framework_contracts import (
     infer_stack_contract,
     normalize_sort_request,
     normalize_topk_request,
+    normalize_scatter_request,
+    scatter_index_violation,
 )
 
 if TYPE_CHECKING:
@@ -279,6 +282,38 @@ def _normalize_masked_fill_value(value: Any, dtype: str) -> Any:
     if normalized < int(bounds.min) or normalized > int(bounds.max):
         raise ValueError(
             f"masked_fill: value {normalized} is out of range for {dtype}"
+        )
+    return normalized
+
+
+def _normalize_scatter_source_value(value: Any, dtype: str) -> Any:
+    if dtype == "bool":
+        if type(value) not in (bool, np.bool_):
+            raise TypeError(
+                "scatter: a boolean target requires a built-in or NumPy boolean source"
+            )
+        return bool(value)
+    if type(value) not in _MASKED_FILL_VALUE_TYPES:
+        raise TypeError(
+            "scatter: scalar source must be a built-in or NumPy real scalar, "
+            f"got {type(value).__name__}"
+        )
+    if dtype.startswith("float"):
+        with np.errstate(over="ignore", invalid="ignore"):
+            return float(np.asarray(value, dtype=np.dtype(dtype)).item())
+    if type(value) in (float, np.float16, np.float32, np.float64):
+        numeric = float(value)
+        if not np.isfinite(numeric) or not numeric.is_integer():
+            raise ValueError(
+                f"scatter: scalar source {numeric!r} is not an exact finite integer for {dtype}"
+            )
+        normalized = int(numeric)
+    else:
+        normalized = int(value)
+    bounds = np.iinfo(np.dtype(dtype))
+    if normalized < int(bounds.min) or normalized > int(bounds.max):
+        raise ValueError(
+            f"scatter: scalar source {normalized} is out of range for {dtype}"
         )
     return normalized
 
@@ -1548,25 +1583,15 @@ class TensorProxy:
     def masked_fill_(self, mask: Any, value: Any) -> "TensorProxy":
         return self.masked_fill(mask, value)
 
-    def scatter(self, dim: int, index: Any, src: Any) -> "TensorProxy":
-        index_proxy = _to_proxy(index, self._get_session())
-        src_proxy = _to_proxy(src, self._get_session())
-        axis = int(dim) % self.ndim
-
-        def _scatter_forward(x_arr: np.ndarray, idx_arr: np.ndarray, src_arr: np.ndarray) -> np.ndarray:
-            out = x_arr.copy()
-            source = np.broadcast_to(src_arr, idx_arr.shape).astype(x_arr.dtype, copy=False)
-            np.put_along_axis(out, idx_arr.astype(np.int64), source, axis=axis)
-            return out
-
-        uop = UOp(
-            op=OP_CUSTOM,
-            inputs=(self._uop, index_proxy._uop, src_proxy._uop),
-            shape=self.shape,
-            dtype=self._uop.dtype,
-            arg={"fn": _scatter_forward, "captures": (), "name": "scatter"},
-        )
-        return TensorProxy(uop, session=self._get_session(), requires_grad=False)
+    def scatter(
+        self,
+        dim: Any,
+        index: Any,
+        src: Any,
+        *,
+        reduce: Any = None,
+    ) -> "TensorProxy":
+        return scatter(self, dim, index, src, reduce=reduce)
 
     def reshape(self, *shape: Any) -> "TensorProxy":
         # Accept reshape(3, 4) or reshape((3, 4)).
@@ -2671,6 +2696,104 @@ def topk(
         ctx=ctx,
     )
     return values, indices
+
+
+def scatter(
+    input: Any,
+    dim: Any,
+    index: Any,
+    src: Any,
+    *,
+    reduce: Any = None,
+) -> "TensorProxy":
+    if type(input) is not TensorProxy:
+        raise TypeError(
+            f"scatter: input must be a TensorProxy, got {type(input).__name__}"
+        )
+    if type(index) is not TensorProxy:
+        raise TypeError(
+            f"scatter: index must be a TensorProxy, got {type(index).__name__}"
+        )
+    if reduce is not None:
+        raise JitNotImplementedError(
+            "scatter: reduce= is outside typed overwrite scatter; use a typed "
+            "scatter_reduce operation when available"
+        )
+    target = input
+    session = target._get_session()
+    index_proxy = _to_proxy(index, session)
+    if type(src) is TensorProxy:
+        source_proxy = _to_proxy(src, session)
+    else:
+        normalized_source = _normalize_scatter_source_value(src, target.dtype)
+        source_uop = UOp(
+            op=OP_CONST,
+            inputs=(),
+            shape=(),
+            dtype=target.dtype,
+            arg={"value": normalized_source},
+        )
+        source_proxy = TensorProxy(source_uop, session=session)
+    axis = normalize_scatter_request(
+        target._uop,
+        index_proxy._uop,
+        source_proxy._uop,
+        dim,
+    )
+    uop = UOp(
+        op=OP_SCATTER,
+        inputs=(target._uop, index_proxy._uop, source_proxy._uop),
+        shape=target.shape,
+        dtype=target.dtype,
+        arg={"dim": axis},
+    )
+
+    def _bw(
+        dy: np.ndarray,
+        ins: Tuple[np.ndarray, ...],
+    ) -> Tuple[Optional[np.ndarray], ...]:
+        target_array, index_array, source_array = ins
+        violation = scatter_index_violation(
+            index_array,
+            axis,
+            target_array.shape[axis],
+        )
+        if violation is not None:
+            raise ShapeError(violation)
+        target_gradient = np.array(dy, dtype=target_array.dtype, copy=True)
+        np.put_along_axis(
+            target_gradient,
+            index_array,
+            np.asarray(0, dtype=target_array.dtype),
+            axis=axis,
+        )
+        source_gradient = None
+        if source_array.ndim != 0:
+            source_gradient = np.array(
+                np.take_along_axis(dy, index_array, axis=axis),
+                dtype=source_array.dtype,
+                copy=True,
+            )
+        return target_gradient, None, source_gradient
+
+    floating = target.dtype in _VARIADIC_FLOATING_DTYPES
+    requires = floating and (
+        _should_track(target) or _should_track(source_proxy)
+    )
+    ctx = (
+        _BackwardCtx(
+            fn=_bw,
+            input_proxies=(target, index_proxy, source_proxy),
+        )
+        if requires
+        else None
+    )
+    return TensorProxy(
+        uop,
+        session=session,
+        requires_grad=requires,
+        ctx=ctx,
+    )
 
 
 def triu(input: Any, diagonal: int = 0) -> "TensorProxy":

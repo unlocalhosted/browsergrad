@@ -343,6 +343,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.repeat-interleave.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.tensor.scatter.v1",
+      publicSurface: "torch.scatter",
+      opcode: "SCATTER",
+      semanticState: "typed",
+      shapeContract: "same-rank-unique-index-overwrite-scatter",
+      dtypeContract: "preserve-target-require-int64-index-matching-source",
+      decisions: {
+        cpu: "supported-numpy-owning-unique-overwrite-scatter",
+        closureAutograd: "supported-unique-overwrite-scatter",
+        symbolicVjp: "supported-unique-overwrite-scatter",
+        functionalGrad: "supported-for-floating-target-and-source-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-scatter-captured-broadcast",
+        onnxExport: "supported-opset17-scatter-elements-float32-int32-int64-bool",
+        tensorPlan: "refused-no-canonical-scatter-overwrite-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.scatter.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.sign.v1",
       publicSurface: "Tensor.sign",
       opcode: "SIGN",
@@ -530,7 +551,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(24);
+    expect(result.first.operations).toHaveLength(25);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

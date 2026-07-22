@@ -83,7 +83,7 @@ class PlanOnlyGpuBuffers:
     expect(result).toEqual(expected("jit.custom.shared-refusals.v0"));
   });
 
-  it("pins conditional backward and the two silently disconnected callbacks", async () => {
+  it("pins conditional backward and the remaining silently disconnected callback", async () => {
     const target = await getJitTarget();
     const result = await target.run<Record<string, unknown>>(`
 import browsergrad_jit as bg
@@ -101,15 +101,12 @@ except Exception as exc:
     bilinear_error = type(exc).__name__
 
 x = bg.from_numpy(np.array([[4.0, 1.0], [3.0, 2.0]], dtype=np.float32), requires_grad=True)
-index = bg.from_numpy(np.array([[0, 1], [1, 0]], dtype=np.int64))
-source = bg.from_numpy(np.array([[8.0, 9.0], [10.0, 11.0]], dtype=np.float32))
-scatter = x.scatter(1, index, source)
 einsum = bg.einsum("ij,jk->ik", x, bg.ones(2, 2))
-forward_only = [einsum, scatter]
+forward_only = [einsum]
 for value in forward_only:
     value.numpy()
 
-disconnected = bg.func.grad(lambda value: value.scatter(1, index, source).sum())(x)
+disconnected = bg.func.grad(lambda value: bg.einsum("ij,jk->ik", value, bg.ones(2, 2)).sum())(x)
 {
     "nearestGradient": nearest_input.grad.numpy().reshape(-1).tolist(),
     "bilinearBackwardError": bilinear_error,

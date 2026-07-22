@@ -19,7 +19,7 @@ hash the same. This is what lets the trace cache and pipeline cache
 
 Design notes:
 
-  * 75 opcodes total — corrects PRD-005's nominal 19. The extras are
+  * 76 opcodes total — corrects PRD-005's nominal 19. The extras are
     documented per-opcode below. Headline additions: RANDOM (dropout +
     nn.init at trace time), CMP (boolean results), CONV1D/CONV2D/CONV3D
     primitive CNN ops and backward refs, CUSTOM
@@ -134,6 +134,7 @@ OP_SORT_INDICES = "SORT_INDICES"  # arg: {axis, descending, stable}, inputs: (so
 OP_SORT_VALUES = "SORT_VALUES"    # same arg, inputs: (source, SORT_INDICES)
 OP_TOPK_INDICES = "TOPK_INDICES"  # arg: {axis, k, largest, sorted}, inputs: (source,)
 OP_TOPK_VALUES = "TOPK_VALUES"    # same arg, inputs: (source, TOPK_INDICES)
+OP_SCATTER = "SCATTER"  # arg: {dim}, inputs: (target, int64 index, source)
 OP_WHERE   = "WHERE"
 OP_INDEX   = "INDEX"    # arg: {dim: int}, inputs: (source, int64 index) ← gather elements
 OP_MASK    = "MASK"     # arg: None                    ← bool-mask indexing
@@ -190,7 +191,7 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_CONV3D_BACKWARD_BIAS, OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS, OP_REDUCE,
     OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES,
-    OP_TOPK_INDICES, OP_TOPK_VALUES,
+    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     # Fusion-emitted (PRD-006)
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
@@ -201,7 +202,7 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 })
-assert len(ALL_OPS) == 75, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
+assert len(ALL_OPS) == 76, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -442,6 +443,8 @@ __all__ = [
     "OP_LAYER_NORM_BACKWARD_WEIGHT", "OP_LAYER_NORM_BACKWARD_BIAS",
     "OP_REDUCE",
     "OP_RESHAPE", "OP_PERMUTE", "OP_SLICE", "OP_PAD",
+    "OP_SORT_INDICES", "OP_SORT_VALUES", "OP_TOPK_INDICES", "OP_TOPK_VALUES",
+    "OP_SCATTER",
     "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
     "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",
     "OP_SCATTER_ADD", "OP_BROADCAST_TO",

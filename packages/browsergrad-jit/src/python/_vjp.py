@@ -62,7 +62,7 @@ from ._ir import (
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_SORT_INDICES, OP_SORT_VALUES,
-    OP_TOPK_INDICES, OP_TOPK_VALUES,
+    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER,
     OP_CONST, OP_BROADCAST_TO, OP_WHERE, OP_INDEX, OP_SCATTER_ADD,
     OP_ISNAN,
 )
@@ -75,6 +75,7 @@ from ._framework_contracts import (
     validate_sort_values_contract,
     validate_topk_indices_contract,
     validate_topk_values_contract,
+    validate_scatter_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -544,6 +545,46 @@ def _vjp_topk_values(
         arg={"dim": axis},
     )
     return gradient, None
+
+
+@register_vjp(OP_SCATTER)
+def _vjp_scatter(
+    output: UOp,
+    inputs: Tuple[UOp, ...],
+    dy: UOp,
+) -> Tuple[Optional[UOp], ...]:
+    """Differentiate deterministic unique overwrite into target and source."""
+    axis = validate_scatter_contract(output)
+    target, index, source = inputs
+    if target.dtype not in ("float16", "float32", "float64"):
+        return None, None, None
+    zero = _vjp_uop(
+        OP_CONST,
+        (),
+        (),
+        target.dtype,
+        output,
+        arg={"value": 0},
+    )
+    target_gradient = _vjp_uop(
+        OP_SCATTER,
+        (dy, index, zero),
+        target.shape,
+        target.dtype,
+        output,
+        arg={"dim": axis},
+    )
+    if source.shape == ():
+        return target_gradient, None, None
+    source_gradient = _vjp_uop(
+        OP_INDEX,
+        (dy, index),
+        source.shape,
+        source.dtype,
+        output,
+        arg={"dim": axis},
+    )
+    return target_gradient, None, source_gradient
 
 
 @register_vjp(OP_CUMSUM)

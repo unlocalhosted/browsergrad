@@ -27,11 +27,8 @@
       "expected": {
         "nearestGradient": [4],
         "bilinearBackwardError": "NotImplementedError",
-        "forwardOnlyLabels": [
-          "einsum",
-          "scatter"
-        ],
-        "forwardOnlyRequiresGrad": [false, false],
+        "forwardOnlyLabels": ["einsum"],
+        "forwardOnlyRequiresGrad": [false],
         "functionalDisconnectedGradient": [0, 0, 0, 0]
       }
     },

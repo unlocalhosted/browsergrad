@@ -94,6 +94,11 @@ contract in the README](README.md#compatibility-contract).
   scatter closure/symbolic VJP, batch-safe vmap, exact selected-k ONNX
   `TopK`/`GatherElements`, bounded output/workspace, and explicit
   tensor-plan/WebGPU refusal.
+- `torch.scatter` now emits typed `SCATTER` with an exact axis, int64 index,
+  matching tensor or exact scalar source, unique in-range overwrite semantics,
+  owning dtype-preserving CPU output, target/source closure and symbolic VJP,
+  captured-input-safe vmap, ONNX `ScatterElements`, bounded output/workspace,
+  and explicit reduction/tensor-plan/WebGPU refusal.
 
 ### Added
 
@@ -102,7 +107,7 @@ contract in the README](README.md#compatibility-contract).
   come from the same validator bindings used by execution boundaries; the
   current table contains `ABS`, `CLAMP`, `CONCAT`, `COS`, `CUMSUM`, `BROADCAST_TO`, `FLIP`,
   `INDEX`, `PAD`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`,
-  `SORT_INDICES`, `SORT_VALUES`, `STACK`, `TOPK_INDICES`, `TOPK_VALUES`,
+  `SCATTER`, `SORT_INDICES`, `SORT_VALUES`, `STACK`, `TOPK_INDICES`, `TOPK_VALUES`,
   `TRIL`, `TRIU`, `VAR`, and masked-fill `WHERE`.
 
 ## [0.9.0] — 2026-07-15

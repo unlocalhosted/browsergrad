@@ -98,6 +98,10 @@ _TOPK_AXIS_MAX = _SORT_AXIS_MAX
 _TOPK_OUTPUT_BYTE_MAX = _SORT_OUTPUT_BYTE_MAX
 _TOPK_OUTPUT_EXTENT_MAX = _SORT_OUTPUT_EXTENT_MAX
 _TOPK_WORKSPACE_BYTE_MAX = _SORT_WORKSPACE_BYTE_MAX
+_SCATTER_RANK_MAX = 32
+_SCATTER_OUTPUT_BYTE_MAX = 1 << 28
+_SCATTER_OUTPUT_EXTENT_MAX = _SCATTER_OUTPUT_BYTE_MAX
+_SCATTER_WORKSPACE_BYTE_MAX = 1 << 28
 
 
 def _normalize_prod_axes(value, rank: int) -> tuple:
@@ -471,6 +475,110 @@ def _partial_topk_indices_array(array, axis, k, largest, sorted_output):
         )
         selected = np.take_along_axis(selected, local_order, axis=axis)
     return np.array(selected, dtype=np.int64, copy=True)
+
+
+def _scatter_index_violation(index, axis, target_axis_extent):
+    if index.size == 0:
+        return None
+    if bool(np.any(index < 0)) or bool(np.any(index >= target_axis_extent)):
+        return f"scatter: index values must be in [0, {target_axis_extent})"
+    if index.shape[axis] <= 1:
+        return None
+    ordered = np.sort(index, axis=axis)
+    lower = [slice(None)] * index.ndim
+    upper = [slice(None)] * index.ndim
+    lower[axis] = slice(None, -1)
+    upper[axis] = slice(1, None)
+    if bool(np.any(ordered[tuple(lower)] == ordered[tuple(upper)])):
+        return (
+            "scatter: duplicate destination indices are outside the deterministic "
+            "overwrite profile"
+        )
+    return None
+
+
+def _normalize_scatter_inputs(input, dim, index, src, reduce):
+    if type(input) is not Tensor:
+        raise TypeError(f"scatter: input must be a Tensor, got {type(input).__name__}")
+    if type(index) is not Tensor:
+        raise TypeError(f"scatter: index must be a Tensor, got {type(index).__name__}")
+    if reduce is not None:
+        raise NotImplementedError(
+            "scatter: reduce= is outside typed overwrite scatter; use a typed "
+            "scatter_reduce operation when available"
+        )
+    if input.dtype not in _VARIADIC_DTYPES:
+        raise ValueError(f"scatter: target dtype {input.dtype!r} is not supported")
+    rank = input.ndim
+    if rank == 0 or rank > _SCATTER_RANK_MAX:
+        raise ValueError(
+            f"scatter: target rank must be in [1, {_SCATTER_RANK_MAX}], got {rank}"
+        )
+    if index.ndim != rank:
+        raise ValueError(
+            "scatter: target and index must have the same nonzero rank, "
+            f"got {rank} and {index.ndim}"
+        )
+    if index.dtype != "int64":
+        raise ValueError(f"scatter: index dtype must be int64, got {index.dtype!r}")
+    if type(dim) not in _EXACT_INTEGER_SCALAR_TYPES:
+        raise TypeError(
+            "scatter: dim must be a built-in or NumPy integer scalar, "
+            f"got {type(dim).__name__}"
+        )
+    raw_axis = int(dim)
+    axis = raw_axis + rank if raw_axis < 0 else raw_axis
+    if axis < 0 or axis >= rank:
+        raise ValueError(f"scatter: dim {raw_axis} out of range for rank {rank}")
+    target_elements = 1
+    for dimension, extent in enumerate(input.shape):
+        if extent > _SCATTER_OUTPUT_EXTENT_MAX:
+            raise ValueError(
+                f"scatter: target extent {extent} on axis {dimension} exceeds the "
+                f"{_SCATTER_OUTPUT_EXTENT_MAX}-element per-axis ceiling"
+            )
+        target_elements *= extent
+    index_elements = 1
+    for dimension, (target_extent, index_extent) in enumerate(
+        zip(input.shape, index.shape)
+    ):
+        if index_extent > target_extent:
+            qualifier = "selected" if dimension == axis else "non-scatter"
+            raise ValueError(
+                f"scatter: index extent {index_extent} exceeds target extent "
+                f"{target_extent} at {qualifier} dimension {dimension}; the typed "
+                "overwrite profile requires unique destinations"
+            )
+        index_elements *= index_extent
+    if type(src) is Tensor:
+        if src.dtype != input.dtype:
+            raise ValueError("scatter: tensor source dtype must equal the target dtype")
+        if src.shape != index.shape:
+            raise ValueError(
+                "scatter: source must be a canonical scalar or have exactly the index shape"
+            )
+        source_data = src.data
+        source_tensor = src
+    else:
+        normalized = _normalize_exact_fill_value(src, input.dtype, "scatter")
+        source_data = np.asarray(normalized, dtype=input.data.dtype)
+        source_tensor = None
+    output_bytes = target_elements * _VARIADIC_DTYPE_BYTES[input.dtype]
+    if output_bytes > _SCATTER_OUTPUT_BYTE_MAX:
+        raise ValueError(
+            f"scatter: output requires {output_bytes} bytes, exceeding the "
+            f"{_SCATTER_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    workspace_bytes = output_bytes + index_elements * 9
+    if workspace_bytes > _SCATTER_WORKSPACE_BYTE_MAX:
+        raise ValueError(
+            f"scatter: conservative overwrite workspace requires {workspace_bytes} "
+            f"bytes, exceeding the {_SCATTER_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+    violation = _scatter_index_violation(index.data, axis, input.shape[axis])
+    if violation is not None:
+        raise ValueError(violation)
+    return axis, source_data, source_tensor
 
 
 def _normalize_masked_fill_inputs(source, mask, value):
@@ -1101,13 +1209,9 @@ class Tensor:
         """Repeat each element `repeats` times along `dim`. Matches torch.repeat_interleave."""
         return _repeat_interleave(self, repeats, dim)
 
-    def scatter(self, dim: int, index, src) -> "Tensor":
-        """Non-in-place scatter: return a copy with src placed at index positions."""
-        idx_np = index.data.astype(np.int64) if isinstance(index, Tensor) else np.asarray(index, dtype=np.int64)
-        src_np = src.data if isinstance(src, Tensor) else np.full(idx_np.shape, float(src), dtype=np.float32)
-        out_data = self.data.copy().astype(np.float32)
-        np.put_along_axis(out_data, idx_np, src_np.astype(np.float32), axis=dim)
-        return Tensor(out_data)
+    def scatter(self, dim, index, src, *, reduce=None) -> "Tensor":
+        """Return an owning deterministic unique-destination overwrite scatter."""
+        return scatter(self, dim, index, src, reduce=reduce)
 
     def clamp_min(self, min_val: float) -> "Tensor":
         """Clamp to [min_val, +inf). Alias for clamp(min=min_val)."""
@@ -2231,6 +2335,50 @@ def topk(input, k, dim=None, largest=True, sorted=True, *, out=None):
     if input.requires_grad and input.dtype in _VARIADIC_FLOATING_DTYPES:
         values = _build_ctx(values, (input,), backward)
     return values, indices
+
+
+def scatter(input, dim, index, src, *, reduce=None):
+    """Return an owning deterministic unique-destination overwrite scatter."""
+    axis, source_data, source_tensor = _normalize_scatter_inputs(
+        input,
+        dim,
+        index,
+        src,
+        reduce,
+    )
+    output_data = np.array(input.data, dtype=input.data.dtype, copy=True)
+    np.put_along_axis(output_data, index.data, source_data, axis=axis)
+    output = Tensor(output_data, dtype=input.dtype)
+    captured_index = np.array(index.data, dtype=np.int64, copy=True)
+
+    def backward(g):
+        violation = _scatter_index_violation(
+            captured_index,
+            axis,
+            input.shape[axis],
+        )
+        if violation is not None:
+            raise ValueError(violation)
+        target_gradient = np.array(g.data, dtype=input.data.dtype, copy=True)
+        np.put_along_axis(
+            target_gradient,
+            captured_index,
+            np.asarray(0, dtype=input.data.dtype),
+            axis=axis,
+        )
+        if source_tensor is None:
+            return (target_gradient,)
+        source_gradient = np.array(
+            np.take_along_axis(g.data, captured_index, axis=axis),
+            dtype=source_tensor.data.dtype,
+            copy=True,
+        )
+        return target_gradient, source_gradient
+
+    if input.dtype in _VARIADIC_FLOATING_DTYPES:
+        parents = (input,) if source_tensor is None else (input, source_tensor)
+        output = _build_ctx(output, parents, backward)
+    return output
 
 
 def sort(x, dim=-1, descending=False, *, stable=False, out=None):

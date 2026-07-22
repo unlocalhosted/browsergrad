@@ -69,7 +69,7 @@ from ._ir import (
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
     OP_PAD, OP_SLICE, OP_SORT_INDICES, OP_SORT_VALUES,
-    OP_TOPK_INDICES, OP_TOPK_VALUES,
+    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
     OP_STORE,
@@ -85,6 +85,7 @@ from ._framework_contracts import (
     validate_sort_values_contract,
     validate_topk_indices_contract,
     validate_topk_values_contract,
+    validate_scatter_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -820,6 +821,44 @@ def _vmap_fused_elementwise(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
     new_shape = _broadcast(*[i.shape for i in new_inputs])
     return UOp(op=OP_FUSED_ELEMENTWISE, inputs=new_inputs,
                shape=new_shape, dtype=node.dtype, arg=node.arg)
+
+
+@register_vmap(OP_SCATTER)
+def _vmap_scatter(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    """Batch overwrite scatter and broadcast captured target/index/source."""
+    axis = validate_scatter_contract(node)
+    target, index, source = node.inputs
+    mapped_target, mapped_index = _vmap_variadic_inputs(
+        (target, index),
+        batched,
+        B,
+        "scatter",
+        (True, True),
+    )
+    mapped_source = batched[id(source)]
+    if source.shape == ():
+        if mapped_source.shape != ():
+            raise JitNotImplementedError(
+                "vmap scatter does not accept a mapped tensor scalar source; "
+                "use the scalar-value overload or an index-shaped source"
+            )
+    else:
+        (mapped_source,) = _vmap_variadic_inputs(
+            (source,),
+            batched,
+            B,
+            "scatter",
+            (True,),
+        )
+    mapped = UOp(
+        op=OP_SCATTER,
+        inputs=(mapped_target, mapped_index, mapped_source),
+        shape=(B,) + node.shape,
+        dtype=node.dtype,
+        arg={**node.arg, "dim": axis + 1},
+    )
+    validate_scatter_contract(mapped)
+    return mapped
 
 
 @register_vmap(OP_INDEX)

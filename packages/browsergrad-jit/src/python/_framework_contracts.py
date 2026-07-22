@@ -42,6 +42,10 @@ TOPK_AXIS_MAX = SORT_AXIS_MAX
 TOPK_OUTPUT_BYTE_MAX = SORT_OUTPUT_BYTE_MAX
 TOPK_OUTPUT_EXTENT_MAX = SORT_OUTPUT_EXTENT_MAX
 TOPK_WORKSPACE_BYTE_MAX = SORT_WORKSPACE_BYTE_MAX
+SCATTER_RANK_MAX = 32
+SCATTER_OUTPUT_BYTE_MAX = 1 << 28
+SCATTER_OUTPUT_EXTENT_MAX = SCATTER_OUTPUT_BYTE_MAX
+SCATTER_WORKSPACE_BYTE_MAX = 1 << 28
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 32 * 1024
@@ -85,6 +89,7 @@ _ENUMS = {
         "trailing-dimension-constant-padding",
         "same-shape-axis-ordering",
         "selected-axis-becomes-exact-k",
+        "same-rank-unique-index-overwrite-scatter",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
@@ -99,6 +104,7 @@ _ENUMS = {
         "preserve-input-require-bool-mask",
         "preserve-real-numeric-input",
         "preserve-source-require-int64-index",
+        "preserve-target-require-int64-index-matching-source",
         "promote-integral-default-or-explicit-scan-dtype",
         "pytorch-dimensioned-tensor-promotion",
     }),
@@ -114,6 +120,7 @@ _ENUMS = {
         "supported-numpy-owning-sort-gather",
         "supported-numpy-owning-partial-topk-indices",
         "supported-numpy-owning-topk-gather",
+        "supported-numpy-owning-unique-overwrite-scatter",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -136,6 +143,7 @@ _ENUMS = {
         "supported-static-interior-slice",
         "not-applicable-discrete-indices",
         "supported-permutation-scatter",
+        "supported-unique-overwrite-scatter",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -158,12 +166,14 @@ _ENUMS = {
         "supported-static-interior-slice",
         "not-applicable-discrete-indices",
         "supported-permutation-scatter",
+        "supported-unique-overwrite-scatter",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
         "supported-for-floating-source-and-output-via-symbolic-vjp",
         "supported-for-floating-output-via-symbolic-vjp",
         "supported-for-floating-input-via-symbolic-vjp",
+        "supported-for-floating-target-and-source-via-symbolic-vjp",
         "not-applicable-discrete-output",
     }),
     "vmap": frozenset({
@@ -175,6 +185,7 @@ _ENUMS = {
         "supported-leading-batch-axis-with-unit-repeat",
         "supported-leading-batch-axis-with-scan-axis-shift",
         "supported-leading-batch-axis-with-axis-shift-and-captured-broadcast",
+        "supported-leading-batch-axis-with-scatter-captured-broadcast",
         "supported-leading-batch-axis-preserving-pad",
     }),
     "onnxExport": frozenset({
@@ -195,6 +206,7 @@ _ENUMS = {
         "supported-opset17-pad-float32-int32-int64",
         "supported-opset17-full-axis-topk-gather-float32-int32-int64",
         "supported-opset17-selected-k-topk-gather-float32-int32-int64",
+        "supported-opset17-scatter-elements-float32-int32-int64-bool",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -205,6 +217,7 @@ _ENUMS = {
         "refused-no-canonical-pad-lowering",
         "refused-no-canonical-sort-lowering",
         "refused-no-canonical-topk-lowering",
+        "refused-no-canonical-scatter-overwrite-lowering",
         "refused-no-canonical-tile-layout-profile",
         "refused-no-canonical-selected-axis-replication-profile",
         "refused-no-portable-lowering",
@@ -256,6 +269,7 @@ _VARIADIC_DTYPE_BYTES = MappingProxyType({
 _PAD_DTYPES = _VARIADIC_DTYPES
 _SORT_DTYPES = _VARIADIC_DTYPES
 _TOPK_DTYPES = _SORT_DTYPES
+_SCATTER_DTYPES = _VARIADIC_DTYPES
 _PAD_INTEGER_TYPES = (
     int,
     np.int8,
@@ -1536,6 +1550,173 @@ def _validate_triu(node: Any, contract: FrameworkOperationContract) -> int:
     return _validate_triangular(node, contract, upper=True)
 
 
+def _infer_scatter_contract(
+    target: Any,
+    index: Any,
+    source: Any,
+    axis: Any,
+) -> int:
+    target_shape = getattr(target, "shape", None)
+    index_shape = getattr(index, "shape", None)
+    source_shape = getattr(source, "shape", None)
+    if type(target_shape) is not tuple or type(index_shape) is not tuple:
+        raise ShapeError("scatter: target and index shapes must be tuples")
+    rank = len(target_shape)
+    if rank == 0 or rank > SCATTER_RANK_MAX:
+        raise ShapeError(
+            f"scatter: target rank must be in [1, {SCATTER_RANK_MAX}], got {rank}"
+        )
+    if len(index_shape) != rank:
+        raise ShapeError(
+            "scatter: target and index must have the same nonzero rank, "
+            f"got {rank} and {len(index_shape)}"
+        )
+    if type(axis) is not int or axis < 0 or axis >= rank:
+        raise ShapeError(
+            f"scatter: normalized dim must be in [0, {rank}), got {axis!r}"
+        )
+    target_dtype = getattr(target, "dtype", None)
+    if target_dtype not in _SCATTER_DTYPES:
+        raise ShapeError(f"scatter: target dtype {target_dtype!r} is not supported")
+    if getattr(index, "dtype", None) != "int64":
+        raise ShapeError(
+            f"scatter: index dtype must be 'int64', got {getattr(index, 'dtype', None)!r}"
+        )
+    if getattr(source, "dtype", None) != target_dtype:
+        raise ShapeError("scatter: tensor source dtype must equal the target dtype")
+    if source_shape not in ((), index_shape):
+        raise ShapeError(
+            "scatter: source must be a canonical scalar or have exactly the index shape"
+        )
+    target_elements = 1
+    for dimension, extent in enumerate(target_shape):
+        if type(extent) is not int or extent < 0:
+            raise ShapeError(
+                f"scatter: target shape[{dimension}] must be a non-negative integer"
+            )
+        if extent > SCATTER_OUTPUT_EXTENT_MAX:
+            raise ShapeError(
+                f"scatter: target extent {extent} on axis {dimension} exceeds the "
+                f"{SCATTER_OUTPUT_EXTENT_MAX}-element per-axis ceiling"
+            )
+        target_elements *= extent
+    index_elements = 1
+    for dimension, (target_extent, index_extent) in enumerate(
+        zip(target_shape, index_shape)
+    ):
+        if type(index_extent) is not int or index_extent < 0:
+            raise ShapeError(
+                f"scatter: index shape[{dimension}] must be a non-negative integer"
+            )
+        if index_extent > target_extent:
+            qualifier = "selected" if dimension == axis else "non-scatter"
+            raise ShapeError(
+                f"scatter: index extent {index_extent} exceeds target extent "
+                f"{target_extent} at {qualifier} dimension {dimension}; the typed "
+                "overwrite profile requires unique destinations"
+            )
+        index_elements *= index_extent
+    output_bytes = target_elements * _VARIADIC_DTYPE_BYTES[target_dtype]
+    if output_bytes > SCATTER_OUTPUT_BYTE_MAX:
+        raise ShapeError(
+            f"scatter: output requires {output_bytes} bytes, exceeding the "
+            f"{SCATTER_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    # CPU owns one output copy and, for duplicate rejection, one sorted int64
+    # index copy plus one adjacent-equality boolean temporary.
+    workspace_bytes = output_bytes + index_elements * 9
+    if workspace_bytes > SCATTER_WORKSPACE_BYTE_MAX:
+        raise ShapeError(
+            f"scatter: conservative overwrite workspace requires {workspace_bytes} "
+            f"bytes, exceeding the {SCATTER_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+    return axis
+
+
+def normalize_scatter_request(
+    target: Any,
+    index: Any,
+    source: Any,
+    dim: Any,
+) -> int:
+    target_shape = getattr(target, "shape", None)
+    if type(target_shape) is not tuple:
+        raise ShapeError("scatter: target shape must be a tuple")
+    if type(dim) not in _PAD_INTEGER_TYPES:
+        raise ShapeError(
+            "scatter: dim must be a built-in or NumPy integer scalar, "
+            f"got {type(dim).__name__}"
+        )
+    raw_axis = int(dim)
+    axis = raw_axis + len(target_shape) if raw_axis < 0 else raw_axis
+    if axis < 0 or axis >= len(target_shape):
+        raise ShapeError(
+            f"scatter: dim {raw_axis} out of range for rank {len(target_shape)}"
+        )
+    return _infer_scatter_contract(target, index, source, axis)
+
+
+def infer_scatter_contract(
+    target: Any,
+    index: Any,
+    source: Any,
+    axis: Any,
+) -> int:
+    return _infer_scatter_contract(target, index, source, axis)
+
+
+def scatter_index_violation(
+    index: np.ndarray,
+    axis: int,
+    target_axis_extent: int,
+) -> Optional[str]:
+    if index.size == 0:
+        return None
+    if bool(np.any(index < 0)) or bool(np.any(index >= target_axis_extent)):
+        return f"scatter: index values must be in [0, {target_axis_extent})"
+    if index.shape[axis] <= 1:
+        return None
+    ordered = np.sort(index, axis=axis)
+    lower = [slice(None)] * index.ndim
+    upper = [slice(None)] * index.ndim
+    lower[axis] = slice(None, -1)
+    upper[axis] = slice(1, None)
+    if bool(np.any(ordered[tuple(lower)] == ordered[tuple(upper)])):
+        return (
+            "scatter: duplicate destination indices are outside the deterministic "
+            "overwrite profile"
+        )
+    return None
+
+
+def _validate_scatter(node: Any, contract: FrameworkOperationContract) -> int:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or len(inputs) != 3:
+        raise ShapeError("SCATTER must have target, index, and source inputs")
+    target, index, source = inputs
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("SCATTER arg must be a plain dict")
+    fields = set(arg)
+    if "dim" not in fields or not fields.issubset({"dim", "vjp_of"}):
+        raise ShapeError(
+            "SCATTER arg fields must be exactly 'dim' plus optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("SCATTER arg.vjp_of must reference a UOp")
+    axis = infer_scatter_contract(target, index, source, arg["dim"])
+    if getattr(node, "shape", None) != getattr(target, "shape", None):
+        raise ShapeError("SCATTER output shape must equal its target shape")
+    if getattr(node, "dtype", None) != getattr(target, "dtype", None):
+        raise ShapeError("SCATTER output dtype must equal its target dtype")
+    return axis
+
+
 def _validate_gather(node: Any, contract: FrameworkOperationContract) -> int:
     if getattr(node, "op", None) != contract.opcode:
         raise ShapeError(
@@ -1962,6 +2143,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.var.v1": _validate_var,
     "browsergrad.jit.framework.tensor.repeat.v1": _validate_repeat,
     "browsergrad.jit.framework.tensor.repeat-interleave.v1": _validate_repeat_interleave,
+    "browsergrad.jit.framework.tensor.scatter.v1": _validate_scatter,
     "browsergrad.jit.framework.tensor.sort-indices.v1": _validate_sort_indices,
     "browsergrad.jit.framework.tensor.sort-values.v1": _validate_sort_values,
     "browsergrad.jit.framework.tensor.sign.v1": _validate_typed_unary,
@@ -2076,6 +2258,13 @@ def validate_topk_values_contract(node: Any) -> Tuple[int, int, bool, bool]:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.topk-values.v1":
         raise ShapeError("TOPK_VALUES resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_scatter_contract(node: Any) -> int:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.scatter.v1":
+        raise ShapeError("SCATTER resolved to the wrong framework-operation contract")
     return normalized
 
 
@@ -2235,6 +2424,10 @@ __all__ = [
     "TOPK_OUTPUT_BYTE_MAX",
     "TOPK_OUTPUT_EXTENT_MAX",
     "TOPK_WORKSPACE_BYTE_MAX",
+    "SCATTER_RANK_MAX",
+    "SCATTER_OUTPUT_BYTE_MAX",
+    "SCATTER_OUTPUT_EXTENT_MAX",
+    "SCATTER_WORKSPACE_BYTE_MAX",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "framework_operation_support",
@@ -2245,10 +2438,13 @@ __all__ = [
     "infer_pad_contract",
     "infer_sort_contract",
     "infer_topk_contract",
+    "infer_scatter_contract",
     "normalize_pad_request",
     "normalize_pad_value",
     "normalize_sort_request",
     "normalize_topk_request",
+    "normalize_scatter_request",
+    "scatter_index_violation",
     "stable_sort_indices_array",
     "partial_topk_indices_array",
     "promote_variadic_dtypes",
@@ -2262,6 +2458,7 @@ __all__ = [
     "validate_sort_values_contract",
     "validate_topk_indices_contract",
     "validate_topk_values_contract",
+    "validate_scatter_contract",
     "validate_clamp_contract",
     "validate_cumsum_contract",
     "validate_flip_contract",

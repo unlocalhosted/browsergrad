@@ -152,7 +152,7 @@ Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
 `Tensor.repeat_interleave`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`,
 `Tensor.var`, top-level `torch.cat`, top-level `torch.stack`, and
 `torch.nn.functional.pad`, plus both values and indices from `torch.sort` and
-`torch.topk`, from the frozen opaque callback
+`torch.topk`, and `torch.scatter`, from the frozen opaque callback
 inventory. Expand emits the existing typed `BROADCAST_TO`
 primitive. One shared contract validates exact arity, closed shape arguments,
 output-shape identity, dtype preservation, rank direction, and broadcast
@@ -179,8 +179,8 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 13 constructor calls and 16 operations under ADR-0002
-and ADR-0004 through ADR-0021. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 12 constructor calls and 15 operations under ADR-0002
+and ADR-0004 through ADR-0022. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -367,11 +367,31 @@ refuse until canonical portable partial selection exists. Grad consumes the
 same eager/lazy conformance fixture. These are twenty-three migrated operation
 records, not Gate 6 completion.
 
+Overwrite scatter now emits typed `SCATTER` over one exact normalized axis.
+The target and int64 index have the same bounded nonzero rank; a tensor source
+has exactly the index shape and target dtype, while an exact scalar source
+stays scalar in IR. Bool, uint8, signed int8/16/32/64, and float16/32/64 are
+preserved in one owning CPU target copy. Negative, out-of-range, and duplicate
+destinations fail before assignment. The unique-destination profile avoids
+PyTorch's documented nondeterministic duplicate overwrite and incorrect
+gradient case and matches ONNX `ScatterElements` reduction-none preconditions.
+Closure and symbolic VJP zero overwritten target cotangents through typed
+`SCATTER` and gather tensor-source cotangents through typed `INDEX`. Vmap
+shifts the axis and broadcasts captured target/index/tensor-source inputs;
+ONNX opset 17 emits `ScatterElements` for float32/int32/int64/bool and expands
+a scalar source explicitly. Output storage and conservative duplicate-check
+workspace are separately bounded at 256 MiB. Deprecated reduction spellings,
+tensor-plan, and WebGPU fail explicitly until their distinct semantics and
+canonical portable lowering exist. Grad consumes the same eager/lazy
+conformance fixture. This is twenty-four migrated operation records, not Gate
+6 completion.
+
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
 records bind `Tensor.abs`, `torch.cat`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
 `Tensor.flip`, `Tensor.gather`, `Tensor.masked_fill`, `Tensor.prod`,
 `Tensor.repeat_interleave`, `Tensor.repeat`, `Tensor.sign`, `Tensor.sin`,
+`torch.scatter`,
 `torch.sort.indices`, `torch.sort.values`, `torch.stack`,
 `torch.topk.indices`, `torch.topk.values`,
 `torch.nn.functional.pad`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`, and
@@ -385,7 +405,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 16 still-opaque and twenty-three typed retirements. ADR-0003 records
+opaque IDs into 15 still-opaque and twenty-four typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.

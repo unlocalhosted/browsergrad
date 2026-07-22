@@ -76,6 +76,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   dtype-safe partial selection for values and int64 indices, orders only the
   selected values when requested, and scatters floating gradients through an
   immutable captured permutation.
+- `scatter` now shares JIT's exact axis, int64 index, matching tensor or exact
+  scalar source, unique in-range destination, dtype, ownership, output, and
+  workspace contract. It preserves target dtype and propagates mathematically
+  defined gradients to both the untouched target positions and tensor source
+  instead of silently casting to float32 and disconnecting autograd.
 
 ## [0.5.2] — 2026-07-15
 
