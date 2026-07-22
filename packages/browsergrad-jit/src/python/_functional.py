@@ -21,12 +21,13 @@ import numpy as np
 from ._ir import (
     UOp, OP_WHERE, OP_CONST, OP_CUSTOM, OP_CONV1D, OP_CONV2D,
     OP_CONV_TRANSPOSE2D, OP_CONV3D,
-    OP_LAYER_NORM, OP_REDUCE, OP_DIV,
+    OP_LAYER_NORM, OP_REDUCE, OP_DIV, OP_PAD,
 )
 from ._tensor_proxy import (
     TensorProxy, _BackwardCtx, _should_track, _to_proxy, from_numpy, where,
 )
 from ._errors import ShapeError
+from ._framework_contracts import normalize_pad_request
 
 
 def _pair2(value: Any, name: str) -> Tuple[int, int]:
@@ -1203,35 +1204,35 @@ def dropout(x: TensorProxy, p: float = 0.5, training: bool = True) -> TensorProx
     return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
 
 
-def pad(input: TensorProxy, pad, mode: str = "constant", value: float = 0.0) -> TensorProxy:
-    if mode != "constant":
-        raise NotImplementedError(f"pad: mode {mode!r} not supported; only 'constant'")
-    if len(pad) % 2 != 0:
-        raise ValueError(f"pad: pad length must be even, got {len(pad)}")
-    pairs_lastdim_first = list(zip(pad[0::2], pad[1::2]))
-    ndim = input.ndim
-    npad = [(0, 0)] * ndim
-    for k, (lo, hi) in enumerate(pairs_lastdim_first):
-        dim = ndim - 1 - k
-        npad[dim] = (int(lo), int(hi))
-    out_shape = tuple(input.shape[i] + lo + hi for i, (lo, hi) in enumerate(npad))
-
-    def _pad_forward(x_arr: np.ndarray) -> np.ndarray:
-        return np.pad(x_arr, npad, mode="constant", constant_values=value)
-
+def pad(input: TensorProxy, pad, mode: str = "constant", value=None) -> TensorProxy:
+    if type(input) is not TensorProxy:
+        raise TypeError(f"pad: input must be a TensorProxy, got {type(input).__name__}")
+    pad_width, normalized_value, out_shape = normalize_pad_request(
+        input._uop,
+        pad,
+        mode,
+        value,
+    )
     uop = UOp(
-        op=OP_CUSTOM,
+        op=OP_PAD,
         inputs=(input._uop,),
         shape=out_shape,
         dtype=input.dtype,
-        arg={"fn": _pad_forward, "captures": (), "name": "pad"},
+        arg={
+            "pad_width": pad_width,
+            "mode": "constant",
+            "value": normalized_value,
+        },
     )
 
     def _bw(dy: np.ndarray, _ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
-        slices = tuple(slice(lo, lo + size) for (lo, _), size in zip(npad, input.shape))
+        slices = tuple(
+            slice(lower, lower + size)
+            for (lower, _), size in zip(pad_width, input.shape)
+        )
         return (dy[slices].copy().astype(np.dtype(input.dtype), copy=False),)
 
-    requires = _should_track(input)
+    requires = _should_track(input) and input.dtype in ("float16", "float32", "float64")
     ctx = _BackwardCtx(fn=_bw, input_proxies=(input,)) if requires else None
     return TensorProxy(uop, session=input._get_session(), requires_grad=requires, ctx=ctx)
 

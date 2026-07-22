@@ -5,9 +5,9 @@
     {
       "id": "jit.custom.shared-refusals.v0",
       "expected": {
-        "label": "pad",
+        "label": "l1_loss",
         "labelField": "name",
-        "cpuValues": [[0, 1, 2, 0], [0, 3, 4, 0]],
+        "cpuValues": [[1, 2], [3, 4]],
         "cpuGradient": [[1, 1], [1, 1]],
         "symbolicVjpRegistered": false,
         "functionalGradError": "JitNotImplementedError",
@@ -86,7 +86,6 @@
           "kl_div",
           "l1_loss",
           "nll_loss",
-          "pad",
           "smooth_l1_loss"
         ],
         "allLabelsMatch": true,
@@ -100,7 +99,6 @@
           "kl_div",
           "l1_loss",
           "nll_loss",
-          "pad",
           "smooth_l1_loss"
         ],
         "allClosureGradientsPresent": true,

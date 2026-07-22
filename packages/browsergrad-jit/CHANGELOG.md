@@ -78,6 +78,11 @@ contract in the README](README.md#compatibility-contract).
   typed per-input closure/symbolic VJP; captured-input-aware vmap; exact ONNX
   `Cast`/`Unsqueeze`/`Concat`; and explicit tensor-plan/WebGPU refusal until
   canonical variadic copy lowering exists.
+- `torch.nn.functional.pad` now emits typed constant `PAD` with strict
+  last-dimension-first nonnegative geometry, exact dtype-aware fill and bounded
+  allocation semantics, owning CPU realization, typed interior-slice
+  closure/symbolic VJP, batch-safe vmap, exact ONNX `Pad`, and explicit
+  tensor-plan/WebGPU refusal until canonical padding/layout lowering exists.
 
 ### Added
 
@@ -85,7 +90,7 @@ contract in the README](README.md#compatibility-contract).
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
   current table contains `ABS`, `CLAMP`, `CONCAT`, `COS`, `CUMSUM`, `BROADCAST_TO`, `FLIP`,
-  `INDEX`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`, `STACK`,
+  `INDEX`, `PAD`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`, `STACK`,
   `TRIL`, `TRIU`, `VAR`, and masked-fill `WHERE`.
 
 ## [0.9.0] — 2026-07-15

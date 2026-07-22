@@ -19,7 +19,8 @@ Scope (v0):
     framework operations additionally cover ABS, SIGN, SIN, COS, CLAMP
     (→Clip), FLIP (→Slice), INDEX (→GatherElements), PROD (→ReduceProd),
     VAR (→ReduceMean/Sub/Mul/ReduceSum/Div), TRIL/TRIU (→Trilu), REPEAT (→Tile), and
-    REPEAT_INTERLEAVE (→Unsqueeze/Tile/Reshape). Plus lifecycle
+    REPEAT_INTERLEAVE (→Unsqueeze/Tile/Reshape), and constant PAD (→Pad).
+    Plus lifecycle
     (BUFFER/LOAD/CONST).
   * Opset 17 (axes as attribute on ReduceSum/Mean/Max — opset 18 made
     axes a runtime input, which would require initializer plumbing).
@@ -33,7 +34,7 @@ Refusals (typed `OnnxUnmappableOp`):
   * OP_CUSTOM (opaque)
   * OP_MASK, OP_SCATTER_ADD (initializer-tensor plumbing
     deferred to a follow-on)
-  * OP_ISNAN, OP_SLICE, OP_PAD (same — needs initializer wiring or
+  * OP_ISNAN, OP_SLICE (same — needs initializer wiring or
     opset-specific shapes)
   * OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX (export on pre-fusion IR
     via `_fusion_config.use_fusion(False)`; the export path enforces
@@ -66,7 +67,7 @@ from ._ir import (
     OP_CONV3D_BACKWARD_WEIGHT, OP_CONV3D_BACKWARD_BIAS,
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
-    OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
+    OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_PAD,
     OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
@@ -76,6 +77,7 @@ from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_cat_contract,
     validate_stack_contract,
+    validate_pad_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -630,6 +632,37 @@ def export_inference(
                 "Concat",
                 [_emit_attr_int("axis", axis)],
             ))
+        elif node.op == OP_PAD:
+            pad_width, value = validate_pad_contract(node)
+            if node.dtype not in ("float32", "int32", "int64"):
+                raise OnnxUnmappableOp(
+                    f"export_inference: PAD dtype {node.dtype!r} is not exportable; "
+                    "supported output dtypes are float32, int32, and int64"
+                )
+            suffix = next_node_id - 1
+            pads_name = f"const_pad_width_{suffix}"
+            pads = tuple(pair[0] for pair in pad_width) + tuple(
+                pair[1] for pair in pad_width
+            )
+            initializers.append(_emit_tensor_proto(
+                pads_name,
+                DT_INT64,
+                (len(pads),),
+                _i64_initializer_for_shape(pads),
+            ))
+            value_name = f"const_pad_value_{suffix}"
+            initializers.append(_emit_tensor_proto(
+                value_name,
+                _dtype_or_die(node.dtype),
+                (),
+                _initializer_bytes_for_scalar(value, node.dtype),
+            ))
+            nodes.append(_emit_node(
+                input_names + [pads_name, value_name],
+                [out_name],
+                nm,
+                "Pad",
+            ))
         elif node.op == OP_NARROW:
             validate_narrow_contract(node)
             raise OnnxUnmappableOp(
@@ -835,7 +868,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_PAD, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

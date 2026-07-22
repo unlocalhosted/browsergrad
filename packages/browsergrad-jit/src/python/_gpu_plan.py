@@ -42,6 +42,7 @@ from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_cat_contract,
     validate_stack_contract,
+    validate_pad_contract,
     validate_gather_contract,
     validate_gather_scatter_add_contract,
     validate_narrow_contract,
@@ -82,7 +83,7 @@ PRIMITIVE_GPU_IR_OPS = frozenset({
     OP_CONV3D_BACKWARD_BIAS,
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
-    OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
+    OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE,
     OP_WHERE, OP_MASK, OP_BROADCAST_TO,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
@@ -282,6 +283,12 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
             raise GpuPlanUnsupported(
                 "GPU tensor plan does not support CONCAT. Add a canonical "
                 "variadic copy lowering before GPU codegen."
+            )
+        elif node.op == OP_PAD:
+            validate_pad_contract(node)
+            raise GpuPlanUnsupported(
+                "GPU tensor plan does not support PAD. Add a canonical "
+                "padding/layout lowering before GPU codegen."
             )
         elif node.op == OP_STACK:
             validate_stack_contract(node)

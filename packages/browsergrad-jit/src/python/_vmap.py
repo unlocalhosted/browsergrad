@@ -78,6 +78,7 @@ from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_cat_contract,
     validate_stack_contract,
+    validate_pad_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -631,22 +632,24 @@ def _vmap_isnan(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
 
 @register_vmap(OP_PAD)
 def _vmap_pad(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
-    """Prepend a no-op (0, 0) pad for the batch dim (only when actually
-    batched). The original pad_width acts on the un-batched axes."""
+    """Preserve the leading mapped axis outside the declared pad."""
+    pad_width, value = validate_pad_contract(node)
+    source = node.inputs[0]
     inner = batched[id(node.inputs[0])]
-    orig_input_ndim = len(node.inputs[0].shape)
-    is_batched = len(inner.shape) > orig_input_ndim
-    arg = dict(node.arg)
-    pad_width = list(arg.get("pad_width", ()))
-    if is_batched:
-        pad_width = [(0, 0)] + pad_width
-    arg["pad_width"] = pad_width
-    # Recompute output shape from inner.shape + pad_width.
-    out_dims = []
-    for d, (lo, hi) in zip(inner.shape, pad_width):
-        out_dims.append(d + lo + hi)
-    return UOp(op=OP_PAD, inputs=(inner,), shape=tuple(out_dims),
-               dtype=node.dtype, arg=arg)
+    if inner.shape == source.shape:
+        return node
+    if inner.shape != (B,) + source.shape:
+        raise JitNotImplementedError(
+            "vmap pad requires its source to be captured or on the leading mapped axis"
+        )
+    mapped_pad_width = ((0, 0),) + pad_width
+    return UOp(
+        op=OP_PAD,
+        inputs=(inner,),
+        shape=(B,) + node.shape,
+        dtype=node.dtype,
+        arg={"pad_width": mapped_pad_width, "mode": "constant", "value": value},
+    )
 
 
 @register_vmap(OP_SLICE)

@@ -16,6 +16,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Tuple
 
+import numpy as np
+
 from ._errors import ShapeError
 
 
@@ -27,6 +29,9 @@ VAR_CORRECTION_MIN = -(1 << 31)
 VAR_CORRECTION_MAX = (1 << 31) - 1
 VARIADIC_INPUT_MAX = 1024
 VARIADIC_OUTPUT_BYTE_MAX = 1 << 28
+PAD_RANK_MAX = 32
+PAD_OUTPUT_BYTE_MAX = 1 << 28
+PAD_OUTPUT_EXTENT_MAX = PAD_OUTPUT_BYTE_MAX
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 32 * 1024
@@ -67,6 +72,7 @@ _ENUMS = {
         "variadic-new-axis-stacking",
         "same-rank-index-shaped-gather",
         "preserve-source-with-broadcast-bool-mask",
+        "trailing-dimension-constant-padding",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
@@ -76,6 +82,7 @@ _ENUMS = {
     "dtypeContract": frozenset({
         "preserve-floating-input",
         "preserve-input",
+        "preserve-supported-input-with-exact-fill",
         "preserve-input-require-bool-mask",
         "preserve-real-numeric-input",
         "preserve-source-require-int64-index",
@@ -89,6 +96,7 @@ _ENUMS = {
         "supported-numpy-owning-scan-copy",
         "supported-numpy-owning-concatenation-copy",
         "supported-numpy-owning-stack-copy",
+        "supported-numpy-owning-constant-pad-copy",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -108,6 +116,7 @@ _ENUMS = {
         "supported-opposite-direction-inclusive-scan-for-floating-source-and-output",
         "supported-static-axis-split",
         "supported-static-axis-index",
+        "supported-static-interior-slice",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -127,11 +136,13 @@ _ENUMS = {
         "supported-opposite-direction-inclusive-scan-for-floating-source-and-output",
         "supported-static-axis-split",
         "supported-static-axis-index",
+        "supported-static-interior-slice",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
         "supported-for-floating-source-and-output-via-symbolic-vjp",
         "supported-for-floating-output-via-symbolic-vjp",
+        "supported-for-floating-input-via-symbolic-vjp",
     }),
     "vmap": frozenset({
         "supported-leading-batch-axis",
@@ -142,6 +153,7 @@ _ENUMS = {
         "supported-leading-batch-axis-with-unit-repeat",
         "supported-leading-batch-axis-with-scan-axis-shift",
         "supported-leading-batch-axis-with-axis-shift-and-captured-broadcast",
+        "supported-leading-batch-axis-preserving-pad",
     }),
     "onnxExport": frozenset({
         "supported-opset17-clip-export-dtypes",
@@ -158,6 +170,7 @@ _ENUMS = {
         "supported-opset17-cumsum-with-cast-float32-int32-int64",
         "supported-opset17-concat-with-casts-float32-int32-int64-bool",
         "supported-opset17-unsqueeze-concat-with-casts-float32-int32-int64-bool",
+        "supported-opset17-pad-float32-int32-int64",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -165,6 +178,7 @@ _ENUMS = {
         "refused-no-portable-masked-selection",
         "refused-no-portable-triangular-selection",
         "refused-no-canonical-variadic-copy-lowering",
+        "refused-no-canonical-pad-lowering",
         "refused-no-canonical-tile-layout-profile",
         "refused-no-canonical-selected-axis-replication-profile",
         "refused-no-portable-lowering",
@@ -213,6 +227,24 @@ _VARIADIC_DTYPE_BYTES = MappingProxyType({
     "int64": 8,
     "float64": 8,
 })
+_PAD_DTYPES = _VARIADIC_DTYPES
+_PAD_INTEGER_TYPES = (
+    int,
+    np.int8,
+    np.int16,
+    np.int32,
+    np.int64,
+    np.uint8,
+    np.uint16,
+    np.uint32,
+    np.uint64,
+)
+_PAD_VALUE_TYPES = _PAD_INTEGER_TYPES + (
+    float,
+    np.float16,
+    np.float32,
+    np.float64,
+)
 _UNARY_DTYPE_PROFILES = MappingProxyType({
     "preserve-floating-input": (_FLOATING_DTYPES, "floating"),
     "preserve-real-numeric-input": (_REAL_NUMERIC_DTYPES, "real numeric"),
@@ -657,6 +689,157 @@ def infer_stack_contract(
     return axis, output_shape, output_dtype
 
 
+def _pad_source_metadata(source: Any) -> Tuple[Tuple[int, ...], str]:
+    shape = getattr(source, "shape", None)
+    if type(shape) is not tuple:
+        raise ShapeError("PAD source shape must be a tuple")
+    if len(shape) > PAD_RANK_MAX:
+        raise ShapeError(
+            f"PAD source rank {len(shape)} exceeds the {PAD_RANK_MAX}-rank ceiling"
+        )
+    for axis, extent in enumerate(shape):
+        if type(extent) is not int or extent < 0:
+            raise ShapeError(
+                f"PAD source shape[{axis}] must be a non-negative integer"
+            )
+    dtype = getattr(source, "dtype", None)
+    if dtype not in _PAD_DTYPES:
+        raise ShapeError(f"PAD source dtype {dtype!r} is not supported")
+    return shape, dtype
+
+
+def normalize_pad_value(value: Any, dtype: str) -> Any:
+    if value is None:
+        value = False if dtype == "bool" else 0
+    if dtype == "bool":
+        if type(value) not in (bool, np.bool_):
+            raise ShapeError(
+                "pad: a boolean input requires a built-in or NumPy boolean fill value"
+            )
+        return bool(value)
+    if type(value) not in _PAD_VALUE_TYPES:
+        raise ShapeError(
+            "pad: value must be a built-in or NumPy real scalar, "
+            f"got {type(value).__name__}"
+        )
+    if dtype.startswith("float"):
+        with np.errstate(over="ignore", invalid="ignore"):
+            normalized = float(np.asarray(value, dtype=np.dtype(dtype)).item())
+        if not math.isfinite(normalized):
+            raise ShapeError("pad: floating fill value must remain finite in the input dtype")
+        return 0.0 if normalized == 0.0 else normalized
+    if type(value) in (float, np.float16, np.float32, np.float64):
+        numeric = float(value)
+        if not math.isfinite(numeric) or not numeric.is_integer():
+            raise ShapeError(
+                f"pad: value {numeric!r} is not an exact finite integer for {dtype}"
+            )
+        normalized = int(numeric)
+    else:
+        normalized = int(value)
+    bounds = np.iinfo(np.dtype(dtype))
+    if normalized < int(bounds.min) or normalized > int(bounds.max):
+        raise ShapeError(f"pad: value {normalized} is out of range for {dtype}")
+    return normalized
+
+
+def _pad_output_shape(
+    source_shape: Tuple[int, ...],
+    pad_width: Tuple[Tuple[int, int], ...],
+    dtype: str,
+) -> Tuple[int, ...]:
+    output_shape = []
+    for axis, (extent, (lower, upper)) in enumerate(zip(source_shape, pad_width)):
+        output_extent = extent + lower + upper
+        if output_extent > PAD_OUTPUT_EXTENT_MAX:
+            raise ShapeError(
+                f"PAD output extent {output_extent} on axis {axis} exceeds the "
+                f"{PAD_OUTPUT_EXTENT_MAX}-element per-axis ceiling"
+            )
+        output_shape.append(output_extent)
+    canonical_shape = tuple(output_shape)
+    elements = 1
+    for extent in canonical_shape:
+        elements *= extent
+    output_bytes = elements * _VARIADIC_DTYPE_BYTES[dtype]
+    if output_bytes > PAD_OUTPUT_BYTE_MAX:
+        raise ShapeError(
+            f"PAD output requires {output_bytes} bytes, exceeding the "
+            f"{PAD_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    return canonical_shape
+
+
+def normalize_pad_request(
+    source: Any,
+    pad: Any,
+    mode: Any,
+    value: Any,
+) -> Tuple[Tuple[Tuple[int, int], ...], Any, Tuple[int, ...]]:
+    source_shape, dtype = _pad_source_metadata(source)
+    if type(mode) is not str:
+        raise ShapeError(f"pad: mode must be a string, got {type(mode).__name__}")
+    if mode != "constant":
+        raise ShapeError(f"pad: mode {mode!r} is not supported; expected 'constant'")
+    if type(pad) not in (tuple, list):
+        raise ShapeError("pad: pad must be a plain tuple or list")
+    if len(pad) % 2 != 0:
+        raise ShapeError(f"pad: pad length must be even, got {len(pad)}")
+    pair_count = len(pad) // 2
+    if pair_count > len(source_shape):
+        raise ShapeError(
+            f"pad: {pair_count} padded dimensions exceed input rank {len(source_shape)}"
+        )
+    pad_width = [(0, 0)] * len(source_shape)
+    for index in range(pair_count):
+        lower_raw = pad[2 * index]
+        upper_raw = pad[2 * index + 1]
+        if type(lower_raw) not in _PAD_INTEGER_TYPES or type(upper_raw) not in _PAD_INTEGER_TYPES:
+            raise ShapeError(
+                f"pad: pair {index} must contain built-in or NumPy integer scalars"
+            )
+        lower = int(lower_raw)
+        upper = int(upper_raw)
+        if lower < 0 or upper < 0:
+            raise ShapeError("pad: negative padding is outside the constant-pad v1 profile")
+        pad_width[len(source_shape) - 1 - index] = (lower, upper)
+    canonical = tuple(pad_width)
+    normalized_value = normalize_pad_value(value, dtype)
+    return canonical, normalized_value, _pad_output_shape(source_shape, canonical, dtype)
+
+
+def infer_pad_contract(
+    source: Any,
+    pad_width: Any,
+    mode: Any,
+    value: Any,
+) -> Tuple[Tuple[Tuple[int, int], ...], Any, Tuple[int, ...]]:
+    source_shape, dtype = _pad_source_metadata(source)
+    if type(mode) is not str or mode != "constant":
+        raise ShapeError("PAD arg.mode must be exactly 'constant'")
+    if type(pad_width) is not tuple or len(pad_width) != len(source_shape):
+        raise ShapeError("PAD arg.pad_width must be one canonical pair per source axis")
+    canonical = []
+    for axis, pair in enumerate(pad_width):
+        if type(pair) is not tuple or len(pair) != 2:
+            raise ShapeError(f"PAD arg.pad_width[{axis}] must be an exact pair")
+        lower, upper = pair
+        if type(lower) is not int or type(upper) is not int or lower < 0 or upper < 0:
+            raise ShapeError(
+                f"PAD arg.pad_width[{axis}] must contain non-negative normalized integers"
+            )
+        canonical.append((lower, upper))
+    canonical_pad = tuple(canonical)
+    normalized_value = normalize_pad_value(value, dtype)
+    if type(value) is not type(normalized_value) or value != normalized_value:
+        raise ShapeError("PAD arg.value must be canonical for the source dtype")
+    return (
+        canonical_pad,
+        normalized_value,
+        _pad_output_shape(source_shape, canonical_pad, dtype),
+    )
+
+
 def _validate_cat(
     node: Any,
     contract: FrameworkOperationContract,
@@ -717,6 +900,42 @@ def _validate_stack(
             f"STACK output dtype must be {output_dtype!r}, got {getattr(node, 'dtype', None)!r}"
         )
     return axis
+
+
+def _validate_pad(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> Tuple[Tuple[Tuple[int, int], ...], Any]:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = _require_single_input_tuple(node, "PAD")
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("PAD arg must be a plain dict")
+    fields = set(arg)
+    required = {"pad_width", "mode", "value"}
+    if not required.issubset(fields) or not fields.issubset(required | {"vjp_of"}):
+        raise ShapeError(
+            "PAD arg fields must be exactly 'pad_width', 'mode', and 'value' "
+            "plus optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("PAD arg.vjp_of must reference a UOp")
+    pad_width, value, output_shape = infer_pad_contract(
+        inputs[0],
+        arg["pad_width"],
+        arg["mode"],
+        arg["value"],
+    )
+    if getattr(node, "shape", None) != output_shape:
+        raise ShapeError(
+            f"PAD output shape must be {output_shape}, got {getattr(node, 'shape', None)}"
+        )
+    if getattr(node, "dtype", None) != getattr(inputs[0], "dtype", None):
+        raise ShapeError("PAD must preserve the source dtype")
+    return pad_width, value
 
 
 def _validate_narrow(node: Any) -> Tuple[int, int, int]:
@@ -1289,6 +1508,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.flip.v1": _validate_flip,
     "browsergrad.jit.framework.tensor.gather.v1": _validate_gather,
     "browsergrad.jit.framework.tensor.masked-fill.v1": _validate_masked_fill,
+    "browsergrad.jit.framework.tensor.pad.v1": _validate_pad,
     "browsergrad.jit.framework.tensor.prod.v1": _validate_prod,
     "browsergrad.jit.framework.tensor.var.v1": _validate_var,
     "browsergrad.jit.framework.tensor.repeat.v1": _validate_repeat,
@@ -1368,6 +1588,13 @@ def validate_stack_contract(node: Any) -> int:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.stack.v1":
         raise ShapeError("STACK resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_pad_contract(node: Any) -> Tuple[Tuple[Tuple[int, int], ...], Any]:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.pad.v1":
+        raise ShapeError("PAD resolved to the wrong framework-operation contract")
     return normalized
 
 
@@ -1514,6 +1741,9 @@ __all__ = [
     "VAR_CORRECTION_MAX",
     "VARIADIC_INPUT_MAX",
     "VARIADIC_OUTPUT_BYTE_MAX",
+    "PAD_RANK_MAX",
+    "PAD_OUTPUT_BYTE_MAX",
+    "PAD_OUTPUT_EXTENT_MAX",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "framework_operation_support",
@@ -1521,12 +1751,16 @@ __all__ = [
     "has_internal_operation_contract",
     "infer_cat_contract",
     "infer_stack_contract",
+    "infer_pad_contract",
+    "normalize_pad_request",
+    "normalize_pad_value",
     "promote_variadic_dtypes",
     "validate_framework_operation_contract",
     "validate_internal_operation_contract",
     "validate_broadcast_to_contract",
     "validate_cat_contract",
     "validate_stack_contract",
+    "validate_pad_contract",
     "validate_clamp_contract",
     "validate_cumsum_contract",
     "validate_flip_contract",

@@ -44,6 +44,7 @@ sorted(ALL_OPS)
     expect(ops).toContain("CONCAT");
     expect(ops).toContain("CUMSUM");
     expect(ops).toContain("NARROW");
+    expect(ops).toContain("PAD");
     expect(ops).toContain("ABS");
     expect(ops).toContain("CLAMP");
     expect(ops).toContain("COS");

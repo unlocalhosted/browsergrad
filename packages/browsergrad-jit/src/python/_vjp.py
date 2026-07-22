@@ -60,7 +60,7 @@ from ._ir import (
     OP_CONV3D_BACKWARD_WEIGHT, OP_CONV3D_BACKWARD_BIAS,
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
-    OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
+    OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_CONST, OP_BROADCAST_TO, OP_WHERE, OP_INDEX, OP_SCATTER_ADD,
     OP_ISNAN,
 )
@@ -68,6 +68,7 @@ from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_cat_contract,
     validate_stack_contract,
+    validate_pad_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -416,6 +417,27 @@ def _vjp_stack(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[
             )
         gradients.append(gradient)
     return tuple(gradients)
+
+
+@register_vjp(OP_PAD)
+def _vjp_pad(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """Select the unpadded static interior of the output cotangent."""
+    pad_width, _ = validate_pad_contract(output)
+    (source,) = inputs
+    if source.dtype not in ("float16", "float32", "float64"):
+        return (None,)
+    slices = tuple(
+        slice(lower, lower + extent)
+        for extent, (lower, _) in zip(source.shape, pad_width)
+    )
+    return (_vjp_uop(
+        OP_SLICE,
+        (dy,),
+        source.shape,
+        source.dtype,
+        output,
+        arg={"slices": slices},
+    ),)
 
 
 @register_vjp(OP_CUMSUM)

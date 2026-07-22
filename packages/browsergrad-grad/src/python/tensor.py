@@ -85,6 +85,9 @@ _VARIADIC_DTYPE_BYTES = {
 }
 _VARIADIC_INPUT_MAX = 1024
 _VARIADIC_OUTPUT_BYTE_MAX = 1 << 28
+_PAD_RANK_MAX = 32
+_PAD_OUTPUT_BYTE_MAX = 1 << 28
+_PAD_OUTPUT_EXTENT_MAX = _PAD_OUTPUT_BYTE_MAX
 
 
 def _normalize_prod_axes(value, rank: int) -> tuple:
@@ -174,26 +177,42 @@ def _normalize_variance_correction(correction, unbiased) -> int:
     return normalized
 
 
-def _normalize_masked_fill_value(value, dtype: str):
+def _normalize_exact_fill_value(
+    value,
+    dtype: str,
+    operation: str,
+    *,
+    allow_none: bool = False,
+    require_finite_float: bool = False,
+):
+    if value is None:
+        if not allow_none:
+            raise TypeError(f"{operation}: value must not be None")
+        value = False if dtype == "bool" else 0
     if dtype == "bool":
         if type(value) not in (bool, np.bool_):
             raise TypeError(
-                "masked_fill: a boolean source requires a built-in or NumPy boolean value"
+                f"{operation}: a boolean source requires a built-in or NumPy boolean value"
             )
         return bool(value)
     if type(value) not in _MASKED_FILL_VALUE_TYPES:
         raise TypeError(
-            "masked_fill: value must be a built-in or NumPy real scalar, "
+            f"{operation}: value must be a built-in or NumPy real scalar, "
             f"got {type(value).__name__}"
         )
     if dtype.startswith("float"):
         with np.errstate(over="ignore", invalid="ignore"):
-            return float(np.asarray(value, dtype=np.dtype(dtype)).item())
+            normalized = float(np.asarray(value, dtype=np.dtype(dtype)).item())
+        if require_finite_float and not np.isfinite(normalized):
+            raise ValueError(
+                f"{operation}: floating fill value must remain finite in the input dtype"
+            )
+        return 0.0 if normalized == 0.0 else normalized
     if type(value) in (float, np.float16, np.float32, np.float64):
         numeric = float(value)
         if not np.isfinite(numeric) or not numeric.is_integer():
             raise ValueError(
-                f"masked_fill: value {numeric!r} is not an exact finite integer for {dtype}"
+                f"{operation}: value {numeric!r} is not an exact finite integer for {dtype}"
             )
         normalized = int(numeric)
     else:
@@ -201,9 +220,83 @@ def _normalize_masked_fill_value(value, dtype: str):
     bounds = np.iinfo(np.dtype(dtype))
     if normalized < int(bounds.min) or normalized > int(bounds.max):
         raise ValueError(
-            f"masked_fill: value {normalized} is out of range for {dtype}"
+            f"{operation}: value {normalized} is out of range for {dtype}"
         )
     return normalized
+
+
+def _normalize_masked_fill_value(value, dtype: str):
+    return _normalize_exact_fill_value(value, dtype, "masked_fill")
+
+
+def _normalize_pad_contract(input, pad, mode, value):
+    if type(input) is not Tensor:
+        raise TypeError(f"pad: input must be a Tensor, got {type(input).__name__}")
+    if input.dtype not in _MASKED_FILL_DTYPES:
+        raise ValueError(f"pad: input dtype {input.dtype!r} is not supported")
+    if input.ndim > _PAD_RANK_MAX:
+        raise ValueError(
+            f"pad: input rank {input.ndim} exceeds the {_PAD_RANK_MAX}-rank ceiling"
+        )
+    if type(mode) is not str:
+        raise TypeError(f"pad: mode must be a string, got {type(mode).__name__}")
+    if mode != "constant":
+        raise NotImplementedError(
+            f"pad: mode {mode!r} is not supported; expected 'constant'"
+        )
+    if type(pad) not in (tuple, list):
+        raise TypeError("pad: pad must be a plain tuple or list")
+    if len(pad) % 2 != 0:
+        raise ValueError(f"pad: pad length must be even, got {len(pad)}")
+    pair_count = len(pad) // 2
+    if pair_count > input.ndim:
+        raise ValueError(
+            f"pad: {pair_count} padded dimensions exceed input rank {input.ndim}"
+        )
+    pad_width = [(0, 0)] * input.ndim
+    for index in range(pair_count):
+        lower_raw = pad[2 * index]
+        upper_raw = pad[2 * index + 1]
+        if (
+            type(lower_raw) not in _EXACT_INTEGER_SCALAR_TYPES
+            or type(upper_raw) not in _EXACT_INTEGER_SCALAR_TYPES
+        ):
+            raise TypeError(
+                f"pad: pair {index} must contain built-in or NumPy integer scalars"
+            )
+        lower = int(lower_raw)
+        upper = int(upper_raw)
+        if lower < 0 or upper < 0:
+            raise ValueError("pad: negative padding is outside the constant-pad v1 profile")
+        pad_width[input.ndim - 1 - index] = (lower, upper)
+    canonical = tuple(pad_width)
+    output_shape_list = []
+    for axis, (extent, (lower, upper)) in enumerate(zip(input.shape, canonical)):
+        output_extent = extent + lower + upper
+        if output_extent > _PAD_OUTPUT_EXTENT_MAX:
+            raise ValueError(
+                f"pad: output extent {output_extent} on axis {axis} exceeds the "
+                f"{_PAD_OUTPUT_EXTENT_MAX}-element per-axis ceiling"
+            )
+        output_shape_list.append(output_extent)
+    output_shape = tuple(output_shape_list)
+    elements = 1
+    for extent in output_shape:
+        elements *= extent
+    output_bytes = elements * _VARIADIC_DTYPE_BYTES[input.dtype]
+    if output_bytes > _PAD_OUTPUT_BYTE_MAX:
+        raise ValueError(
+            f"pad: output requires {output_bytes} bytes, exceeding the "
+            f"{_PAD_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    normalized_value = _normalize_exact_fill_value(
+        value,
+        input.dtype,
+        "pad",
+        allow_none=True,
+        require_finite_float=True,
+    )
+    return canonical, normalized_value, output_shape
 
 
 def _normalize_masked_fill_inputs(source, mask, value):

@@ -61,6 +61,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   dtype-promotion, and allocation contract. It accepts exact tensors only,
   returns an owning promoted-dtype result, selects floating gradients in source
   dtype, and refuses unsupported `out=` mutation explicitly.
+- `functional.pad` now shares JIT's strict nonnegative constant-padding,
+  exact dtype-aware fill, rank, per-axis, and allocation contract. It returns
+  an owning dtype-preserving result, extracts the unpadded floating gradient,
+  rejects hostile coercions before NumPy, and leaves non-constant modes and
+  negative cropping explicit rather than silently changing semantics.
 
 ## [0.5.2] — 2026-07-15
 

@@ -196,6 +196,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.masked-fill.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.tensor.pad.v1",
+      publicSurface: "torch.nn.functional.pad",
+      opcode: "PAD",
+      semanticState: "typed",
+      shapeContract: "trailing-dimension-constant-padding",
+      dtypeContract: "preserve-supported-input-with-exact-fill",
+      decisions: {
+        cpu: "supported-numpy-owning-constant-pad-copy",
+        closureAutograd: "supported-static-interior-slice",
+        symbolicVjp: "supported-static-interior-slice",
+        functionalGrad: "supported-for-floating-input-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-preserving-pad",
+        onnxExport: "supported-opset17-pad-float32-int32-int64",
+        tensorPlan: "refused-no-canonical-pad-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.pad.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.prod.v1",
       publicSurface: "Tensor.prod",
       opcode: "PROD",
@@ -425,7 +446,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(19);
+    expect(result.first.operations).toHaveLength(20);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

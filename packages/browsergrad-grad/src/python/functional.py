@@ -2,7 +2,7 @@
 """browsergrad_grad.functional — stateless ops with autograd."""
 
 import numpy as np
-from .tensor import Tensor, _build_ctx
+from .tensor import Tensor, _build_ctx, _normalize_pad_contract
 from . import _device
 
 
@@ -348,7 +348,7 @@ def kl_div_loss(input: Tensor, target: Tensor, reduction: str = "mean", log_targ
 
 # ─── Spatial / shape ops ───────────────────────────────────
 
-def pad(input: Tensor, pad, mode: str = "constant", value: float = 0.0) -> Tensor:
+def pad(input: Tensor, pad, mode: str = "constant", value=None) -> Tensor:
     """Pad input.
 
     pad: a sequence of even length, paired by dimension, last-dim-first
@@ -358,26 +358,33 @@ def pad(input: Tensor, pad, mode: str = "constant", value: float = 0.0) -> Tenso
     Currently supports mode='constant' only — that covers nearly every
     real PyTorch lab. Add reflect / replicate when something needs them.
     """
-    if mode != "constant":
-        raise NotImplementedError(f"pad: mode {mode!r} not supported; only 'constant'")
-    if len(pad) % 2 != 0:
-        raise ValueError(f"pad: pad length must be even, got {len(pad)}")
-    pairs_lastdim_first = list(zip(pad[0::2], pad[1::2]))
-    # Convert to numpy's first-dim-first ordering, with zero-pad for any dims
-    # that the user didn't specify.
-    ndim = input.data.ndim
-    npad = [(0, 0)] * ndim
-    for k, (lo, hi) in enumerate(pairs_lastdim_first):
-        dim = ndim - 1 - k
-        npad[dim] = (int(lo), int(hi))
-    out_data = np.pad(input.data, npad, mode="constant", constant_values=value)
-    out = Tensor(out_data.astype(np.float32))
+    pad_width, normalized_value, _ = _normalize_pad_contract(
+        input,
+        pad,
+        mode,
+        value,
+    )
+    out_data = np.pad(
+        input.data,
+        pad_width,
+        mode="constant",
+        constant_values=normalized_value,
+    )
+    out = Tensor(
+        np.array(out_data, dtype=input.data.dtype, copy=True),
+        dtype=input.dtype,
+    )
 
     def backward(g):
-        slices = tuple(slice(lo, lo + s) for (lo, _), s in zip(npad, input.data.shape))
-        return (g.data[slices].copy(),)
+        slices = tuple(
+            slice(lower, lower + size)
+            for (lower, _), size in zip(pad_width, input.data.shape)
+        )
+        return (g.data[slices].copy().astype(input.data.dtype, copy=False),)
 
-    return _build_ctx(out, (input,), backward)
+    if input.requires_grad and input.dtype in ("float16", "float32", "float64"):
+        return _build_ctx(out, (input,), backward)
+    return out
 
 
 def _interp_nearest_2d(x_data, out_h, out_w, scale_h, scale_w):

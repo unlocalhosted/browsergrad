@@ -61,6 +61,7 @@ from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_cat_contract,
     validate_stack_contract,
+    validate_pad_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -1052,12 +1053,14 @@ def _h_slice(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
 
 def _h_pad(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     x = vt[id(node.inputs[0])]
-    pad_width = node.arg["pad_width"]
-    mode = node.arg.get("mode", "constant")
-    value = node.arg.get("value", 0.0)
-    if mode == "constant":
-        return np.pad(x, pad_width=pad_width, mode="constant", constant_values=value)
-    return np.pad(x, pad_width=pad_width, mode=mode)
+    pad_width, value = validate_pad_contract(node)
+    padded = np.pad(
+        x,
+        pad_width=pad_width,
+        mode="constant",
+        constant_values=value,
+    )
+    return np.array(padded, dtype=np.dtype(node.dtype), copy=True)
 
 
 def _h_where(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:

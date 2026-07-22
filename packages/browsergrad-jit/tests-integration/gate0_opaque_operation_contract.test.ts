@@ -43,7 +43,8 @@ def error_name(fn):
         return type(exc).__name__
 
 x = bg.from_numpy(np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32), requires_grad=True)
-y = F.pad(x, (1, 1))
+target = bg.zeros(2, 2)
+y = F.l1_loss(x, target, reduction="none")
 cpu_values = y.numpy().tolist()
 y.sum().backward()
 custom_plan = bg.gpu_plan_summary(y, allow_custom=True)
@@ -57,7 +58,7 @@ class PlanOnlyGpuBuffers:
     "cpuValues": cpu_values,
     "cpuGradient": x.grad.numpy().tolist(),
     "symbolicVjpRegistered": _vjp.get_rule("CUSTOM") is not None,
-    "functionalGradError": error_name(lambda: bg.func.grad(lambda value: F.pad(value, (1, 1)).sum())(x)),
+    "functionalGradError": error_name(lambda: bg.func.grad(lambda value: F.l1_loss(value, target, reduction="none").sum())(x)),
     "vmapError": error_name(lambda: _vmap._VMAP_RULES["CUSTOM"](y._uop, {}, 2)),
     "onnxError": error_name(lambda: bg.onnx.export_inference(y, input_buffers=(x,))),
     "tensorPlanError": error_name(lambda: bg.gpu_plan_summary(y)),
@@ -72,7 +73,7 @@ class PlanOnlyGpuBuffers:
     )),
     "legacyWebgpuError": error_name(lambda: _h_custom(
         y._uop,
-        {id(x._uop): "x"},
+        {id(node): f"input-{index}" for index, node in enumerate(y._uop.inputs)},
         None,
         object(),
         None,
@@ -292,7 +293,6 @@ a = leaf([[[[2.0]]]]); check("interpolate", F.interpolate(a, size=(2, 2), mode="
 a = leaf([[-0.2, -1.6]]); check("kl_div", F.kl_div(a, constant([[0.7, 0.3]])), a)
 a = leaf([1.0, 3.0]); check("l1_loss", F.l1_loss(a, constant([0.0, 1.0])), a)
 a = leaf([[-0.2, -1.6], [-0.3, -1.2]]); check("nll_loss", F.nll_loss(a, constant([0, 1], np.int64)), a)
-a = leaf([[1.0, 2.0]]); check("pad", F.pad(a, (1, 1)), a)
 a = leaf([1.0, 3.0]); check("smooth_l1_loss", F.smooth_l1_loss(a, constant([0.0, 1.0])), a)
 
 {

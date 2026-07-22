@@ -150,7 +150,8 @@ Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
 `Tensor.sign`, `Tensor.sin`, `Tensor.cos`, `Tensor.clamp`, `Tensor.flip`,
 `Tensor.gather`, `Tensor.masked_fill`, `Tensor.prod`, `Tensor.repeat`,
 `Tensor.repeat_interleave`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`,
-`Tensor.var`, top-level `torch.cat`, and top-level `torch.stack` from the frozen opaque callback
+`Tensor.var`, top-level `torch.cat`, top-level `torch.stack`, and
+`torch.nn.functional.pad` from the frozen opaque callback
 inventory. Expand emits the existing typed `BROADCAST_TO`
 primitive. One shared contract validates exact arity, closed shape arguments,
 output-shape identity, dtype preservation, rank direction, and broadcast
@@ -177,8 +178,8 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 18 constructor calls and 21 operations under ADR-0002
-and ADR-0004 through ADR-0018. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 17 constructor calls and 20 operations under ADR-0002
+and ADR-0004 through ADR-0019. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -320,12 +321,27 @@ explicit refusals until canonical variadic copy lowering and a typed effect
 contract exist. Grad consumes the same eager/lazy conformance fixture. This is
 eighteen migrated operations, not Gate 6 completion.
 
+Constant padding now emits typed `PAD` over a canonical rank-sized tuple of
+first-dimension-first padding pairs. The public PyTorch-shaped boundary accepts
+only a plain even-length tuple/list of exact built-in or fixed-width NumPy
+integers in last-dimension-first order, supports nonnegative `constant` mode,
+and normalizes `None` or an exact scalar fill into the source dtype without
+calling arbitrary conversion hooks. Bool, uint8, signed int8/16/32/64, and
+float16/32/64 are preserved exactly. Rank, each output extent, and total output
+storage are bounded before NumPy. CPU returns an owning copy; closure and
+symbolic VJP extract the static interior through typed `SLICE`; vmap preserves
+the leading mapped axis; and ONNX emits exact opset-17 `Pad` initializers for
+float32/int32/int64. Tensor-plan/WebGPU refuse until canonical padding/layout
+lowering exists. Grad consumes the same eager/lazy conformance fixture. This is
+nineteen migrated operations, not Gate 6 completion.
+
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
 records bind `Tensor.abs`, `torch.cat`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
 `Tensor.flip`, `Tensor.gather`, `Tensor.masked_fill`, `Tensor.prod`,
 `Tensor.repeat_interleave`, `Tensor.repeat`, `Tensor.sign`, `Tensor.sin`,
-`torch.stack`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`, and `Tensor.var` to the same
+`torch.stack`, `torch.nn.functional.pad`, `Tensor.tril`, `Tensor.triu`,
+`Tensor.cumsum`, and `Tensor.var` to the same
 validators invoked by construction and every admitted execution, transform,
 export, or plan boundary. Import rejects duplicate keys,
 open fields, unknown decisions, invalid versions, duplicate identities, and
@@ -335,7 +351,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 21 still-opaque and eighteen typed retirements. ADR-0003 records
+opaque IDs into 20 still-opaque and nineteen typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.
