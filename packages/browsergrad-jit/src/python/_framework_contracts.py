@@ -60,6 +60,7 @@ L1_LOSS_OUTPUT_EXTENT_MAX = L1_LOSS_OUTPUT_BYTE_MAX
 L1_LOSS_WORK_ELEMENT_MAX = 1 << 28
 L1_LOSS_WORKSPACE_BYTE_MAX = 1 << 28
 L1_LOSS_WORK_VISIT_FACTOR = 10
+SMOOTH_L1_LOSS_WORK_VISIT_FACTOR = 32
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 32 * 1024
@@ -166,6 +167,7 @@ _ENUMS = {
         "supported-unique-overwrite-scatter",
         "supported-general-einsum-vjp",
         "supported-signed-difference-for-both-inputs",
+        "supported-piecewise-difference-for-both-inputs",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -191,6 +193,7 @@ _ENUMS = {
         "supported-unique-overwrite-scatter",
         "supported-general-einsum-vjp",
         "supported-signed-difference-for-both-inputs",
+        "supported-piecewise-difference-for-both-inputs",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
@@ -236,6 +239,7 @@ _ENUMS = {
         "supported-opset17-scatter-elements-float32-int32-int64-bool",
         "supported-opset17-resolved-einsum-numeric-dtypes",
         "supported-opset17-sub-abs-reduce-float16-float32-float64",
+        "supported-opset17-piecewise-smooth-l1-float16-float32-float64",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -318,6 +322,7 @@ _PAD_VALUE_TYPES = _PAD_INTEGER_TYPES + (
     np.float32,
     np.float64,
 )
+_SMOOTH_L1_BETA_TYPES = _PAD_VALUE_TYPES
 _UNARY_DTYPE_PROFILES = MappingProxyType({
     "preserve-floating-input": (_FLOATING_DTYPES, "floating"),
     "preserve-real-numeric-input": (_REAL_NUMERIC_DTYPES, "real numeric"),
@@ -648,6 +653,19 @@ def promote_variadic_dtypes(dtypes: tuple[str, ...], operation: str) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class _ElementwiseLossGeometry:
+    input_shape: Tuple[int, ...]
+    input_dtypes: Tuple[str, str]
+    output_shape: Tuple[int, ...]
+    output_dtype: str
+    reduction: str
+    batch_rank: int
+    reduced_elements: int
+    work_elements: int
+    workspace_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
 class L1LossContract:
     input_shape: Tuple[int, ...]
     input_dtypes: Tuple[str, str]
@@ -660,7 +678,21 @@ class L1LossContract:
     workspace_bytes: int
 
 
-def _l1_loss_checked_product(extents: Tuple[int, ...], ceiling: int) -> int:
+@dataclass(frozen=True, slots=True)
+class SmoothL1LossContract:
+    input_shape: Tuple[int, ...]
+    input_dtypes: Tuple[str, str]
+    output_shape: Tuple[int, ...]
+    output_dtype: str
+    reduction: str
+    batch_rank: int
+    reduced_elements: int
+    work_elements: int
+    workspace_bytes: int
+    beta: float
+
+
+def _elementwise_loss_checked_product(extents: Tuple[int, ...], ceiling: int) -> int:
     product = 1
     for extent in extents:
         if extent == 0:
@@ -671,49 +703,51 @@ def _l1_loss_checked_product(extents: Tuple[int, ...], ceiling: int) -> int:
     return product
 
 
-def infer_l1_loss_contract(
+def _infer_elementwise_loss_geometry(
     inputs: tuple[Any, ...],
     reduction: Any,
-    batch_rank: Any = 0,
-) -> L1LossContract:
+    batch_rank: Any,
+    operation: str,
+    work_visit_factor: int,
+) -> _ElementwiseLossGeometry:
     if type(inputs) is not tuple or len(inputs) != 2:
-        raise ShapeError("l1_loss requires exactly two tensor inputs")
+        raise ShapeError(f"{operation} requires exactly two tensor inputs")
     if type(reduction) is not str:
         raise ShapeError(
-            f"l1_loss: reduction must be a string, got {type(reduction).__name__}"
+            f"{operation}: reduction must be a string, got {type(reduction).__name__}"
         )
     if reduction not in ("none", "sum", "mean"):
         raise ShapeError(
-            f"l1_loss: reduction must be 'none', 'sum', or 'mean', got {reduction!r}"
+            f"{operation}: reduction must be 'none', 'sum', or 'mean', got {reduction!r}"
         )
     if type(batch_rank) is not int:
-        raise ShapeError("l1_loss: batch_rank must be a normalized integer")
+        raise ShapeError(f"{operation}: batch_rank must be a normalized integer")
 
     shapes = []
     dtypes = []
     for index, source in enumerate(inputs):
         shape = getattr(source, "shape", None)
         if type(shape) is not tuple:
-            raise ShapeError(f"l1_loss input {index} shape must be a tuple")
+            raise ShapeError(f"{operation} input {index} shape must be a tuple")
         if len(shape) > L1_LOSS_RANK_MAX:
             raise ShapeError(
-                f"l1_loss input {index} rank {len(shape)} exceeds the "
+                f"{operation} input {index} rank {len(shape)} exceeds the "
                 f"{L1_LOSS_RANK_MAX}-rank ceiling"
             )
         for axis, extent in enumerate(shape):
             if type(extent) is not int or extent < 0:
                 raise ShapeError(
-                    f"l1_loss input {index} shape[{axis}] must be a non-negative integer"
+                    f"{operation} input {index} shape[{axis}] must be a non-negative integer"
                 )
             if extent > L1_LOSS_OUTPUT_EXTENT_MAX:
                 raise ShapeError(
-                    f"l1_loss input {index} extent {extent} on axis {axis} exceeds the "
+                    f"{operation} input {index} extent {extent} on axis {axis} exceeds the "
                     f"{L1_LOSS_OUTPUT_EXTENT_MAX}-element per-axis ceiling"
                 )
         dtype = getattr(source, "dtype", None)
         if dtype not in _FLOATING_DTYPES:
             raise ShapeError(
-                f"l1_loss input {index} dtype {dtype!r} is not supported; "
+                f"{operation} input {index} dtype {dtype!r} is not supported; "
                 "expected float16, float32, or float64"
             )
         shapes.append(shape)
@@ -722,48 +756,45 @@ def infer_l1_loss_contract(
     input_shape = shapes[0]
     if shapes[1] != input_shape:
         raise ShapeError(
-            f"l1_loss: input shape {input_shape} must equal target shape {shapes[1]}"
+            f"{operation}: input shape {input_shape} must equal target shape {shapes[1]}"
         )
     if batch_rank < 0 or batch_rank > len(input_shape):
         raise ShapeError(
-            f"l1_loss: batch_rank {batch_rank} is out of range for rank {len(input_shape)}"
+            f"{operation}: batch_rank {batch_rank} is out of range for rank {len(input_shape)}"
         )
 
-    output_dtype = promote_variadic_dtypes(tuple(dtypes), "L1_LOSS")
+    output_dtype = promote_variadic_dtypes(tuple(dtypes), operation.upper())
     output_shape = input_shape if reduction == "none" else input_shape[:batch_rank]
-    reduced_elements = _l1_loss_checked_product(
+    reduced_elements = _elementwise_loss_checked_product(
         input_shape[batch_rank:],
         L1_LOSS_WORK_ELEMENT_MAX,
     )
-    input_elements = _l1_loss_checked_product(
+    input_elements = _elementwise_loss_checked_product(
         input_shape,
         L1_LOSS_WORK_ELEMENT_MAX,
     )
-    capacity_elements = _l1_loss_checked_product(
+    capacity_elements = _elementwise_loss_checked_product(
         tuple(max(1, extent) for extent in input_shape),
         L1_LOSS_WORK_ELEMENT_MAX,
     )
-    # Forward plus both-input closure/symbolic derivatives can each traverse
-    # the complete element domain. Keep one conservative aggregate ceiling
-    # rather than letting individually bounded phases multiply the work limit.
-    if capacity_elements > L1_LOSS_WORK_ELEMENT_MAX // L1_LOSS_WORK_VISIT_FACTOR:
+    if capacity_elements > L1_LOSS_WORK_ELEMENT_MAX // work_visit_factor:
         work_elements = L1_LOSS_WORK_ELEMENT_MAX + 1
     else:
-        work_elements = capacity_elements * L1_LOSS_WORK_VISIT_FACTOR
+        work_elements = capacity_elements * work_visit_factor
     if work_elements > L1_LOSS_WORK_ELEMENT_MAX:
         raise ShapeError(
-            f"l1_loss: projected work exceeds the "
+            f"{operation}: projected work exceeds the "
             f"{L1_LOSS_WORK_ELEMENT_MAX}-element-visit ceiling"
         )
 
-    output_elements = _l1_loss_checked_product(
+    output_elements = _elementwise_loss_checked_product(
         output_shape,
         L1_LOSS_OUTPUT_BYTE_MAX,
     )
     output_bytes = output_elements * _VARIADIC_DTYPE_BYTES[output_dtype]
     if output_bytes > L1_LOSS_OUTPUT_BYTE_MAX:
         raise ShapeError(
-            f"l1_loss: output requires {output_bytes} bytes, exceeding the "
+            f"{operation}: output requires {output_bytes} bytes, exceeding the "
             f"{L1_LOSS_OUTPUT_BYTE_MAX}-byte ceiling"
         )
 
@@ -772,23 +803,24 @@ def infer_l1_loss_contract(
     cast_bytes = sum(
         input_elements * compute_bytes for dtype in dtypes if dtype != compute_dtype
     )
-    # Peak closure backward retains both source-dtype cotangents while the
-    # second derivative owns one signed buffer, one compute buffer, and an
-    # equality mask. Count them all; "largest gradient" would understate the
-    # real two-input lifetime.
-    intermediate_bytes = input_elements * (compute_bytes * 2 + 1)
+    # The peak closure lifetime retains both source cotangents, input casts,
+    # the output, and three compute buffers (derivative/difference, upstream,
+    # and result) plus one branch/equality mask. This also covers Smooth L1's
+    # forward piecewise branch without pretending sequential allocations are
+    # free while the first operand cotangent remains live.
+    intermediate_bytes = input_elements * (compute_bytes * 3 + 1)
     gradient_bytes = input_elements * sum(
         _VARIADIC_DTYPE_BYTES[dtype] for dtype in dtypes
     )
     workspace_bytes = output_bytes + cast_bytes + intermediate_bytes + gradient_bytes
     if workspace_bytes > L1_LOSS_WORKSPACE_BYTE_MAX:
         raise ShapeError(
-            "l1_loss: projected output/cast/intermediate/gradient workspace "
+            f"{operation}: projected output/cast/intermediate/gradient workspace "
             f"requires {workspace_bytes} bytes, exceeding the "
             f"{L1_LOSS_WORKSPACE_BYTE_MAX}-byte ceiling"
         )
 
-    return L1LossContract(
+    return _ElementwiseLossGeometry(
         input_shape=input_shape,
         input_dtypes=(dtypes[0], dtypes[1]),
         output_shape=output_shape,
@@ -801,38 +833,106 @@ def infer_l1_loss_contract(
     )
 
 
-def _validate_l1_loss_runtime_arrays(
-    contract: L1LossContract,
+def infer_l1_loss_contract(
+    inputs: tuple[Any, ...],
+    reduction: Any,
+    batch_rank: Any = 0,
+) -> L1LossContract:
+    geometry = _infer_elementwise_loss_geometry(
+        inputs,
+        reduction,
+        batch_rank,
+        "l1_loss",
+        L1_LOSS_WORK_VISIT_FACTOR,
+    )
+    return L1LossContract(**{
+        field: getattr(geometry, field)
+        for field in L1LossContract.__dataclass_fields__
+    })
+
+
+def normalize_smooth_l1_beta(beta: Any) -> float:
+    if type(beta) not in _SMOOTH_L1_BETA_TYPES or type(beta) is bool:
+        raise ShapeError(
+            "smooth_l1_loss: beta must be an exact real scalar"
+        )
+    try:
+        normalized = float(beta)
+    except (OverflowError, ValueError) as exc:
+        raise ShapeError("smooth_l1_loss: beta must be finite") from exc
+    if not math.isfinite(normalized):
+        raise ShapeError("smooth_l1_loss: beta must be finite")
+    if normalized < 0.0:
+        raise ShapeError(
+            f"smooth_l1_loss: beta must be non-negative, got {normalized}"
+        )
+    return 0.0 if normalized == 0.0 else normalized
+
+
+def infer_smooth_l1_loss_contract(
+    inputs: tuple[Any, ...],
+    beta: Any,
+    reduction: Any,
+    batch_rank: Any = 0,
+) -> SmoothL1LossContract:
+    normalized_beta = normalize_smooth_l1_beta(beta)
+    geometry = _infer_elementwise_loss_geometry(
+        inputs,
+        reduction,
+        batch_rank,
+        "smooth_l1_loss",
+        SMOOTH_L1_LOSS_WORK_VISIT_FACTOR,
+    )
+    compute_dtype = "float32" if geometry.output_dtype == "float16" else geometry.output_dtype
+    with np.errstate(over="ignore", under="ignore"):
+        compute_beta = float(
+            np.asarray(normalized_beta, dtype=np.dtype(compute_dtype)).item()
+        )
+    if normalized_beta > 0.0 and (compute_beta == 0.0 or not math.isfinite(compute_beta)):
+        raise ShapeError(
+            f"smooth_l1_loss: beta {normalized_beta} is not representable as "
+            f"a finite nonzero {compute_dtype} scalar"
+        )
+    values = {
+        field: getattr(geometry, field)
+        for field in _ElementwiseLossGeometry.__dataclass_fields__
+    }
+    return SmoothL1LossContract(**values, beta=compute_beta)
+
+
+def _validate_elementwise_loss_runtime_arrays(
+    contract: Any,
     arrays: tuple[np.ndarray, ...],
+    operation: str,
 ) -> None:
     if type(arrays) is not tuple or len(arrays) != 2:
-        raise ShapeError("l1_loss execution requires exactly two arrays")
+        raise ShapeError(f"{operation} execution requires exactly two arrays")
     for index, (array, dtype) in enumerate(zip(arrays, contract.input_dtypes)):
         if type(array) is not np.ndarray:
             raise ShapeError(
-                f"l1_loss runtime input {index} must be an exact ndarray"
+                f"{operation} runtime input {index} must be an exact ndarray"
             )
         if tuple(array.shape) != contract.input_shape:
             raise ShapeError(
-                f"l1_loss runtime input {index} shape {tuple(array.shape)} does not "
+                f"{operation} runtime input {index} shape {tuple(array.shape)} does not "
                 f"match {contract.input_shape}"
             )
         if array.dtype.name != dtype:
             raise ShapeError(
-                f"l1_loss runtime input {index} dtype {array.dtype.name!r} does not "
+                f"{operation} runtime input {index} dtype {array.dtype.name!r} does not "
                 f"match {dtype!r}"
             )
 
 
-def execute_l1_loss_arrays(
-    contract: L1LossContract,
-    arrays: tuple[np.ndarray, ...],
+def _elementwise_loss_compute_dtype(contract: Any) -> str:
+    return "float32" if contract.output_dtype == "float16" else contract.output_dtype
+
+
+def _execute_elementwise_loss_reduction(
+    contract: Any,
+    per_element: np.ndarray,
 ) -> np.ndarray:
-    _validate_l1_loss_runtime_arrays(contract, arrays)
-    compute_dtype = "float32" if contract.output_dtype == "float16" else contract.output_dtype
-    left = arrays[0].astype(np.dtype(compute_dtype), copy=False)
-    right = arrays[1].astype(np.dtype(compute_dtype), copy=False)
-    per_element = np.abs(left - right)
+    compute_dtype = _elementwise_loss_compute_dtype(contract)
     reduction_axes = tuple(range(contract.batch_rank, len(contract.input_shape)))
     if contract.reduction == "none" or not reduction_axes:
         result = per_element
@@ -848,32 +948,19 @@ def execute_l1_loss_arrays(
     return np.array(result, dtype=np.dtype(contract.output_dtype), copy=True)
 
 
-def execute_l1_loss_vjp_array(
-    contract: L1LossContract,
-    operand: int,
+def _elementwise_loss_upstream(
+    contract: Any,
     dy: np.ndarray,
-    arrays: tuple[np.ndarray, ...],
+    operation: str,
 ) -> np.ndarray:
-    _validate_l1_loss_runtime_arrays(contract, arrays)
-    if type(operand) is not int or operand not in (0, 1):
-        raise ShapeError("l1_loss VJP operand must be 0 or 1")
-    if not isinstance(dy, np.ndarray):
-        raise ShapeError("l1_loss VJP cotangent must be an ndarray")
+    if type(dy) is not np.ndarray:
+        raise ShapeError(f"{operation} VJP cotangent must be an exact ndarray")
     if tuple(dy.shape) != contract.output_shape or dy.dtype.name != contract.output_dtype:
         raise ShapeError(
-            f"l1_loss VJP cotangent must have shape {contract.output_shape} and "
+            f"{operation} VJP cotangent must have shape {contract.output_shape} and "
             f"dtype {contract.output_dtype!r}"
         )
-    target_dtype = contract.input_dtypes[operand]
-    if contract.reduced_elements == 0:
-        return np.zeros(contract.input_shape, dtype=np.dtype(target_dtype))
-
-    compute_dtype = "float32" if contract.output_dtype == "float16" else contract.output_dtype
-    left = arrays[0].astype(np.dtype(compute_dtype), copy=False)
-    right = arrays[1].astype(np.dtype(compute_dtype), copy=False)
-    signed = np.empty(contract.input_shape, dtype=np.dtype(compute_dtype))
-    np.subtract(left, right, out=signed)
-    np.sign(signed, out=signed)
+    compute_dtype = _elementwise_loss_compute_dtype(contract)
     upstream = dy.astype(np.dtype(compute_dtype), copy=False)
     if contract.reduction != "none":
         user_rank = len(contract.input_shape) - contract.batch_rank
@@ -881,6 +968,41 @@ def execute_l1_loss_vjp_array(
         upstream = np.broadcast_to(upstream, contract.input_shape)
         if contract.reduction == "mean":
             upstream = upstream / float(contract.reduced_elements)
+    return upstream
+
+
+def execute_l1_loss_arrays(
+    contract: L1LossContract,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_elementwise_loss_runtime_arrays(contract, arrays, "l1_loss")
+    compute_dtype = _elementwise_loss_compute_dtype(contract)
+    left = arrays[0].astype(np.dtype(compute_dtype), copy=False)
+    right = arrays[1].astype(np.dtype(compute_dtype), copy=False)
+    per_element = np.abs(left - right)
+    return _execute_elementwise_loss_reduction(contract, per_element)
+
+
+def execute_l1_loss_vjp_array(
+    contract: L1LossContract,
+    operand: int,
+    dy: np.ndarray,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_elementwise_loss_runtime_arrays(contract, arrays, "l1_loss")
+    if type(operand) is not int or operand not in (0, 1):
+        raise ShapeError("l1_loss VJP operand must be 0 or 1")
+    upstream = _elementwise_loss_upstream(contract, dy, "l1_loss")
+    target_dtype = contract.input_dtypes[operand]
+    if contract.reduced_elements == 0:
+        return np.zeros(contract.input_shape, dtype=np.dtype(target_dtype))
+
+    compute_dtype = _elementwise_loss_compute_dtype(contract)
+    left = arrays[0].astype(np.dtype(compute_dtype), copy=False)
+    right = arrays[1].astype(np.dtype(compute_dtype), copy=False)
+    signed = np.empty(contract.input_shape, dtype=np.dtype(compute_dtype))
+    np.subtract(left, right, out=signed)
+    np.sign(signed, out=signed)
     gradient = np.empty(contract.input_shape, dtype=np.dtype(compute_dtype))
     np.multiply(signed, upstream, out=gradient)
     if operand == 1:
@@ -889,6 +1011,72 @@ def execute_l1_loss_vjp_array(
     if gradient.dtype.name == target_dtype:
         return gradient
     return gradient.astype(np.dtype(target_dtype), copy=True)
+
+
+def execute_smooth_l1_loss_arrays(
+    contract: SmoothL1LossContract,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_elementwise_loss_runtime_arrays(contract, arrays, "smooth_l1_loss")
+    compute_dtype = _elementwise_loss_compute_dtype(contract)
+    dtype = np.dtype(compute_dtype)
+    left = arrays[0].astype(dtype, copy=False)
+    right = arrays[1].astype(dtype, copy=False)
+    difference = np.empty(contract.input_shape, dtype=dtype)
+    np.subtract(left, right, out=difference)
+    if contract.beta == 0.0:
+        np.abs(difference, out=difference)
+        per_element = difference
+    else:
+        per_element = np.empty(contract.input_shape, dtype=dtype)
+        np.abs(difference, out=per_element)
+        quadratic_mask = per_element < contract.beta
+        np.subtract(per_element, contract.beta * 0.5, out=per_element)
+        quadratic = np.empty(contract.input_shape, dtype=dtype)
+        np.multiply(difference, difference, out=quadratic)
+        np.divide(quadratic, contract.beta, out=quadratic)
+        np.multiply(quadratic, 0.5, out=quadratic)
+        np.copyto(per_element, quadratic, where=quadratic_mask)
+    return _execute_elementwise_loss_reduction(contract, per_element)
+
+
+def execute_smooth_l1_loss_vjp_array(
+    contract: SmoothL1LossContract,
+    operand: int,
+    dy: np.ndarray,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_elementwise_loss_runtime_arrays(contract, arrays, "smooth_l1_loss")
+    if type(operand) is not int or operand not in (0, 1):
+        raise ShapeError("smooth_l1_loss VJP operand must be 0 or 1")
+    upstream = _elementwise_loss_upstream(contract, dy, "smooth_l1_loss")
+    target_dtype = contract.input_dtypes[operand]
+    if contract.reduced_elements == 0:
+        return np.zeros(contract.input_shape, dtype=np.dtype(target_dtype))
+
+    compute_dtype = _elementwise_loss_compute_dtype(contract)
+    dtype = np.dtype(compute_dtype)
+    left = arrays[0].astype(dtype, copy=False)
+    right = arrays[1].astype(dtype, copy=False)
+    difference = np.empty(contract.input_shape, dtype=dtype)
+    np.subtract(left, right, out=difference)
+    if contract.beta == 0.0:
+        derivative = difference
+        np.sign(derivative, out=derivative)
+    else:
+        derivative = np.empty(contract.input_shape, dtype=dtype)
+        np.abs(difference, out=derivative)
+        quadratic_mask = derivative < contract.beta
+        np.sign(difference, out=derivative)
+        np.divide(difference, contract.beta, out=difference)
+        np.copyto(derivative, difference, where=quadratic_mask)
+    np.multiply(derivative, upstream, out=difference)
+    if operand == 1:
+        np.negative(difference, out=difference)
+        difference[derivative == 0] = 0.0
+    if difference.dtype.name == target_dtype:
+        return difference
+    return difference.astype(np.dtype(target_dtype), copy=True)
 
 
 _EINSUM_LABEL_ORDER = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -2878,6 +3066,103 @@ def _validate_l1_loss_vjp(node: Any) -> Tuple[L1LossContract, int]:
     return normalized, operand
 
 
+def _validate_smooth_l1_loss(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> SmoothL1LossContract:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict or set(arg) != {"reduction", "batch_rank", "beta"}:
+        raise ShapeError(
+            "SMOOTH_L1_LOSS arg fields must be exactly 'reduction', 'batch_rank', and 'beta'"
+        )
+    if type(arg["beta"]) is not float:
+        raise ShapeError("SMOOTH_L1_LOSS arg.beta must be a canonical float")
+    normalized = infer_smooth_l1_loss_contract(
+        getattr(node, "inputs", None),
+        arg["beta"],
+        arg["reduction"],
+        arg["batch_rank"],
+    )
+    if normalized.beta != arg["beta"] or (
+        arg["beta"] == 0.0 and math.copysign(1.0, arg["beta"]) < 0.0
+    ):
+        raise ShapeError("SMOOTH_L1_LOSS arg.beta must be canonical")
+    if getattr(node, "shape", None) != normalized.output_shape:
+        raise ShapeError(
+            f"SMOOTH_L1_LOSS declared shape {getattr(node, 'shape', None)!r} does not "
+            f"match derived shape {normalized.output_shape!r}"
+        )
+    if getattr(node, "dtype", None) != normalized.output_dtype:
+        raise ShapeError(
+            f"SMOOTH_L1_LOSS declared dtype {getattr(node, 'dtype', None)!r} does not "
+            f"match promoted dtype {normalized.output_dtype!r}"
+        )
+    return normalized
+
+
+def _validate_smooth_l1_loss_vjp(node: Any) -> Tuple[SmoothL1LossContract, int]:
+    if getattr(node, "op", None) != "SMOOTH_L1_LOSS_VJP":
+        raise ShapeError(
+            "SMOOTH_L1_LOSS_VJP validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or len(inputs) != 3:
+        raise ShapeError(
+            "SMOOTH_L1_LOSS_VJP must have exactly dy, input, and target inputs"
+        )
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("SMOOTH_L1_LOSS_VJP arg must be a plain dict")
+    fields = set(arg)
+    required = {"reduction", "batch_rank", "beta", "operand"}
+    if not required.issubset(fields) or not fields.issubset(required | {"vjp_of"}):
+        raise ShapeError(
+            "SMOOTH_L1_LOSS_VJP arg fields must be exactly 'reduction', "
+            "'batch_rank', 'beta', and 'operand' plus optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("SMOOTH_L1_LOSS_VJP arg.vjp_of must reference a UOp")
+    if type(arg["beta"]) is not float:
+        raise ShapeError("SMOOTH_L1_LOSS_VJP arg.beta must be a canonical float")
+    operand = arg["operand"]
+    if type(operand) is not int or operand not in (0, 1):
+        raise ShapeError("SMOOTH_L1_LOSS_VJP arg.operand must be 0 or 1")
+    normalized = infer_smooth_l1_loss_contract(
+        inputs[1:],
+        arg["beta"],
+        arg["reduction"],
+        arg["batch_rank"],
+    )
+    if normalized.beta != arg["beta"] or (
+        arg["beta"] == 0.0 and math.copysign(1.0, arg["beta"]) < 0.0
+    ):
+        raise ShapeError("SMOOTH_L1_LOSS_VJP arg.beta must be canonical")
+    dy = inputs[0]
+    if (
+        getattr(dy, "shape", None) != normalized.output_shape
+        or getattr(dy, "dtype", None) != normalized.output_dtype
+    ):
+        raise ShapeError(
+            f"SMOOTH_L1_LOSS_VJP dy must have shape {normalized.output_shape!r} "
+            f"and dtype {normalized.output_dtype!r}"
+        )
+    source = inputs[operand + 1]
+    if getattr(node, "shape", None) != getattr(source, "shape", None):
+        raise ShapeError(
+            "SMOOTH_L1_LOSS_VJP must preserve its selected operand shape"
+        )
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError(
+            "SMOOTH_L1_LOSS_VJP must preserve its selected operand dtype"
+        )
+    return normalized, operand
+
+
 def _validate_repeat(
     node: Any,
     contract: FrameworkOperationContract,
@@ -3129,6 +3414,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.flip.v1": _validate_flip,
     "browsergrad.jit.framework.tensor.gather.v1": _validate_gather,
     "browsergrad.jit.framework.functional.l1-loss.v1": _validate_l1_loss,
+    "browsergrad.jit.framework.functional.smooth-l1-loss.v1": _validate_smooth_l1_loss,
     "browsergrad.jit.framework.tensor.masked-fill.v1": _validate_masked_fill,
     "browsergrad.jit.framework.tensor.pad.v1": _validate_pad,
     "browsergrad.jit.framework.tensor.prod.v1": _validate_prod,
@@ -3160,6 +3446,7 @@ _INTERNAL_VALIDATORS: Mapping[str, Callable[[Any], Any]] = MappingProxyType({
     "NARROW": _validate_narrow,
     "EINSUM_VJP": _validate_einsum_vjp,
     "L1_LOSS_VJP": _validate_l1_loss_vjp,
+    "SMOOTH_L1_LOSS_VJP": _validate_smooth_l1_loss_vjp,
 })
 
 
@@ -3306,6 +3593,21 @@ def validate_l1_loss_contract(node: Any) -> L1LossContract:
 
 
 def validate_l1_loss_vjp_contract(node: Any) -> Tuple[L1LossContract, int]:
+    return validate_internal_operation_contract(node)
+
+
+def validate_smooth_l1_loss_contract(node: Any) -> SmoothL1LossContract:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.functional.smooth-l1-loss.v1":
+        raise ShapeError(
+            "SMOOTH_L1_LOSS resolved to the wrong framework-operation contract"
+        )
+    return normalized
+
+
+def validate_smooth_l1_loss_vjp_contract(
+    node: Any,
+) -> Tuple[SmoothL1LossContract, int]:
     return validate_internal_operation_contract(node)
 
 
@@ -3458,10 +3760,12 @@ __all__ = [
     "L1_LOSS_WORK_ELEMENT_MAX",
     "L1_LOSS_WORKSPACE_BYTE_MAX",
     "L1_LOSS_WORK_VISIT_FACTOR",
+    "SMOOTH_L1_LOSS_WORK_VISIT_FACTOR",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "EinsumContract",
     "L1LossContract",
+    "SmoothL1LossContract",
     "framework_operation_support",
     "has_framework_operation_contract",
     "has_internal_operation_contract",
@@ -3473,6 +3777,8 @@ __all__ = [
     "infer_scatter_contract",
     "infer_einsum_contract",
     "infer_l1_loss_contract",
+    "infer_smooth_l1_loss_contract",
+    "normalize_smooth_l1_beta",
     "normalize_pad_request",
     "normalize_pad_value",
     "normalize_sort_request",
@@ -3483,6 +3789,8 @@ __all__ = [
     "execute_einsum_vjp_array",
     "execute_l1_loss_arrays",
     "execute_l1_loss_vjp_array",
+    "execute_smooth_l1_loss_arrays",
+    "execute_smooth_l1_loss_vjp_array",
     "einsum_onnx_equation",
     "stable_sort_indices_array",
     "partial_topk_indices_array",
@@ -3506,6 +3814,8 @@ __all__ = [
     "validate_gather_contract",
     "validate_l1_loss_contract",
     "validate_l1_loss_vjp_contract",
+    "validate_smooth_l1_loss_contract",
+    "validate_smooth_l1_loss_vjp_contract",
     "validate_gather_scatter_add_contract",
     "validate_tril_contract",
     "validate_triu_contract",

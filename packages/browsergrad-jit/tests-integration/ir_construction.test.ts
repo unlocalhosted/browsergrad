@@ -34,19 +34,21 @@ browsergrad_jit.__version__
     expect(version).toBe(pkg.version);
   });
 
-  it("exposes 80 opcodes in ALL_OPS (core + typed framework + CNN + norm + fusion + autograd + AMP + optimizer)", async () => {
+  it("exposes 82 opcodes in ALL_OPS (core + typed framework + CNN + norm + fusion + autograd + AMP + optimizer)", async () => {
     const target = await getJitTarget();
     const ops = await target.run<string[]>(`
 from browsergrad_jit._ir import ALL_OPS
 sorted(ALL_OPS)
 `);
-    expect(ops).toHaveLength(80);
+    expect(ops).toHaveLength(82);
     expect(ops).toContain("CONCAT");
     expect(ops).toContain("CUMSUM");
     expect(ops).toContain("NARROW");
     expect(ops).toContain("PAD");
     expect(ops).toContain("SORT_INDICES");
     expect(ops).toContain("SORT_VALUES");
+    expect(ops).toContain("SMOOTH_L1_LOSS");
+    expect(ops).toContain("SMOOTH_L1_LOSS_VJP");
     expect(ops).toContain("TOPK_INDICES");
     expect(ops).toContain("TOPK_VALUES");
     expect(ops).toContain("SCATTER");

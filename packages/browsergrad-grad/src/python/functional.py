@@ -279,6 +279,22 @@ _L1_LOSS_OUTPUT_EXTENT_MAX = _L1_LOSS_OUTPUT_BYTE_MAX
 _L1_LOSS_WORK_ELEMENT_MAX = 1 << 28
 _L1_LOSS_WORKSPACE_BYTE_MAX = 1 << 28
 _L1_LOSS_WORK_VISIT_FACTOR = 10
+_SMOOTH_L1_LOSS_WORK_VISIT_FACTOR = 32
+_SMOOTH_L1_BETA_TYPES = (
+    int,
+    float,
+    np.int8,
+    np.int16,
+    np.int32,
+    np.int64,
+    np.uint8,
+    np.uint16,
+    np.uint32,
+    np.uint64,
+    np.float16,
+    np.float32,
+    np.float64,
+)
 
 
 def _l1_loss_checked_product(extents, ceiling: int) -> int:
@@ -292,48 +308,60 @@ def _l1_loss_checked_product(extents, ceiling: int) -> int:
     return product
 
 
-def _l1_loss_contract(input: Tensor, target: Tensor, reduction):
+def _elementwise_loss_contract(
+    input: Tensor,
+    target: Tensor,
+    reduction,
+    operation: str,
+    work_visit_factor: int,
+):
     if not isinstance(input, Tensor):
-        raise TypeError(f"l1_loss: input must be a Tensor, got {type(input).__name__}")
+        raise TypeError(
+            f"{operation}: input must be a Tensor, got {type(input).__name__}"
+        )
     if not isinstance(target, Tensor):
-        raise TypeError(f"l1_loss: target must be a Tensor, got {type(target).__name__}")
+        raise TypeError(
+            f"{operation}: target must be a Tensor, got {type(target).__name__}"
+        )
     if type(input.data) is not np.ndarray:
-        raise TypeError("l1_loss: input data must be an exact ndarray")
+        raise TypeError(f"{operation}: input data must be an exact ndarray")
     if type(target.data) is not np.ndarray:
-        raise TypeError("l1_loss: target data must be an exact ndarray")
+        raise TypeError(f"{operation}: target data must be an exact ndarray")
     if type(reduction) is not str:
         raise ValueError(
-            f"l1_loss: reduction must be a string, got {type(reduction).__name__}"
+            f"{operation}: reduction must be a string, got {type(reduction).__name__}"
         )
     if reduction not in ("none", "sum", "mean"):
         raise ValueError(
-            f"l1_loss: reduction must be 'none', 'sum', or 'mean', got {reduction!r}"
+            f"{operation}: reduction must be 'none', 'sum', or 'mean', got {reduction!r}"
         )
     if input.data.shape != target.data.shape:
         raise ValueError(
-            f"l1_loss: input shape {input.data.shape} must equal target shape {target.data.shape}"
+            f"{operation}: input shape {input.data.shape} must equal target shape "
+            f"{target.data.shape}"
         )
     shape = tuple(input.data.shape)
     if len(shape) > _L1_LOSS_RANK_MAX:
         raise ValueError(
-            f"l1_loss: input rank {len(shape)} exceeds the {_L1_LOSS_RANK_MAX}-rank ceiling"
+            f"{operation}: input rank {len(shape)} exceeds the "
+            f"{_L1_LOSS_RANK_MAX}-rank ceiling"
         )
     for axis, extent in enumerate(shape):
         if extent > _L1_LOSS_OUTPUT_EXTENT_MAX:
             raise ValueError(
-                f"l1_loss: input extent {extent} on axis {axis} exceeds the "
+                f"{operation}: input extent {extent} on axis {axis} exceeds the "
                 f"{_L1_LOSS_OUTPUT_EXTENT_MAX}-element per-axis ceiling"
             )
     input_dtype = input.data.dtype.name
     target_dtype = target.data.dtype.name
     if input_dtype not in _L1_LOSS_FLOATING_DTYPES:
         raise ValueError(
-            f"l1_loss: input dtype {input_dtype!r} is not supported; "
+            f"{operation}: input dtype {input_dtype!r} is not supported; "
             "expected float16, float32, or float64"
         )
     if target_dtype not in _L1_LOSS_FLOATING_DTYPES:
         raise ValueError(
-            f"l1_loss: target dtype {target_dtype!r} is not supported; "
+            f"{operation}: target dtype {target_dtype!r} is not supported; "
             "expected float16, float32, or float64"
         )
     output_dtype = np.promote_types(input.data.dtype, target.data.dtype).name
@@ -343,20 +371,20 @@ def _l1_loss_contract(input: Tensor, target: Tensor, reduction):
         tuple(max(1, extent) for extent in shape),
         _L1_LOSS_WORK_ELEMENT_MAX,
     )
-    if capacity_elements > _L1_LOSS_WORK_ELEMENT_MAX // _L1_LOSS_WORK_VISIT_FACTOR:
+    if capacity_elements > _L1_LOSS_WORK_ELEMENT_MAX // work_visit_factor:
         work_elements = _L1_LOSS_WORK_ELEMENT_MAX + 1
     else:
-        work_elements = capacity_elements * _L1_LOSS_WORK_VISIT_FACTOR
+        work_elements = capacity_elements * work_visit_factor
     if work_elements > _L1_LOSS_WORK_ELEMENT_MAX:
         raise ValueError(
-            f"l1_loss: projected work exceeds the "
+            f"{operation}: projected work exceeds the "
             f"{_L1_LOSS_WORK_ELEMENT_MAX}-element-visit ceiling"
         )
     output_elements = input_elements if reduction == "none" else 1
     output_bytes = output_elements * np.dtype(output_dtype).itemsize
     if output_bytes > _L1_LOSS_OUTPUT_BYTE_MAX:
         raise ValueError(
-            f"l1_loss: output requires {output_bytes} bytes, exceeding the "
+            f"{operation}: output requires {output_bytes} bytes, exceeding the "
             f"{_L1_LOSS_OUTPUT_BYTE_MAX}-byte ceiling"
         )
     compute_bytes = np.dtype(compute_dtype).itemsize
@@ -368,22 +396,54 @@ def _l1_loss_contract(input: Tensor, target: Tensor, reduction):
     workspace_bytes = (
         output_bytes
         + cast_bytes
-        + input_elements * (compute_bytes * 2 + 1)
+        + input_elements * (compute_bytes * 3 + 1)
         + input_elements * (
             np.dtype(input_dtype).itemsize + np.dtype(target_dtype).itemsize
         )
     )
     if workspace_bytes > _L1_LOSS_WORKSPACE_BYTE_MAX:
         raise ValueError(
-            "l1_loss: projected output/cast/intermediate/gradient workspace "
+            f"{operation}: projected output/cast/intermediate/gradient workspace "
             f"requires {workspace_bytes} bytes, exceeding the "
             f"{_L1_LOSS_WORKSPACE_BYTE_MAX}-byte ceiling"
         )
     return shape, input_dtype, target_dtype, output_dtype, compute_dtype, input_elements
 
 
-def l1_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
-    """Typed same-shape absolute error with exact reduction semantics."""
+def _l1_loss_contract(input: Tensor, target: Tensor, reduction):
+    return _elementwise_loss_contract(
+        input,
+        target,
+        reduction,
+        "l1_loss",
+        _L1_LOSS_WORK_VISIT_FACTOR,
+    )
+
+
+def _normalize_smooth_l1_beta(beta) -> float:
+    if type(beta) not in _SMOOTH_L1_BETA_TYPES or type(beta) is bool:
+        raise ValueError("smooth_l1_loss: beta must be an exact real scalar")
+    try:
+        normalized = float(beta)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("smooth_l1_loss: beta must be finite") from exc
+    if not np.isfinite(normalized):
+        raise ValueError("smooth_l1_loss: beta must be finite")
+    if normalized < 0.0:
+        raise ValueError(
+            f"smooth_l1_loss: beta must be non-negative, got {normalized}"
+        )
+    return 0.0 if normalized == 0.0 else normalized
+
+
+def _finish_typed_elementwise_loss(
+    input: Tensor,
+    target: Tensor,
+    reduction: str,
+    contract,
+    per_element: np.ndarray,
+    derivative: np.ndarray,
+) -> Tensor:
     (
         shape,
         input_dtype,
@@ -391,13 +451,7 @@ def l1_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
         output_dtype,
         compute_dtype,
         input_elements,
-    ) = _l1_loss_contract(input, target, reduction)
-    left = input.data.astype(np.dtype(compute_dtype), copy=False)
-    right = target.data.astype(np.dtype(compute_dtype), copy=False)
-    signed = np.empty(shape, dtype=np.dtype(compute_dtype))
-    np.subtract(left, right, out=signed)
-    np.sign(signed, out=signed)
-    per_element = np.abs(left - right)
+    ) = contract
     if reduction == "none":
         result = per_element
     elif reduction == "sum":
@@ -423,14 +477,36 @@ def l1_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
             if reduction == "mean":
                 upstream = upstream / float(input_elements)
         working_gradient = np.empty(shape, dtype=np.dtype(compute_dtype))
-        np.multiply(signed, upstream, out=working_gradient)
+        np.multiply(derivative, upstream, out=working_gradient)
         input_gradient = working_gradient.astype(np.dtype(input_dtype), copy=True)
         np.negative(working_gradient, out=working_gradient)
-        working_gradient[signed == 0] = 0.0
+        working_gradient[derivative == 0] = 0.0
         target_gradient = working_gradient.astype(np.dtype(target_dtype), copy=True)
         return input_gradient, target_gradient
 
     return _build_ctx(out, (input, target), backward)
+
+
+def l1_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
+    """Typed same-shape absolute error with exact reduction semantics."""
+    contract = _l1_loss_contract(input, target, reduction)
+    shape, _, _, _, compute_dtype, _ = contract
+    dtype = np.dtype(compute_dtype)
+    left = input.data.astype(dtype, copy=False)
+    right = target.data.astype(dtype, copy=False)
+    difference = np.empty(shape, dtype=dtype)
+    np.subtract(left, right, out=difference)
+    per_element = np.empty(shape, dtype=dtype)
+    np.abs(difference, out=per_element)
+    np.sign(difference, out=difference)
+    return _finish_typed_elementwise_loss(
+        input,
+        target,
+        reduction,
+        contract,
+        per_element,
+        difference,
+    )
 
 
 def bce_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
@@ -452,23 +528,53 @@ def bce_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
 
 
 def smooth_l1_loss(input: Tensor, target: Tensor, beta: float = 1.0, reduction: str = "mean") -> Tensor:
-    """Smooth L1 (Huber with knee at beta).
-
-    Per element:
-      0.5 * d^2 / beta              if |d| < beta
-      |d| - 0.5 * beta              otherwise
-    """
-    if input.data.shape != target.data.shape:
-        raise ValueError(f"smooth_l1_loss: shape mismatch {input.data.shape} vs {target.data.shape}")
-    if beta <= 0:
-        raise ValueError(f"smooth_l1_loss: beta must be > 0, got {beta}")
-    d = input.data - target.data
-    a = np.abs(d)
-    quad = 0.5 * d * d / beta
-    lin = a - 0.5 * beta
-    per_elem = np.where(a < beta, quad, lin)
-    grad_per_elem = np.where(a < beta, d / beta, np.sign(d)).astype(np.float32)
-    return _reduce_loss(per_elem, grad_per_elem, input, reduction, "smooth_l1_loss")
+    """Typed same-shape piecewise quadratic/linear error."""
+    normalized_beta = _normalize_smooth_l1_beta(beta)
+    contract = _elementwise_loss_contract(
+        input,
+        target,
+        reduction,
+        "smooth_l1_loss",
+        _SMOOTH_L1_LOSS_WORK_VISIT_FACTOR,
+    )
+    shape, _, _, _, compute_dtype, _ = contract
+    dtype = np.dtype(compute_dtype)
+    with np.errstate(over="ignore", under="ignore"):
+        compute_beta = float(np.asarray(normalized_beta, dtype=dtype).item())
+    if normalized_beta > 0.0 and (compute_beta == 0.0 or not np.isfinite(compute_beta)):
+        raise ValueError(
+            f"smooth_l1_loss: beta {normalized_beta} is not representable as "
+            f"a finite nonzero {compute_dtype} scalar"
+        )
+    normalized_beta = compute_beta
+    left = input.data.astype(dtype, copy=False)
+    right = target.data.astype(dtype, copy=False)
+    difference = np.empty(shape, dtype=dtype)
+    np.subtract(left, right, out=difference)
+    per_element = np.empty(shape, dtype=dtype)
+    np.abs(difference, out=per_element)
+    if normalized_beta == 0.0:
+        np.sign(difference, out=difference)
+    else:
+        quadratic_mask = per_element < normalized_beta
+        np.subtract(per_element, normalized_beta * 0.5, out=per_element)
+        quadratic = np.empty(shape, dtype=dtype)
+        np.multiply(difference, difference, out=quadratic)
+        np.divide(quadratic, normalized_beta, out=quadratic)
+        np.multiply(quadratic, 0.5, out=quadratic)
+        np.copyto(per_element, quadratic, where=quadratic_mask)
+        np.divide(difference, normalized_beta, out=quadratic)
+        np.sign(difference, out=difference)
+        np.copyto(difference, quadratic, where=quadratic_mask)
+        del quadratic, quadratic_mask
+    return _finish_typed_elementwise_loss(
+        input,
+        target,
+        reduction,
+        contract,
+        per_element,
+        difference,
+    )
 
 
 def kl_div_loss(input: Tensor, target: Tensor, reduction: str = "mean", log_target: bool = False) -> Tensor:

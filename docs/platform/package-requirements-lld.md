@@ -180,8 +180,8 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 11 constructor calls and 13 operations under ADR-0002
-and ADR-0004 through ADR-0024. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 11 constructor calls and 12 operations under ADR-0002
+and ADR-0004 through ADR-0025. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -428,12 +428,33 @@ value/dtype/empty/gradient/resource fixture and no longer casts every result to
 float32 or disconnects the target. This is twenty-six migrated operation
 records, not Gate 6 completion.
 
+Smooth L1 loss now emits typed binary `SMOOTH_L1_LOSS` with canonical finite
+non-negative beta, exact reduction, and transform-owned batch rank. It reuses
+the same-shape float16/32/64 promotion and float32 half-compute seam while
+rejecting positive beta values that cannot remain finite and nonzero in the
+compute dtype. Positive beta uses the exact quadratic branch only below the
+boundary and the linear branch at and above it; zero beta takes the L1 path
+without evaluating division. Rank, extents, output, conservative casts,
+intermediates, mask, both retained cotangents, and 32-visit piecewise work are
+bounded before allocation, including zero-extent hostile capacity. Closure and
+typed symbolic `SMOOTH_L1_LOSS_VJP` propagate source-dtype derivatives to both
+operands, normalize target zero, and Grad snapshots the piecewise derivative.
+Nested vmap keeps reductions per example. ONNX opset 17 emits float32
+half-compute casts plus `Sub`/`Abs` and, for positive beta,
+`Less`/`Mul`/`Div`/`Where` before the exact non-batch reduction and output cast;
+zero beta emits the smaller L1 decomposition. Tensor-plan and WebGPU validate
+and refuse pending canonical piecewise loss lowering. The shared loss geometry
+also tightens L1's workspace proof to count the retained upstream compute
+buffer. This is twenty-seven migrated operation records, not Gate 6
+completion.
+
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
 records bind `Tensor.abs`, `torch.cat`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
 `Tensor.flip`, `Tensor.gather`, `Tensor.masked_fill`, `Tensor.prod`,
 `Tensor.repeat_interleave`, `Tensor.repeat`, `Tensor.sign`, `Tensor.sin`,
 `torch.einsum`, `torch.scatter`, `torch.nn.functional.l1_loss`,
+`torch.nn.functional.smooth_l1_loss`,
 `torch.sort.indices`, `torch.sort.values`, `torch.stack`,
 `torch.topk.indices`, `torch.topk.values`,
 `torch.nn.functional.pad`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`, and
@@ -447,7 +468,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 13 still-opaque and twenty-six typed retirements. ADR-0003 records
+opaque IDs into 12 still-opaque and twenty-seven typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.

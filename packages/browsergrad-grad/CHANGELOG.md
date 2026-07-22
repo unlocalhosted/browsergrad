@@ -93,6 +93,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the signed difference, and propagates both input and target gradients in
   their source dtypes instead of casting through float32 and disconnecting the
   target.
+- `functional.smooth_l1_loss` now shares JIT's strict same-shape floating
+  promotion, canonical beta, exact reduction, empty/scalar, bounded work, and
+  workspace contract. It supports the zero-beta L1 limit, snapshots the
+  piecewise derivative, and returns both input and target gradients in source
+  dtype instead of casting through float32 and disconnecting the target.
 
 ## [0.5.2] — 2026-07-15
 

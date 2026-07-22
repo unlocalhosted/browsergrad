@@ -21,7 +21,8 @@ Scope (v0):
     VAR (→ReduceMean/Sub/Mul/ReduceSum/Div), TRIL/TRIU (→Trilu), REPEAT (→Tile), and
     REPEAT_INTERLEAVE (→Unsqueeze/Tile/Reshape), constant PAD (→Pad),
     SCATTER (→ScatterElements), EINSUM (→Einsum), L1_LOSS
-    (→Sub/Abs/ReduceSum or ReduceMean), and paired sort and selected top-k
+    (→Sub/Abs/ReduceSum or ReduceMean), SMOOTH_L1_LOSS
+    (→Sub/Abs/Less/Mul/Where/reduce), and paired sort and selected top-k
     indices/values (→TopK/GatherElements).
     Plus lifecycle
     (BUFFER/LOAD/CONST).
@@ -74,6 +75,7 @@ from ._ir import (
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_PAD,
     OP_SORT_INDICES, OP_SORT_VALUES,
     OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_L1_LOSS,
+    OP_SMOOTH_L1_LOSS,
     OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
@@ -91,6 +93,7 @@ from ._framework_contracts import (
     validate_scatter_contract,
     validate_einsum_contract,
     validate_l1_loss_contract,
+    validate_smooth_l1_loss_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -499,7 +502,7 @@ def export_inference(
             # LOAD is a pass-through over BUFFER; reuse the BUFFER's name.
             uop_to_name[id(node)] = uop_to_name[id(node.inputs[0])]
             continue
-        if node.op not in (OP_EINSUM, OP_L1_LOSS) and node.dtype not in _LEGACY_GRAPH_DTYPES:
+        if node.op not in (OP_EINSUM, OP_L1_LOSS, OP_SMOOTH_L1_LOSS) and node.dtype not in _LEGACY_GRAPH_DTYPES:
             raise OnnxUnmappableOp(
                 f"export_inference: {node.op} dtype {node.dtype!r} is not "
                 "exportable; the legacy graph profile supports float32, "
@@ -699,6 +702,141 @@ def export_inference(
                         f"{nm}_identity",
                         "Identity",
                     ))
+            if compute_dtype != node.dtype:
+                nodes.append(_emit_node(
+                    [compute_result_name],
+                    [out_name],
+                    f"{nm}_output_cast",
+                    "Cast",
+                    [_emit_attr_int("to", _dtype_or_die(node.dtype))],
+                ))
+        elif node.op == OP_SMOOTH_L1_LOSS:
+            contract = validate_smooth_l1_loss_contract(node)
+            suffix = next_node_id - 1
+            compute_dtype = "float32" if node.dtype == "float16" else node.dtype
+            loss_inputs = []
+            for index, (source, source_name) in enumerate(zip(node.inputs, input_names)):
+                loss_input = source_name
+                if source.dtype != compute_dtype:
+                    cast_name = f"smooth_l1_loss_cast_{suffix}_{index}"
+                    nodes.append(_emit_node(
+                        [source_name],
+                        [cast_name],
+                        f"{nm}_cast_{index}",
+                        "Cast",
+                        [_emit_attr_int("to", _dtype_or_die(compute_dtype))],
+                    ))
+                    loss_input = cast_name
+                loss_inputs.append(loss_input)
+
+            difference_name = f"smooth_l1_loss_difference_{suffix}"
+            absolute_name = f"smooth_l1_loss_absolute_{suffix}"
+            nodes.append(_emit_node(
+                loss_inputs,
+                [difference_name],
+                f"{nm}_subtract",
+                "Sub",
+            ))
+            nodes.append(_emit_node(
+                [difference_name],
+                [absolute_name],
+                f"{nm}_absolute",
+                "Abs",
+            ))
+
+            if contract.beta == 0.0:
+                per_element_name = absolute_name
+            else:
+                beta_name = f"smooth_l1_loss_beta_{suffix}"
+                half_beta_name = f"smooth_l1_loss_half_beta_{suffix}"
+                half_name = f"smooth_l1_loss_half_{suffix}"
+                for constant_name, constant_value in (
+                    (beta_name, contract.beta),
+                    (half_beta_name, contract.beta * 0.5),
+                    (half_name, 0.5),
+                ):
+                    initializers.append(_emit_tensor_proto(
+                        constant_name,
+                        _dtype_or_die(compute_dtype),
+                        (1,),
+                        _initializer_bytes_for_scalar(constant_value, compute_dtype),
+                    ))
+                quadratic_mask_name = f"smooth_l1_loss_quadratic_mask_{suffix}"
+                squared_name = f"smooth_l1_loss_squared_{suffix}"
+                divided_name = f"smooth_l1_loss_divided_{suffix}"
+                quadratic_name = f"smooth_l1_loss_quadratic_{suffix}"
+                linear_name = f"smooth_l1_loss_linear_{suffix}"
+                per_element_name = f"smooth_l1_loss_piecewise_{suffix}"
+                nodes.append(_emit_node(
+                    [absolute_name, beta_name],
+                    [quadratic_mask_name],
+                    f"{nm}_quadratic_mask",
+                    "Less",
+                ))
+                nodes.append(_emit_node(
+                    [difference_name, difference_name],
+                    [squared_name],
+                    f"{nm}_square",
+                    "Mul",
+                ))
+                nodes.append(_emit_node(
+                    [squared_name, beta_name],
+                    [divided_name],
+                    f"{nm}_divide_beta",
+                    "Div",
+                ))
+                nodes.append(_emit_node(
+                    [divided_name, half_name],
+                    [quadratic_name],
+                    f"{nm}_quadratic",
+                    "Mul",
+                ))
+                nodes.append(_emit_node(
+                    [absolute_name, half_beta_name],
+                    [linear_name],
+                    f"{nm}_linear",
+                    "Sub",
+                ))
+                nodes.append(_emit_node(
+                    [quadratic_mask_name, quadratic_name, linear_name],
+                    [per_element_name],
+                    f"{nm}_piecewise",
+                    "Where",
+                ))
+
+            reduction_axes = tuple(range(contract.batch_rank, len(contract.input_shape)))
+            compute_result_name = (
+                out_name
+                if compute_dtype == node.dtype
+                else f"smooth_l1_loss_compute_result_{suffix}"
+            )
+            if contract.reduction == "none":
+                if per_element_name != compute_result_name:
+                    nodes.append(_emit_node(
+                        [per_element_name],
+                        [compute_result_name],
+                        f"{nm}_identity",
+                        "Identity",
+                    ))
+            elif reduction_axes:
+                reduction_op = "ReduceSum" if contract.reduction == "sum" else "ReduceMean"
+                nodes.append(_emit_node(
+                    [per_element_name],
+                    [compute_result_name],
+                    f"{nm}_reduce",
+                    reduction_op,
+                    [
+                        _emit_attr_ints("axes", reduction_axes),
+                        _emit_attr_int("keepdims", 0),
+                    ],
+                ))
+            else:
+                nodes.append(_emit_node(
+                    [per_element_name],
+                    [compute_result_name],
+                    f"{nm}_identity",
+                    "Identity",
+                ))
             if compute_dtype != node.dtype:
                 nodes.append(_emit_node(
                     [compute_result_name],
@@ -1155,7 +1293,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES, OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_L1_LOSS, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES, OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_L1_LOSS, OP_SMOOTH_L1_LOSS, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

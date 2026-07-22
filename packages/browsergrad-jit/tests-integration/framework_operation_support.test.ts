@@ -28,6 +28,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.l1-loss.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.functional.smooth-l1-loss.v1",
+      publicSurface: "torch.nn.functional.smooth_l1_loss",
+      opcode: "SMOOTH_L1_LOSS",
+      semanticState: "typed",
+      shapeContract: "same-shape-elementwise-loss-with-batched-reduction",
+      dtypeContract: "promote-floating-inputs-with-fp32-half-accumulator",
+      decisions: {
+        cpu: "supported-numpy-owning-loss-reduction",
+        closureAutograd: "supported-piecewise-difference-for-both-inputs",
+        symbolicVjp: "supported-piecewise-difference-for-both-inputs",
+        functionalGrad: "supported-for-both-floating-inputs-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-per-example-reduction",
+        onnxExport: "supported-opset17-piecewise-smooth-l1-float16-float32-float64",
+        tensorPlan: "refused-no-canonical-loss-reduction-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-array",
+      },
+      retiredOpaqueOperationId: "jit.custom.smooth-l1-loss.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.abs.v1",
       publicSurface: "Tensor.abs",
       opcode: "ABS",
@@ -593,7 +614,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(27);
+    expect(result.first.operations).toHaveLength(28);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");
