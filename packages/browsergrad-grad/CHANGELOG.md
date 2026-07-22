@@ -81,6 +81,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   workspace contract. It preserves target dtype and propagates mathematically
   defined gradients to both the untouched target positions and tensor source
   instead of silently casting to float32 and disconnecting autograd.
+- `einsum` now shares JIT's bounded canonical equation and promotion contract,
+  including implicit output, arbitrary admitted arity, repeated-label
+  diagonals, broadcasting, different-rank ellipses, PyTorch ellipsis reduction,
+  scalars, uppercase labels, float32 half accumulation, owning output, and
+  general snapshot-safe gradients instead of the former explicit-arrow,
+  two-operand, float32-only path.
 
 ## [0.5.2] — 2026-07-15
 

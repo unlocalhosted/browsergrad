@@ -50,7 +50,7 @@ from ._ir import (
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_SORT_INDICES, OP_SORT_VALUES,
     OP_TOPK_INDICES, OP_TOPK_VALUES,
-    OP_SCATTER,
+    OP_SCATTER, OP_EINSUM,
     OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO, OP_INDEX,
 )
 from ._errors import JitNotImplementedError, ShapeError, RealizationError
@@ -66,6 +66,8 @@ from ._framework_contracts import (
     normalize_topk_request,
     normalize_scatter_request,
     scatter_index_violation,
+    infer_einsum_contract,
+    execute_einsum_vjp_array,
 )
 
 if TYPE_CHECKING:
@@ -2831,24 +2833,45 @@ def multinomial(input: Any, num_samples: int, replacement: bool = True) -> "Tens
 
 
 def einsum(equation: str, *operands: Any) -> "TensorProxy":
+    if not operands:
+        raise ValueError("einsum: need at least one operand")
     first_proxy = next((v for v in operands if isinstance(v, TensorProxy)), None)
     sess = first_proxy._get_session() if first_proxy is not None else None
     proxies = tuple(_to_proxy(op, sess) for op in operands)
-    sample_shapes = [np.empty(p.shape, dtype=np.dtype(p.dtype)) for p in proxies]
-    sample = np.einsum(equation, *sample_shapes)
-    out_dtype = _promote_many_dtype(proxies)
-
-    def _einsum_forward(*arrays: np.ndarray) -> np.ndarray:
-        return np.einsum(equation, *arrays).astype(np.dtype(out_dtype), copy=False)
+    sess = proxies[0]._get_session()
+    if any(proxy._get_session() is not sess for proxy in proxies[1:]):
+        raise ValueError("einsum: all operands must belong to the same execution session")
+    contract = infer_einsum_contract(
+        tuple(proxy._uop for proxy in proxies),
+        equation,
+        0,
+    )
 
     uop = UOp(
-        op=OP_CUSTOM,
+        op=OP_EINSUM,
         inputs=tuple(p._uop for p in proxies),
-        shape=tuple(sample.shape),
-        dtype=out_dtype,
-        arg={"fn": _einsum_forward, "captures": (), "name": "einsum"},
+        shape=contract.output_shape,
+        dtype=contract.output_dtype,
+        arg={"equation": contract.equation, "batch_rank": 0},
     )
-    return TensorProxy(uop, session=proxies[0]._get_session(), requires_grad=False)
+    floating = frozenset({"float16", "float32", "float64"})
+    requires = _GRAD_ENABLED and any(
+        proxy.requires_grad and proxy.dtype in floating for proxy in proxies
+    )
+
+    def _bw(
+        dy: np.ndarray,
+        arrays: Tuple[np.ndarray, ...],
+    ) -> Tuple[Optional[np.ndarray], ...]:
+        return tuple(
+            execute_einsum_vjp_array(contract, index, dy, arrays)
+            if proxy.dtype in floating
+            else None
+            for index, proxy in enumerate(proxies)
+        )
+
+    ctx = _BackwardCtx(fn=_bw, input_proxies=proxies) if requires else None
+    return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
 
 
 __all__ = [

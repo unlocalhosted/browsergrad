@@ -99,13 +99,19 @@ contract in the README](README.md#compatibility-contract).
   owning dtype-preserving CPU output, target/source closure and symbolic VJP,
   captured-input-safe vmap, ONNX `ScatterElements`, bounded output/workspace,
   and explicit reduction/tensor-plan/WebGPU refusal.
+- `torch.einsum` now emits typed variadic `EINSUM` with canonical
+  explicit/implicit equations, diagonals, broadcast labels, different-rank
+  ellipses and PyTorch ellipsis reduction, bounded output/workspace/contraction
+  work, promoted owning CPU results with float32 half accumulation, general
+  closure and symbolic VJP, captured-input-safe vmap, resolved ONNX `Einsum`,
+  and explicit tensor-plan/WebGPU refusal until canonical contraction lowering.
 
 ### Added
 
 - Added the bounded v1 executable framework-operation registry and detached
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
-  current table contains `ABS`, `CLAMP`, `CONCAT`, `COS`, `CUMSUM`, `BROADCAST_TO`, `FLIP`,
+  current table contains `ABS`, `CLAMP`, `CONCAT`, `COS`, `CUMSUM`, `BROADCAST_TO`, `EINSUM`, `FLIP`,
   `INDEX`, `PAD`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`,
   `SCATTER`, `SORT_INDICES`, `SORT_VALUES`, `STACK`, `TOPK_INDICES`, `TOPK_VALUES`,
   `TRIL`, `TRIU`, `VAR`, and masked-fill `WHERE`.

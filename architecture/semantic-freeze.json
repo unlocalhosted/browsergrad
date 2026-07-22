@@ -356,7 +356,6 @@
       "id": "jit.core-custom-ops.v0",
       "owner": "@unlocalhosted/browsergrad-jit",
       "permittedCallers": [
-        "packages/browsergrad-jit/src/python/_tensor_proxy.py",
         "packages/browsergrad-jit/src/python/_functional.py",
         "packages/browsergrad-jit/src/python/_nn.py",
         "packages/browsergrad-jit/src/python/_webnn.py",
@@ -366,27 +365,26 @@
       "newUseProhibition": "No new core label or constructor site; only the explicit user-authored kernel API may supply user kernel names.",
       "retirementGate": "Advertised core operations have typed IR plus explicit CPU, VJP, transform, export, and backend decisions.",
       "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-jit@1.0.0",
-      "baselineDecision": "docs/adr/0022-migrate-jit-scatter-to-typed-overwrite.md",
+      "baselineDecision": "docs/adr/0023-migrate-jit-einsum-to-typed-contraction.md",
       "freeze": {
         "kind": "jit-op-custom",
         "inventoryFile": "architecture/jit-opaque-operation-inventory.json",
-        "inventorySha256": "b006453690a983c1fe43009d25ca71ae504d895a43df60dd5e4848069cae6f3b",
+        "inventorySha256": "06a93037d4b443bba709453287527448ebac98c3447113e4e24d8cd1bdc90672",
         "behaviorFixtureFile": "packages/browsergrad-jit/tests-integration/fixtures/jit-opaque-operation.v0.json",
-        "behaviorFixtureSha256": "f8358fdae02c3061b0da9e6cba267d9cfebf6cb67d0cb8072aa1829396b39795",
+        "behaviorFixtureSha256": "080a09ea546fda1c991946bd9e803ad9b211a8cb63903ebd08f197251b7c8b08",
         "behaviorFixtureIds": [
           "jit.custom.accelerator-and-constructor-only.v0",
           "jit.custom.all-callback-labels-and-dtypes.v0",
-          "jit.custom.conditional-and-disconnected.v0",
+          "jit.custom.conditional-backward-refusal.v0",
           "jit.custom.shared-refusals.v0",
           "jit.custom.stateful-replay.v0"
         ],
         "behaviorTestFile": "packages/browsergrad-jit/tests-integration/gate0_opaque_operation_contract.test.ts",
-        "behaviorTestSha256": "e3a151e942aaab4245c3b68490ef7876e9684683e5fd60f190ab9031d8907051",
+        "behaviorTestSha256": "e2226fb35b53e177bb5a2c86610033f5d9090e4e193b944cbfb49ed6651993e2",
         "constructorCounts": {
           "packages/browsergrad-jit/src/python/_custom_kernel.py": 1,
           "packages/browsergrad-jit/src/python/_functional.py": 6,
           "packages/browsergrad-jit/src/python/_nn.py": 1,
-          "packages/browsergrad-jit/src/python/_tensor_proxy.py": 1,
           "packages/browsergrad-jit/src/python/_webnn.py": 1,
           "packages/browsergrad-jit/src/python/index.ts": 2
         },
@@ -424,12 +422,6 @@
             "dynamicName": [],
             "dynamicOp": []
           },
-          "packages/browsergrad-jit/src/python/_tensor_proxy.py": {
-            "name": ["einsum"],
-            "op": [],
-            "dynamicName": [],
-            "dynamicOp": []
-          },
           "packages/browsergrad-jit/src/python/_webnn.py": {
             "name": [],
             "op": ["webnn_matmul"],
@@ -449,7 +441,6 @@
           "binary_cross_entropy_with_logits",
           "cross_entropy",
           "dropout",
-          "einsum",
           "flash_attention",
           "interpolate",
           "kl_div",
@@ -462,7 +453,6 @@
         ],
         "policyIds": [
           "constructor-only-forward-only",
-          "cpu-callback-forward-only",
           "cpu-callback-with-closure",
           "cpu-callback-with-conditional-closure",
           "legacy-webgpu-forward-only"
@@ -478,7 +468,6 @@
           "functional.interpolate",
           "functional.nll-loss",
           "nn.batch-norm-1d-forward",
-          "tensor.einsum",
           "webnn.matmul"
         ],
         "operationIds": [
@@ -487,7 +476,6 @@
           "jit.custom.binary-cross-entropy.v0",
           "jit.custom.cross-entropy.v0",
           "jit.custom.dropout.v0",
-          "jit.custom.einsum.v0",
           "jit.custom.flash-attention.v0",
           "jit.custom.interpolate.v0",
           "jit.custom.kl-div.v0",
@@ -573,7 +561,6 @@
             "BatchNorm1d.forward": ["83dba68c5100fdd7ebd1f5b6add2df1c2c547e387dceaca595dc65548357fa15"]
           },
           "packages/browsergrad-jit/src/python/_tensor_proxy.py": {
-            "einsum": ["62173d7267b6f0bc323ddc4bf2efb4c40ce43ffa6ca838df909b24ea3eb3ce8b"],
             "TensorProxy.backward": ["1da373743a463164ce02511e2ff37dba438853e2597018e855fe90d9834d4167"]
           },
           "packages/browsergrad-jit/src/python/_webnn.py": {
@@ -592,7 +579,7 @@
             "realize_webgpu": ["c8bb56f6665b8071d800ba3c035f97a83cc5c0334d2133315fd024693c91e774"]
           },
           "packages/browsergrad-jit/src/python/_gpu_plan.py": {
-            "build_gpu_execution_plan": ["fed01a681b266dc9eafc0c38fdf7652026ebfaac1ffb798abcbabb5f7efe9b8d"]
+            "build_gpu_execution_plan": ["9ac9bbd71b09a5f6e31bfd72fc63ec44bda078e926449a088d0fd202099cf1cc"]
           },
           "packages/browsergrad-jit/src/python/_vjp.py": {
             "get_rule": ["b851b98e25bc8ae27bc0c88b0caf3080e1604f2880ffaea8d0fb3f4100f5e976"],

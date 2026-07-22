@@ -152,7 +152,7 @@ Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
 `Tensor.repeat_interleave`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`,
 `Tensor.var`, top-level `torch.cat`, top-level `torch.stack`, and
 `torch.nn.functional.pad`, plus both values and indices from `torch.sort` and
-`torch.topk`, and `torch.scatter`, from the frozen opaque callback
+`torch.topk`, `torch.scatter`, and `torch.einsum`, from the frozen opaque callback
 inventory. Expand emits the existing typed `BROADCAST_TO`
 primitive. One shared contract validates exact arity, closed shape arguments,
 output-shape identity, dtype preservation, rank direction, and broadcast
@@ -179,8 +179,8 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 12 constructor calls and 15 operations under ADR-0002
-and ADR-0004 through ADR-0022. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 11 constructor calls and 14 operations under ADR-0002
+and ADR-0004 through ADR-0023. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -386,12 +386,32 @@ canonical portable lowering exist. Grad consumes the same eager/lazy
 conformance fixture. This is twenty-four migrated operation records, not Gate
 6 completion.
 
+Einstein contraction now emits typed variadic `EINSUM` with one canonical
+explicit equation and transform-owned batch rank. The string parser accepts
+ASCII upper/lower labels, implicit or explicit output, repeated-label
+diagonals, broadcast-compatible shared labels, different-rank ellipses, and
+PyTorch's explicit-output ellipsis reduction without executing NumPy during
+construction. Arity, equation bytes, rank, resolved labels, each extent,
+output bytes, conservative cast/contraction/gradient workspace, and total contraction
+domain are bounded before allocation. CPU performs one greedy numeric-label
+`np.einsum`, uses float32 accumulation for float16, and returns an owning array
+in the promoted dtype. Closure and symbolic `EINSUM_VJP` cover arbitrary
+admitted arity, broadcast reduction, absent target labels, repeated-label
+diagonal scatter, and immutable eager snapshots. Vmap preserves a leading
+mapped prefix independently of user ellipses and broadcasts captured inputs.
+ONNX opset 17 emits a fully resolved lower-case `Einsum` equation with casts,
+refusing bool and more than 26 resolved exporter labels. Tensor-plan and
+WebGPU validate and refuse until canonical contraction scheduling/lowering
+exists. Grad consumes the same equation/value/dtype/gradient/resource fixture
+instead of its former explicit-arrow, two-operand, float32-only path. This is
+twenty-five migrated operation records, not Gate 6 completion.
+
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
 records bind `Tensor.abs`, `torch.cat`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
 `Tensor.flip`, `Tensor.gather`, `Tensor.masked_fill`, `Tensor.prod`,
 `Tensor.repeat_interleave`, `Tensor.repeat`, `Tensor.sign`, `Tensor.sin`,
-`torch.scatter`,
+`torch.einsum`, `torch.scatter`,
 `torch.sort.indices`, `torch.sort.values`, `torch.stack`,
 `torch.topk.indices`, `torch.topk.values`,
 `torch.nn.functional.pad`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`, and
@@ -405,7 +425,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 15 still-opaque and twenty-four typed retirements. ADR-0003 records
+opaque IDs into 14 still-opaque and twenty-five typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.

@@ -52,24 +52,6 @@
       "targetConformance": "compatibility-debt"
     },
     {
-      "id": "cpu-callback-forward-only",
-      "category": "legacy-numpy-callback",
-      "cpuRealization": "numpy-callback",
-      "closureAutograd": "disconnected-requires-grad-false",
-      "symbolicVjp": "refused-no-custom-rule",
-      "functionalGrad": "returns-zero-for-disconnected-input",
-      "vmap": "refused-custom",
-      "onnxExport": "refused-custom",
-      "tensorGpuPlanDefault": "refused-custom",
-      "tensorGpuPlanAllowCustom": "admitted-plan-structure-only",
-      "tensorGpuPlanExecution": "refused-custom",
-      "legacyWebgpu": "refused-name-field",
-      "residency": "host-materialized",
-      "realizedResultValidation": "ndarray-only-shape-and-dtype-unchecked",
-      "failurePolicy": "silent-autograd-disconnection",
-      "targetConformance": "compatibility-debt"
-    },
-    {
       "id": "legacy-webgpu-forward-only",
       "category": "explicit-accelerator-kernel",
       "cpuRealization": "refused-missing-fn",
@@ -177,14 +159,6 @@
       "operationIds": ["jit.custom.batch-norm-1d.v0"]
     },
     {
-      "id": "tensor.einsum",
-      "file": "packages/browsergrad-jit/src/python/_tensor_proxy.py",
-      "definition": "einsum",
-      "constructorCount": 1,
-      "labelBinding": "static-name",
-      "operationIds": ["jit.custom.einsum.v0"]
-    },
-    {
       "id": "webnn.matmul",
       "file": "packages/browsergrad-jit/src/python/_webnn.py",
       "definition": "matmul",
@@ -229,7 +203,6 @@
     {"id":"jit.custom.binary-cross-entropy-with-logits.v0","label":"binary_cross_entropy_with_logits","labelField":"name","constructorSite":"functional.binary-cross-entropy-with-logits","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-first-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.cross-entropy.v0","label":"cross_entropy","labelField":"name","constructorSite":"functional.cross-entropy","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-first-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.dropout.v0","label":"dropout","labelField":"name","constructorSite":"functional.dropout","policy":"cpu-callback-with-closure","constructorReachability":"training-and-zero-less-than-p-less-than-one","effectCondition":"rng-mask-resampled-on-every-callback-realization","effectClass":"rng-and-captured-state","replayContract":"reexecution-resamples-mask-and-replaces-backward-state","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"observed forward and backward may use different masks after replay","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
-    {"id":"jit.custom.einsum.v0","label":"einsum","labelField":"name","constructorSite":"tensor.einsum","policy":"cpu-callback-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"numpy-shape-probe-executes-during-construction","effectClass":"host-shape-probe","replayContract":"construction-executes-numpy-sample-and-forward-reexecutes","inputArity":"variadic","shapeRule":"host-sample-evaluation","declaredDtypeRule":"promote-inputs","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"construction can allocate and execute proportional to output shape; autograd silently disconnects","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.flash-attention.v0","label":"flash_attention","labelField":"op","constructorSite":"embedded.flash-attention","policy":"legacy-webgpu-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"legacy-webgpu-bridge-required","effectClass":"accelerator-kernel","replayContract":"forward-only-root-materialization","inputArity":"3-or-4","shapeRule":"preserve-query-shape","declaredDtypeRule":"preserve-query-dtype","realizedDtypeRule":"bridge-materialized-as-declared","webgpuRoute":"flash-attention","currentFailure":"CPU and portable tensor plan refuse; input relationships are only partially validated","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze","legacy-webgpu-flash"]},
     {"id":"jit.custom.interpolate.v0","label":"interpolate","labelField":"name","constructorSite":"functional.interpolate","policy":"cpu-callback-with-conditional-closure","constructorReachability":"supported-nearest-or-bilinear-four-dimensional-input","effectCondition":"nearest-has-closure;bilinear-backward-refused","effectClass":"captured-state","replayContract":"nearest-deterministic-bilinear-backward-refused","inputArity":"1","shapeRule":"resized-four-dimensional-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"bilinear forward builds a graph whose backward fails only at execution","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.kl-div.v0","label":"kl_div","labelField":"name","constructorSite":"functional.elementwise-loss-helper","policy":"cpu-callback-with-closure","constructorReachability":"always-when-surface-called","effectCondition":"no-additional-condition","effectClass":"pure","replayContract":"deterministic-reexecution-safe","inputArity":"2","shapeRule":"reduction-dependent","declaredDtypeRule":"preserve-first-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"portable paths refuse opaque callback","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},

@@ -83,7 +83,7 @@ class PlanOnlyGpuBuffers:
     expect(result).toEqual(expected("jit.custom.shared-refusals.v0"));
   });
 
-  it("pins conditional backward and the remaining silently disconnected callback", async () => {
+  it("pins the remaining conditional backward refusal", async () => {
     const target = await getJitTarget();
     const result = await target.run<Record<string, unknown>>(`
 import browsergrad_jit as bg
@@ -100,22 +100,12 @@ try:
 except Exception as exc:
     bilinear_error = type(exc).__name__
 
-x = bg.from_numpy(np.array([[4.0, 1.0], [3.0, 2.0]], dtype=np.float32), requires_grad=True)
-einsum = bg.einsum("ij,jk->ik", x, bg.ones(2, 2))
-forward_only = [einsum]
-for value in forward_only:
-    value.numpy()
-
-disconnected = bg.func.grad(lambda value: bg.einsum("ij,jk->ik", value, bg.ones(2, 2)).sum())(x)
 {
     "nearestGradient": nearest_input.grad.numpy().reshape(-1).tolist(),
     "bilinearBackwardError": bilinear_error,
-    "forwardOnlyLabels": [value._uop.arg["name"] for value in forward_only],
-    "forwardOnlyRequiresGrad": [value.requires_grad for value in forward_only],
-    "functionalDisconnectedGradient": disconnected.numpy().reshape(-1).tolist(),
 }
 `);
-    expect(result).toEqual(expected("jit.custom.conditional-and-disconnected.v0"));
+    expect(result).toEqual(expected("jit.custom.conditional-backward-refusal.v0"));
   });
 
   it("records stateful callback replay instead of classifying it as pure", async () => {

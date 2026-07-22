@@ -46,6 +46,14 @@ SCATTER_RANK_MAX = 32
 SCATTER_OUTPUT_BYTE_MAX = 1 << 28
 SCATTER_OUTPUT_EXTENT_MAX = SCATTER_OUTPUT_BYTE_MAX
 SCATTER_WORKSPACE_BYTE_MAX = 1 << 28
+EINSUM_INPUT_MAX = 64
+EINSUM_EQUATION_BYTE_MAX = 4096
+EINSUM_RANK_MAX = 32
+EINSUM_LABEL_MAX = 52
+EINSUM_OUTPUT_BYTE_MAX = 1 << 28
+EINSUM_OUTPUT_EXTENT_MAX = EINSUM_OUTPUT_BYTE_MAX
+EINSUM_WORK_ELEMENT_MAX = 1 << 28
+EINSUM_WORKSPACE_BYTE_MAX = 1 << 28
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 32 * 1024
@@ -90,6 +98,7 @@ _ENUMS = {
         "same-shape-axis-ordering",
         "selected-axis-becomes-exact-k",
         "same-rank-unique-index-overwrite-scatter",
+        "canonical-general-einstein-contraction",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
@@ -105,6 +114,7 @@ _ENUMS = {
         "preserve-real-numeric-input",
         "preserve-source-require-int64-index",
         "preserve-target-require-int64-index-matching-source",
+        "dimensioned-tensor-promotion-with-fp32-half-accumulator",
         "promote-integral-default-or-explicit-scan-dtype",
         "pytorch-dimensioned-tensor-promotion",
     }),
@@ -121,6 +131,7 @@ _ENUMS = {
         "supported-numpy-owning-partial-topk-indices",
         "supported-numpy-owning-topk-gather",
         "supported-numpy-owning-unique-overwrite-scatter",
+        "supported-numpy-owning-greedy-einsum",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -144,6 +155,7 @@ _ENUMS = {
         "not-applicable-discrete-indices",
         "supported-permutation-scatter",
         "supported-unique-overwrite-scatter",
+        "supported-general-einsum-vjp",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -167,6 +179,7 @@ _ENUMS = {
         "not-applicable-discrete-indices",
         "supported-permutation-scatter",
         "supported-unique-overwrite-scatter",
+        "supported-general-einsum-vjp",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
@@ -186,6 +199,7 @@ _ENUMS = {
         "supported-leading-batch-axis-with-scan-axis-shift",
         "supported-leading-batch-axis-with-axis-shift-and-captured-broadcast",
         "supported-leading-batch-axis-with-scatter-captured-broadcast",
+        "supported-leading-batch-axis-with-einsum-captured-broadcast",
         "supported-leading-batch-axis-preserving-pad",
     }),
     "onnxExport": frozenset({
@@ -207,6 +221,7 @@ _ENUMS = {
         "supported-opset17-full-axis-topk-gather-float32-int32-int64",
         "supported-opset17-selected-k-topk-gather-float32-int32-int64",
         "supported-opset17-scatter-elements-float32-int32-int64-bool",
+        "supported-opset17-resolved-einsum-numeric-dtypes",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -218,6 +233,7 @@ _ENUMS = {
         "refused-no-canonical-sort-lowering",
         "refused-no-canonical-topk-lowering",
         "refused-no-canonical-scatter-overwrite-lowering",
+        "refused-no-canonical-contraction-lowering",
         "refused-no-canonical-tile-layout-profile",
         "refused-no-canonical-selected-axis-replication-profile",
         "refused-no-portable-lowering",
@@ -614,6 +630,556 @@ def promote_variadic_dtypes(dtypes: tuple[str, ...], operation: str) -> str:
     if has_uint8:
         return "uint8"
     return "bool"
+
+
+_EINSUM_LABEL_ORDER = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+_EINSUM_LABEL_RANK = MappingProxyType({
+    label: index for index, label in enumerate(_EINSUM_LABEL_ORDER)
+})
+_EINSUM_ELLIPSIS = "..."
+
+
+@dataclass(frozen=True, slots=True)
+class EinsumContract:
+    equation: str
+    input_shapes: Tuple[Tuple[int, ...], ...]
+    input_dtypes: Tuple[str, ...]
+    input_labels: Tuple[Tuple[int, ...], ...]
+    output_labels: Tuple[int, ...]
+    label_sizes: Tuple[int, ...]
+    batch_shape: Tuple[int, ...]
+    output_shape: Tuple[int, ...]
+    output_dtype: str
+    batch_rank: int
+    work_elements: int
+
+
+def _parse_einsum_term(term: str, location: str) -> Tuple[str, ...]:
+    tokens = []
+    saw_ellipsis = False
+    index = 0
+    while index < len(term):
+        label = term[index]
+        if label in _EINSUM_LABEL_RANK:
+            tokens.append(label)
+            index += 1
+            continue
+        if term.startswith(_EINSUM_ELLIPSIS, index):
+            if saw_ellipsis:
+                raise ShapeError(f"einsum: {location} contains more than one ellipsis")
+            tokens.append(_EINSUM_ELLIPSIS)
+            saw_ellipsis = True
+            index += 3
+            continue
+        raise ShapeError(
+            f"einsum: invalid subscript {label!r} in {location}; "
+            "expected ASCII letters or one ellipsis"
+        )
+    return tuple(tokens)
+
+
+def _einsum_checked_product(
+    extents: Tuple[int, ...],
+    ceiling: int,
+) -> int:
+    product = 1
+    for extent in extents:
+        if extent == 0:
+            return 0
+        if product > ceiling // extent:
+            return ceiling + 1
+        product *= extent
+    return product
+
+
+def _merge_einsum_extent(
+    label: str,
+    current: int,
+    incoming: int,
+) -> int:
+    if current != 1 and incoming != 1 and current != incoming:
+        raise ShapeError(
+            f"einsum: subscript {label!r} has incompatible broadcast "
+            f"extents {current} and {incoming}"
+        )
+    if current == 1:
+        return incoming
+    return current
+
+
+def infer_einsum_contract(
+    inputs: tuple[Any, ...],
+    equation: Any,
+    batch_rank: int = 0,
+) -> EinsumContract:
+    if type(inputs) is not tuple or not inputs:
+        raise ShapeError("einsum: operands must be a non-empty plain tuple")
+    if len(inputs) > EINSUM_INPUT_MAX:
+        raise ShapeError(
+            f"einsum: operand count {len(inputs)} exceeds the "
+            f"{EINSUM_INPUT_MAX}-operand ceiling"
+        )
+    if type(equation) is not str:
+        raise ShapeError("einsum: equation must be an exact string")
+    if len(equation.encode("utf-8")) > EINSUM_EQUATION_BYTE_MAX:
+        raise ShapeError(
+            f"einsum: equation exceeds the {EINSUM_EQUATION_BYTE_MAX}-byte ceiling"
+        )
+    if type(batch_rank) is not int or batch_rank < 0 or batch_rank > EINSUM_RANK_MAX:
+        raise ShapeError(
+            f"einsum: batch_rank must be in [0, {EINSUM_RANK_MAX}]"
+        )
+
+    compact = equation.replace(" ", "")
+    if compact.count("->") > 1:
+        raise ShapeError("einsum: equation may contain at most one '->'")
+    explicit_output = "->" in compact
+    if explicit_output:
+        lhs, output_term = compact.split("->")
+    else:
+        lhs = compact
+        output_term = ""
+    input_terms = tuple(lhs.split(","))
+    if len(input_terms) != len(inputs):
+        raise ShapeError(
+            f"einsum: equation has {len(input_terms)} input terms for "
+            f"{len(inputs)} operands"
+        )
+    parsed_terms = tuple(
+        _parse_einsum_term(term, f"operand {index}")
+        for index, term in enumerate(input_terms)
+    )
+
+    input_shapes = []
+    input_dtypes = []
+    batch_shape: Tuple[int, ...] = ()
+    base_shapes = []
+    ellipsis_ranks = []
+    for index, source in enumerate(inputs):
+        shape = getattr(source, "shape", None)
+        if type(shape) is not tuple:
+            raise ShapeError(f"einsum: operand {index} shape must be a tuple")
+        if len(shape) > EINSUM_RANK_MAX:
+            raise ShapeError(
+                f"einsum: operand {index} rank {len(shape)} exceeds the "
+                f"{EINSUM_RANK_MAX}-rank ceiling"
+            )
+        for axis, extent in enumerate(shape):
+            if type(extent) is not int or extent < 0:
+                raise ShapeError(
+                    f"einsum: operand {index} shape[{axis}] must be a "
+                    "non-negative integer"
+                )
+            if extent > EINSUM_OUTPUT_EXTENT_MAX:
+                raise ShapeError(
+                    f"einsum: operand {index} extent {extent} exceeds the "
+                    f"{EINSUM_OUTPUT_EXTENT_MAX}-extent ceiling"
+                )
+        if len(shape) < batch_rank:
+            raise ShapeError(
+                f"einsum: operand {index} rank {len(shape)} is smaller than "
+                f"batch_rank {batch_rank}"
+            )
+        prefix = shape[:batch_rank]
+        if index == 0:
+            batch_shape = prefix
+        elif prefix != batch_shape:
+            raise ShapeError(
+                f"einsum: mapped batch prefix {prefix} for operand {index} "
+                f"does not match {batch_shape}"
+            )
+        base_shape = shape[batch_rank:]
+        tokens = parsed_terms[index]
+        explicit_labels = sum(token != _EINSUM_ELLIPSIS for token in tokens)
+        has_ellipsis = _EINSUM_ELLIPSIS in tokens
+        if has_ellipsis:
+            if explicit_labels > len(base_shape):
+                raise ShapeError(
+                    f"einsum: operand {index} has {explicit_labels} explicit "
+                    f"subscripts for rank {len(base_shape)}"
+                )
+            ellipsis_rank = len(base_shape) - explicit_labels
+        else:
+            if explicit_labels != len(base_shape):
+                raise ShapeError(
+                    f"einsum: operand {index} has {explicit_labels} subscripts "
+                    f"for rank {len(base_shape)}"
+                )
+            ellipsis_rank = 0
+        input_shapes.append(shape)
+        base_shapes.append(base_shape)
+        ellipsis_ranks.append(ellipsis_rank)
+        input_dtypes.append(getattr(source, "dtype", None))
+
+    ellipsis_rank = max(ellipsis_ranks, default=0)
+    named_counts: dict[str, int] = {}
+    named_sizes: dict[str, int] = {}
+    ellipsis_sizes = [1] * ellipsis_rank
+    expanded_keys = []
+    for operand_index, (tokens, shape, local_ellipsis_rank) in enumerate(
+        zip(parsed_terms, base_shapes, ellipsis_ranks)
+    ):
+        cursor = 0
+        local_named_extents: dict[str, int] = {}
+        operand_keys = []
+        for token in tokens:
+            if token == _EINSUM_ELLIPSIS:
+                offset = ellipsis_rank - local_ellipsis_rank
+                for local_axis in range(local_ellipsis_rank):
+                    extent = shape[cursor + local_axis]
+                    ellipsis_axis = offset + local_axis
+                    ellipsis_sizes[ellipsis_axis] = _merge_einsum_extent(
+                        f"ellipsis[{ellipsis_axis}]",
+                        ellipsis_sizes[ellipsis_axis],
+                        extent,
+                    )
+                    operand_keys.append(("ellipsis", ellipsis_axis))
+                cursor += local_ellipsis_rank
+                continue
+            extent = shape[cursor]
+            previous_local = local_named_extents.get(token)
+            if previous_local is not None and previous_local != extent:
+                raise ShapeError(
+                    f"einsum: repeated subscript {token!r} in operand "
+                    f"{operand_index} has unequal extents {previous_local} and {extent}"
+                )
+            local_named_extents[token] = extent
+            named_counts[token] = named_counts.get(token, 0) + 1
+            named_sizes[token] = _merge_einsum_extent(
+                token,
+                named_sizes.get(token, 1),
+                extent,
+            )
+            operand_keys.append(("named", token))
+            cursor += 1
+        expanded_keys.append(tuple(operand_keys))
+
+    has_input_ellipsis = any(
+        _EINSUM_ELLIPSIS in tokens for tokens in parsed_terms
+    )
+    if explicit_output:
+        parsed_output = _parse_einsum_term(output_term, "output")
+        seen_output = set()
+        output_keys = []
+        for token in parsed_output:
+            if token == _EINSUM_ELLIPSIS:
+                if token in seen_output:
+                    raise ShapeError("einsum: output contains more than one ellipsis")
+                seen_output.add(token)
+                output_keys.extend(
+                    ("ellipsis", axis) for axis in range(ellipsis_rank)
+                )
+                continue
+            if token in seen_output:
+                raise ShapeError(
+                    f"einsum: output subscript {token!r} appears more than once"
+                )
+            if token not in named_counts:
+                raise ShapeError(
+                    f"einsum: output subscript {token!r} does not appear in any operand"
+                )
+            seen_output.add(token)
+            output_keys.append(("named", token))
+        canonical_output = output_term
+    else:
+        implicit_labels = tuple(
+            label
+            for label in _EINSUM_LABEL_ORDER
+            if named_counts.get(label, 0) == 1
+        )
+        output_keys = []
+        if has_input_ellipsis:
+            output_keys.extend(("ellipsis", axis) for axis in range(ellipsis_rank))
+        output_keys.extend(("named", label) for label in implicit_labels)
+        canonical_output = (
+            (_EINSUM_ELLIPSIS if has_input_ellipsis else "")
+            + "".join(implicit_labels)
+        )
+
+    named_key_order = [
+        ("named", label)
+        for label in _EINSUM_LABEL_ORDER
+        if label in named_counts
+    ]
+    ellipsis_key_order = [
+        ("ellipsis", axis) for axis in range(ellipsis_rank)
+    ]
+    key_order = tuple(named_key_order + ellipsis_key_order)
+    if len(key_order) > EINSUM_LABEL_MAX:
+        raise ShapeError(
+            f"einsum: {len(key_order)} resolved labels exceed the "
+            f"{EINSUM_LABEL_MAX}-label NumPy execution ceiling"
+        )
+    key_to_id = {key: index for index, key in enumerate(key_order)}
+    input_labels = tuple(
+        tuple(key_to_id[key] for key in keys) for keys in expanded_keys
+    )
+    output_labels = tuple(key_to_id[key] for key in output_keys)
+    label_sizes = tuple(
+        named_sizes[key[1]] if key[0] == "named" else ellipsis_sizes[key[1]]
+        for key in key_order
+    )
+    base_output_shape = tuple(label_sizes[label] for label in output_labels)
+    output_shape = batch_shape + base_output_shape
+    if len(output_shape) > EINSUM_RANK_MAX:
+        raise ShapeError(
+            f"einsum: output rank {len(output_shape)} exceeds the "
+            f"{EINSUM_RANK_MAX}-rank ceiling"
+        )
+    output_dtype = promote_variadic_dtypes(tuple(input_dtypes), "EINSUM")
+    output_elements = _einsum_checked_product(
+        output_shape,
+        EINSUM_OUTPUT_BYTE_MAX,
+    )
+    output_bytes = output_elements * _VARIADIC_DTYPE_BYTES[output_dtype]
+    if output_bytes > EINSUM_OUTPUT_BYTE_MAX:
+        raise ShapeError(
+            f"einsum: output requires {output_bytes} bytes, exceeding the "
+            f"{EINSUM_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+
+    domain_elements = _einsum_checked_product(
+        batch_shape + label_sizes,
+        EINSUM_WORK_ELEMENT_MAX,
+    )
+    if domain_elements > EINSUM_WORK_ELEMENT_MAX // max(1, len(inputs)):
+        work_elements = EINSUM_WORK_ELEMENT_MAX + 1
+    else:
+        work_elements = domain_elements * max(1, len(inputs))
+    if work_elements > EINSUM_WORK_ELEMENT_MAX:
+        raise ShapeError(
+            f"einsum: projected contraction work exceeds the "
+            f"{EINSUM_WORK_ELEMENT_MAX}-element ceiling"
+        )
+
+    accumulation_dtype = "float32" if output_dtype == "float16" else output_dtype
+    accumulation_bytes = _VARIADIC_DTYPE_BYTES[accumulation_dtype]
+    cast_bytes = 0
+    for shape, dtype in zip(input_shapes, input_dtypes):
+        if dtype != accumulation_dtype:
+            cast_elements = _einsum_checked_product(
+                shape,
+                EINSUM_WORKSPACE_BYTE_MAX,
+            )
+            cast_bytes += cast_elements * accumulation_bytes
+    gradient_bytes = 0
+    for dtype, labels in zip(input_dtypes, input_labels):
+        if dtype not in _FLOATING_DTYPES:
+            continue
+        unique_labels = tuple(dict.fromkeys(labels))
+        unique_shape = batch_shape + tuple(label_sizes[label] for label in unique_labels)
+        elements = _einsum_checked_product(
+            unique_shape,
+            EINSUM_WORKSPACE_BYTE_MAX,
+        )
+        gradient_bytes = max(gradient_bytes, elements * accumulation_bytes)
+    contraction_bytes = domain_elements * accumulation_bytes
+    workspace_bytes = output_bytes + cast_bytes + contraction_bytes + gradient_bytes
+    if workspace_bytes > EINSUM_WORKSPACE_BYTE_MAX:
+        raise ShapeError(
+            f"einsum: projected output/cast/contraction/gradient workspace requires "
+            f"{workspace_bytes} bytes, exceeding the "
+            f"{EINSUM_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+
+    return EinsumContract(
+        equation=",".join(input_terms) + "->" + canonical_output,
+        input_shapes=tuple(input_shapes),
+        input_dtypes=tuple(input_dtypes),
+        input_labels=input_labels,
+        output_labels=output_labels,
+        label_sizes=label_sizes,
+        batch_shape=batch_shape,
+        output_shape=output_shape,
+        output_dtype=output_dtype,
+        batch_rank=batch_rank,
+        work_elements=work_elements,
+    )
+
+
+def _validate_einsum_runtime_arrays(
+    contract: EinsumContract,
+    arrays: tuple[np.ndarray, ...],
+) -> None:
+    if type(arrays) is not tuple or len(arrays) != len(contract.input_shapes):
+        raise ShapeError("einsum: runtime arrays do not match the operand contract")
+    for index, (array, shape, dtype) in enumerate(
+        zip(arrays, contract.input_shapes, contract.input_dtypes)
+    ):
+        if type(array) is not np.ndarray:
+            raise ShapeError(f"einsum: runtime operand {index} must be an ndarray")
+        if tuple(array.shape) != shape or array.dtype.name != dtype:
+            raise ShapeError(
+                f"einsum: runtime operand {index} metadata "
+                f"{tuple(array.shape)}/{array.dtype.name} does not match "
+                f"{shape}/{dtype}"
+            )
+
+
+def execute_einsum_arrays(
+    contract: EinsumContract,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_einsum_runtime_arrays(contract, arrays)
+    compute_dtype = "float32" if contract.output_dtype == "float16" else contract.output_dtype
+    arguments = []
+    for array, labels in zip(arrays, contract.input_labels):
+        runtime_labels = list(labels)
+        if contract.batch_rank:
+            runtime_labels.insert(0, Ellipsis)
+        arguments.extend([
+            array.astype(np.dtype(compute_dtype), copy=False),
+            runtime_labels,
+        ])
+    output_labels = list(contract.output_labels)
+    if contract.batch_rank:
+        output_labels.insert(0, Ellipsis)
+    arguments.append(output_labels)
+    result = np.einsum(*arguments, optimize="greedy")
+    reshaped = np.asarray(
+        result,
+        dtype=np.dtype(contract.output_dtype),
+    ).reshape(contract.output_shape)
+    return np.array(reshaped, dtype=np.dtype(contract.output_dtype), copy=True)
+
+
+def execute_einsum_vjp_array(
+    contract: EinsumContract,
+    operand_index: int,
+    dy: np.ndarray,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_einsum_runtime_arrays(contract, arrays)
+    if type(operand_index) is not int or operand_index < 0 or operand_index >= len(arrays):
+        raise ShapeError("EINSUM_VJP operand index is outside the input range")
+    target_dtype = contract.input_dtypes[operand_index]
+    if target_dtype not in _FLOATING_DTYPES:
+        raise ShapeError("EINSUM_VJP target must have a floating dtype")
+    if type(dy) is not np.ndarray:
+        raise ShapeError("EINSUM_VJP upstream gradient must be an ndarray")
+    if tuple(dy.shape) != contract.output_shape or dy.dtype.name != contract.output_dtype:
+        raise ShapeError(
+            "EINSUM_VJP upstream gradient metadata does not match the forward output"
+        )
+
+    compute_dtype = "float32" if contract.output_dtype == "float16" else contract.output_dtype
+    target_labels = contract.input_labels[operand_index]
+    unique_target_labels = tuple(dict.fromkeys(target_labels))
+    present_labels = set(contract.output_labels)
+    for index, labels in enumerate(contract.input_labels):
+        if index != operand_index:
+            present_labels.update(labels)
+    requested_labels = tuple(
+        label for label in unique_target_labels if label in present_labels
+    )
+    arguments = []
+    dy_labels = list(contract.output_labels)
+    if contract.batch_rank:
+        dy_labels.insert(0, Ellipsis)
+    arguments.extend([
+        dy.astype(np.dtype(compute_dtype), copy=False),
+        dy_labels,
+    ])
+    for index, (array, labels) in enumerate(zip(arrays, contract.input_labels)):
+        if index == operand_index:
+            continue
+        runtime_labels = list(labels)
+        if contract.batch_rank:
+            runtime_labels.insert(0, Ellipsis)
+        arguments.extend([
+            array.astype(np.dtype(compute_dtype), copy=False),
+            runtime_labels,
+        ])
+    result_labels = list(requested_labels)
+    if contract.batch_rank:
+        result_labels.insert(0, Ellipsis)
+    arguments.append(result_labels)
+    contracted = np.einsum(*arguments, optimize="greedy")
+
+    requested = set(requested_labels)
+    expanded_shape = contract.batch_shape + tuple(
+        contract.label_sizes[label] if label in requested else 1
+        for label in unique_target_labels
+    )
+    full_unique_shape = contract.batch_shape + tuple(
+        contract.label_sizes[label] for label in unique_target_labels
+    )
+    gradient = np.asarray(contracted, dtype=np.dtype(compute_dtype)).reshape(expanded_shape)
+    gradient = np.broadcast_to(gradient, full_unique_shape)
+
+    target_base_shape = contract.input_shapes[operand_index][contract.batch_rank:]
+    target_label_extents: dict[int, int] = {}
+    for label, extent in zip(target_labels, target_base_shape):
+        target_label_extents.setdefault(label, extent)
+    for position, label in enumerate(unique_target_labels):
+        target_extent = target_label_extents[label]
+        if target_extent == 1 and contract.label_sizes[label] != 1:
+            gradient = gradient.sum(
+                axis=contract.batch_rank + position,
+                keepdims=True,
+                dtype=np.dtype(compute_dtype),
+            )
+    gradient = np.asarray(gradient, dtype=np.dtype(target_dtype))
+    if len(unique_target_labels) == len(target_labels):
+        return np.array(
+            gradient,
+            dtype=np.dtype(target_dtype),
+            copy=True,
+        ).reshape(contract.input_shapes[operand_index])
+
+    output = np.zeros(
+        contract.input_shapes[operand_index],
+        dtype=np.dtype(target_dtype),
+    )
+    unique_positions = {
+        label: position for position, label in enumerate(unique_target_labels)
+    }
+    grids = []
+    unique_rank = len(unique_target_labels)
+    for label in target_labels:
+        position = unique_positions[label]
+        extent = target_label_extents[label]
+        grid_shape = [1] * unique_rank
+        grid_shape[position] = extent
+        grids.append(np.arange(extent, dtype=np.intp).reshape(tuple(grid_shape)))
+    if contract.batch_rank:
+        batch_elements = _einsum_checked_product(
+            contract.batch_shape,
+            EINSUM_WORK_ELEMENT_MAX,
+        )
+        output_flat = output.reshape((batch_elements,) + target_base_shape)
+        gradient_flat = gradient.reshape(
+            (batch_elements,) + tuple(
+                target_label_extents[label] for label in unique_target_labels
+            )
+        )
+        for batch_index in range(batch_elements):
+            output_flat[batch_index][tuple(grids)] = gradient_flat[batch_index]
+    else:
+        output[tuple(grids)] = gradient
+    return output
+
+
+def einsum_onnx_equation(contract: EinsumContract) -> str:
+    resolved_count = contract.batch_rank + len(contract.label_sizes)
+    if resolved_count > 26:
+        raise ShapeError(
+            f"einsum: ONNX export requires at most 26 resolved labels, got "
+            f"{resolved_count}"
+        )
+    labels = "abcdefghijklmnopqrstuvwxyz"
+    batch_prefix = labels[:contract.batch_rank]
+    offset = contract.batch_rank
+    input_terms = []
+    for input_labels in contract.input_labels:
+        input_terms.append(
+            batch_prefix
+            + "".join(labels[offset + label] for label in input_labels)
+        )
+    output_term = batch_prefix + "".join(
+        labels[offset + label] for label in contract.output_labels
+    )
+    return ",".join(input_terms) + "->" + output_term
 
 
 def _variadic_input_metadata(
@@ -1717,6 +2283,96 @@ def _validate_scatter(node: Any, contract: FrameworkOperationContract) -> int:
     return axis
 
 
+def _validate_einsum(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> EinsumContract:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or not inputs:
+        raise ShapeError("EINSUM must have a non-empty plain input tuple")
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict or set(arg) != {"equation", "batch_rank"}:
+        raise ShapeError(
+            "EINSUM arg fields must be exactly 'equation' and 'batch_rank'"
+        )
+    normalized = infer_einsum_contract(
+        inputs,
+        arg["equation"],
+        arg["batch_rank"],
+    )
+    if arg["equation"] != normalized.equation:
+        raise ShapeError(
+            f"EINSUM equation must be canonical {normalized.equation!r}"
+        )
+    if getattr(node, "shape", None) != normalized.output_shape:
+        raise ShapeError(
+            f"EINSUM declared shape {getattr(node, 'shape', None)!r} does not "
+            f"match derived shape {normalized.output_shape!r}"
+        )
+    if getattr(node, "dtype", None) != normalized.output_dtype:
+        raise ShapeError(
+            f"EINSUM declared dtype {getattr(node, 'dtype', None)!r} does not "
+            f"match promoted dtype {normalized.output_dtype!r}"
+        )
+    return normalized
+
+
+def _validate_einsum_vjp(node: Any) -> Tuple[EinsumContract, int]:
+    if getattr(node, "op", None) != "EINSUM_VJP":
+        raise ShapeError("EINSUM_VJP validator received the wrong opcode")
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or len(inputs) < 2:
+        raise ShapeError(
+            "EINSUM_VJP inputs must be upstream gradient plus original operands"
+        )
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("EINSUM_VJP arg must be a plain dict")
+    fields = set(arg)
+    if not {"equation", "batch_rank", "operand"}.issubset(fields) or not fields.issubset({
+        "equation", "batch_rank", "operand", "vjp_of"
+    }):
+        raise ShapeError(
+            "EINSUM_VJP arg fields must be exactly 'equation', 'batch_rank', "
+            "and 'operand' plus optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("EINSUM_VJP arg.vjp_of must reference a UOp")
+    normalized = infer_einsum_contract(
+        inputs[1:],
+        arg["equation"],
+        arg["batch_rank"],
+    )
+    if arg["equation"] != normalized.equation:
+        raise ShapeError(
+            f"EINSUM_VJP equation must be canonical {normalized.equation!r}"
+        )
+    operand = arg["operand"]
+    if type(operand) is not int or operand < 0 or operand >= len(inputs) - 1:
+        raise ShapeError("EINSUM_VJP operand must be a normalized input index")
+    upstream = inputs[0]
+    if (
+        getattr(upstream, "shape", None) != normalized.output_shape
+        or getattr(upstream, "dtype", None) != normalized.output_dtype
+    ):
+        raise ShapeError(
+            "EINSUM_VJP upstream gradient must match the forward output metadata"
+        )
+    target = inputs[operand + 1]
+    if getattr(target, "dtype", None) not in _FLOATING_DTYPES:
+        raise ShapeError("EINSUM_VJP target must have a floating dtype")
+    if getattr(node, "shape", None) != getattr(target, "shape", None):
+        raise ShapeError("EINSUM_VJP output shape must match its target operand")
+    if getattr(node, "dtype", None) != getattr(target, "dtype", None):
+        raise ShapeError("EINSUM_VJP output dtype must match its target operand")
+    return normalized, operand
+
+
 def _validate_gather(node: Any, contract: FrameworkOperationContract) -> int:
     if getattr(node, "op", None) != contract.opcode:
         raise ShapeError(
@@ -2134,6 +2790,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.clamp.v1": _validate_clamp,
     "browsergrad.jit.framework.tensor.cos.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.cumsum.v1": _validate_cumsum,
+    "browsergrad.jit.framework.tensor.einsum.v1": _validate_einsum,
     "browsergrad.jit.framework.tensor.expand.v1": _validate_broadcast_to,
     "browsergrad.jit.framework.tensor.flip.v1": _validate_flip,
     "browsergrad.jit.framework.tensor.gather.v1": _validate_gather,
@@ -2166,6 +2823,7 @@ _BY_OPCODE: Mapping[str, _ExecutableFrameworkOperationContract] = MappingProxyTy
 })
 _INTERNAL_VALIDATORS: Mapping[str, Callable[[Any], Any]] = MappingProxyType({
     "NARROW": _validate_narrow,
+    "EINSUM_VJP": _validate_einsum_vjp,
 })
 
 
@@ -2266,6 +2924,17 @@ def validate_scatter_contract(node: Any) -> int:
     if record.contract_id != "browsergrad.jit.framework.tensor.scatter.v1":
         raise ShapeError("SCATTER resolved to the wrong framework-operation contract")
     return normalized
+
+
+def validate_einsum_contract(node: Any) -> EinsumContract:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.einsum.v1":
+        raise ShapeError("EINSUM resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_einsum_vjp_contract(node: Any) -> Tuple[EinsumContract, int]:
+    return validate_internal_operation_contract(node)
 
 
 def validate_narrow_contract(node: Any) -> Tuple[int, int, int]:
@@ -2428,8 +3097,17 @@ __all__ = [
     "SCATTER_OUTPUT_BYTE_MAX",
     "SCATTER_OUTPUT_EXTENT_MAX",
     "SCATTER_WORKSPACE_BYTE_MAX",
+    "EINSUM_INPUT_MAX",
+    "EINSUM_EQUATION_BYTE_MAX",
+    "EINSUM_RANK_MAX",
+    "EINSUM_LABEL_MAX",
+    "EINSUM_OUTPUT_BYTE_MAX",
+    "EINSUM_OUTPUT_EXTENT_MAX",
+    "EINSUM_WORK_ELEMENT_MAX",
+    "EINSUM_WORKSPACE_BYTE_MAX",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
+    "EinsumContract",
     "framework_operation_support",
     "has_framework_operation_contract",
     "has_internal_operation_contract",
@@ -2439,12 +3117,16 @@ __all__ = [
     "infer_sort_contract",
     "infer_topk_contract",
     "infer_scatter_contract",
+    "infer_einsum_contract",
     "normalize_pad_request",
     "normalize_pad_value",
     "normalize_sort_request",
     "normalize_topk_request",
     "normalize_scatter_request",
     "scatter_index_violation",
+    "execute_einsum_arrays",
+    "execute_einsum_vjp_array",
+    "einsum_onnx_equation",
     "stable_sort_indices_array",
     "partial_topk_indices_array",
     "promote_variadic_dtypes",
@@ -2459,6 +3141,8 @@ __all__ = [
     "validate_topk_indices_contract",
     "validate_topk_values_contract",
     "validate_scatter_contract",
+    "validate_einsum_contract",
+    "validate_einsum_vjp_contract",
     "validate_clamp_contract",
     "validate_cumsum_contract",
     "validate_flip_contract",

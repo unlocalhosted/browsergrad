@@ -45,6 +45,8 @@ Design contract (per PRD-007 DL/GPU review):
 from __future__ import annotations
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from ._errors import ShapeError
+
 from ._ir import (
     UOp,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
@@ -62,7 +64,7 @@ from ._ir import (
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_SORT_INDICES, OP_SORT_VALUES,
-    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER,
+    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_EINSUM_VJP,
     OP_CONST, OP_BROADCAST_TO, OP_WHERE, OP_INDEX, OP_SCATTER_ADD,
     OP_ISNAN,
 )
@@ -76,6 +78,7 @@ from ._framework_contracts import (
     validate_topk_indices_contract,
     validate_topk_values_contract,
     validate_scatter_contract,
+    validate_einsum_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -1268,6 +1271,37 @@ def _vjp_matmul(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional
         _unbroadcast_uop(da_full, a.shape, output),
         _unbroadcast_uop(db_full, b.shape, output),
     )
+
+
+@register_vjp(OP_EINSUM)
+def _vjp_einsum(
+    output: UOp,
+    inputs: Tuple[UOp, ...],
+    dy: UOp,
+) -> Tuple[Optional[UOp], ...]:
+    contract = validate_einsum_contract(output)
+    if inputs != output.inputs:
+        raise ShapeError("EINSUM VJP inputs must equal the forward operands")
+    if dy.shape != output.shape or dy.dtype != output.dtype:
+        raise ShapeError("EINSUM VJP upstream gradient must match the forward output")
+    gradients = []
+    for operand, source in enumerate(inputs):
+        if source.dtype not in ("float16", "float32", "float64"):
+            gradients.append(None)
+            continue
+        gradients.append(_vjp_uop(
+            OP_EINSUM_VJP,
+            (dy,) + inputs,
+            source.shape,
+            source.dtype,
+            output,
+            arg={
+                "equation": contract.equation,
+                "batch_rank": contract.batch_rank,
+                "operand": operand,
+            },
+        ))
+    return tuple(gradients)
 
 
 def _broadcast_batch_shape(

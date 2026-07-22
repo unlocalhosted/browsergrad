@@ -112,6 +112,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.cumsum.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.tensor.einsum.v1",
+      publicSurface: "torch.einsum",
+      opcode: "EINSUM",
+      semanticState: "typed",
+      shapeContract: "canonical-general-einstein-contraction",
+      dtypeContract: "dimensioned-tensor-promotion-with-fp32-half-accumulator",
+      decisions: {
+        cpu: "supported-numpy-owning-greedy-einsum",
+        closureAutograd: "supported-general-einsum-vjp",
+        symbolicVjp: "supported-general-einsum-vjp",
+        functionalGrad: "supported-for-floating-input-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-einsum-captured-broadcast",
+        onnxExport: "supported-opset17-resolved-einsum-numeric-dtypes",
+        tensorPlan: "refused-no-canonical-contraction-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-array",
+      },
+      retiredOpaqueOperationId: "jit.custom.einsum.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.expand.v1",
       publicSurface: "Tensor.expand",
       opcode: "BROADCAST_TO",
@@ -551,7 +572,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(25);
+    expect(result.first.operations).toHaveLength(26);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

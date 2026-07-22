@@ -23,13 +23,10 @@
       }
     },
     {
-      "id": "jit.custom.conditional-and-disconnected.v0",
+      "id": "jit.custom.conditional-backward-refusal.v0",
       "expected": {
         "nearestGradient": [4],
-        "bilinearBackwardError": "NotImplementedError",
-        "forwardOnlyLabels": ["einsum"],
-        "forwardOnlyRequiresGrad": [false],
-        "functionalDisconnectedGradient": [0, 0, 0, 0]
+        "bilinearBackwardError": "NotImplementedError"
       }
     },
     {

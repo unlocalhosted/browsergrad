@@ -19,14 +19,16 @@ Scope (v0):
     framework operations additionally cover ABS, SIGN, SIN, COS, CLAMP
     (→Clip), FLIP (→Slice), INDEX (→GatherElements), PROD (→ReduceProd),
     VAR (→ReduceMean/Sub/Mul/ReduceSum/Div), TRIL/TRIU (→Trilu), REPEAT (→Tile), and
-    REPEAT_INTERLEAVE (→Unsqueeze/Tile/Reshape), constant PAD (→Pad), and
-    paired sort and selected top-k indices/values (→TopK/GatherElements).
+    REPEAT_INTERLEAVE (→Unsqueeze/Tile/Reshape), constant PAD (→Pad),
+    SCATTER (→ScatterElements), EINSUM (→Einsum), and paired sort and selected
+    top-k indices/values (→TopK/GatherElements).
     Plus lifecycle
     (BUFFER/LOAD/CONST).
   * Opset 17 (axes as attribute on ReduceSum/Mean/Max — opset 18 made
     axes a runtime input, which would require initializer plumbing).
-  * float32, int32, int64, and bool graph dtypes only; each typed framework
-    contract may narrow that exporter profile further.
+  * The encoder represents bool, uint8, signed int8/16/32/64, unsigned
+    int16/32/64, and float16/32/64. Each operation contract narrows that graph
+    dtype profile explicitly.
 
 Refusals (typed `OnnxUnmappableOp`):
   * OP_RANDOM (no runtime randomness in ONNX inference)
@@ -70,7 +72,7 @@ from ._ir import (
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_PAD,
     OP_SORT_INDICES, OP_SORT_VALUES,
-    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER,
+    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM,
     OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
@@ -86,6 +88,7 @@ from ._framework_contracts import (
     validate_topk_indices_contract,
     validate_topk_values_contract,
     validate_scatter_contract,
+    validate_einsum_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -99,6 +102,7 @@ from ._framework_contracts import (
     validate_repeat_contract,
     validate_repeat_interleave_contract,
     validate_typed_unary_contract,
+    einsum_onnx_equation,
 )
 
 
@@ -172,21 +176,44 @@ def _emit_packed_int64(field_no: int, values: Sequence[int]) -> bytes:
 
 # TensorProto.DataType enum
 DT_FLOAT = 1
+DT_UINT8 = 2
+DT_INT8 = 3
+DT_UINT16 = 4
+DT_INT16 = 5
 DT_INT32 = 6
 DT_INT64 = 7
 DT_BOOL = 9
+DT_FLOAT16 = 10
+DT_DOUBLE = 11
+DT_UINT32 = 12
+DT_UINT64 = 13
 
 
 _DTYPE_TO_ONNX: Dict[str, int] = {
     "float32": DT_FLOAT,
+    "float16": DT_FLOAT16,
+    "float64": DT_DOUBLE,
+    "uint8": DT_UINT8,
+    "int8": DT_INT8,
+    "int16": DT_INT16,
     "int32": DT_INT32,
     "int64": DT_INT64,
+    "uint16": DT_UINT16,
+    "uint32": DT_UINT32,
+    "uint64": DT_UINT64,
     "bool": DT_BOOL,
 }
+
+# The existing exporter contract predates typed EINSUM and intentionally
+# exposes only this conservative graph-wide dtype profile.  Keep the broader
+# TensorProto encoder private to EINSUM so adding contraction support cannot
+# silently widen unrelated operation contracts.
+_LEGACY_GRAPH_DTYPES = frozenset({"float32", "int32", "int64", "bool"})
 
 
 # AttributeProto.AttributeType enum
 AT_INT = 2
+AT_STRING = 3
 AT_INTS = 7
 
 
@@ -262,6 +289,16 @@ def _emit_attr_ints(name: str, values: Sequence[int]) -> bytes:
         _emit_string(1, name),
         _emit_int32(20, AT_INTS),
         _emit_packed_int64(8, values),  # ints = field 8, packed
+    ]
+    return b"".join(parts)
+
+
+def _emit_attr_string(name: str, value: str) -> bytes:
+    """AttributeProto with one strict UTF-8 string attribute."""
+    parts = [
+        _emit_string(1, name),
+        _emit_int32(20, AT_STRING),
+        _emit_string(4, value),
     ]
     return b"".join(parts)
 
@@ -460,6 +497,12 @@ def export_inference(
             # LOAD is a pass-through over BUFFER; reuse the BUFFER's name.
             uop_to_name[id(node)] = uop_to_name[id(node.inputs[0])]
             continue
+        if node.op != OP_EINSUM and node.dtype not in _LEGACY_GRAPH_DTYPES:
+            raise OnnxUnmappableOp(
+                f"export_inference: {node.op} dtype {node.dtype!r} is not "
+                "exportable; the non-EINSUM graph profile supports float32, "
+                "int32, int64, and bool"
+            )
         nm = f"node_{next_node_id}_{node.op}"
         next_node_id += 1
         out_name = f"out_{next_node_id - 1}"
@@ -564,6 +607,36 @@ def export_inference(
                 ))
                 slice_inputs.append(initializer_name)
             nodes.append(_emit_node(slice_inputs, [out_name], nm, "Slice"))
+        elif node.op == OP_EINSUM:
+            contract = validate_einsum_contract(node)
+            if node.dtype == "bool":
+                raise OnnxUnmappableOp(
+                    "export_inference: ONNX Einsum does not admit bool tensors"
+                )
+            _dtype_or_die(node.dtype)
+            equation = einsum_onnx_equation(contract)
+            suffix = next_node_id - 1
+            einsum_inputs = []
+            for index, (source, source_name) in enumerate(zip(node.inputs, input_names)):
+                einsum_input = source_name
+                if source.dtype != node.dtype:
+                    cast_name = f"einsum_cast_{suffix}_{index}"
+                    nodes.append(_emit_node(
+                        [source_name],
+                        [cast_name],
+                        f"{nm}_cast_{index}",
+                        "Cast",
+                        [_emit_attr_int("to", _dtype_or_die(node.dtype))],
+                    ))
+                    einsum_input = cast_name
+                einsum_inputs.append(einsum_input)
+            nodes.append(_emit_node(
+                einsum_inputs,
+                [out_name],
+                nm,
+                "Einsum",
+                [_emit_attr_string("equation", equation)],
+            ))
         elif node.op == OP_CONCAT:
             axis, _, legacy_empty = validate_cat_contract(node)
             if node.dtype not in ("float32", "int32", "int64", "bool"):
@@ -1012,7 +1085,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES, OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES, OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

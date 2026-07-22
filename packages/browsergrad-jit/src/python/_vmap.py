@@ -69,7 +69,7 @@ from ._ir import (
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
     OP_PAD, OP_SLICE, OP_SORT_INDICES, OP_SORT_VALUES,
-    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER,
+    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_EINSUM_VJP,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
     OP_STORE,
@@ -86,6 +86,8 @@ from ._framework_contracts import (
     validate_topk_indices_contract,
     validate_topk_values_contract,
     validate_scatter_contract,
+    validate_einsum_contract,
+    validate_einsum_vjp_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -100,6 +102,7 @@ from ._framework_contracts import (
     validate_repeat_contract,
     validate_repeat_interleave_contract,
     validate_typed_unary_contract,
+    infer_einsum_contract,
 )
 
 
@@ -300,6 +303,64 @@ def _vmap_variadic_inputs(
             arg={"shape": target_shape},
         ))
     return tuple(mapped_inputs)
+
+
+@register_vmap(OP_EINSUM)
+def _vmap_einsum(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    contract = validate_einsum_contract(node)
+    mapped_inputs = _vmap_variadic_inputs(
+        node.inputs,
+        batched,
+        B,
+        "einsum",
+        tuple(True for _ in node.inputs),
+    )
+    mapped_contract = infer_einsum_contract(
+        mapped_inputs,
+        contract.equation,
+        contract.batch_rank + 1,
+    )
+    return UOp(
+        op=OP_EINSUM,
+        inputs=mapped_inputs,
+        shape=mapped_contract.output_shape,
+        dtype=mapped_contract.output_dtype,
+        arg={
+            "equation": mapped_contract.equation,
+            "batch_rank": mapped_contract.batch_rank,
+        },
+    )
+
+
+@register_vmap(OP_EINSUM_VJP)
+def _vmap_einsum_vjp(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    contract, operand = validate_einsum_vjp_contract(node)
+    mapped_inputs = _vmap_variadic_inputs(
+        node.inputs,
+        batched,
+        B,
+        "einsum_vjp",
+        tuple(True for _ in node.inputs),
+    )
+    mapped_contract = infer_einsum_contract(
+        mapped_inputs[1:],
+        contract.equation,
+        contract.batch_rank + 1,
+    )
+    arg = {
+        "equation": mapped_contract.equation,
+        "batch_rank": mapped_contract.batch_rank,
+        "operand": operand,
+    }
+    if "vjp_of" in node.arg:
+        arg["vjp_of"] = node.arg["vjp_of"]
+    return UOp(
+        op=OP_EINSUM_VJP,
+        inputs=mapped_inputs,
+        shape=mapped_inputs[operand + 1].shape,
+        dtype=mapped_inputs[operand + 1].dtype,
+        arg=arg,
+    )
 
 
 @register_vmap(OP_CONCAT)
