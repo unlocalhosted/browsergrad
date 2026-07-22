@@ -322,6 +322,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.sin.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.tensor.stack.v1",
+      publicSurface: "torch.stack",
+      opcode: "STACK",
+      semanticState: "typed",
+      shapeContract: "variadic-new-axis-stacking",
+      dtypeContract: "pytorch-dimensioned-tensor-promotion",
+      decisions: {
+        cpu: "supported-numpy-owning-stack-copy",
+        closureAutograd: "supported-static-axis-index",
+        symbolicVjp: "supported-static-axis-index",
+        functionalGrad: "supported-for-floating-output-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-axis-shift-and-captured-broadcast",
+        onnxExport: "supported-opset17-unsqueeze-concat-with-casts-float32-int32-int64-bool",
+        tensorPlan: "refused-no-canonical-variadic-copy-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.stack.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.tril.v1",
       publicSurface: "Tensor.tril",
       opcode: "TRIL",
@@ -404,7 +425,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(18);
+    expect(result.first.operations).toHaveLength(19);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

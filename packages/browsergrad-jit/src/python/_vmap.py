@@ -52,7 +52,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_NARROW, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_NARROW, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -77,6 +77,7 @@ from ._framework_contracts import (
     MASKED_FILL_CONTRACT_ID,
     validate_broadcast_to_contract,
     validate_cat_contract,
+    validate_stack_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -254,20 +255,25 @@ def _vmap_cumsum(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
     )
 
 
-@register_vmap(OP_CONCAT)
-def _vmap_concat(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
-    axis, _, legacy_empty = validate_cat_contract(node)
+def _vmap_variadic_inputs(
+    inputs: Tuple[UOp, ...],
+    batched: Dict[int, UOp],
+    B: int,
+    operation: str,
+    included: Tuple[bool, ...],
+) -> Tuple[UOp, ...]:
     mapped_inputs = []
-    for source, empty in zip(node.inputs, legacy_empty):
-        inner = batched[id(source)]
-        if empty and len(node.shape) != 1:
+    for source, keep in zip(inputs, included):
+        if not keep:
             continue
+        inner = batched[id(source)]
         if inner.shape == (B,) + source.shape:
             mapped_inputs.append(inner)
             continue
         if inner.shape != source.shape:
             raise JitNotImplementedError(
-                "vmap concat requires each source to be captured or on the leading mapped axis"
+                f"vmap {operation} requires each source to be captured or on "
+                "the leading mapped axis"
             )
         singleton_shape = (1,) + source.shape
         reshaped = UOp(
@@ -285,9 +291,42 @@ def _vmap_concat(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
             dtype=source.dtype,
             arg={"shape": target_shape},
         ))
+    return tuple(mapped_inputs)
+
+
+@register_vmap(OP_CONCAT)
+def _vmap_concat(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    axis, _, legacy_empty = validate_cat_contract(node)
+    included = tuple(not (empty and len(node.shape) != 1) for empty in legacy_empty)
+    mapped_inputs = _vmap_variadic_inputs(
+        node.inputs,
+        batched,
+        B,
+        "concat",
+        included,
+    )
     return UOp(
         op=OP_CONCAT,
-        inputs=tuple(mapped_inputs),
+        inputs=mapped_inputs,
+        shape=(B,) + node.shape,
+        dtype=node.dtype,
+        arg={"axis": axis + 1},
+    )
+
+
+@register_vmap(OP_STACK)
+def _vmap_stack(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    axis = validate_stack_contract(node)
+    mapped_inputs = _vmap_variadic_inputs(
+        node.inputs,
+        batched,
+        B,
+        "stack",
+        (True,) * len(node.inputs),
+    )
+    return UOp(
+        op=OP_STACK,
+        inputs=mapped_inputs,
         shape=(B,) + node.shape,
         dtype=node.dtype,
         arg={"axis": axis + 1},

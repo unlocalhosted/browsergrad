@@ -1,3 +1,54 @@
+export const VARIADIC_TENSOR_DTYPE_CASES = Object.freeze([
+  {
+    id: "float32-dominates-int64",
+    dtypes: ["float32", "int64"],
+    values: [[0.5, 1.5], [2, 3]],
+    expectedDtype: "float32",
+    expectedValues: [0.5, 1.5, 2, 3],
+    expectedStackValues: [[0.5, 1.5], [2, 3]],
+  },
+  {
+    id: "float16-dominates-int64",
+    dtypes: ["float16", "int64"],
+    values: [[0.5], [2]],
+    expectedDtype: "float16",
+    expectedValues: [0.5, 2],
+    expectedStackValues: [[0.5], [2]],
+  },
+  {
+    id: "uint8-and-int8-promote-int16",
+    dtypes: ["uint8", "int8"],
+    values: [[255], [-1]],
+    expectedDtype: "int16",
+    expectedValues: [255, -1],
+    expectedStackValues: [[255], [-1]],
+  },
+  {
+    id: "bool-and-uint8-promote-uint8",
+    dtypes: ["bool", "uint8"],
+    values: [[true, false], [2, 3]],
+    expectedDtype: "uint8",
+    expectedValues: [1, 0, 2, 3],
+    expectedStackValues: [[1, 0], [2, 3]],
+  },
+  {
+    id: "float64-dominates-float16",
+    dtypes: ["float64", "float16"],
+    values: [[0.25], [0.5]],
+    expectedDtype: "float64",
+    expectedValues: [0.25, 0.5],
+    expectedStackValues: [[0.25], [0.5]],
+  },
+  {
+    id: "bool-preserves",
+    dtypes: ["bool", "bool"],
+    values: [[true, false], [false, true]],
+    expectedDtype: "bool",
+    expectedValues: [true, false, false, true],
+    expectedStackValues: [[true, false], [false, true]],
+  },
+] as const);
+
 export const FRAMEWORK_CAT_CONFORMANCE = Object.freeze({
   schema: "browsergrad.framework.cat-conformance.v1",
   valid: {
@@ -17,50 +68,7 @@ export const FRAMEWORK_CAT_CONFORMANCE = Object.freeze({
       [[], []],
     ],
   },
-  dtypeCases: [
-    {
-      id: "float32-dominates-int64",
-      dtypes: ["float32", "int64"],
-      values: [[0.5, 1.5], [2, 3]],
-      expectedDtype: "float32",
-      expectedValues: [0.5, 1.5, 2, 3],
-    },
-    {
-      id: "float16-dominates-int64",
-      dtypes: ["float16", "int64"],
-      values: [[0.5], [2]],
-      expectedDtype: "float16",
-      expectedValues: [0.5, 2],
-    },
-    {
-      id: "uint8-and-int8-promote-int16",
-      dtypes: ["uint8", "int8"],
-      values: [[255], [-1]],
-      expectedDtype: "int16",
-      expectedValues: [255, -1],
-    },
-    {
-      id: "bool-and-uint8-promote-uint8",
-      dtypes: ["bool", "uint8"],
-      values: [[true, false], [2]],
-      expectedDtype: "uint8",
-      expectedValues: [1, 0, 2],
-    },
-    {
-      id: "float64-dominates-float16",
-      dtypes: ["float64", "float16"],
-      values: [[0.25], [0.5]],
-      expectedDtype: "float64",
-      expectedValues: [0.25, 0.5],
-    },
-    {
-      id: "bool-preserves",
-      dtypes: ["bool", "bool"],
-      values: [[true], [false, true]],
-      expectedDtype: "bool",
-      expectedValues: [true, false, true],
-    },
-  ],
+  dtypeCases: VARIADIC_TENSOR_DTYPE_CASES,
   legacyEmpty: {
     axis: 1,
     emptyDtype: "float64",

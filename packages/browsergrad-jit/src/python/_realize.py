@@ -34,7 +34,7 @@ from ._ir import (
     UOp, ALL_OPS, toposort,
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM,
     OP_CAST, OP_ADD, OP_MUL, OP_DIV, OP_NEG,
-    OP_EXP, OP_LOG, OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_NARROW, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT,
+    OP_EXP, OP_LOG, OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_NARROW, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT,
     OP_REPEAT_INTERLEAVE, OP_SIGN, OP_SIN, OP_CMP, OP_MATMUL,
     OP_CONV1D, OP_CONV1D_BACKWARD_INPUT, OP_CONV1D_BACKWARD_WEIGHT,
     OP_CONV1D_BACKWARD_BIAS, OP_CONV2D,
@@ -60,6 +60,7 @@ from ._errors import RealizationError
 from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_cat_contract,
+    validate_stack_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -215,6 +216,16 @@ def _h_concat(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
         arrays.append(np.asarray(vt[id(source_node)], dtype=np.dtype(node.dtype)))
     concatenated = np.concatenate(arrays, axis=axis)
     return np.array(concatenated, dtype=np.dtype(node.dtype), copy=True)
+
+
+def _h_stack(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    axis = validate_stack_contract(node)
+    arrays = [
+        np.asarray(vt[id(source)], dtype=np.dtype(node.dtype))
+        for source in node.inputs
+    ]
+    stacked = np.stack(arrays, axis=axis)
+    return np.array(stacked, dtype=np.dtype(node.dtype), copy=True)
 
 
 def _h_narrow(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
@@ -1342,6 +1353,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_FLIP:    _h_flip,
     OP_CUMSUM:  _h_cumsum,
     OP_CONCAT:  _h_concat,
+    OP_STACK:   _h_stack,
     OP_NARROW:  _h_narrow,
     OP_TRIL:    _h_tril,
     OP_TRIU:    _h_triu,

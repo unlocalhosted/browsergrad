@@ -19,7 +19,7 @@ hash the same. This is what lets the trace cache and pipeline cache
 
 Design notes:
 
-  * 70 opcodes total — corrects PRD-005's nominal 19. The extras are
+  * 71 opcodes total — corrects PRD-005's nominal 19. The extras are
     documented per-opcode below. Headline additions: RANDOM (dropout +
     nn.init at trace time), CMP (boolean results), CONV1D/CONV2D/CONV3D
     primitive CNN ops and backward refs, CUSTOM
@@ -93,6 +93,7 @@ OP_COS     = "COS"
 OP_FLIP    = "FLIP"
 OP_CUMSUM  = "CUMSUM"
 OP_CONCAT  = "CONCAT"
+OP_STACK   = "STACK"
 OP_NARROW  = "NARROW"
 OP_TRIL    = "TRIL"
 OP_TRIU    = "TRIU"
@@ -173,7 +174,7 @@ OP_ADAM_UPDATE_PARAM = "ADAM_UPDATE_PARAM"  # inputs: (param, m_new, v_new), arg
 ALL_OPS: FrozenSet[str] = frozenset({
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_NARROW, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_NARROW, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -195,7 +196,7 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 })
-assert len(ALL_OPS) == 70, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
+assert len(ALL_OPS) == 71, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -420,7 +421,7 @@ __all__ = [
     # Opcode strings
     "OP_BUFFER", "OP_LOAD", "OP_STORE", "OP_CONST", "OP_RANDOM",
     "OP_CAST", "OP_ADD", "OP_MUL", "OP_DIV", "OP_NEG",
-    "OP_EXP", "OP_LOG", "OP_ABS", "OP_CLAMP", "OP_COS", "OP_FLIP", "OP_CUMSUM", "OP_CONCAT", "OP_NARROW", "OP_TRIL", "OP_TRIU",
+    "OP_EXP", "OP_LOG", "OP_ABS", "OP_CLAMP", "OP_COS", "OP_FLIP", "OP_CUMSUM", "OP_CONCAT", "OP_STACK", "OP_NARROW", "OP_TRIL", "OP_TRIU",
     "OP_PROD", "OP_VAR", "OP_REPEAT", "OP_REPEAT_INTERLEAVE", "OP_SIGN", "OP_SIN",
     "OP_CMP", "OP_MATMUL",
     "OP_CONV1D", "OP_CONV1D_BACKWARD_INPUT",

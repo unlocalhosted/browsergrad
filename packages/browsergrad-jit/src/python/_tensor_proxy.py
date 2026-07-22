@@ -45,19 +45,20 @@ from ._ir import (
     UOp,
     OP_BUFFER,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO, OP_INDEX,
 )
 from ._errors import JitNotImplementedError, ShapeError, RealizationError
 from ._framework_contracts import (
-    CAT_INPUT_MAX,
+    VARIADIC_INPUT_MAX,
     REPEAT_FACTOR_MAX,
     REPEAT_RANK_MAX,
     VAR_CORRECTION_MAX,
     VAR_CORRECTION_MIN,
     infer_cat_contract,
+    infer_stack_contract,
 )
 
 if TYPE_CHECKING:
@@ -99,7 +100,7 @@ _MASKED_FILL_DTYPES = frozenset({
 _TRIANGULAR_DTYPES = _MASKED_FILL_DTYPES
 _CUMSUM_DTYPES = _MASKED_FILL_DTYPES
 _CUMSUM_FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
-_CAT_FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
+_VARIADIC_FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
 _CUMSUM_DTYPE_ALIASES = {
     "float": "float32",
     "float32": "float32",
@@ -2294,9 +2295,10 @@ def cat(tensors: Any, dim: Any = 0, *, out: Any = None) -> "TensorProxy":
     tensors_t = tuple(tensors)
     if not tensors_t:
         raise ValueError("cat: empty tensor list")
-    if len(tensors_t) > CAT_INPUT_MAX:
+    if len(tensors_t) > VARIADIC_INPUT_MAX:
         raise ValueError(
-            f"cat: tensor count {len(tensors_t)} exceeds the {CAT_INPUT_MAX}-input ceiling"
+            f"cat: tensor count {len(tensors_t)} exceeds the "
+            f"{VARIADIC_INPUT_MAX}-input ceiling"
         )
     if any(type(tensor) is not TensorProxy for tensor in tensors_t):
         raise TypeError("cat: every input must be a TensorProxy")
@@ -2326,7 +2328,7 @@ def cat(tensors: Any, dim: Any = 0, *, out: Any = None) -> "TensorProxy":
         parts = np.split(dy, cuts, axis=axis)
         gradients = []
         for part, arr, proxy, empty in zip(parts, ins, proxies, legacy_empty):
-            if proxy.dtype not in _CAT_FLOATING_DTYPES:
+            if proxy.dtype not in _VARIADIC_FLOATING_DTYPES:
                 gradients.append(None)
                 continue
             if empty and part.shape != arr.shape:
@@ -2335,9 +2337,9 @@ def cat(tensors: Any, dim: Any = 0, *, out: Any = None) -> "TensorProxy":
         return tuple(gradients)
 
     requires = (
-        out_dtype in _CAT_FLOATING_DTYPES
+        out_dtype in _VARIADIC_FLOATING_DTYPES
         and any(
-            _should_track(proxy) and proxy.dtype in _CAT_FLOATING_DTYPES
+            _should_track(proxy) and proxy.dtype in _VARIADIC_FLOATING_DTYPES
             for proxy in proxies
         )
     )
@@ -2346,43 +2348,61 @@ def cat(tensors: Any, dim: Any = 0, *, out: Any = None) -> "TensorProxy":
                        requires_grad=requires, ctx=ctx)
 
 
-def stack(tensors: Any, dim: int = 0) -> "TensorProxy":
+def stack(tensors: Any, dim: Any = 0, *, out: Any = None) -> "TensorProxy":
+    if out is not None:
+        raise JitNotImplementedError(
+            "stack: out= is not supported because lazy tensor mutation has no typed effect contract"
+        )
+    if type(tensors) not in (tuple, list):
+        raise TypeError("stack: tensors must be a plain tuple or list of TensorProxy values")
     tensors_t = tuple(tensors)
-    if len(tensors_t) == 0:
+    if not tensors_t:
         raise ValueError("stack: empty tensor list")
-    first_proxy = next((t for t in tensors_t if isinstance(t, TensorProxy)), None)
-    sess = first_proxy._get_session() if first_proxy is not None else None
-    proxies = tuple(_to_proxy(t, sess) for t in tensors_t)
-    ref_shape = proxies[0].shape
-    for p in proxies:
-        if p.shape != ref_shape:
-            raise ShapeError(f"stack: all tensors must have shape {ref_shape}, got {p.shape}")
-    dim = _normalize_dim(dim, proxies[0].ndim + 1, "stack")
-    out_shape = ref_shape[:dim] + (len(proxies),) + ref_shape[dim:]
-    out_dtype = _promote_many_dtype(proxies)
-
-    def _stack_forward(*arrays: np.ndarray) -> np.ndarray:
-        return np.stack(arrays, axis=dim).astype(np.dtype(out_dtype), copy=False)
+    if len(tensors_t) > VARIADIC_INPUT_MAX:
+        raise ValueError(
+            f"stack: tensor count {len(tensors_t)} exceeds the "
+            f"{VARIADIC_INPUT_MAX}-input ceiling"
+        )
+    if any(type(tensor) is not TensorProxy for tensor in tensors_t):
+        raise TypeError("stack: every input must be a TensorProxy")
+    proxies = tensors_t
+    sess = proxies[0]._get_session()
+    if any(proxy._get_session() is not sess for proxy in proxies[1:]):
+        raise ValueError("stack: all inputs must belong to the same execution session")
+    axis = _normalize_single_axis("stack", dim, proxies[0].ndim + 1)
+    _, out_shape, out_dtype = infer_stack_contract(
+        tuple(proxy._uop for proxy in proxies),
+        axis,
+    )
 
     uop = UOp(
-        op=OP_CUSTOM,
+        op=OP_STACK,
         inputs=tuple(p._uop for p in proxies),
         shape=out_shape,
         dtype=out_dtype,
-        arg={"fn": _stack_forward, "captures": (), "name": "stack"},
+        arg={"axis": axis},
     )
 
     def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
         parts = []
         for i, arr in enumerate(ins):
+            if proxies[i].dtype not in _VARIADIC_FLOATING_DTYPES:
+                parts.append(None)
+                continue
             idx = [slice(None)] * dy.ndim
-            idx[dim] = i
+            idx[axis] = i
             parts.append(dy[tuple(idx)].astype(arr.dtype, copy=False))
         return tuple(parts)
 
-    requires = _should_track(*proxies)
+    requires = (
+        out_dtype in _VARIADIC_FLOATING_DTYPES
+        and any(
+            _should_track(proxy) and proxy.dtype in _VARIADIC_FLOATING_DTYPES
+            for proxy in proxies
+        )
+    )
     ctx = _BackwardCtx(fn=_bw, input_proxies=proxies) if requires else None
-    return TensorProxy(uop, session=proxies[0]._get_session(),
+    return TensorProxy(uop, session=sess,
                        requires_grad=requires, ctx=ctx)
 
 

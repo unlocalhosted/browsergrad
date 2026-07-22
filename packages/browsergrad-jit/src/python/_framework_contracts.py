@@ -25,7 +25,8 @@ REPEAT_FACTOR_MAX = 1 << 30
 REPEAT_RANK_MAX = 32
 VAR_CORRECTION_MIN = -(1 << 31)
 VAR_CORRECTION_MAX = (1 << 31) - 1
-CAT_INPUT_MAX = 1024
+VARIADIC_INPUT_MAX = 1024
+VARIADIC_OUTPUT_BYTE_MAX = 1 << 28
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 32 * 1024
@@ -63,6 +64,7 @@ _ENUMS = {
         "preserve-batched-upper-triangular",
         "preserve-single-axis-inclusive-scan",
         "variadic-existing-axis-concatenation-with-legacy-empty",
+        "variadic-new-axis-stacking",
         "same-rank-index-shaped-gather",
         "preserve-source-with-broadcast-bool-mask",
         "static-broadcast-with-existing-dim-minus-one",
@@ -86,6 +88,7 @@ _ENUMS = {
         "supported-numpy-owning-copy-with-range-check",
         "supported-numpy-owning-scan-copy",
         "supported-numpy-owning-concatenation-copy",
+        "supported-numpy-owning-stack-copy",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -104,6 +107,7 @@ _ENUMS = {
         "supported-zero-derivative",
         "supported-opposite-direction-inclusive-scan-for-floating-source-and-output",
         "supported-static-axis-split",
+        "supported-static-axis-index",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -122,6 +126,7 @@ _ENUMS = {
         "supported-zero-derivative",
         "supported-opposite-direction-inclusive-scan-for-floating-source-and-output",
         "supported-static-axis-split",
+        "supported-static-axis-index",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
@@ -152,6 +157,7 @@ _ENUMS = {
         "supported-opset17-unsqueeze-tile-reshape-float32-int32-int64-bool",
         "supported-opset17-cumsum-with-cast-float32-int32-int64",
         "supported-opset17-concat-with-casts-float32-int32-int64-bool",
+        "supported-opset17-unsqueeze-concat-with-casts-float32-int32-int64-bool",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -184,19 +190,19 @@ _FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
 _MASKED_FILL_DTYPES = _REAL_NUMERIC_DTYPES | frozenset({"bool"})
 _TRIANGULAR_DTYPES = _MASKED_FILL_DTYPES
 _CUMSUM_DTYPES = _MASKED_FILL_DTYPES
-_CAT_DTYPES = _MASKED_FILL_DTYPES
-_CAT_FLOATING_RANK = MappingProxyType({
+_VARIADIC_DTYPES = _MASKED_FILL_DTYPES
+_VARIADIC_FLOATING_RANK = MappingProxyType({
     "float16": 0,
     "float32": 1,
     "float64": 2,
 })
-_CAT_SIGNED_BITS = MappingProxyType({
+_VARIADIC_SIGNED_BITS = MappingProxyType({
     "int8": 8,
     "int16": 16,
     "int32": 32,
     "int64": 64,
 })
-_CAT_DTYPE_BYTES = MappingProxyType({
+_VARIADIC_DTYPE_BYTES = MappingProxyType({
     "bool": 1,
     "uint8": 1,
     "int8": 1,
@@ -207,7 +213,6 @@ _CAT_DTYPE_BYTES = MappingProxyType({
     "int64": 8,
     "float64": 8,
 })
-CAT_OUTPUT_BYTE_MAX = 1 << 28
 _UNARY_DTYPE_PROFILES = MappingProxyType({
     "preserve-floating-input": (_FLOATING_DTYPES, "floating"),
     "preserve-real-numeric-input": (_REAL_NUMERIC_DTYPES, "real numeric"),
@@ -514,22 +519,22 @@ def _validate_flip(node: Any, contract: FrameworkOperationContract) -> int:
     return axis
 
 
-def promote_cat_dtypes(dtypes: tuple[str, ...]) -> str:
+def promote_variadic_dtypes(dtypes: tuple[str, ...], operation: str) -> str:
     if type(dtypes) is not tuple or not dtypes:
-        raise ShapeError("CONCAT dtype promotion requires a non-empty tuple")
+        raise ShapeError(f"{operation} dtype promotion requires a non-empty tuple")
     for index, dtype in enumerate(dtypes):
-        if dtype not in _CAT_DTYPES:
+        if dtype not in _VARIADIC_DTYPES:
             raise ShapeError(
-                f"CONCAT input {index} has unsupported dtype {dtype!r}"
+                f"{operation} input {index} has unsupported dtype {dtype!r}"
             )
-    floating = [dtype for dtype in dtypes if dtype in _CAT_FLOATING_RANK]
+    floating = [dtype for dtype in dtypes if dtype in _VARIADIC_FLOATING_RANK]
     if floating:
-        return max(floating, key=_CAT_FLOATING_RANK.__getitem__)
-    signed = [dtype for dtype in dtypes if dtype in _CAT_SIGNED_BITS]
+        return max(floating, key=_VARIADIC_FLOATING_RANK.__getitem__)
+    signed = [dtype for dtype in dtypes if dtype in _VARIADIC_SIGNED_BITS]
     has_uint8 = "uint8" in dtypes
     if signed:
-        widest = max(signed, key=_CAT_SIGNED_BITS.__getitem__)
-        if has_uint8 and _CAT_SIGNED_BITS[widest] == 8:
+        widest = max(signed, key=_VARIADIC_SIGNED_BITS.__getitem__)
+        if has_uint8 and _VARIADIC_SIGNED_BITS[widest] == 8:
             return "int16"
         return widest
     if has_uint8:
@@ -537,36 +542,60 @@ def promote_cat_dtypes(dtypes: tuple[str, ...]) -> str:
     return "bool"
 
 
+def _variadic_input_metadata(
+    inputs: tuple[Any, ...],
+    operation: str,
+) -> Tuple[Tuple[Tuple[int, ...], ...], str]:
+    if type(inputs) is not tuple:
+        raise ShapeError(f"{operation} inputs must be a plain tuple")
+    if not inputs:
+        raise ShapeError(f"{operation} requires at least one input")
+    if len(inputs) > VARIADIC_INPUT_MAX:
+        raise ShapeError(
+            f"{operation} input count {len(inputs)} exceeds the "
+            f"{VARIADIC_INPUT_MAX}-input ceiling"
+        )
+    shapes = []
+    dtypes = []
+    for index, source in enumerate(inputs):
+        shape = getattr(source, "shape", None)
+        if type(shape) is not tuple:
+            raise ShapeError(f"{operation} input {index} shape must be a tuple")
+        for axis, extent in enumerate(shape):
+            if type(extent) is not int or extent < 0:
+                raise ShapeError(
+                    f"{operation} input {index} shape[{axis}] must be a "
+                    "non-negative integer"
+                )
+        shapes.append(shape)
+        dtypes.append(getattr(source, "dtype", None))
+    return tuple(shapes), promote_variadic_dtypes(tuple(dtypes), operation)
+
+
+def _validate_variadic_output_resource(
+    shape: Tuple[int, ...],
+    dtype: str,
+    operation: str,
+) -> None:
+    elements = 1
+    for extent in shape:
+        elements *= extent
+    output_bytes = elements * _VARIADIC_DTYPE_BYTES[dtype]
+    if output_bytes > VARIADIC_OUTPUT_BYTE_MAX:
+        raise ShapeError(
+            f"{operation} output requires {output_bytes} bytes, exceeding the "
+            f"{VARIADIC_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+
+
 def infer_cat_contract(
     inputs: tuple[Any, ...],
     axis: int,
 ) -> Tuple[int, Tuple[int, ...], str, Tuple[int, ...], Tuple[bool, ...]]:
-    if type(inputs) is not tuple:
-        raise ShapeError("CONCAT inputs must be a plain tuple")
-    if not inputs:
-        raise ShapeError("CONCAT requires at least one input")
-    if len(inputs) > CAT_INPUT_MAX:
-        raise ShapeError(
-            f"CONCAT input count {len(inputs)} exceeds the {CAT_INPUT_MAX}-input ceiling"
-        )
     if type(axis) is not int:
         raise ShapeError("CONCAT arg.axis must be a normalized integer")
-
-    shapes = []
-    dtypes = []
-    legacy_empty = []
-    for index, source in enumerate(inputs):
-        shape = getattr(source, "shape", None)
-        if type(shape) is not tuple:
-            raise ShapeError(f"CONCAT input {index} shape must be a tuple")
-        for shape_axis, extent in enumerate(shape):
-            if type(extent) is not int or extent < 0:
-                raise ShapeError(
-                    f"CONCAT input {index} shape[{shape_axis}] must be a non-negative integer"
-                )
-        shapes.append(shape)
-        dtypes.append(getattr(source, "dtype", None))
-        legacy_empty.append(shape == (0,))
+    shapes, output_dtype = _variadic_input_metadata(inputs, "CONCAT")
+    legacy_empty = tuple(shape == (0,) for shape in shapes)
 
     substantive = [shape for shape, empty in zip(shapes, legacy_empty) if not empty]
     reference = substantive[0] if substantive else (0,)
@@ -596,23 +625,36 @@ def infer_cat_contract(
         sizes.append(shape[axis])
         output_shape[axis] += shape[axis]
 
-    output_dtype = promote_cat_dtypes(tuple(dtypes))
-    elements = 1
-    for extent in output_shape:
-        elements *= extent
-    output_bytes = elements * _CAT_DTYPE_BYTES[output_dtype]
-    if output_bytes > CAT_OUTPUT_BYTE_MAX:
-        raise ShapeError(
-            f"CONCAT output requires {output_bytes} bytes, exceeding the "
-            f"{CAT_OUTPUT_BYTE_MAX}-byte ceiling"
-        )
+    output_shape = tuple(output_shape)
+    _validate_variadic_output_resource(output_shape, output_dtype, "CONCAT")
     return (
         axis,
-        tuple(output_shape),
+        output_shape,
         output_dtype,
         tuple(sizes),
-        tuple(legacy_empty),
+        legacy_empty,
     )
+
+
+def infer_stack_contract(
+    inputs: tuple[Any, ...],
+    axis: int,
+) -> Tuple[int, Tuple[int, ...], str]:
+    if type(axis) is not int:
+        raise ShapeError("STACK arg.axis must be a normalized integer")
+    shapes, output_dtype = _variadic_input_metadata(inputs, "STACK")
+    reference = shapes[0]
+    rank = len(reference)
+    if axis < 0 or axis > rank:
+        raise ShapeError(f"STACK arg.axis {axis} out of range for output rank {rank + 1}")
+    for index, shape in enumerate(shapes[1:], start=1):
+        if shape != reference:
+            raise ShapeError(
+                f"STACK input {index} shape {shape} does not match {reference}"
+            )
+    output_shape = reference[:axis] + (len(inputs),) + reference[axis:]
+    _validate_variadic_output_resource(output_shape, output_dtype, "STACK")
+    return axis, output_shape, output_dtype
 
 
 def _validate_cat(
@@ -644,6 +686,37 @@ def _validate_cat(
             f"CONCAT output dtype must be {output_dtype!r}, got {getattr(node, 'dtype', None)!r}"
         )
     return arg["axis"], sizes, legacy_empty
+
+
+def _validate_stack(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> int:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("STACK arg must be a plain dict")
+    fields = set(arg)
+    if "axis" not in fields or not fields.issubset({"axis", "vjp_of"}):
+        raise ShapeError("STACK arg fields must be exactly 'axis' plus optional 'vjp_of'")
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("STACK arg.vjp_of must reference a UOp")
+    axis, output_shape, output_dtype = infer_stack_contract(
+        getattr(node, "inputs", ()),
+        arg["axis"],
+    )
+    if getattr(node, "shape", None) != output_shape:
+        raise ShapeError(
+            f"STACK output shape must be {output_shape}, got {getattr(node, 'shape', None)}"
+        )
+    if getattr(node, "dtype", None) != output_dtype:
+        raise ShapeError(
+            f"STACK output dtype must be {output_dtype!r}, got {getattr(node, 'dtype', None)!r}"
+        )
+    return axis
 
 
 def _validate_narrow(node: Any) -> Tuple[int, int, int]:
@@ -1222,6 +1295,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.repeat-interleave.v1": _validate_repeat_interleave,
     "browsergrad.jit.framework.tensor.sign.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.sin.v1": _validate_typed_unary,
+    "browsergrad.jit.framework.tensor.stack.v1": _validate_stack,
     "browsergrad.jit.framework.tensor.tril.v1": _validate_tril,
     "browsergrad.jit.framework.tensor.triu.v1": _validate_triu,
 })
@@ -1287,6 +1361,13 @@ def validate_cat_contract(
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.cat.v1":
         raise ShapeError("CONCAT resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_stack_contract(node: Any) -> int:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.stack.v1":
+        raise ShapeError("STACK resolved to the wrong framework-operation contract")
     return normalized
 
 
@@ -1431,19 +1512,21 @@ __all__ = [
     "REPEAT_RANK_MAX",
     "VAR_CORRECTION_MIN",
     "VAR_CORRECTION_MAX",
-    "CAT_INPUT_MAX",
-    "CAT_OUTPUT_BYTE_MAX",
+    "VARIADIC_INPUT_MAX",
+    "VARIADIC_OUTPUT_BYTE_MAX",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "framework_operation_support",
     "has_framework_operation_contract",
     "has_internal_operation_contract",
     "infer_cat_contract",
-    "promote_cat_dtypes",
+    "infer_stack_contract",
+    "promote_variadic_dtypes",
     "validate_framework_operation_contract",
     "validate_internal_operation_contract",
     "validate_broadcast_to_contract",
     "validate_cat_contract",
+    "validate_stack_contract",
     "validate_clamp_contract",
     "validate_cumsum_contract",
     "validate_flip_contract",

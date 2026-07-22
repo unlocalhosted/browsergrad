@@ -1,0 +1,65 @@
+import { VARIADIC_TENSOR_DTYPE_CASES } from "./framework-cat-conformance";
+
+export const FRAMEWORK_STACK_CONFORMANCE = Object.freeze({
+  schema: "browsergrad.framework.stack-conformance.v1",
+  valid: {
+    axis: 1,
+    inputShape: [2],
+    inputValues: [[1, 2], [3, 4], [5, 6]],
+    expectedShape: [2, 3],
+    expectedValues: [[1, 3, 5], [2, 4, 6]],
+    cotangent: [[1, 2, 4], [8, 16, 32]],
+    expectedGradients: [[1, 8], [2, 16], [4, 32]],
+  },
+  dtypeCases: VARIADIC_TENSOR_DTYPE_CASES,
+  scalar: {
+    axis: -1,
+    values: [2, 7],
+    expectedShape: [2],
+    expectedValues: [2, 7],
+  },
+  empty: {
+    inputShape: [2, 0],
+    axis: 0,
+    expectedShape: [2, 2, 0],
+    expectedValues: [[[], []], [[], []]],
+  },
+  mixedGradient: {
+    floatingValues: [1, 2],
+    integralValues: [3, 4],
+    expectedFloatingGradient: [1, 1],
+    expectedIntegralGradientPresent: false,
+  },
+  vmap: {
+    mappedValues: [[1, 2], [3, 4]],
+    capturedValues: [9, 10],
+    expectedValues: [
+      [[1, 2], [9, 10]],
+      [[3, 4], [9, 10]],
+    ],
+    expectedArg: { axis: 1 },
+  },
+  onnx: {
+    axis: 1,
+    outputDtype: 1,
+    castTo: 1,
+    opTypes: ["Unsqueeze", "Cast", "Unsqueeze", "Concat", "Identity"],
+    concatInputCount: 2,
+    axesInitializerRank: 1,
+    axesInitializerValue: 1,
+  },
+  invalid: [
+    { id: "non-sequence" },
+    { id: "empty-sequence" },
+    { id: "non-tensor" },
+    { id: "bool-axis" },
+    { id: "float-axis" },
+    { id: "low-axis" },
+    { id: "high-axis" },
+    { id: "hostile-axis" },
+    { id: "hostile-sequence" },
+    { id: "shape-mismatch" },
+    { id: "unsupported-dtype" },
+    { id: "out-mutation" },
+  ],
+} as const);

@@ -73,6 +73,11 @@ contract in the README](README.md#compatibility-contract).
   owning CPU realization, typed static-split closure/symbolic VJP,
   captured-input-aware vmap, exact ONNX `Cast`/`Concat`, and explicit
   tensor-plan/WebGPU refusal until canonical variadic copy lowering exists.
+- `stack` now emits typed variadic `STACK` with strict inserted-axis,
+  equal-shape, promotion, and resource validation; owning CPU realization;
+  typed per-input closure/symbolic VJP; captured-input-aware vmap; exact ONNX
+  `Cast`/`Unsqueeze`/`Concat`; and explicit tensor-plan/WebGPU refusal until
+  canonical variadic copy lowering exists.
 
 ### Added
 
@@ -80,8 +85,8 @@ contract in the README](README.md#compatibility-contract).
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
   current table contains `ABS`, `CLAMP`, `CONCAT`, `COS`, `CUMSUM`, `BROADCAST_TO`, `FLIP`,
-  `INDEX`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`, `TRIL`,
-  `TRIU`, `VAR`, and masked-fill `WHERE`.
+  `INDEX`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`, `STACK`,
+  `TRIL`, `TRIU`, `VAR`, and masked-fill `WHERE`.
 
 ## [0.9.0] — 2026-07-15
 

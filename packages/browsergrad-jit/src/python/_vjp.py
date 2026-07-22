@@ -48,7 +48,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from ._ir import (
     UOp,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_NARROW, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_NARROW, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CAST, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -67,6 +67,7 @@ from ._ir import (
 from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_cat_contract,
+    validate_stack_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -373,6 +374,47 @@ def _vjp_concat(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional
             )
         gradients.append(gradient)
         start += length
+    return tuple(gradients)
+
+
+@register_vjp(OP_STACK)
+def _vjp_stack(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """Select and reshape each static slice of a stacked cotangent."""
+    axis = validate_stack_contract(output)
+    gradients = []
+    floating = frozenset({"float16", "float32", "float64"})
+    narrow_shape = list(output.shape)
+    narrow_shape[axis] = 1
+    for index, source in enumerate(inputs):
+        if output.dtype not in floating or source.dtype not in floating:
+            gradients.append(None)
+            continue
+        gradient = _vjp_uop(
+            OP_NARROW,
+            (dy,),
+            tuple(narrow_shape),
+            output.dtype,
+            output,
+            arg={"axis": axis, "start": index, "length": 1},
+        )
+        gradient = _vjp_uop(
+            OP_RESHAPE,
+            (gradient,),
+            source.shape,
+            output.dtype,
+            output,
+            arg={"new_shape": source.shape},
+        )
+        if gradient.dtype != source.dtype:
+            gradient = _vjp_uop(
+                OP_CAST,
+                (gradient,),
+                source.shape,
+                source.dtype,
+                output,
+                arg={"dtype": source.dtype},
+            )
+        gradients.append(gradient)
     return tuple(gradients)
 
 

@@ -150,7 +150,7 @@ Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
 `Tensor.sign`, `Tensor.sin`, `Tensor.cos`, `Tensor.clamp`, `Tensor.flip`,
 `Tensor.gather`, `Tensor.masked_fill`, `Tensor.prod`, `Tensor.repeat`,
 `Tensor.repeat_interleave`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`,
-`Tensor.var`, and top-level `torch.cat` from the frozen opaque callback
+`Tensor.var`, top-level `torch.cat`, and top-level `torch.stack` from the frozen opaque callback
 inventory. Expand emits the existing typed `BROADCAST_TO`
 primitive. One shared contract validates exact arity, closed shape arguments,
 output-shape identity, dtype preservation, rank direction, and broadcast
@@ -177,8 +177,8 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 19 constructor calls and 22 operations under ADR-0002
-and ADR-0004 through ADR-0017. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 18 constructor calls and 21 operations under ADR-0002
+and ADR-0004 through ADR-0018. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -305,12 +305,27 @@ same value, shape, axis, dtype-promotion, legacy-empty, ownership, gradient,
 resource, hostile-input, mutation-refusal, and boundary fixture. This is
 seventeen migrated operations, not Gate 6 completion.
 
+Stacking now emits typed variadic `STACK` over one exact normalized inserted
+axis. A closed contract requires a nonempty plain tuple/list of no more than
+1,024 exact same-session tensors, identical input shapes, and an output no
+larger than 256 MiB. Scalars and identically shaped empty tensors remain valid.
+It reuses concatenation's closed dimensioned-tensor promotion lattice. CPU
+casts every input and returns an owning `np.stack` copy; closure and symbolic
+VJP select each static source index through typed internal `NARROW`, reshape
+away the inserted axis, and cast floating gradients to source dtype. Vmap
+shifts the stack axis and broadcasts captured inputs. ONNX emits exact
+per-input `Cast`/`Unsqueeze` plus `Concat` for float32/int32/int64/bool and
+explicitly refuses other output dtypes. Tensor-plan/WebGPU and `out=` remain
+explicit refusals until canonical variadic copy lowering and a typed effect
+contract exist. Grad consumes the same eager/lazy conformance fixture. This is
+eighteen migrated operations, not Gate 6 completion.
+
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
 records bind `Tensor.abs`, `torch.cat`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
 `Tensor.flip`, `Tensor.gather`, `Tensor.masked_fill`, `Tensor.prod`,
 `Tensor.repeat_interleave`, `Tensor.repeat`, `Tensor.sign`, `Tensor.sin`,
-`Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`, and `Tensor.var` to the same
+`torch.stack`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`, and `Tensor.var` to the same
 validators invoked by construction and every admitted execution, transform,
 export, or plan boundary. Import rejects duplicate keys,
 open fields, unknown decisions, invalid versions, duplicate identities, and
@@ -320,7 +335,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 22 still-opaque and seventeen typed retirements. ADR-0003 records
+opaque IDs into 21 still-opaque and eighteen typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.

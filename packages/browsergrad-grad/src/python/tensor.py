@@ -68,11 +68,11 @@ _CUMSUM_DTYPE_ALIASES = {
     "uint8": "uint8",
     "bool": "bool",
 }
-_CAT_DTYPES = _MASKED_FILL_DTYPES
-_CAT_FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
-_CAT_FLOATING_RANK = {"float16": 0, "float32": 1, "float64": 2}
-_CAT_SIGNED_BITS = {"int8": 8, "int16": 16, "int32": 32, "int64": 64}
-_CAT_DTYPE_BYTES = {
+_VARIADIC_DTYPES = _MASKED_FILL_DTYPES
+_VARIADIC_FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
+_VARIADIC_FLOATING_RANK = {"float16": 0, "float32": 1, "float64": 2}
+_VARIADIC_SIGNED_BITS = {"int8": 8, "int16": 16, "int32": 32, "int64": 64}
+_VARIADIC_DTYPE_BYTES = {
     "bool": 1,
     "uint8": 1,
     "int8": 1,
@@ -83,8 +83,8 @@ _CAT_DTYPE_BYTES = {
     "int64": 8,
     "float64": 8,
 }
-_CAT_INPUT_MAX = 1024
-_CAT_OUTPUT_BYTE_MAX = 1 << 28
+_VARIADIC_INPUT_MAX = 1024
+_VARIADIC_OUTPUT_BYTE_MAX = 1 << 28
 
 
 def _normalize_prod_axes(value, rank: int) -> tuple:
@@ -276,23 +276,37 @@ def _normalize_cumsum_dtype(spec, source_dtype: str) -> str:
     return normalized
 
 
-def _promote_cat_dtypes(dtypes: tuple) -> str:
+def _promote_variadic_dtypes(dtypes: tuple, operation: str) -> str:
     for index, dtype in enumerate(dtypes):
-        if dtype not in _CAT_DTYPES:
-            raise ValueError(f"cat: input {index} has unsupported dtype {dtype!r}")
-    floating = [dtype for dtype in dtypes if dtype in _CAT_FLOATING_RANK]
+        if dtype not in _VARIADIC_DTYPES:
+            raise ValueError(
+                f"{operation}: input {index} has unsupported dtype {dtype!r}"
+            )
+    floating = [dtype for dtype in dtypes if dtype in _VARIADIC_FLOATING_RANK]
     if floating:
-        return max(floating, key=_CAT_FLOATING_RANK.__getitem__)
-    signed = [dtype for dtype in dtypes if dtype in _CAT_SIGNED_BITS]
+        return max(floating, key=_VARIADIC_FLOATING_RANK.__getitem__)
+    signed = [dtype for dtype in dtypes if dtype in _VARIADIC_SIGNED_BITS]
     has_uint8 = "uint8" in dtypes
     if signed:
-        widest = max(signed, key=_CAT_SIGNED_BITS.__getitem__)
-        if has_uint8 and _CAT_SIGNED_BITS[widest] == 8:
+        widest = max(signed, key=_VARIADIC_SIGNED_BITS.__getitem__)
+        if has_uint8 and _VARIADIC_SIGNED_BITS[widest] == 8:
             return "int16"
         return widest
     if has_uint8:
         return "uint8"
     return "bool"
+
+
+def _validate_variadic_output_resource(shape: tuple, dtype: str, operation: str):
+    elements = 1
+    for extent in shape:
+        elements *= extent
+    output_bytes = elements * _VARIADIC_DTYPE_BYTES[dtype]
+    if output_bytes > _VARIADIC_OUTPUT_BYTE_MAX:
+        raise ValueError(
+            f"{operation}: output requires {output_bytes} bytes, exceeding the "
+            f"{_VARIADIC_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
 
 
 def _infer_cat_contract(tensors: tuple, dim) -> tuple:
@@ -332,17 +346,40 @@ def _infer_cat_contract(tensors: tuple, dim) -> tuple:
                 )
         sizes.append(shape[axis])
         output_shape[axis] += shape[axis]
-    output_dtype = _promote_cat_dtypes(tuple(tensor.dtype for tensor in tensors))
-    elements = 1
-    for extent in output_shape:
-        elements *= extent
-    output_bytes = elements * _CAT_DTYPE_BYTES[output_dtype]
-    if output_bytes > _CAT_OUTPUT_BYTE_MAX:
+    output_dtype = _promote_variadic_dtypes(
+        tuple(tensor.dtype for tensor in tensors),
+        "cat",
+    )
+    output_shape = tuple(output_shape)
+    _validate_variadic_output_resource(output_shape, output_dtype, "cat")
+    return axis, output_shape, output_dtype, tuple(sizes), legacy_empty
+
+
+def _infer_stack_contract(tensors: tuple, dim) -> tuple:
+    if type(dim) not in _EXACT_INTEGER_SCALAR_TYPES:
         raise ValueError(
-            f"cat: output requires {output_bytes} bytes, exceeding the "
-            f"{_CAT_OUTPUT_BYTE_MAX}-byte ceiling"
+            "stack: dim must be a built-in or NumPy integer scalar, "
+            f"got {type(dim).__name__}"
         )
-    return axis, tuple(output_shape), output_dtype, tuple(sizes), legacy_empty
+    reference = tensors[0].shape
+    rank = len(reference)
+    axis = int(dim)
+    if axis < 0:
+        axis += rank + 1
+    if axis < 0 or axis > rank:
+        raise ValueError(f"stack: dim {dim} out of range for output rank {rank + 1}")
+    for index, tensor in enumerate(tensors[1:], start=1):
+        if tensor.shape != reference:
+            raise ValueError(
+                f"stack: input {index} shape {tensor.shape} does not match {reference}"
+            )
+    output_dtype = _promote_variadic_dtypes(
+        tuple(tensor.dtype for tensor in tensors),
+        "stack",
+    )
+    output_shape = reference[:axis] + (len(tensors),) + reference[axis:]
+    _validate_variadic_output_resource(output_shape, output_dtype, "stack")
+    return axis, output_shape, output_dtype
 
 
 def _normalize_triangular_diagonal(value, shape: tuple, *, upper: bool) -> int:
@@ -1672,9 +1709,10 @@ def cat(tensors, dim=0, *, out=None) -> Tensor:
         raise TypeError("cat: tensors must be a plain tuple or list of Tensor values")
     if not tensors:
         raise ValueError("cat: empty tensor list")
-    if len(tensors) > _CAT_INPUT_MAX:
+    if len(tensors) > _VARIADIC_INPUT_MAX:
         raise ValueError(
-            f"cat: tensor count {len(tensors)} exceeds the {_CAT_INPUT_MAX}-input ceiling"
+            f"cat: tensor count {len(tensors)} exceeds the "
+            f"{_VARIADIC_INPUT_MAX}-input ceiling"
         )
     if any(type(tensor) is not Tensor for tensor in tensors):
         raise TypeError("cat: every input must be a Tensor")
@@ -1699,7 +1737,7 @@ def cat(tensors, dim=0, *, out=None) -> Tensor:
         parts = np.split(g.data, cuts, axis=axis)
         gradients = []
         for part, tensor, empty in zip(parts, tensors, legacy_empty):
-            if tensor.dtype not in _CAT_FLOATING_DTYPES:
+            if tensor.dtype not in _VARIADIC_FLOATING_DTYPES:
                 gradients.append(None)
                 continue
             if empty and part.shape != tensor.shape:
@@ -1710,9 +1748,9 @@ def cat(tensors, dim=0, *, out=None) -> Tensor:
         return tuple(gradients)
 
     if (
-        output_dtype in _CAT_FLOATING_DTYPES
+        output_dtype in _VARIADIC_FLOATING_DTYPES
         and any(
-            tensor.requires_grad and tensor.dtype in _CAT_FLOATING_DTYPES
+            tensor.requires_grad and tensor.dtype in _VARIADIC_FLOATING_DTYPES
             for tensor in tensors
         )
     ):
@@ -1720,29 +1758,60 @@ def cat(tensors, dim=0, *, out=None) -> Tensor:
     return result
 
 
-def stack(tensors, dim: int = 0) -> Tensor:
+def stack(tensors, dim=0, *, out=None) -> Tensor:
     """Concatenate `tensors` along a new axis inserted at `dim`.
 
     PyTorch behavior: all inputs must have identical shape.
     """
-    if len(tensors) == 0:
+    if out is not None:
+        raise NotImplementedError(
+            "stack: out= is not supported because eager mutation has no shared effect contract"
+        )
+    if type(tensors) not in (tuple, list):
+        raise TypeError("stack: tensors must be a plain tuple or list of Tensor values")
+    if not tensors:
         raise ValueError("stack: empty tensor list")
-    tensors = tuple(_wrap(t) for t in tensors)
-    out_data = np.stack([t.data for t in tensors], axis=dim)
-    out = Tensor(out_data)
-    n = len(tensors)
+    if len(tensors) > _VARIADIC_INPUT_MAX:
+        raise ValueError(
+            f"stack: tensor count {len(tensors)} exceeds the "
+            f"{_VARIADIC_INPUT_MAX}-input ceiling"
+        )
+    if any(type(tensor) is not Tensor for tensor in tensors):
+        raise TypeError("stack: every input must be a Tensor")
+    tensors = tuple(tensors)
+    axis, output_shape, output_dtype = _infer_stack_contract(tensors, dim)
+    arrays = [
+        tensor.data.astype(np.dtype(output_dtype), copy=False)
+        for tensor in tensors
+    ]
+    out_data = np.stack(arrays, axis=axis)
+    result = Tensor(
+        np.array(out_data, dtype=np.dtype(output_dtype), copy=True),
+        dtype=output_dtype,
+    )
 
     def backward(g):
-        # The new axis at `dim` has size n; iterate it to recover per-parent grads.
         parts = []
-        for i in range(n):
-            # Index along the new axis to get a slice with that dim removed.
+        for index, tensor in enumerate(tensors):
+            if tensor.dtype not in _VARIADIC_FLOATING_DTYPES:
+                parts.append(None)
+                continue
             idx = [slice(None)] * g.data.ndim
-            idx[dim] = i
-            parts.append(g.data[tuple(idx)].copy())
+            idx[axis] = index
+            parts.append(
+                g.data[tuple(idx)].copy().astype(tensor.data.dtype, copy=False)
+            )
         return tuple(parts)
 
-    return _build_ctx(out, tensors, backward)
+    if (
+        output_dtype in _VARIADIC_FLOATING_DTYPES
+        and any(
+            tensor.requires_grad and tensor.dtype in _VARIADIC_FLOATING_DTYPES
+            for tensor in tensors
+        )
+    ):
+        return _build_ctx(result, tensors, backward)
+    return result
 
 
 # ─── einsum ────────────────────────────────────────────────

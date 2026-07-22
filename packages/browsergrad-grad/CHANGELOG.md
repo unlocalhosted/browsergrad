@@ -57,6 +57,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   legacy-empty, and allocation contract. It accepts exact tensors only,
   returns an owning promoted-dtype result, splits floating gradients in source
   dtype, and refuses unsupported `out=` mutation explicitly.
+- Top-level `stack` now shares JIT's strict variadic inserted-axis, equal-shape,
+  dtype-promotion, and allocation contract. It accepts exact tensors only,
+  returns an owning promoted-dtype result, selects floating gradients in source
+  dtype, and refuses unsupported `out=` mutation explicitly.
 
 ## [0.5.2] — 2026-07-15
 
