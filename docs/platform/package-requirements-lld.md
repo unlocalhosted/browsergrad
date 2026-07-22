@@ -149,8 +149,8 @@ asset set.
 Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
 `Tensor.sign`, `Tensor.sin`, `Tensor.cos`, `Tensor.clamp`, `Tensor.flip`,
 `Tensor.gather`, `Tensor.masked_fill`, `Tensor.prod`, `Tensor.repeat`,
-`Tensor.repeat_interleave`, `Tensor.tril`, `Tensor.triu`, and `Tensor.var` from the frozen
-opaque callback inventory. Expand emits the existing typed `BROADCAST_TO`
+`Tensor.repeat_interleave`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`, and
+`Tensor.var` from the frozen opaque callback inventory. Expand emits the existing typed `BROADCAST_TO`
 primitive. One shared contract validates exact arity, closed shape arguments,
 output-shape identity, dtype preservation, rank direction, and broadcast
 compatibility at construction and again at CPU, VJP, vmap, ONNX, and
@@ -176,8 +176,8 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 21 constructor calls and 24 operations under ADR-0002
-and ADR-0004 through ADR-0015. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 20 constructor calls and 23 operations under ADR-0002
+and ADR-0004 through ADR-0016. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -275,12 +275,23 @@ exposes equivalent instance and top-level spellings and consumes the shared
 two-variant triangular conformance harness. This is fifteen migrated
 operations, not Gate 6 completion.
 
+Cumulative sum now emits typed `CUMSUM` with one exact normalized axis and a
+closed scan dtype contract. Floating defaults preserve dtype; integral and
+boolean defaults promote to int64; an explicit supported dtype casts before
+accumulation. CPU returns an owning exact-dtype array, closure and symbolic VJP
+scan the cotangent in the opposite direction, vmap shifts the scan axis past a
+leading batch, and ONNX emits exact `Cast`/`CumSum` wiring for the supported
+float32/int32/int64 output profile. Tensor-plan and WebGPU explicitly refuse
+until portable scan lowering exists. Grad consumes the same value, axis,
+dtype, empty, hostile-input, mutation-refusal, and gradient fixture. This is
+sixteen migrated operations, not Gate 6 completion.
+
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
 records bind `Tensor.abs`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
 `Tensor.flip`, `Tensor.gather`, `Tensor.masked_fill`, `Tensor.prod`,
 `Tensor.repeat_interleave`, `Tensor.repeat`, `Tensor.sign`, `Tensor.sin`,
-`Tensor.tril`, `Tensor.triu`, and `Tensor.var` to the same
+`Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`, and `Tensor.var` to the same
 validators invoked by construction and every admitted execution, transform,
 export, or plan boundary. Import rejects duplicate keys,
 open fields, unknown decisions, invalid versions, duplicate identities, and
@@ -290,7 +301,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 24 still-opaque and fifteen typed retirements. ADR-0003 records
+opaque IDs into 23 still-opaque and sixteen typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.

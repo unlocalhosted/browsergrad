@@ -52,7 +52,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -77,6 +77,7 @@ from ._framework_contracts import (
     MASKED_FILL_CONTRACT_ID,
     validate_broadcast_to_contract,
     validate_clamp_contract,
+    validate_cumsum_contract,
     validate_flip_contract,
     validate_tril_contract,
     validate_triu_contract,
@@ -231,6 +232,23 @@ def _vmap_flip(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
         shape=inner.shape,
         dtype=node.dtype,
         arg={"axis": axis + 1},
+    )
+
+
+@register_vmap(OP_CUMSUM)
+def _vmap_cumsum(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    axis, reverse = validate_cumsum_contract(node)
+    inner = batched[id(node.inputs[0])]
+    if len(inner.shape) != len(node.inputs[0].shape) + 1 or inner.shape[0] != B:
+        raise JitNotImplementedError(
+            "vmap cumsum requires the source tensor on the leading mapped axis"
+        )
+    return UOp(
+        op=OP_CUMSUM,
+        inputs=(inner,),
+        shape=inner.shape,
+        dtype=node.dtype,
+        arg={"axis": axis + 1, "reverse": reverse},
     )
 
 

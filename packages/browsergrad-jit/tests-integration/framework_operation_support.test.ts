@@ -70,6 +70,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.cos.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.tensor.cumsum.v1",
+      publicSurface: "Tensor.cumsum",
+      opcode: "CUMSUM",
+      semanticState: "typed",
+      shapeContract: "preserve-single-axis-inclusive-scan",
+      dtypeContract: "promote-integral-default-or-explicit-scan-dtype",
+      decisions: {
+        cpu: "supported-numpy-owning-scan-copy",
+        closureAutograd: "supported-opposite-direction-inclusive-scan-for-floating-source-and-output",
+        symbolicVjp: "supported-opposite-direction-inclusive-scan-for-floating-source-and-output",
+        functionalGrad: "supported-for-floating-source-and-output-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-scan-axis-shift",
+        onnxExport: "supported-opset17-cumsum-with-cast-float32-int32-int64",
+        tensorPlan: "refused-no-portable-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.cumsum.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.expand.v1",
       publicSurface: "Tensor.expand",
       opcode: "BROADCAST_TO",
@@ -362,7 +383,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(16);
+    expect(result.first.operations).toHaveLength(17);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

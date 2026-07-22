@@ -45,7 +45,7 @@ from ._ir import (
     UOp,
     OP_BUFFER,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO, OP_INDEX,
@@ -95,6 +95,25 @@ _MASKED_FILL_DTYPES = frozenset({
     "int8", "int16", "int32", "int64", "uint8", "bool",
 })
 _TRIANGULAR_DTYPES = _MASKED_FILL_DTYPES
+_CUMSUM_DTYPES = _MASKED_FILL_DTYPES
+_CUMSUM_FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
+_CUMSUM_DTYPE_ALIASES = {
+    "float": "float32",
+    "float32": "float32",
+    "double": "float64",
+    "float64": "float64",
+    "half": "float16",
+    "float16": "float16",
+    "int": "int32",
+    "int32": "int32",
+    "long": "int64",
+    "int64": "int64",
+    "short": "int16",
+    "int16": "int16",
+    "int8": "int8",
+    "uint8": "uint8",
+    "bool": "bool",
+}
 
 
 class no_grad:
@@ -148,6 +167,25 @@ def _normalize_single_axis(op_name: str, value: Any, rank: int) -> int:
     if axis < 0 or axis >= rank:
         raise ShapeError(f"{op_name}: axis {value} out of range for rank {rank}")
     return axis
+
+
+def _normalize_cumsum_dtype(spec: Any, source_dtype: str) -> str:
+    if source_dtype not in _CUMSUM_DTYPES:
+        raise ShapeError(f"cumsum: source dtype {source_dtype!r} is not supported")
+    if spec is None:
+        return source_dtype if source_dtype in _CUMSUM_FLOATING_DTYPES else "int64"
+    if type(spec) is not str:
+        raise TypeError(
+            "cumsum: dtype must be a BrowserGrad/PyTorch dtype token string, "
+            f"got {type(spec).__name__}"
+        )
+    normalized = _CUMSUM_DTYPE_ALIASES.get(spec)
+    if normalized is None:
+        raise ValueError(
+            f"cumsum: dtype {spec!r} is not supported; expected one of "
+            f"{sorted(_CUMSUM_DTYPE_ALIASES)}"
+        )
+    return normalized
 
 
 def _normalize_triangular_diagonal(
@@ -1054,6 +1092,9 @@ class TensorProxy:
         ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
         return TensorProxy(uop, session=self._get_session(),
                            requires_grad=requires, ctx=ctx)
+
+    def cumsum(self, dim: Any, dtype: Any = None) -> "TensorProxy":
+        return cumsum(self, dim=dim, dtype=dtype)
 
     def _triangular(self, diagonal: Any, *, upper: bool) -> "TensorProxy":
         operation = "triu" if upper else "tril"
@@ -2393,26 +2434,47 @@ def minimum(a: Any, b: Any) -> "TensorProxy":
     return where(lhs <= rhs, lhs, rhs)
 
 
-def cumsum(x: Any, dim: int = 0) -> "TensorProxy":
+def cumsum(
+    x: Any,
+    dim: Any = 0,
+    *,
+    dtype: Any = None,
+    out: Any = None,
+) -> "TensorProxy":
     proxy = _to_proxy(x, None)
-    axis = int(dim) % proxy.ndim
-
-    def _cumsum_forward(x_arr: np.ndarray) -> np.ndarray:
-        return np.cumsum(x_arr, axis=axis)
+    if out is not None:
+        raise JitNotImplementedError(
+            "cumsum: out= is not supported because lazy tensor mutation has no typed effect contract"
+        )
+    axis = _normalize_single_axis("cumsum", dim, proxy.ndim)
+    output_dtype = _normalize_cumsum_dtype(dtype, proxy.dtype)
 
     uop = UOp(
-        op=OP_CUSTOM,
+        op=OP_CUMSUM,
         inputs=(proxy._uop,),
         shape=proxy.shape,
-        dtype=proxy.dtype,
-        arg={"fn": _cumsum_forward, "captures": (), "name": "cumsum"},
+        dtype=output_dtype,
+        arg={"axis": axis, "reverse": False},
     )
 
     def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:
-        grad = np.flip(np.cumsum(np.flip(dy, axis=axis), axis=axis), axis=axis)
-        return (grad.copy().astype(np.dtype(proxy.dtype), copy=False),)
+        reversed_dy = np.flip(dy, axis=axis)
+        grad = np.cumsum(
+            reversed_dy,
+            axis=axis,
+            dtype=np.dtype(output_dtype),
+        )
+        return (
+            np.flip(grad, axis=axis)
+            .copy()
+            .astype(np.dtype(proxy.dtype), copy=False),
+        )
 
-    requires = _should_track(proxy)
+    requires = (
+        _should_track(proxy)
+        and proxy.dtype in _CUMSUM_FLOATING_DTYPES
+        and output_dtype in _CUMSUM_FLOATING_DTYPES
+    )
     ctx = _BackwardCtx(fn=_bw, input_proxies=(proxy,)) if requires else None
     return TensorProxy(uop, session=proxy._get_session(),
                        requires_grad=requires, ctx=ctx)

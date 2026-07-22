@@ -60,6 +60,7 @@ _ENUMS = {
         "preserve-single-axis-reverse",
         "preserve-batched-lower-triangular",
         "preserve-batched-upper-triangular",
+        "preserve-single-axis-inclusive-scan",
         "same-rank-index-shaped-gather",
         "preserve-source-with-broadcast-bool-mask",
         "static-broadcast-with-existing-dim-minus-one",
@@ -74,11 +75,13 @@ _ENUMS = {
         "preserve-input-require-bool-mask",
         "preserve-real-numeric-input",
         "preserve-source-require-int64-index",
+        "promote-integral-default-or-explicit-scan-dtype",
     }),
     "cpu": frozenset({
         "supported-numpy-dtype-preserving",
         "supported-numpy-owning-copy",
         "supported-numpy-owning-copy-with-range-check",
+        "supported-numpy-owning-scan-copy",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -95,6 +98,7 @@ _ENUMS = {
         "supported-unbroadcast-sum",
         "supported-zero-aware-product-rule",
         "supported-zero-derivative",
+        "supported-opposite-direction-inclusive-scan-for-floating-source-and-output",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -111,8 +115,12 @@ _ENUMS = {
         "supported-unbroadcast-sum",
         "supported-zero-aware-product-rule",
         "supported-zero-derivative",
+        "supported-opposite-direction-inclusive-scan-for-floating-source-and-output",
     }),
-    "functionalGrad": frozenset({"supported-via-symbolic-vjp"}),
+    "functionalGrad": frozenset({
+        "supported-via-symbolic-vjp",
+        "supported-for-floating-source-and-output-via-symbolic-vjp",
+    }),
     "vmap": frozenset({
         "supported-leading-batch-axis",
         "supported-leading-batch-axis-with-axis-shift",
@@ -120,6 +128,7 @@ _ENUMS = {
         "supported-leading-batch-axis-with-mask-broadcast",
         "supported-leading-batch-axis-preserve-matrix-axes",
         "supported-leading-batch-axis-with-unit-repeat",
+        "supported-leading-batch-axis-with-scan-axis-shift",
     }),
     "onnxExport": frozenset({
         "supported-opset17-clip-export-dtypes",
@@ -133,6 +142,7 @@ _ENUMS = {
         "supported-opset17-trilu-float32-int32-int64-bool",
         "supported-opset17-tile-float32-int32-int64-bool",
         "supported-opset17-unsqueeze-tile-reshape-float32-int32-int64-bool",
+        "supported-opset17-cumsum-with-cast-float32-int32-int64",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -163,6 +173,7 @@ _REAL_NUMERIC_DTYPES = frozenset({
 _FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
 _MASKED_FILL_DTYPES = _REAL_NUMERIC_DTYPES | frozenset({"bool"})
 _TRIANGULAR_DTYPES = _MASKED_FILL_DTYPES
+_CUMSUM_DTYPES = _MASKED_FILL_DTYPES
 _UNARY_DTYPE_PROFILES = MappingProxyType({
     "preserve-floating-input": (_FLOATING_DTYPES, "floating"),
     "preserve-real-numeric-input": (_REAL_NUMERIC_DTYPES, "real numeric"),
@@ -467,6 +478,54 @@ def _validate_flip(node: Any, contract: FrameworkOperationContract) -> int:
     if axis < 0 or axis >= rank:
         raise ShapeError(f"FLIP arg.axis {axis} out of range for rank {rank}")
     return axis
+
+
+def _validate_cumsum(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> Tuple[int, bool]:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = _require_single_input_tuple(node, contract.opcode)
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("CUMSUM arg must be a plain dict")
+    fields = set(arg)
+    if not {"axis", "reverse"}.issubset(fields) or not fields.issubset(
+        {"axis", "reverse", "vjp_of"}
+    ):
+        raise ShapeError(
+            "CUMSUM arg fields must be exactly 'axis' and 'reverse' plus optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("CUMSUM arg.vjp_of must reference a UOp")
+    source = inputs[0]
+    source_shape = getattr(source, "shape", None)
+    if type(source_shape) is not tuple:
+        raise ShapeError("CUMSUM source shape must be a tuple")
+    if not source_shape:
+        raise ShapeError("CUMSUM requires an input with rank at least one")
+    if getattr(node, "shape", None) != source_shape:
+        raise ShapeError("CUMSUM must preserve its input shape")
+    source_dtype = getattr(source, "dtype", None)
+    output_dtype = getattr(node, "dtype", None)
+    if source_dtype not in _CUMSUM_DTYPES:
+        raise ShapeError(f"CUMSUM does not support source dtype {source_dtype!r}")
+    if output_dtype not in _CUMSUM_DTYPES:
+        raise ShapeError(f"CUMSUM does not support output dtype {output_dtype!r}")
+    axis = arg["axis"]
+    reverse = arg["reverse"]
+    if type(axis) is not int:
+        raise ShapeError("CUMSUM arg.axis must be a normalized integer")
+    if axis < 0 or axis >= len(source_shape):
+        raise ShapeError(
+            f"CUMSUM arg.axis {axis} out of range for rank {len(source_shape)}"
+        )
+    if type(reverse) is not bool:
+        raise ShapeError("CUMSUM arg.reverse must be a boolean")
+    return axis, reverse
 
 
 def _validate_triangular(
@@ -944,6 +1003,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.abs.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.clamp.v1": _validate_clamp,
     "browsergrad.jit.framework.tensor.cos.v1": _validate_typed_unary,
+    "browsergrad.jit.framework.tensor.cumsum.v1": _validate_cumsum,
     "browsergrad.jit.framework.tensor.expand.v1": _validate_broadcast_to,
     "browsergrad.jit.framework.tensor.flip.v1": _validate_flip,
     "browsergrad.jit.framework.tensor.gather.v1": _validate_gather,
@@ -1002,6 +1062,13 @@ def validate_flip_contract(node: Any) -> int:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.flip.v1":
         raise ShapeError("FLIP resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_cumsum_contract(node: Any) -> Tuple[int, bool]:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.cumsum.v1":
+        raise ShapeError("CUMSUM resolved to the wrong framework-operation contract")
     return normalized
 
 
@@ -1135,6 +1202,7 @@ __all__ = [
     "validate_framework_operation_contract",
     "validate_broadcast_to_contract",
     "validate_clamp_contract",
+    "validate_cumsum_contract",
     "validate_flip_contract",
     "validate_gather_contract",
     "validate_gather_scatter_add_contract",

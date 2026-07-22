@@ -34,7 +34,7 @@ from ._ir import (
     UOp, ALL_OPS, toposort,
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM,
     OP_CAST, OP_ADD, OP_MUL, OP_DIV, OP_NEG,
-    OP_EXP, OP_LOG, OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT,
+    OP_EXP, OP_LOG, OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT,
     OP_REPEAT_INTERLEAVE, OP_SIGN, OP_SIN, OP_CMP, OP_MATMUL,
     OP_CONV1D, OP_CONV1D_BACKWARD_INPUT, OP_CONV1D_BACKWARD_WEIGHT,
     OP_CONV1D_BACKWARD_BIAS, OP_CONV2D,
@@ -60,6 +60,7 @@ from ._errors import RealizationError
 from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_clamp_contract,
+    validate_cumsum_contract,
     validate_flip_contract,
     validate_tril_contract,
     validate_triu_contract,
@@ -186,6 +187,21 @@ def _h_cos(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
 def _h_flip(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     axis = validate_flip_contract(node)
     return np.flip(vt[id(node.inputs[0])], axis=axis).copy()
+
+
+def _h_cumsum(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    axis, reverse = validate_cumsum_contract(node)
+    source = vt[id(node.inputs[0])]
+    if reverse:
+        source = np.flip(source, axis=axis)
+    scanned = np.cumsum(
+        source,
+        axis=axis,
+        dtype=np.dtype(node.dtype),
+    )
+    if reverse:
+        scanned = np.flip(scanned, axis=axis)
+    return np.array(scanned, dtype=np.dtype(node.dtype), copy=True)
 
 
 def _h_tril(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
@@ -1303,6 +1319,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_CLAMP:   _h_clamp,
     OP_COS:     _h_cos,
     OP_FLIP:    _h_flip,
+    OP_CUMSUM:  _h_cumsum,
     OP_TRIL:    _h_tril,
     OP_TRIU:    _h_triu,
     OP_PROD:    _h_prod,

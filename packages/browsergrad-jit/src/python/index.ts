@@ -643,8 +643,8 @@ def repeat_interleave(x, repeats, dim):
     return x.repeat_interleave(repeats, dim)
 
 
-def cumsum(x, dim=0):
-    return _cumsum(x, dim=dim)
+def cumsum(input, dim=0, *, dtype=None, out=None):
+    return _cumsum(input, dim=dim, dtype=dtype, out=out)
 
 
 def sort(x, dim=-1, descending=False):

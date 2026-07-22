@@ -48,7 +48,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from ._ir import (
     UOp,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_CUMSUM, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CAST, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -67,6 +67,7 @@ from ._ir import (
 from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_clamp_contract,
+    validate_cumsum_contract,
     validate_flip_contract,
     validate_tril_contract,
     validate_triu_contract,
@@ -327,6 +328,31 @@ def _vjp_flip(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[U
         output,
         arg={"axis": axis},
     ),)
+
+
+@register_vjp(OP_CUMSUM)
+def _vjp_cumsum(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """An inclusive scan's VJP is the opposite-direction inclusive scan."""
+    axis, reverse = validate_cumsum_contract(output)
+    (source,) = inputs
+    gradient = _vjp_uop(
+        OP_CUMSUM,
+        (dy,),
+        source.shape,
+        output.dtype,
+        output,
+        arg={"axis": axis, "reverse": not reverse},
+    )
+    if gradient.dtype != source.dtype:
+        gradient = _vjp_uop(
+            OP_CAST,
+            (gradient,),
+            source.shape,
+            source.dtype,
+            output,
+            arg={"dtype": source.dtype},
+        )
+    return (gradient,)
 
 
 @register_vjp(OP_TRIL)

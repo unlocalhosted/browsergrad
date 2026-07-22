@@ -49,6 +49,25 @@ _MASKED_FILL_DTYPES = frozenset({
     "int8", "int16", "int32", "int64", "uint8", "bool",
 })
 _TRIANGULAR_DTYPES = _MASKED_FILL_DTYPES
+_CUMSUM_DTYPES = _MASKED_FILL_DTYPES
+_CUMSUM_FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
+_CUMSUM_DTYPE_ALIASES = {
+    "float": "float32",
+    "float32": "float32",
+    "double": "float64",
+    "float64": "float64",
+    "half": "float16",
+    "float16": "float16",
+    "int": "int32",
+    "int32": "int32",
+    "long": "int64",
+    "int64": "int64",
+    "short": "int16",
+    "int16": "int16",
+    "int8": "int8",
+    "uint8": "uint8",
+    "bool": "bool",
+}
 
 
 def _normalize_prod_axes(value, rank: int) -> tuple:
@@ -205,6 +224,39 @@ def _normalize_gather_axis(value, rank: int) -> int:
     if axis < 0 or axis >= rank:
         raise ValueError(f"gather: axis {value} out of range for rank {rank}")
     return axis
+
+
+def _normalize_cumsum_axis(value, rank: int) -> int:
+    if type(value) not in _EXACT_INTEGER_SCALAR_TYPES:
+        raise ValueError(
+            "cumsum: axis must be a built-in or NumPy integer scalar, "
+            f"got {type(value).__name__}"
+        )
+    axis = int(value)
+    if axis < 0:
+        axis += rank
+    if axis < 0 or axis >= rank:
+        raise ValueError(f"cumsum: axis {value} out of range for rank {rank}")
+    return axis
+
+
+def _normalize_cumsum_dtype(spec, source_dtype: str) -> str:
+    if source_dtype not in _CUMSUM_DTYPES:
+        raise ValueError(f"cumsum: source dtype {source_dtype!r} is not supported")
+    if spec is None:
+        return source_dtype if source_dtype in _CUMSUM_FLOATING_DTYPES else "int64"
+    if type(spec) is not str:
+        raise TypeError(
+            "cumsum: dtype must be a BrowserGrad/PyTorch dtype token string, "
+            f"got {type(spec).__name__}"
+        )
+    normalized = _CUMSUM_DTYPE_ALIASES.get(spec)
+    if normalized is None:
+        raise ValueError(
+            f"cumsum: dtype {spec!r} is not supported; expected one of "
+            f"{sorted(_CUMSUM_DTYPE_ALIASES)}"
+        )
+    return normalized
 
 
 def _normalize_triangular_diagonal(value, shape: tuple, *, upper: bool) -> int:
@@ -679,6 +731,9 @@ class Tensor:
 
     def flip(self, dim: int) -> "Tensor":
         return _flip(self, int(dim))
+
+    def cumsum(self, dim, dtype=None) -> "Tensor":
+        return cumsum(self, dim=dim, dtype=dtype)
 
     def tril(self, diagonal=0) -> "Tensor":
         return _triangular(self, diagonal, upper=False)
@@ -1642,14 +1697,44 @@ def sin(x) -> Tensor:
     return _build_ctx(out, (xw,), lambda g: (g.data * np.cos(xd).astype(np.float32),))
 
 
-def cumsum(x, dim: int = 0) -> Tensor:
-    """Cumulative sum along dim. Used for top-p nucleus sampling."""
+def cumsum(x, dim=0, *, dtype=None, out=None) -> Tensor:
+    """Inclusive cumulative sum with PyTorch-compatible dtype selection."""
     xw = _wrap(x)
-    out_data = np.cumsum(xw.data, axis=dim).astype(np.float32)
-    out = Tensor(out_data)
+    if out is not None:
+        raise NotImplementedError(
+            "cumsum: out= is not supported because eager mutation has no shared effect contract"
+        )
+    axis = _normalize_cumsum_axis(dim, xw.ndim)
+    output_dtype = _normalize_cumsum_dtype(dtype, xw.dtype)
+    out_data = np.cumsum(
+        xw.data,
+        axis=axis,
+        dtype=np.dtype(output_dtype),
+    )
+    out_tensor = Tensor(
+        np.array(out_data, dtype=np.dtype(output_dtype), copy=True),
+        dtype=output_dtype,
+    )
+
     def backward(g):
-        return (np.flip(np.cumsum(np.flip(g.data, axis=dim), axis=dim), axis=dim).copy().astype(np.float32),)
-    return _build_ctx(out, (xw,), backward)
+        reversed_grad = np.flip(g.data, axis=axis)
+        scanned = np.cumsum(
+            reversed_grad,
+            axis=axis,
+            dtype=np.dtype(output_dtype),
+        )
+        return (
+            np.flip(scanned, axis=axis)
+            .copy()
+            .astype(xw.data.dtype, copy=False),
+        )
+
+    if (
+        xw.dtype in _CUMSUM_FLOATING_DTYPES
+        and output_dtype in _CUMSUM_FLOATING_DTYPES
+    ):
+        return _build_ctx(out_tensor, (xw,), backward)
+    return out_tensor
 
 
 def sort(x, dim: int = -1, descending: bool = False):

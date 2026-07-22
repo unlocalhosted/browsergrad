@@ -49,6 +49,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   contract, preserve source dtype in owning results, and propagate exact
   upper-triangular selection through autograd instead of returning a
   disconnected forward-only tensor.
+- `Tensor.cumsum` and top-level `cumsum` now share JIT's strict axis and dtype
+  contract, preserve floating dtype or promote integral defaults to int64,
+  return owning exact-dtype results, and propagate the opposite-direction scan
+  through autograd. Unsupported mutation through `out=` fails explicitly.
 
 ## [0.5.2] — 2026-07-15
 

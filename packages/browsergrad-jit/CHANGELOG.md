@@ -63,13 +63,18 @@ contract in the README](README.md#compatibility-contract).
   results, applies upper selection in closure and symbolic VJP, supports
   leading-axis vmap, exports exact ONNX `Trilu` with `upper=1`, and refuses
   tensor-plan/WebGPU until portable triangular selection exists.
+- `Tensor.cumsum` now emits typed `CUMSUM` with an exact normalized axis,
+  floating preservation or integral-to-int64 default promotion, explicit scan
+  dtype selection, owning CPU realization, opposite-direction closure and
+  symbolic VJP, batch-axis-aware vmap, exact ONNX `Cast`/`CumSum`, and explicit
+  tensor-plan/WebGPU refusal until portable scan lowering exists.
 
 ### Added
 
 - Added the bounded v1 executable framework-operation registry and detached
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
-  current table contains `ABS`, `CLAMP`, `COS`, `BROADCAST_TO`, `FLIP`,
+  current table contains `ABS`, `CLAMP`, `COS`, `CUMSUM`, `BROADCAST_TO`, `FLIP`,
   `INDEX`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`, `TRIL`,
   `TRIU`, `VAR`, and masked-fill `WHERE`.
 

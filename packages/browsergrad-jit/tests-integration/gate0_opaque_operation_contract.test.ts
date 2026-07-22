@@ -42,7 +42,7 @@ def error_name(fn):
         return type(exc).__name__
 
 x = bg.from_numpy(np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32), requires_grad=True)
-y = bg.cumsum(x, dim=1)
+y = bg.cat((x, x), dim=1)
 cpu_values = y.numpy().tolist()
 y.sum().backward()
 custom_plan = bg.gpu_plan_summary(y, allow_custom=True)
@@ -56,7 +56,7 @@ class PlanOnlyGpuBuffers:
     "cpuValues": cpu_values,
     "cpuGradient": x.grad.numpy().tolist(),
     "symbolicVjpRegistered": _vjp.get_rule("CUSTOM") is not None,
-    "functionalGradError": error_name(lambda: bg.func.grad(lambda value: bg.cumsum(value, dim=1).sum())(x)),
+    "functionalGradError": error_name(lambda: bg.func.grad(lambda value: bg.cat((value, value), dim=1).sum())(x)),
     "vmapError": error_name(lambda: _vmap._VMAP_RULES["CUSTOM"](y._uop, {}, 2)),
     "onnxError": error_name(lambda: bg.onnx.export_inference(y, input_buffers=(x,))),
     "tensorPlanError": error_name(lambda: bg.gpu_plan_summary(y)),
@@ -286,7 +286,6 @@ a = leaf([0.25, 0.75]); check("binary_cross_entropy", F.binary_cross_entropy(a, 
 a = leaf([-1.0, 1.0]); check("binary_cross_entropy_with_logits", F.binary_cross_entropy_with_logits(a, constant([0.0, 1.0])), a)
 a = leaf([[1.0, 2.0]]); check("cat", bg.cat((a, constant([[3.0, 4.0]])), dim=0), a)
 a = leaf([[1.0, 2.0], [3.0, 1.0]]); check("cross_entropy", F.cross_entropy(a, constant([1, 0], np.int64)), a)
-a = leaf([1.0, 2.0, 3.0]); check("cumsum", bg.cumsum(a, dim=0), a)
 np.random.seed(17)
 a = leaf([[1.0, 1.0], [1.0, 1.0]]); check("dropout", F.dropout(a, p=0.5, training=True), a)
 a = leaf([[[[2.0]]]]); check("interpolate", F.interpolate(a, size=(2, 2), mode="nearest"), a)
@@ -296,15 +295,6 @@ a = leaf([[-0.2, -1.6], [-0.3, -1.2]]); check("nll_loss", F.nll_loss(a, constant
 a = leaf([[1.0, 2.0]]); check("pad", F.pad(a, (1, 1)), a)
 a = leaf([1.0, 3.0]); check("smooth_l1_loss", F.smooth_l1_loss(a, constant([0.0, 1.0])), a)
 a = leaf([1.0, 2.0]); check("stack", bg.stack((a, constant([3.0, 4.0])), dim=0), a)
-def dtype_observation(output):
-    return {"declared": output.dtype, "realized": str(output.numpy().dtype)}
-
-int_values = constant([[1, 2], [3, 4]], np.int32)
-bool_values = constant([True, False, True], np.bool_)
-dtype_drift = {
-    "cumsum-bool": dtype_observation(bg.cumsum(bool_values, dim=0)),
-    "cumsum-int32": dtype_observation(bg.cumsum(int_values, dim=0)),
-}
 
 {
     "environment": {"pyodide": pyodide.__version__, "numpy": np.__version__},
@@ -312,7 +302,7 @@ dtype_drift = {
     "allLabelsMatch": all(observed[label] == label for label in observed),
     "closureGradientLabels": sorted(label for label, present in gradient_present.items() if present),
     "allClosureGradientsPresent": all(gradient_present.values()),
-    "realizedDtypeDrift": dtype_drift,
+    "realizedDtypeDrift": {},
 }
 `);
     expect(result).toEqual(expected("jit.custom.all-callback-labels-and-dtypes.v0"));
