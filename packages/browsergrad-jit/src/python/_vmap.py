@@ -69,6 +69,7 @@ from ._ir import (
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
     OP_PAD, OP_SLICE, OP_SORT_INDICES, OP_SORT_VALUES,
+    OP_TOPK_INDICES, OP_TOPK_VALUES,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
     OP_STORE,
@@ -82,6 +83,8 @@ from ._framework_contracts import (
     validate_pad_contract,
     validate_sort_indices_contract,
     validate_sort_values_contract,
+    validate_topk_indices_contract,
+    validate_topk_values_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -712,6 +715,65 @@ def _vmap_sort_values(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
         shape=(B,) + node.shape,
         dtype=node.dtype,
         arg={"axis": axis + 1, "descending": descending, "stable": stable},
+    )
+
+
+@register_vmap(OP_TOPK_INDICES)
+def _vmap_topk_indices(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    """Shift a top-k selection axis past one leading mapped axis."""
+    axis, k, largest, sorted_output = validate_topk_indices_contract(node)
+    source = node.inputs[0]
+    inner = batched[id(source)]
+    if inner.shape == source.shape:
+        return node
+    if inner.shape != (B,) + source.shape:
+        raise JitNotImplementedError(
+            "vmap topk requires its source to be captured or on the leading mapped axis"
+        )
+    return UOp(
+        op=OP_TOPK_INDICES,
+        inputs=(inner,),
+        shape=(B,) + node.shape,
+        dtype="int64",
+        arg={
+            "axis": axis + 1,
+            "k": k,
+            "largest": largest,
+            "sorted": sorted_output,
+        },
+    )
+
+
+@register_vmap(OP_TOPK_VALUES)
+def _vmap_topk_values(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    """Map the source and paired top-k indices together."""
+    axis, k, largest, sorted_output = validate_topk_values_contract(node)
+    source, indices = node.inputs
+    mapped_source = batched[id(source)]
+    mapped_indices = batched[id(indices)]
+    source_batched = mapped_source.shape != source.shape
+    indices_batched = mapped_indices.shape != indices.shape
+    if source_batched != indices_batched:
+        raise JitNotImplementedError(
+            "vmap topk values require source and indices to share the leading batch axis"
+        )
+    if not source_batched:
+        return node
+    if mapped_source.shape != (B,) + source.shape:
+        raise JitNotImplementedError(
+            "vmap topk requires its source on the leading mapped axis"
+        )
+    return UOp(
+        op=OP_TOPK_VALUES,
+        inputs=(mapped_source, mapped_indices),
+        shape=(B,) + node.shape,
+        dtype=node.dtype,
+        arg={
+            "axis": axis + 1,
+            "k": k,
+            "largest": largest,
+            "sorted": sorted_output,
+        },
     )
 
 

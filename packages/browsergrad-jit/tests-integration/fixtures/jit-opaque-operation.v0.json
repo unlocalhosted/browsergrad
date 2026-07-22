@@ -29,11 +29,9 @@
         "bilinearBackwardError": "NotImplementedError",
         "forwardOnlyLabels": [
           "einsum",
-          "scatter",
-          "topk_indices",
-          "topk_values"
+          "scatter"
         ],
-        "forwardOnlyRequiresGrad": [false, false, false, false],
+        "forwardOnlyRequiresGrad": [false, false],
         "functionalDisconnectedGradient": [0, 0, 0, 0]
       }
     },

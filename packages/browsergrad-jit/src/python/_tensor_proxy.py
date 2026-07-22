@@ -49,6 +49,7 @@ from ._ir import (
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_SORT_INDICES, OP_SORT_VALUES,
+    OP_TOPK_INDICES, OP_TOPK_VALUES,
     OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO, OP_INDEX,
 )
 from ._errors import JitNotImplementedError, ShapeError, RealizationError
@@ -61,6 +62,7 @@ from ._framework_contracts import (
     infer_cat_contract,
     infer_stack_contract,
     normalize_sort_request,
+    normalize_topk_request,
 )
 
 if TYPE_CHECKING:
@@ -1384,8 +1386,14 @@ class TensorProxy:
         return TensorProxy(uop, session=self._get_session(),
                            requires_grad=requires, ctx=ctx)
 
-    def topk(self, k: int, dim: int = -1, largest: bool = True):
-        return _topk(self, k=k, dim=dim, largest=largest)
+    def topk(
+        self,
+        k: Any,
+        dim: Any = None,
+        largest: Any = True,
+        sorted: Any = True,
+    ):
+        return topk(self, k=k, dim=dim, largest=largest, sorted=sorted)
 
     def sort(self, dim: Any = -1, descending: Any = False, *, stable: Any = False):
         return sort(self, dim=dim, descending=descending, stable=stable)
@@ -2592,42 +2600,77 @@ def sort(
     return values, indices
 
 
-def _topk(x: Any, k: int, dim: int = -1, largest: bool = True):
-    proxy = _to_proxy(x, None)
-    axis = int(dim) % proxy.ndim
-    k_i = int(k)
-    out_shape = list(proxy.shape)
-    out_shape[axis] = k_i
-    out_shape_t = tuple(out_shape)
-
-    def _topk_indices_forward(x_arr: np.ndarray) -> np.ndarray:
-        idx = np.argsort(-x_arr if largest else x_arr, axis=axis)
-        slices = [slice(None)] * x_arr.ndim
-        slices[axis] = slice(k_i)
-        return idx[tuple(slices)].astype(np.int64)
-
-    def _topk_values_forward(x_arr: np.ndarray) -> np.ndarray:
-        idx = _topk_indices_forward(x_arr)
-        return np.take_along_axis(x_arr, idx, axis=axis)
-
-    values_uop = UOp(
-        op=OP_CUSTOM,
-        inputs=(proxy._uop,),
-        shape=out_shape_t,
-        dtype=proxy.dtype,
-        arg={"fn": _topk_values_forward, "captures": (), "name": "topk_values"},
+def topk(
+    x: Any,
+    k: Any,
+    dim: Any = None,
+    largest: Any = True,
+    sorted: Any = True,
+    *,
+    out: Any = None,
+):
+    if type(x) is not TensorProxy:
+        raise TypeError(f"topk: input must be a TensorProxy, got {type(x).__name__}")
+    if out is not None:
+        raise JitNotImplementedError(
+            "topk: out= is not supported because lazy tensor mutation has no typed effect contract"
+        )
+    proxy = x
+    axis, k_value, largest_flag, sorted_flag, output_shape = normalize_topk_request(
+        proxy._uop,
+        k,
+        dim,
+        largest,
+        sorted,
     )
+    selection_arg = {
+        "axis": axis,
+        "k": k_value,
+        "largest": largest_flag,
+        "sorted": sorted_flag,
+    }
     indices_uop = UOp(
-        op=OP_CUSTOM,
+        op=OP_TOPK_INDICES,
         inputs=(proxy._uop,),
-        shape=out_shape_t,
+        shape=output_shape,
         dtype="int64",
-        arg={"fn": _topk_indices_forward, "captures": (), "name": "topk_indices"},
+        arg=dict(selection_arg),
     )
-    return (
-        TensorProxy(values_uop, session=proxy._get_session(), requires_grad=False),
-        TensorProxy(indices_uop, session=proxy._get_session(), requires_grad=False),
+    indices = TensorProxy(
+        indices_uop,
+        session=proxy._get_session(),
+        requires_grad=False,
     )
+    values_uop = UOp(
+        op=OP_TOPK_VALUES,
+        inputs=(proxy._uop, indices_uop),
+        shape=output_shape,
+        dtype=proxy.dtype,
+        arg=dict(selection_arg),
+    )
+
+    def _bw(
+        dy: np.ndarray,
+        ins: Tuple[np.ndarray, ...],
+    ) -> Tuple[Optional[np.ndarray], ...]:
+        source_array, index_array = ins
+        gradient = np.zeros_like(source_array)
+        np.put_along_axis(gradient, index_array, dy, axis=axis)
+        return (gradient.astype(source_array.dtype, copy=False), None)
+
+    requires = _should_track(proxy) and proxy.dtype in _VARIADIC_FLOATING_DTYPES
+    ctx = (
+        _BackwardCtx(fn=_bw, input_proxies=(proxy, indices))
+        if requires
+        else None
+    )
+    values = TensorProxy(
+        values_uop,
+        session=proxy._get_session(),
+        requires_grad=requires,
+        ctx=ctx,
+    )
+    return values, indices
 
 
 def triu(input: Any, diagonal: int = 0) -> "TensorProxy":

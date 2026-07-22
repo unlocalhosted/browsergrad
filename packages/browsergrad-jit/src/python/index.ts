@@ -96,6 +96,7 @@ from ._tensor_proxy import (
     minimum as _minimum,
     cumsum as _cumsum,
     sort as _sort,
+    topk as _topk,
     triu as _triu,
     tril as _tril,
     multinomial as _multinomial,
@@ -651,6 +652,17 @@ def sort(x, dim=-1, descending=False, *, stable=False, out=None):
     return _sort(x, dim=dim, descending=descending, stable=stable, out=out)
 
 
+def topk(input, k, dim=None, largest=True, sorted=True, *, out=None):
+    return _topk(
+        input,
+        k,
+        dim=dim,
+        largest=largest,
+        sorted=sorted,
+        out=out,
+    )
+
+
 def triu(input, diagonal=0):
     return _triu(input, diagonal=diagonal)
 
@@ -734,7 +746,7 @@ __all__ = [
     "sigmoid", "matmul", "mm", "bmm", "exp", "log", "tanh", "abs",
     "sqrt", "pow", "sin", "cos", "rsqrt",
     "sum", "mean", "argmax", "prod", "std", "var", "gather", "repeat_interleave",
-    "cumsum", "sort", "reshape", "view", "flatten", "squeeze",
+    "cumsum", "sort", "topk", "reshape", "view", "flatten", "squeeze",
     "unsqueeze", "transpose", "permute", "softmax", "log_softmax",
     "save", "load",
     "functional", "F", "nn", "optim", "jit", "utils", "amp", "kernels", "func",

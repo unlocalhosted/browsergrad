@@ -406,6 +406,48 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.stack.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.tensor.topk-indices.v1",
+      publicSurface: "torch.topk.indices",
+      opcode: "TOPK_INDICES",
+      semanticState: "typed",
+      shapeContract: "selected-axis-becomes-exact-k",
+      dtypeContract: "values-preserve-input-indices-int64",
+      decisions: {
+        cpu: "supported-numpy-owning-partial-topk-indices",
+        closureAutograd: "not-applicable-discrete-indices",
+        symbolicVjp: "not-applicable-discrete-indices",
+        functionalGrad: "not-applicable-discrete-output",
+        vmap: "supported-leading-batch-axis-with-axis-shift",
+        onnxExport: "supported-opset17-selected-k-topk-gather-float32-int32-int64",
+        tensorPlan: "refused-no-canonical-topk-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.topk-indices.v0",
+    },
+    {
+      contractId: "browsergrad.jit.framework.tensor.topk-values.v1",
+      publicSurface: "torch.topk.values",
+      opcode: "TOPK_VALUES",
+      semanticState: "typed",
+      shapeContract: "selected-axis-becomes-exact-k",
+      dtypeContract: "values-preserve-input-indices-int64",
+      decisions: {
+        cpu: "supported-numpy-owning-topk-gather",
+        closureAutograd: "supported-permutation-scatter",
+        symbolicVjp: "supported-permutation-scatter",
+        functionalGrad: "supported-for-floating-input-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-axis-shift",
+        onnxExport: "supported-opset17-selected-k-topk-gather-float32-int32-int64",
+        tensorPlan: "refused-no-canonical-topk-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.topk-values.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.tril.v1",
       publicSurface: "Tensor.tril",
       opcode: "TRIL",
@@ -488,7 +530,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(22);
+    expect(result.first.operations).toHaveLength(24);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

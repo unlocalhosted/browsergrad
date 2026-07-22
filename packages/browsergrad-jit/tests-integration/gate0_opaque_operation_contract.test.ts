@@ -83,7 +83,7 @@ class PlanOnlyGpuBuffers:
     expect(result).toEqual(expected("jit.custom.shared-refusals.v0"));
   });
 
-  it("pins conditional backward and the four silently disconnected callbacks", async () => {
+  it("pins conditional backward and the two silently disconnected callbacks", async () => {
     const target = await getJitTarget();
     const result = await target.run<Record<string, unknown>>(`
 import browsergrad_jit as bg
@@ -104,9 +104,8 @@ x = bg.from_numpy(np.array([[4.0, 1.0], [3.0, 2.0]], dtype=np.float32), requires
 index = bg.from_numpy(np.array([[0, 1], [1, 0]], dtype=np.int64))
 source = bg.from_numpy(np.array([[8.0, 9.0], [10.0, 11.0]], dtype=np.float32))
 scatter = x.scatter(1, index, source)
-topk_values, topk_indices = x.topk(1, dim=1)
 einsum = bg.einsum("ij,jk->ik", x, bg.ones(2, 2))
-forward_only = [einsum, scatter, topk_indices, topk_values]
+forward_only = [einsum, scatter]
 for value in forward_only:
     value.numpy()
 

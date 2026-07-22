@@ -71,6 +71,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   dtype-preserving values plus int64 indices, preserves descending ties without
   dtype-changing negation, and scatters floating gradients through an immutable
   captured permutation.
+- `topk` now shares JIT's exact axis/k/flag, dtype, ownership, selected-axis,
+  output-allocation, and conservative workspace contract. It computes one
+  dtype-safe partial selection for values and int64 indices, orders only the
+  selected values when requested, and scatters floating gradients through an
+  immutable captured permutation.
 
 ## [0.5.2] — 2026-07-15
 

@@ -92,6 +92,12 @@ _SORT_RANK_MAX = 32
 _SORT_AXIS_MAX = 1 << 20
 _SORT_OUTPUT_BYTE_MAX = 1 << 28
 _SORT_OUTPUT_EXTENT_MAX = _SORT_OUTPUT_BYTE_MAX
+_SORT_WORKSPACE_BYTE_MAX = 1 << 28
+_TOPK_RANK_MAX = _SORT_RANK_MAX
+_TOPK_AXIS_MAX = _SORT_AXIS_MAX
+_TOPK_OUTPUT_BYTE_MAX = _SORT_OUTPUT_BYTE_MAX
+_TOPK_OUTPUT_EXTENT_MAX = _SORT_OUTPUT_EXTENT_MAX
+_TOPK_WORKSPACE_BYTE_MAX = _SORT_WORKSPACE_BYTE_MAX
 
 
 def _normalize_prod_axes(value, rank: int) -> tuple:
@@ -326,6 +332,12 @@ def _normalize_sort_contract(input, dim, descending, stable):
             f"sort: paired outputs require {output_bytes} bytes, exceeding the "
             f"{_SORT_OUTPUT_BYTE_MAX}-byte ceiling"
         )
+    workspace_bytes = elements * 24
+    if workspace_bytes > _SORT_WORKSPACE_BYTE_MAX:
+        raise ValueError(
+            f"sort: conservative ordering workspace requires {workspace_bytes} bytes, "
+            f"exceeding the {_SORT_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
     if type(dim) not in _EXACT_INTEGER_SCALAR_TYPES:
         raise TypeError(
             f"sort: dim must be a built-in or NumPy integer scalar, got {type(dim).__name__}"
@@ -363,6 +375,102 @@ def _stable_sort_indices_array(array, axis: int, descending: bool):
     else:
         result = np.argsort(array, axis=axis, kind="stable")
     return np.array(result, dtype=np.int64, copy=True)
+
+
+def _normalize_topk_contract(input, k, dim, largest, sorted_output):
+    if type(input) is not Tensor:
+        raise TypeError(f"topk: input must be a Tensor, got {type(input).__name__}")
+    if input.dtype not in _MASKED_FILL_DTYPES:
+        raise ValueError(f"topk: input dtype {input.dtype!r} is not supported")
+    if input.ndim == 0:
+        raise ValueError("topk: scalar inputs are outside the typed topk v1 profile")
+    if input.ndim > _TOPK_RANK_MAX:
+        raise ValueError(
+            f"topk: input rank {input.ndim} exceeds the {_TOPK_RANK_MAX}-rank ceiling"
+        )
+    elements = 1
+    for axis_index, extent in enumerate(input.shape):
+        if extent > _TOPK_OUTPUT_EXTENT_MAX:
+            raise ValueError(
+                f"topk: input extent {extent} on axis {axis_index} exceeds the "
+                f"{_TOPK_OUTPUT_EXTENT_MAX}-element per-axis ceiling"
+            )
+        elements *= extent
+    if type(k) not in _EXACT_INTEGER_SCALAR_TYPES:
+        raise TypeError(
+            f"topk: k must be a built-in or NumPy integer scalar, got {type(k).__name__}"
+        )
+    if dim is None:
+        raw_axis = -1
+    elif type(dim) in _EXACT_INTEGER_SCALAR_TYPES:
+        raw_axis = int(dim)
+    else:
+        raise TypeError(
+            f"topk: dim must be None or a built-in/NumPy integer scalar, got "
+            f"{type(dim).__name__}"
+        )
+    if type(largest) is not bool:
+        raise TypeError(f"topk: largest must be a boolean, got {type(largest).__name__}")
+    if type(sorted_output) is not bool:
+        raise TypeError(
+            f"topk: sorted must be a boolean, got {type(sorted_output).__name__}"
+        )
+    axis = raw_axis + input.ndim if raw_axis < 0 else raw_axis
+    if axis < 0 or axis >= input.ndim:
+        raise ValueError(f"topk: dim {raw_axis} out of range for rank {input.ndim}")
+    if input.shape[axis] > _TOPK_AXIS_MAX:
+        raise ValueError(
+            f"topk: selected axis extent {input.shape[axis]} exceeds the "
+            f"{_TOPK_AXIS_MAX}-element selection ceiling"
+        )
+    k_value = int(k)
+    if k_value < 0 or k_value > input.shape[axis]:
+        raise ValueError(
+            f"topk: k must be between 0 and selected-axis extent "
+            f"{input.shape[axis]}, got {k_value}"
+        )
+    output_shape = list(input.shape)
+    output_shape[axis] = k_value
+    output_elements = 1
+    for extent in output_shape:
+        output_elements *= extent
+    paired_output_bytes = output_elements * (_VARIADIC_DTYPE_BYTES[input.dtype] + 8)
+    if paired_output_bytes > _TOPK_OUTPUT_BYTE_MAX:
+        raise ValueError(
+            f"topk: paired outputs require {paired_output_bytes} bytes, exceeding the "
+            f"{_TOPK_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    workspace_bytes = elements * 8 + output_elements * (
+        _VARIADIC_DTYPE_BYTES[input.dtype] + 32
+    )
+    if workspace_bytes > _TOPK_WORKSPACE_BYTE_MAX:
+        raise ValueError(
+            f"topk: conservative selection workspace requires {workspace_bytes} bytes, "
+            f"exceeding the {_TOPK_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+    return axis, k_value, largest, sorted_output, tuple(output_shape)
+
+
+def _partial_topk_indices_array(array, axis, k, largest, sorted_output):
+    output_shape = list(array.shape)
+    output_shape[axis] = k
+    if k == 0:
+        return np.empty(tuple(output_shape), dtype=np.int64)
+    axis_extent = array.shape[axis]
+    kth = axis_extent - k if largest else k - 1
+    partition = np.argpartition(array, kth=kth, axis=axis)
+    slices = [slice(None)] * array.ndim
+    slices[axis] = slice(axis_extent - k, None) if largest else slice(0, k)
+    selected = np.array(partition[tuple(slices)], dtype=np.int64, copy=True)
+    if sorted_output:
+        selected_values = np.take_along_axis(array, selected, axis=axis)
+        local_order = _stable_sort_indices_array(
+            selected_values,
+            axis,
+            largest,
+        )
+        selected = np.take_along_axis(selected, local_order, axis=axis)
+    return np.array(selected, dtype=np.int64, copy=True)
 
 
 def _normalize_masked_fill_inputs(source, mask, value):
@@ -890,17 +998,8 @@ class Tensor:
     def clip(self, min=None, max=None) -> "Tensor":
         return self.clamp(min, max)
 
-    def topk(self, k: int, dim: int = -1, largest: bool = True):
-        """Return (values, indices) of the k largest (or smallest) elements along dim.
-        Returns a tuple of Tensors. Non-differentiable.
-        """
-        ax = dim % self.data.ndim if self.data.ndim > 0 else 0
-        sort_idx = np.argsort(-self.data if largest else self.data, axis=ax)
-        slices = [slice(None)] * self.data.ndim
-        slices[ax] = slice(k)
-        idx = sort_idx[tuple(slices)]
-        values = np.take_along_axis(self.data, idx, axis=ax)
-        return Tensor(values.astype(np.float32)), Tensor(idx.astype(np.float32))
+    def topk(self, k, dim=None, largest=True, sorted=True):
+        return topk(self, k, dim=dim, largest=largest, sorted=sorted)
 
     def sort(self, dim=-1, descending=False, *, stable=False):
         return sort(self, dim=dim, descending=descending, stable=stable)
@@ -2091,6 +2190,47 @@ def cumsum(x, dim=0, *, dtype=None, out=None) -> Tensor:
     ):
         return _build_ctx(out_tensor, (xw,), backward)
     return out_tensor
+
+
+def topk(input, k, dim=None, largest=True, sorted=True, *, out=None):
+    """Return bounded owning top-k values and int64 indices along one axis."""
+    if out is not None:
+        raise NotImplementedError(
+            "topk: out= is not supported because eager mutation has no shared effect contract"
+        )
+    axis, k_value, largest_flag, sorted_flag, _ = _normalize_topk_contract(
+        input,
+        k,
+        dim,
+        largest,
+        sorted,
+    )
+    selected_indices = _partial_topk_indices_array(
+        input.data,
+        axis,
+        k_value,
+        largest_flag,
+        sorted_flag,
+    )
+    selected_values = np.take_along_axis(input.data, selected_indices, axis=axis)
+    values = Tensor(
+        np.array(selected_values, dtype=input.data.dtype, copy=True),
+        dtype=input.dtype,
+    )
+    indices = Tensor(
+        np.array(selected_indices, dtype=np.int64, copy=True),
+        dtype="int64",
+    )
+    gradient_indices = np.array(selected_indices, dtype=np.int64, copy=True)
+
+    def backward(g):
+        gradient = np.zeros_like(input.data)
+        np.put_along_axis(gradient, gradient_indices, g.data, axis=axis)
+        return (gradient.astype(input.data.dtype, copy=False),)
+
+    if input.requires_grad and input.dtype in _VARIADIC_FLOATING_DTYPES:
+        values = _build_ctx(values, (input,), backward)
+    return values, indices
 
 
 def sort(x, dim=-1, descending=False, *, stable=False, out=None):

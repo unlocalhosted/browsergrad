@@ -36,6 +36,12 @@ SORT_RANK_MAX = 32
 SORT_AXIS_MAX = 1 << 20
 SORT_OUTPUT_BYTE_MAX = 1 << 28
 SORT_OUTPUT_EXTENT_MAX = SORT_OUTPUT_BYTE_MAX
+SORT_WORKSPACE_BYTE_MAX = 1 << 28
+TOPK_RANK_MAX = SORT_RANK_MAX
+TOPK_AXIS_MAX = SORT_AXIS_MAX
+TOPK_OUTPUT_BYTE_MAX = SORT_OUTPUT_BYTE_MAX
+TOPK_OUTPUT_EXTENT_MAX = SORT_OUTPUT_EXTENT_MAX
+TOPK_WORKSPACE_BYTE_MAX = SORT_WORKSPACE_BYTE_MAX
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 32 * 1024
@@ -78,6 +84,7 @@ _ENUMS = {
         "preserve-source-with-broadcast-bool-mask",
         "trailing-dimension-constant-padding",
         "same-shape-axis-ordering",
+        "selected-axis-becomes-exact-k",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
@@ -105,6 +112,8 @@ _ENUMS = {
         "supported-numpy-owning-constant-pad-copy",
         "supported-numpy-owning-stable-sort-indices",
         "supported-numpy-owning-sort-gather",
+        "supported-numpy-owning-partial-topk-indices",
+        "supported-numpy-owning-topk-gather",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -185,6 +194,7 @@ _ENUMS = {
         "supported-opset17-unsqueeze-concat-with-casts-float32-int32-int64-bool",
         "supported-opset17-pad-float32-int32-int64",
         "supported-opset17-full-axis-topk-gather-float32-int32-int64",
+        "supported-opset17-selected-k-topk-gather-float32-int32-int64",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -194,6 +204,7 @@ _ENUMS = {
         "refused-no-canonical-variadic-copy-lowering",
         "refused-no-canonical-pad-lowering",
         "refused-no-canonical-sort-lowering",
+        "refused-no-canonical-topk-lowering",
         "refused-no-canonical-tile-layout-profile",
         "refused-no-canonical-selected-axis-replication-profile",
         "refused-no-portable-lowering",
@@ -244,6 +255,7 @@ _VARIADIC_DTYPE_BYTES = MappingProxyType({
 })
 _PAD_DTYPES = _VARIADIC_DTYPES
 _SORT_DTYPES = _VARIADIC_DTYPES
+_TOPK_DTYPES = _SORT_DTYPES
 _PAD_INTEGER_TYPES = (
     int,
     np.int8,
@@ -885,6 +897,12 @@ def _sort_source_metadata(source: Any) -> Tuple[Tuple[int, ...], str]:
             f"sort: paired outputs require {output_bytes} bytes, exceeding the "
             f"{SORT_OUTPUT_BYTE_MAX}-byte ceiling"
         )
+    workspace_bytes = elements * 24
+    if workspace_bytes > SORT_WORKSPACE_BYTE_MAX:
+        raise ShapeError(
+            f"sort: conservative ordering workspace requires {workspace_bytes} bytes, "
+            f"exceeding the {SORT_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
     return shape, dtype
 
 
@@ -961,6 +979,159 @@ def stable_sort_indices_array(
     else:
         result = np.argsort(array, axis=axis, kind="stable")
     return np.array(result, dtype=np.int64, copy=True)
+
+
+def _topk_source_metadata(source: Any) -> Tuple[Tuple[int, ...], str, int]:
+    shape = getattr(source, "shape", None)
+    if type(shape) is not tuple:
+        raise ShapeError("topk: source shape must be a tuple")
+    if not shape:
+        raise ShapeError("topk: scalar inputs are outside the typed topk v1 profile")
+    if len(shape) > TOPK_RANK_MAX:
+        raise ShapeError(
+            f"topk: source rank {len(shape)} exceeds the {TOPK_RANK_MAX}-rank ceiling"
+        )
+    elements = 1
+    for axis, extent in enumerate(shape):
+        if type(extent) is not int or extent < 0:
+            raise ShapeError(
+                f"topk: source shape[{axis}] must be a non-negative integer"
+            )
+        if extent > TOPK_OUTPUT_EXTENT_MAX:
+            raise ShapeError(
+                f"topk: source extent {extent} on axis {axis} exceeds the "
+                f"{TOPK_OUTPUT_EXTENT_MAX}-element per-axis ceiling"
+            )
+        elements *= extent
+    dtype = getattr(source, "dtype", None)
+    if dtype not in _TOPK_DTYPES:
+        raise ShapeError(f"topk: source dtype {dtype!r} is not supported")
+    return shape, dtype, elements
+
+
+def _topk_output_contract(
+    shape: Tuple[int, ...],
+    dtype: str,
+    elements: int,
+    axis: int,
+    k: int,
+) -> Tuple[int, ...]:
+    if shape[axis] > TOPK_AXIS_MAX:
+        raise ShapeError(
+            f"topk: selected axis extent {shape[axis]} exceeds the "
+            f"{TOPK_AXIS_MAX}-element selection ceiling"
+        )
+    if k < 0 or k > shape[axis]:
+        raise ShapeError(
+            f"topk: k must be between 0 and selected-axis extent {shape[axis]}, got {k}"
+        )
+    output_shape_list = list(shape)
+    output_shape_list[axis] = k
+    output_shape = tuple(output_shape_list)
+    output_elements = 1
+    for extent in output_shape:
+        output_elements *= extent
+    paired_output_bytes = output_elements * (_VARIADIC_DTYPE_BYTES[dtype] + 8)
+    if paired_output_bytes > TOPK_OUTPUT_BYTE_MAX:
+        raise ShapeError(
+            f"topk: paired outputs require {paired_output_bytes} bytes, exceeding the "
+            f"{TOPK_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    # NumPy argpartition owns one full-size int64 permutation. Sorted output
+    # additionally owns selected values and bounded int64 ordering/remap buffers.
+    workspace_bytes = elements * 8 + output_elements * (
+        _VARIADIC_DTYPE_BYTES[dtype] + 32
+    )
+    if workspace_bytes > TOPK_WORKSPACE_BYTE_MAX:
+        raise ShapeError(
+            f"topk: conservative selection workspace requires {workspace_bytes} bytes, "
+            f"exceeding the {TOPK_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+    return output_shape
+
+
+def normalize_topk_request(
+    source: Any,
+    k: Any,
+    dim: Any,
+    largest: Any,
+    sorted_output: Any,
+) -> Tuple[int, int, bool, bool, Tuple[int, ...]]:
+    shape, dtype, elements = _topk_source_metadata(source)
+    if type(k) not in _PAD_INTEGER_TYPES:
+        raise ShapeError(
+            f"topk: k must be a built-in or NumPy integer scalar, got {type(k).__name__}"
+        )
+    if dim is None:
+        raw_axis = -1
+    elif type(dim) in _PAD_INTEGER_TYPES:
+        raw_axis = int(dim)
+    else:
+        raise ShapeError(
+            f"topk: dim must be None or a built-in/NumPy integer scalar, got "
+            f"{type(dim).__name__}"
+        )
+    if type(largest) is not bool:
+        raise ShapeError(
+            f"topk: largest must be a boolean, got {type(largest).__name__}"
+        )
+    if type(sorted_output) is not bool:
+        raise ShapeError(
+            f"topk: sorted must be a boolean, got {type(sorted_output).__name__}"
+        )
+    axis = raw_axis + len(shape) if raw_axis < 0 else raw_axis
+    if axis < 0 or axis >= len(shape):
+        raise ShapeError(f"topk: dim {raw_axis} out of range for rank {len(shape)}")
+    k_value = int(k)
+    output_shape = _topk_output_contract(shape, dtype, elements, axis, k_value)
+    return axis, k_value, largest, sorted_output, output_shape
+
+
+def infer_topk_contract(
+    source: Any,
+    axis: Any,
+    k: Any,
+    largest: Any,
+    sorted_output: Any,
+) -> Tuple[int, int, bool, bool, Tuple[int, ...]]:
+    shape, dtype, elements = _topk_source_metadata(source)
+    if type(axis) is not int or axis < 0 or axis >= len(shape):
+        raise ShapeError(f"topk: IR axis {axis!r} is invalid for rank {len(shape)}")
+    if type(k) is not int:
+        raise ShapeError("topk: IR k must be a normalized integer")
+    if type(largest) is not bool or type(sorted_output) is not bool:
+        raise ShapeError("topk: IR largest and sorted flags must be booleans")
+    output_shape = _topk_output_contract(shape, dtype, elements, axis, k)
+    return axis, k, largest, sorted_output, output_shape
+
+
+def partial_topk_indices_array(
+    array: np.ndarray,
+    axis: int,
+    k: int,
+    largest: bool,
+    sorted_output: bool,
+) -> np.ndarray:
+    """Select top-k with bounded partial ordering and no dtype-changing negation."""
+    output_shape = list(array.shape)
+    output_shape[axis] = k
+    if k == 0:
+        return np.empty(tuple(output_shape), dtype=np.int64)
+    axis_extent = array.shape[axis]
+    kth = axis_extent - k if largest else k - 1
+    partition = np.argpartition(array, kth=kth, axis=axis)
+    slices = [slice(None)] * array.ndim
+    slices[axis] = slice(axis_extent - k, None) if largest else slice(0, k)
+    selected = np.array(partition[tuple(slices)], dtype=np.int64, copy=True)
+    if sorted_output:
+        selected_values = np.take_along_axis(array, selected, axis=axis)
+        local_order = stable_sort_indices_array(
+            selected_values,
+            axis,
+            descending=largest,
+        )
+        selected = np.take_along_axis(selected, local_order, axis=axis)
+    return np.array(selected, dtype=np.int64, copy=True)
 
 
 def _validate_cat(
@@ -1129,6 +1300,91 @@ def _validate_sort_values(
     if index_normalized != normalized:
         raise ShapeError("SORT_VALUES and SORT_INDICES ordering arguments must match")
     return normalized
+
+
+def _topk_arg(
+    node: Any,
+    opcode: str,
+) -> Tuple[int, int, bool, bool, Tuple[int, ...]]:
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError(f"{opcode} arg must be a plain dict")
+    required = {"axis", "k", "largest", "sorted"}
+    fields = set(arg)
+    if not required.issubset(fields) or not fields.issubset(required | {"vjp_of"}):
+        raise ShapeError(
+            f"{opcode} arg fields must be exactly 'axis', 'k', 'largest', and "
+            "'sorted' plus optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError(f"{opcode} arg.vjp_of must reference a UOp")
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or not inputs:
+        raise ShapeError(f"{opcode} must have a source input")
+    return infer_topk_contract(
+        inputs[0],
+        arg["axis"],
+        arg["k"],
+        arg["largest"],
+        arg["sorted"],
+    )
+
+
+def _validate_topk_indices(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> Tuple[int, int, bool, bool]:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = _require_single_input_tuple(node, "TOPK_INDICES")
+    axis, k, largest, sorted_output, output_shape = _topk_arg(
+        node,
+        "TOPK_INDICES",
+    )
+    if getattr(node, "shape", None) != output_shape:
+        raise ShapeError(
+            f"TOPK_INDICES output shape must be {output_shape}, got "
+            f"{getattr(node, 'shape', None)}"
+        )
+    if getattr(node, "dtype", None) != "int64":
+        raise ShapeError("TOPK_INDICES output dtype must be int64")
+    return axis, k, largest, sorted_output
+
+
+def _validate_topk_values(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> Tuple[int, int, bool, bool]:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or len(inputs) != 2:
+        raise ShapeError("TOPK_VALUES must have source and TOPK_INDICES inputs")
+    source, indices = inputs
+    axis, k, largest, sorted_output, output_shape = _topk_arg(
+        node,
+        "TOPK_VALUES",
+    )
+    if getattr(node, "shape", None) != output_shape:
+        raise ShapeError(
+            f"TOPK_VALUES output shape must be {output_shape}, got "
+            f"{getattr(node, 'shape', None)}"
+        )
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("TOPK_VALUES must preserve the source dtype")
+    if getattr(indices, "op", None) != "TOPK_INDICES":
+        raise ShapeError("TOPK_VALUES second input must be typed TOPK_INDICES")
+    index_inputs = getattr(indices, "inputs", None)
+    if type(index_inputs) is not tuple or len(index_inputs) != 1 or index_inputs[0] is not source:
+        raise ShapeError("TOPK_VALUES indices must derive from the exact same source")
+    index_normalized = validate_topk_indices_contract(indices)
+    if index_normalized != (axis, k, largest, sorted_output):
+        raise ShapeError("TOPK_VALUES and TOPK_INDICES selection arguments must match")
+    return axis, k, largest, sorted_output
 
 
 def _validate_narrow(node: Any) -> Tuple[int, int, int]:
@@ -1711,6 +1967,8 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.sign.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.sin.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.stack.v1": _validate_stack,
+    "browsergrad.jit.framework.tensor.topk-indices.v1": _validate_topk_indices,
+    "browsergrad.jit.framework.tensor.topk-values.v1": _validate_topk_values,
     "browsergrad.jit.framework.tensor.tril.v1": _validate_tril,
     "browsergrad.jit.framework.tensor.triu.v1": _validate_triu,
 })
@@ -1804,6 +2062,20 @@ def validate_sort_values_contract(node: Any) -> Tuple[int, bool, bool]:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.sort-values.v1":
         raise ShapeError("SORT_VALUES resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_topk_indices_contract(node: Any) -> Tuple[int, int, bool, bool]:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.topk-indices.v1":
+        raise ShapeError("TOPK_INDICES resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_topk_values_contract(node: Any) -> Tuple[int, int, bool, bool]:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.topk-values.v1":
+        raise ShapeError("TOPK_VALUES resolved to the wrong framework-operation contract")
     return normalized
 
 
@@ -1957,6 +2229,12 @@ __all__ = [
     "SORT_AXIS_MAX",
     "SORT_OUTPUT_BYTE_MAX",
     "SORT_OUTPUT_EXTENT_MAX",
+    "SORT_WORKSPACE_BYTE_MAX",
+    "TOPK_RANK_MAX",
+    "TOPK_AXIS_MAX",
+    "TOPK_OUTPUT_BYTE_MAX",
+    "TOPK_OUTPUT_EXTENT_MAX",
+    "TOPK_WORKSPACE_BYTE_MAX",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "framework_operation_support",
@@ -1966,10 +2244,13 @@ __all__ = [
     "infer_stack_contract",
     "infer_pad_contract",
     "infer_sort_contract",
+    "infer_topk_contract",
     "normalize_pad_request",
     "normalize_pad_value",
     "normalize_sort_request",
+    "normalize_topk_request",
     "stable_sort_indices_array",
+    "partial_topk_indices_array",
     "promote_variadic_dtypes",
     "validate_framework_operation_contract",
     "validate_internal_operation_contract",
@@ -1979,6 +2260,8 @@ __all__ = [
     "validate_pad_contract",
     "validate_sort_indices_contract",
     "validate_sort_values_contract",
+    "validate_topk_indices_contract",
+    "validate_topk_values_contract",
     "validate_clamp_contract",
     "validate_cumsum_contract",
     "validate_flip_contract",

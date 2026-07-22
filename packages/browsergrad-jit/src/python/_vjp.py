@@ -62,6 +62,7 @@ from ._ir import (
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_SORT_INDICES, OP_SORT_VALUES,
+    OP_TOPK_INDICES, OP_TOPK_VALUES,
     OP_CONST, OP_BROADCAST_TO, OP_WHERE, OP_INDEX, OP_SCATTER_ADD,
     OP_ISNAN,
 )
@@ -72,6 +73,8 @@ from ._framework_contracts import (
     validate_pad_contract,
     validate_sort_indices_contract,
     validate_sort_values_contract,
+    validate_topk_indices_contract,
+    validate_topk_values_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -467,6 +470,55 @@ def _vjp_sort_values(
         return None, None
     if not source.shape:
         return dy, None
+    zero = _vjp_uop(
+        OP_CONST,
+        (),
+        (),
+        source.dtype,
+        output,
+        arg={"value": 0},
+    )
+    target = _vjp_uop(
+        OP_BROADCAST_TO,
+        (zero,),
+        source.shape,
+        source.dtype,
+        output,
+        arg={"shape": source.shape},
+    )
+    gradient = _vjp_uop(
+        OP_SCATTER_ADD,
+        (target, indices, dy),
+        source.shape,
+        source.dtype,
+        output,
+        arg={"dim": axis},
+    )
+    return gradient, None
+
+
+@register_vjp(OP_TOPK_INDICES)
+def _vjp_topk_indices(
+    output: UOp,
+    inputs: Tuple[UOp, ...],
+    dy: UOp,
+) -> Tuple[Optional[UOp], ...]:
+    """Top-k indices are discrete and do not carry a source cotangent."""
+    validate_topk_indices_contract(output)
+    return (None,)
+
+
+@register_vjp(OP_TOPK_VALUES)
+def _vjp_topk_values(
+    output: UOp,
+    inputs: Tuple[UOp, ...],
+    dy: UOp,
+) -> Tuple[Optional[UOp], ...]:
+    """Scatter selected-value cotangents back through the paired indices."""
+    axis, _, _, _ = validate_topk_values_contract(output)
+    source, indices = inputs
+    if source.dtype not in ("float16", "float32", "float64"):
+        return None, None
     zero = _vjp_uop(
         OP_CONST,
         (),

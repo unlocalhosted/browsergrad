@@ -88,6 +88,12 @@ contract in the README](README.md#compatibility-contract).
   dtype-preserving owning values and int64 indices, permutation-scatter
   closure/symbolic VJP, batch-safe vmap, exact ONNX `TopK`/`GatherElements`,
   bounded work/output, and explicit tensor-plan/WebGPU refusal.
+- `torch.topk` now emits paired typed `TOPK_INDICES` and `TOPK_VALUES` with one
+  strict axis/k/ordering contract, one dtype-safe partial CPU selection,
+  dtype-preserving owning values and int64 indices, selected-permutation
+  scatter closure/symbolic VJP, batch-safe vmap, exact selected-k ONNX
+  `TopK`/`GatherElements`, bounded output/workspace, and explicit
+  tensor-plan/WebGPU refusal.
 
 ### Added
 
@@ -96,7 +102,7 @@ contract in the README](README.md#compatibility-contract).
   come from the same validator bindings used by execution boundaries; the
   current table contains `ABS`, `CLAMP`, `CONCAT`, `COS`, `CUMSUM`, `BROADCAST_TO`, `FLIP`,
   `INDEX`, `PAD`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`,
-  `SORT_INDICES`, `SORT_VALUES`, `STACK`,
+  `SORT_INDICES`, `SORT_VALUES`, `STACK`, `TOPK_INDICES`, `TOPK_VALUES`,
   `TRIL`, `TRIU`, `VAR`, and masked-fill `WHERE`.
 
 ## [0.9.0] — 2026-07-15

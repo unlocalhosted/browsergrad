@@ -614,7 +614,7 @@ flipped = e.flip(0)
 
 s = torch.tensor([[3.0, 1.0, 2.0], [4.0, 6.0, 5.0]])
 sort_values, sort_indices = torch.sort(s, dim=1, descending=True)
-top_values, top_indices = s.topk(2, dim=1, largest=False)
+top_values, top_indices = torch.topk(s, 2, dim=1, largest=False, sorted=True)
 
 {
   "prod": prod.numpy().tolist(),
@@ -639,6 +639,7 @@ top_values, top_indices = s.topk(2, dim=1, largest=False)
     "torch.repeat_interleave": hasattr(torch, "repeat_interleave"),
     "torch.cumsum": hasattr(torch, "cumsum"),
     "torch.sort": hasattr(torch, "sort"),
+    "torch.topk": hasattr(torch, "topk"),
     "Tensor.repeat": hasattr(r, "repeat"),
     "Tensor.expand": hasattr(e, "expand"),
     "Tensor.flip": hasattr(e, "flip"),
@@ -689,6 +690,7 @@ top_values, top_indices = s.topk(2, dim=1, largest=False)
       "torch.repeat_interleave": true,
       "torch.cumsum": true,
       "torch.sort": true,
+      "torch.topk": true,
       "Tensor.repeat": true,
       "Tensor.expand": true,
       "Tensor.flip": true,

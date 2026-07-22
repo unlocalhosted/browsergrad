@@ -50,7 +50,7 @@ def install_real(torch_mod, _bg, _types):
     torch_mod.triu = _bg.triu
     torch_mod.tril = _bg.tril
     torch_mod.multinomial = _bg.multinomial
-    torch_mod.topk = lambda input, k, dim=-1, largest=True: input.topk(k, dim=dim, largest=largest)
+    torch_mod.topk = _bg.topk
     torch_mod.tanh    = _bg.tanh
     torch_mod.sqrt    = _bg.sqrt
     torch_mod.pow     = _bg.pow

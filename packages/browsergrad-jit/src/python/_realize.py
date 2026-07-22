@@ -48,6 +48,7 @@ from ._ir import (
     OP_LAYER_NORM_BACKWARD_INPUT, OP_LAYER_NORM_BACKWARD_WEIGHT,
     OP_LAYER_NORM_BACKWARD_BIAS, OP_REDUCE,
     OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES,
+    OP_TOPK_INDICES, OP_TOPK_VALUES,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_BROADCAST_TO,
@@ -64,6 +65,8 @@ from ._framework_contracts import (
     validate_pad_contract,
     validate_sort_indices_contract,
     validate_sort_values_contract,
+    validate_topk_indices_contract,
+    validate_topk_values_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -80,6 +83,7 @@ from ._framework_contracts import (
     validate_real_numeric_unary_contract,
     validate_typed_unary_contract,
     stable_sort_indices_array,
+    partial_topk_indices_array,
 )
 
 
@@ -1082,6 +1086,26 @@ def _h_sort_values(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     return np.array(values, dtype=np.dtype(node.dtype), copy=True)
 
 
+def _h_topk_indices(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    axis, k, largest, sorted_output = validate_topk_indices_contract(node)
+    source = vt[id(node.inputs[0])]
+    return partial_topk_indices_array(
+        source,
+        axis,
+        k,
+        largest,
+        sorted_output,
+    )
+
+
+def _h_topk_values(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    axis, _, _, _ = validate_topk_values_contract(node)
+    source = vt[id(node.inputs[0])]
+    indices = vt[id(node.inputs[1])]
+    values = np.take_along_axis(source, indices, axis=axis)
+    return np.array(values, dtype=np.dtype(node.dtype), copy=True)
+
+
 def _h_where(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     validate_where_contract(node)
     cond = vt[id(node.inputs[0])]
@@ -1414,6 +1438,8 @@ _DISPATCH: dict[str, Handler] = {
     OP_PAD:     _h_pad,
     OP_SORT_INDICES: _h_sort_indices,
     OP_SORT_VALUES: _h_sort_values,
+    OP_TOPK_INDICES: _h_topk_indices,
+    OP_TOPK_VALUES: _h_topk_values,
     OP_WHERE:   _h_where,
     OP_INDEX:   _h_index,
     OP_MASK:    _h_mask,
