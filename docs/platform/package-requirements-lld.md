@@ -152,8 +152,9 @@ Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
 `Tensor.repeat_interleave`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`,
 `Tensor.var`, top-level `torch.cat`, top-level `torch.stack`, and
 `torch.nn.functional.pad`, plus both values and indices from `torch.sort` and
-`torch.topk`, `torch.scatter`, and `torch.einsum`, from the frozen opaque callback
-inventory. Expand emits the existing typed `BROADCAST_TO`
+`torch.topk`, `torch.scatter`, `torch.einsum`, and
+`torch.nn.functional.l1_loss`, from the frozen opaque callback inventory.
+Expand emits the existing typed `BROADCAST_TO`
 primitive. One shared contract validates exact arity, closed shape arguments,
 output-shape identity, dtype preservation, rank direction, and broadcast
 compatibility at construction and again at CPU, VJP, vmap, ONNX, and
@@ -179,8 +180,8 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 11 constructor calls and 14 operations under ADR-0002
-and ADR-0004 through ADR-0023. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 11 constructor calls and 13 operations under ADR-0002
+and ADR-0004 through ADR-0024. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -406,12 +407,33 @@ exists. Grad consumes the same equation/value/dtype/gradient/resource fixture
 instead of its former explicit-arrow, two-operand, float32-only path. This is
 twenty-five migrated operation records, not Gate 6 completion.
 
+L1 loss now emits typed binary `L1_LOSS` with one exact reduction and a
+transform-owned batch rank. The closed contract requires TensorProxy-compatible
+same-session floating tensors backed by exact NumPy ndarrays with identical shapes, refuses
+array subclasses before numerical hooks, and promotes float16/32/64 through the
+dimensioned-tensor lattice, and performs float16 difference and reduction in
+float32 before an owning half store. Rank, every extent, output bytes,
+conservative cast/intermediate/both-cotangent workspace, and total element
+visits are bounded from metadata before NumPy. Empty `none`, zero-valued empty
+`sum`, NaN empty `mean`, and scalar cases are explicit. Closure and symbolic
+typed `L1_LOSS_VJP` propagate `sign(input - target)` to both operands, use the
+zero subgradient at equality, normalize target zero, scale mean per example,
+and return each cotangent in source dtype. Vmap broadcasts captured operands
+and keeps reductions outside its leading batch prefix. ONNX opset 17 emits
+float32 compute casts for half, other mixed-dtype promotion casts,
+`Sub`/`Abs`, and, where required, `ReduceSum` or `ReduceMean` across only
+non-batch axes before an exact output cast. Tensor-plan and WebGPU validate and
+refuse until canonical loss-reduction lowering exists. Grad consumes the same
+value/dtype/empty/gradient/resource fixture and no longer casts every result to
+float32 or disconnects the target. This is twenty-six migrated operation
+records, not Gate 6 completion.
+
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
 records bind `Tensor.abs`, `torch.cat`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
 `Tensor.flip`, `Tensor.gather`, `Tensor.masked_fill`, `Tensor.prod`,
 `Tensor.repeat_interleave`, `Tensor.repeat`, `Tensor.sign`, `Tensor.sin`,
-`torch.einsum`, `torch.scatter`,
+`torch.einsum`, `torch.scatter`, `torch.nn.functional.l1_loss`,
 `torch.sort.indices`, `torch.sort.values`, `torch.stack`,
 `torch.topk.indices`, `torch.topk.values`,
 `torch.nn.functional.pad`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`, and
@@ -425,7 +447,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 14 still-opaque and twenty-five typed retirements. ADR-0003 records
+opaque IDs into 13 still-opaque and twenty-six typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.

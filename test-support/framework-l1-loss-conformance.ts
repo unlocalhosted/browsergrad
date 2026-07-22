@@ -1,0 +1,46 @@
+export const FRAMEWORK_L1_LOSS_CONFORMANCE = {
+  schema: "browsergrad.framework.l1-loss-conformance.v1",
+  base: {
+    shape: [2, 2],
+    inputValues: [1, -2, 3, 0],
+    targetValues: [0, -1, 5, 0],
+    upstreamValues: [1, 2, 3, 4],
+    noneValues: [1, 1, 2, 0],
+    sumValue: 4,
+    meanValue: 1,
+    noneInputGradient: [1, -2, -3, 0],
+    noneTargetGradient: [-1, 2, 3, 0],
+    meanInputGradient: [0.25, -0.25, -0.25, 0],
+    meanTargetGradient: [-0.25, 0.25, 0.25, 0],
+  },
+  mixedDtypes: [
+    { inputDtype: "float16", targetDtype: "float16", outputDtype: "float16" },
+    { inputDtype: "float16", targetDtype: "float32", outputDtype: "float32" },
+    { inputDtype: "float32", targetDtype: "float64", outputDtype: "float64" },
+  ],
+  scalar: {
+    inputValue: -3,
+    targetValue: 1,
+    outputValue: 4,
+    inputGradient: -1,
+    targetGradient: 1,
+  },
+  empty: {
+    shape: [0, 3],
+    noneShape: [0, 3],
+    sumValue: 0,
+  },
+  invalid: [
+    { id: "input-type", message: "input must be" },
+    { id: "shape", message: "must equal target shape" },
+    { id: "reduction", message: "must be 'none', 'sum', or 'mean'" },
+    { id: "reduction-type", message: "reduction must be a string" },
+    { id: "input-dtype", message: "input 0 dtype" },
+    { id: "target-dtype", message: "input 1 dtype" },
+    { id: "target-type", message: "target must be" },
+  ],
+  limits: {
+    workExtent: 1 << 26,
+    workspaceExtent: 1 << 24,
+  },
+} as const;

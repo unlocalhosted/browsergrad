@@ -65,6 +65,7 @@ from ._ir import (
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_SORT_INDICES, OP_SORT_VALUES,
     OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_EINSUM_VJP,
+    OP_L1_LOSS, OP_L1_LOSS_VJP,
     OP_CONST, OP_BROADCAST_TO, OP_WHERE, OP_INDEX, OP_SCATTER_ADD,
     OP_ISNAN,
 )
@@ -79,6 +80,7 @@ from ._framework_contracts import (
     validate_topk_values_contract,
     validate_scatter_contract,
     validate_einsum_contract,
+    validate_l1_loss_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -1297,6 +1299,34 @@ def _vjp_einsum(
             output,
             arg={
                 "equation": contract.equation,
+                "batch_rank": contract.batch_rank,
+                "operand": operand,
+            },
+        ))
+    return tuple(gradients)
+
+
+@register_vjp(OP_L1_LOSS)
+def _vjp_l1_loss(
+    output: UOp,
+    inputs: Tuple[UOp, ...],
+    dy: UOp,
+) -> Tuple[Optional[UOp], ...]:
+    contract = validate_l1_loss_contract(output)
+    if inputs != output.inputs:
+        raise ShapeError("L1_LOSS VJP inputs must equal the forward operands")
+    if dy.shape != output.shape or dy.dtype != output.dtype:
+        raise ShapeError("L1_LOSS VJP upstream gradient must match the forward output")
+    gradients = []
+    for operand, source in enumerate(inputs):
+        gradients.append(_vjp_uop(
+            OP_L1_LOSS_VJP,
+            (dy,) + inputs,
+            source.shape,
+            source.dtype,
+            output,
+            arg={
+                "reduction": contract.reduction,
                 "batch_rank": contract.batch_rank,
                 "operand": operand,
             },

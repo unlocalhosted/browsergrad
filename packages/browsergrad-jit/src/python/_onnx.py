@@ -20,8 +20,9 @@ Scope (v0):
     (→Clip), FLIP (→Slice), INDEX (→GatherElements), PROD (→ReduceProd),
     VAR (→ReduceMean/Sub/Mul/ReduceSum/Div), TRIL/TRIU (→Trilu), REPEAT (→Tile), and
     REPEAT_INTERLEAVE (→Unsqueeze/Tile/Reshape), constant PAD (→Pad),
-    SCATTER (→ScatterElements), EINSUM (→Einsum), and paired sort and selected
-    top-k indices/values (→TopK/GatherElements).
+    SCATTER (→ScatterElements), EINSUM (→Einsum), L1_LOSS
+    (→Sub/Abs/ReduceSum or ReduceMean), and paired sort and selected top-k
+    indices/values (→TopK/GatherElements).
     Plus lifecycle
     (BUFFER/LOAD/CONST).
   * Opset 17 (axes as attribute on ReduceSum/Mean/Max — opset 18 made
@@ -72,7 +73,7 @@ from ._ir import (
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_PAD,
     OP_SORT_INDICES, OP_SORT_VALUES,
-    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM,
+    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_L1_LOSS,
     OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
@@ -89,6 +90,7 @@ from ._framework_contracts import (
     validate_topk_values_contract,
     validate_scatter_contract,
     validate_einsum_contract,
+    validate_l1_loss_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -206,8 +208,8 @@ _DTYPE_TO_ONNX: Dict[str, int] = {
 
 # The existing exporter contract predates typed EINSUM and intentionally
 # exposes only this conservative graph-wide dtype profile.  Keep the broader
-# TensorProto encoder private to EINSUM so adding contraction support cannot
-# silently widen unrelated operation contracts.
+# TensorProto encoder private to EINSUM and L1_LOSS so their explicit records
+# cannot silently widen unrelated operation contracts.
 _LEGACY_GRAPH_DTYPES = frozenset({"float32", "int32", "int64", "bool"})
 
 
@@ -497,10 +499,10 @@ def export_inference(
             # LOAD is a pass-through over BUFFER; reuse the BUFFER's name.
             uop_to_name[id(node)] = uop_to_name[id(node.inputs[0])]
             continue
-        if node.op != OP_EINSUM and node.dtype not in _LEGACY_GRAPH_DTYPES:
+        if node.op not in (OP_EINSUM, OP_L1_LOSS) and node.dtype not in _LEGACY_GRAPH_DTYPES:
             raise OnnxUnmappableOp(
                 f"export_inference: {node.op} dtype {node.dtype!r} is not "
-                "exportable; the non-EINSUM graph profile supports float32, "
+                "exportable; the legacy graph profile supports float32, "
                 "int32, int64, and bool"
             )
         nm = f"node_{next_node_id}_{node.op}"
@@ -637,6 +639,74 @@ def export_inference(
                 "Einsum",
                 [_emit_attr_string("equation", equation)],
             ))
+        elif node.op == OP_L1_LOSS:
+            contract = validate_l1_loss_contract(node)
+            suffix = next_node_id - 1
+            compute_dtype = "float32" if node.dtype == "float16" else node.dtype
+            loss_inputs = []
+            for index, (source, source_name) in enumerate(zip(node.inputs, input_names)):
+                loss_input = source_name
+                if source.dtype != compute_dtype:
+                    cast_name = f"l1_loss_cast_{suffix}_{index}"
+                    nodes.append(_emit_node(
+                        [source_name],
+                        [cast_name],
+                        f"{nm}_cast_{index}",
+                        "Cast",
+                        [_emit_attr_int("to", _dtype_or_die(compute_dtype))],
+                    ))
+                    loss_input = cast_name
+                loss_inputs.append(loss_input)
+            difference_name = f"l1_loss_difference_{suffix}"
+            nodes.append(_emit_node(
+                loss_inputs,
+                [difference_name],
+                f"{nm}_subtract",
+                "Sub",
+            ))
+            reduction_axes = tuple(range(contract.batch_rank, len(contract.input_shape)))
+            compute_result_name = (
+                out_name if compute_dtype == node.dtype else f"l1_loss_compute_result_{suffix}"
+            )
+            absolute_name = (
+                compute_result_name
+                if contract.reduction == "none"
+                else f"l1_loss_absolute_{suffix}"
+            )
+            nodes.append(_emit_node(
+                [difference_name],
+                [absolute_name],
+                f"{nm}_absolute",
+                "Abs",
+            ))
+            if contract.reduction != "none":
+                if reduction_axes:
+                    reduction_op = "ReduceSum" if contract.reduction == "sum" else "ReduceMean"
+                    nodes.append(_emit_node(
+                        [absolute_name],
+                        [compute_result_name],
+                        f"{nm}_reduce",
+                        reduction_op,
+                        [
+                            _emit_attr_ints("axes", reduction_axes),
+                            _emit_attr_int("keepdims", 0),
+                        ],
+                    ))
+                else:
+                    nodes.append(_emit_node(
+                        [absolute_name],
+                        [compute_result_name],
+                        f"{nm}_identity",
+                        "Identity",
+                    ))
+            if compute_dtype != node.dtype:
+                nodes.append(_emit_node(
+                    [compute_result_name],
+                    [out_name],
+                    f"{nm}_output_cast",
+                    "Cast",
+                    [_emit_attr_int("to", _dtype_or_die(node.dtype))],
+                ))
         elif node.op == OP_CONCAT:
             axis, _, legacy_empty = validate_cat_contract(node)
             if node.dtype not in ("float32", "int32", "int64", "bool"):
@@ -1085,7 +1155,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES, OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES, OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_L1_LOSS, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

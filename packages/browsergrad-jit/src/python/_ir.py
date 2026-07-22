@@ -19,7 +19,7 @@ hash the same. This is what lets the trace cache and pipeline cache
 
 Design notes:
 
-  * 78 opcodes total — corrects PRD-005's nominal 19. The extras are
+  * 80 opcodes total — corrects PRD-005's nominal 19. The extras are
     documented per-opcode below. Headline additions: RANDOM (dropout +
     nn.init at trace time), CMP (boolean results), CONV1D/CONV2D/CONV3D
     primitive CNN ops and backward refs, CUSTOM
@@ -136,6 +136,7 @@ OP_TOPK_INDICES = "TOPK_INDICES"  # arg: {axis, k, largest, sorted}, inputs: (so
 OP_TOPK_VALUES = "TOPK_VALUES"    # same arg, inputs: (source, TOPK_INDICES)
 OP_SCATTER = "SCATTER"  # arg: {dim}, inputs: (target, int64 index, source)
 OP_EINSUM = "EINSUM"    # arg: {equation, batch_rank}, inputs: variadic operands
+OP_L1_LOSS = "L1_LOSS"  # arg: {reduction, batch_rank}, inputs: (input, target)
 OP_WHERE   = "WHERE"
 OP_INDEX   = "INDEX"    # arg: {dim: int}, inputs: (source, int64 index) ← gather elements
 OP_MASK    = "MASK"     # arg: None                    ← bool-mask indexing
@@ -160,6 +161,7 @@ OP_FUSED_SOFTMAX     = "FUSED_SOFTMAX"      # arg: {axis: int}
 OP_SCATTER_ADD  = "SCATTER_ADD"   # arg: {dim: int}, inputs: (target, idx, src)
 OP_BROADCAST_TO = "BROADCAST_TO"  # arg: {shape: tuple[int,...]}, inputs: (x,)
 OP_EINSUM_VJP = "EINSUM_VJP"      # inputs: (dy, *operands), arg: equation/operand
+OP_L1_LOSS_VJP = "L1_LOSS_VJP"    # inputs: (dy, input, target), arg: reduction/operand
 
 # Mixed-precision support (PRD-010). ISNAN is the per-element NaN
 # check used by GradScaler's overflow detection. The "OR across all
@@ -193,18 +195,18 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_CONV3D_BACKWARD_BIAS, OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS, OP_REDUCE,
     OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES,
-    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM,
+    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_L1_LOSS,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     # Fusion-emitted (PRD-006)
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     # Autograd-emitted (PRD-007)
-    OP_SCATTER_ADD, OP_BROADCAST_TO, OP_EINSUM_VJP,
+    OP_SCATTER_ADD, OP_BROADCAST_TO, OP_EINSUM_VJP, OP_L1_LOSS_VJP,
     # Mixed precision (PRD-010)
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 })
-assert len(ALL_OPS) == 78, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
+assert len(ALL_OPS) == 80, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -446,10 +448,10 @@ __all__ = [
     "OP_REDUCE",
     "OP_RESHAPE", "OP_PERMUTE", "OP_SLICE", "OP_PAD",
     "OP_SORT_INDICES", "OP_SORT_VALUES", "OP_TOPK_INDICES", "OP_TOPK_VALUES",
-    "OP_SCATTER", "OP_EINSUM",
+    "OP_SCATTER", "OP_EINSUM", "OP_L1_LOSS",
     "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
     "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",
-    "OP_SCATTER_ADD", "OP_BROADCAST_TO", "OP_EINSUM_VJP",
+    "OP_SCATTER_ADD", "OP_BROADCAST_TO", "OP_EINSUM_VJP", "OP_L1_LOSS_VJP",
     "OP_ISNAN", "OP_SGD_UPDATE", "OP_ADAMW_UPDATE_M",
     "OP_ADAMW_UPDATE_V", "OP_ADAMW_UPDATE_PARAM",
     "OP_ADAM_UPDATE_M", "OP_ADAM_UPDATE_V", "OP_ADAM_UPDATE_PARAM",

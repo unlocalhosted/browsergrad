@@ -272,18 +272,165 @@ def _reduce_loss(per_elem: np.ndarray, grad_per_elem: np.ndarray, input_t: Tenso
     raise ValueError(f"{op_name}: unknown reduction {reduction!r}")
 
 
-def l1_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
-    """Mean absolute error.
+_L1_LOSS_FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
+_L1_LOSS_RANK_MAX = 32
+_L1_LOSS_OUTPUT_BYTE_MAX = 1 << 28
+_L1_LOSS_OUTPUT_EXTENT_MAX = _L1_LOSS_OUTPUT_BYTE_MAX
+_L1_LOSS_WORK_ELEMENT_MAX = 1 << 28
+_L1_LOSS_WORKSPACE_BYTE_MAX = 1 << 28
+_L1_LOSS_WORK_VISIT_FACTOR = 10
 
-    reduction: 'mean' (default), 'sum', or 'none'. Matches torch.nn.functional.l1_loss
-    for the reductions we support.
-    """
+
+def _l1_loss_checked_product(extents, ceiling: int) -> int:
+    product = 1
+    for extent in extents:
+        if extent == 0:
+            return 0
+        if product > ceiling // extent:
+            return ceiling + 1
+        product *= extent
+    return product
+
+
+def _l1_loss_contract(input: Tensor, target: Tensor, reduction):
+    if not isinstance(input, Tensor):
+        raise TypeError(f"l1_loss: input must be a Tensor, got {type(input).__name__}")
+    if not isinstance(target, Tensor):
+        raise TypeError(f"l1_loss: target must be a Tensor, got {type(target).__name__}")
+    if type(input.data) is not np.ndarray:
+        raise TypeError("l1_loss: input data must be an exact ndarray")
+    if type(target.data) is not np.ndarray:
+        raise TypeError("l1_loss: target data must be an exact ndarray")
+    if type(reduction) is not str:
+        raise ValueError(
+            f"l1_loss: reduction must be a string, got {type(reduction).__name__}"
+        )
+    if reduction not in ("none", "sum", "mean"):
+        raise ValueError(
+            f"l1_loss: reduction must be 'none', 'sum', or 'mean', got {reduction!r}"
+        )
     if input.data.shape != target.data.shape:
-        raise ValueError(f"l1_loss: shape mismatch {input.data.shape} vs {target.data.shape}")
-    diff = input.data - target.data
-    per_elem = np.abs(diff)
-    grad_per_elem = np.sign(diff).astype(np.float32)
-    return _reduce_loss(per_elem, grad_per_elem, input, reduction, "l1_loss")
+        raise ValueError(
+            f"l1_loss: input shape {input.data.shape} must equal target shape {target.data.shape}"
+        )
+    shape = tuple(input.data.shape)
+    if len(shape) > _L1_LOSS_RANK_MAX:
+        raise ValueError(
+            f"l1_loss: input rank {len(shape)} exceeds the {_L1_LOSS_RANK_MAX}-rank ceiling"
+        )
+    for axis, extent in enumerate(shape):
+        if extent > _L1_LOSS_OUTPUT_EXTENT_MAX:
+            raise ValueError(
+                f"l1_loss: input extent {extent} on axis {axis} exceeds the "
+                f"{_L1_LOSS_OUTPUT_EXTENT_MAX}-element per-axis ceiling"
+            )
+    input_dtype = input.data.dtype.name
+    target_dtype = target.data.dtype.name
+    if input_dtype not in _L1_LOSS_FLOATING_DTYPES:
+        raise ValueError(
+            f"l1_loss: input dtype {input_dtype!r} is not supported; "
+            "expected float16, float32, or float64"
+        )
+    if target_dtype not in _L1_LOSS_FLOATING_DTYPES:
+        raise ValueError(
+            f"l1_loss: target dtype {target_dtype!r} is not supported; "
+            "expected float16, float32, or float64"
+        )
+    output_dtype = np.promote_types(input.data.dtype, target.data.dtype).name
+    compute_dtype = "float32" if output_dtype == "float16" else output_dtype
+    input_elements = _l1_loss_checked_product(shape, _L1_LOSS_WORK_ELEMENT_MAX)
+    capacity_elements = _l1_loss_checked_product(
+        tuple(max(1, extent) for extent in shape),
+        _L1_LOSS_WORK_ELEMENT_MAX,
+    )
+    if capacity_elements > _L1_LOSS_WORK_ELEMENT_MAX // _L1_LOSS_WORK_VISIT_FACTOR:
+        work_elements = _L1_LOSS_WORK_ELEMENT_MAX + 1
+    else:
+        work_elements = capacity_elements * _L1_LOSS_WORK_VISIT_FACTOR
+    if work_elements > _L1_LOSS_WORK_ELEMENT_MAX:
+        raise ValueError(
+            f"l1_loss: projected work exceeds the "
+            f"{_L1_LOSS_WORK_ELEMENT_MAX}-element-visit ceiling"
+        )
+    output_elements = input_elements if reduction == "none" else 1
+    output_bytes = output_elements * np.dtype(output_dtype).itemsize
+    if output_bytes > _L1_LOSS_OUTPUT_BYTE_MAX:
+        raise ValueError(
+            f"l1_loss: output requires {output_bytes} bytes, exceeding the "
+            f"{_L1_LOSS_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    compute_bytes = np.dtype(compute_dtype).itemsize
+    cast_bytes = sum(
+        input_elements * compute_bytes
+        for dtype in (input_dtype, target_dtype)
+        if dtype != compute_dtype
+    )
+    workspace_bytes = (
+        output_bytes
+        + cast_bytes
+        + input_elements * (compute_bytes * 2 + 1)
+        + input_elements * (
+            np.dtype(input_dtype).itemsize + np.dtype(target_dtype).itemsize
+        )
+    )
+    if workspace_bytes > _L1_LOSS_WORKSPACE_BYTE_MAX:
+        raise ValueError(
+            "l1_loss: projected output/cast/intermediate/gradient workspace "
+            f"requires {workspace_bytes} bytes, exceeding the "
+            f"{_L1_LOSS_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+    return shape, input_dtype, target_dtype, output_dtype, compute_dtype, input_elements
+
+
+def l1_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
+    """Typed same-shape absolute error with exact reduction semantics."""
+    (
+        shape,
+        input_dtype,
+        target_dtype,
+        output_dtype,
+        compute_dtype,
+        input_elements,
+    ) = _l1_loss_contract(input, target, reduction)
+    left = input.data.astype(np.dtype(compute_dtype), copy=False)
+    right = target.data.astype(np.dtype(compute_dtype), copy=False)
+    signed = np.empty(shape, dtype=np.dtype(compute_dtype))
+    np.subtract(left, right, out=signed)
+    np.sign(signed, out=signed)
+    per_element = np.abs(left - right)
+    if reduction == "none":
+        result = per_element
+    elif reduction == "sum":
+        result = per_element.sum(dtype=np.dtype(compute_dtype))
+    elif input_elements == 0:
+        result = np.asarray(np.nan, dtype=np.dtype(compute_dtype))
+    else:
+        result = per_element.sum(dtype=np.dtype(compute_dtype)) / float(input_elements)
+    out = Tensor(
+        np.array(result, dtype=np.dtype(output_dtype), copy=True),
+        dtype=output_dtype,
+    )
+
+    def backward(g):
+        if input_elements == 0:
+            return (
+                np.zeros(shape, dtype=np.dtype(input_dtype)),
+                np.zeros(shape, dtype=np.dtype(target_dtype)),
+            )
+        upstream = g.data.astype(np.dtype(compute_dtype), copy=False)
+        if reduction != "none":
+            upstream = np.broadcast_to(upstream, shape)
+            if reduction == "mean":
+                upstream = upstream / float(input_elements)
+        working_gradient = np.empty(shape, dtype=np.dtype(compute_dtype))
+        np.multiply(signed, upstream, out=working_gradient)
+        input_gradient = working_gradient.astype(np.dtype(input_dtype), copy=True)
+        np.negative(working_gradient, out=working_gradient)
+        working_gradient[signed == 0] = 0.0
+        target_gradient = working_gradient.astype(np.dtype(target_dtype), copy=True)
+        return input_gradient, target_gradient
+
+    return _build_ctx(out, (input, target), backward)
 
 
 def bce_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:

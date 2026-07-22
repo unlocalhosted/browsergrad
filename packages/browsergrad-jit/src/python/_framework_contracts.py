@@ -54,6 +54,12 @@ EINSUM_OUTPUT_BYTE_MAX = 1 << 28
 EINSUM_OUTPUT_EXTENT_MAX = EINSUM_OUTPUT_BYTE_MAX
 EINSUM_WORK_ELEMENT_MAX = 1 << 28
 EINSUM_WORKSPACE_BYTE_MAX = 1 << 28
+L1_LOSS_RANK_MAX = 32
+L1_LOSS_OUTPUT_BYTE_MAX = 1 << 28
+L1_LOSS_OUTPUT_EXTENT_MAX = L1_LOSS_OUTPUT_BYTE_MAX
+L1_LOSS_WORK_ELEMENT_MAX = 1 << 28
+L1_LOSS_WORKSPACE_BYTE_MAX = 1 << 28
+L1_LOSS_WORK_VISIT_FACTOR = 10
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 32 * 1024
@@ -99,6 +105,7 @@ _ENUMS = {
         "selected-axis-becomes-exact-k",
         "same-rank-unique-index-overwrite-scatter",
         "canonical-general-einstein-contraction",
+        "same-shape-elementwise-loss-with-batched-reduction",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
@@ -115,6 +122,7 @@ _ENUMS = {
         "preserve-source-require-int64-index",
         "preserve-target-require-int64-index-matching-source",
         "dimensioned-tensor-promotion-with-fp32-half-accumulator",
+        "promote-floating-inputs-with-fp32-half-accumulator",
         "promote-integral-default-or-explicit-scan-dtype",
         "pytorch-dimensioned-tensor-promotion",
     }),
@@ -132,6 +140,7 @@ _ENUMS = {
         "supported-numpy-owning-topk-gather",
         "supported-numpy-owning-unique-overwrite-scatter",
         "supported-numpy-owning-greedy-einsum",
+        "supported-numpy-owning-loss-reduction",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -156,6 +165,7 @@ _ENUMS = {
         "supported-permutation-scatter",
         "supported-unique-overwrite-scatter",
         "supported-general-einsum-vjp",
+        "supported-signed-difference-for-both-inputs",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -180,6 +190,7 @@ _ENUMS = {
         "supported-permutation-scatter",
         "supported-unique-overwrite-scatter",
         "supported-general-einsum-vjp",
+        "supported-signed-difference-for-both-inputs",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
@@ -187,6 +198,7 @@ _ENUMS = {
         "supported-for-floating-output-via-symbolic-vjp",
         "supported-for-floating-input-via-symbolic-vjp",
         "supported-for-floating-target-and-source-via-symbolic-vjp",
+        "supported-for-both-floating-inputs-via-symbolic-vjp",
         "not-applicable-discrete-output",
     }),
     "vmap": frozenset({
@@ -200,6 +212,7 @@ _ENUMS = {
         "supported-leading-batch-axis-with-axis-shift-and-captured-broadcast",
         "supported-leading-batch-axis-with-scatter-captured-broadcast",
         "supported-leading-batch-axis-with-einsum-captured-broadcast",
+        "supported-leading-batch-axis-with-per-example-reduction",
         "supported-leading-batch-axis-preserving-pad",
     }),
     "onnxExport": frozenset({
@@ -222,6 +235,7 @@ _ENUMS = {
         "supported-opset17-selected-k-topk-gather-float32-int32-int64",
         "supported-opset17-scatter-elements-float32-int32-int64-bool",
         "supported-opset17-resolved-einsum-numeric-dtypes",
+        "supported-opset17-sub-abs-reduce-float16-float32-float64",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -234,6 +248,7 @@ _ENUMS = {
         "refused-no-canonical-topk-lowering",
         "refused-no-canonical-scatter-overwrite-lowering",
         "refused-no-canonical-contraction-lowering",
+        "refused-no-canonical-loss-reduction-lowering",
         "refused-no-canonical-tile-layout-profile",
         "refused-no-canonical-selected-axis-replication-profile",
         "refused-no-portable-lowering",
@@ -630,6 +645,250 @@ def promote_variadic_dtypes(dtypes: tuple[str, ...], operation: str) -> str:
     if has_uint8:
         return "uint8"
     return "bool"
+
+
+@dataclass(frozen=True, slots=True)
+class L1LossContract:
+    input_shape: Tuple[int, ...]
+    input_dtypes: Tuple[str, str]
+    output_shape: Tuple[int, ...]
+    output_dtype: str
+    reduction: str
+    batch_rank: int
+    reduced_elements: int
+    work_elements: int
+    workspace_bytes: int
+
+
+def _l1_loss_checked_product(extents: Tuple[int, ...], ceiling: int) -> int:
+    product = 1
+    for extent in extents:
+        if extent == 0:
+            return 0
+        if product > ceiling // extent:
+            return ceiling + 1
+        product *= extent
+    return product
+
+
+def infer_l1_loss_contract(
+    inputs: tuple[Any, ...],
+    reduction: Any,
+    batch_rank: Any = 0,
+) -> L1LossContract:
+    if type(inputs) is not tuple or len(inputs) != 2:
+        raise ShapeError("l1_loss requires exactly two tensor inputs")
+    if type(reduction) is not str:
+        raise ShapeError(
+            f"l1_loss: reduction must be a string, got {type(reduction).__name__}"
+        )
+    if reduction not in ("none", "sum", "mean"):
+        raise ShapeError(
+            f"l1_loss: reduction must be 'none', 'sum', or 'mean', got {reduction!r}"
+        )
+    if type(batch_rank) is not int:
+        raise ShapeError("l1_loss: batch_rank must be a normalized integer")
+
+    shapes = []
+    dtypes = []
+    for index, source in enumerate(inputs):
+        shape = getattr(source, "shape", None)
+        if type(shape) is not tuple:
+            raise ShapeError(f"l1_loss input {index} shape must be a tuple")
+        if len(shape) > L1_LOSS_RANK_MAX:
+            raise ShapeError(
+                f"l1_loss input {index} rank {len(shape)} exceeds the "
+                f"{L1_LOSS_RANK_MAX}-rank ceiling"
+            )
+        for axis, extent in enumerate(shape):
+            if type(extent) is not int or extent < 0:
+                raise ShapeError(
+                    f"l1_loss input {index} shape[{axis}] must be a non-negative integer"
+                )
+            if extent > L1_LOSS_OUTPUT_EXTENT_MAX:
+                raise ShapeError(
+                    f"l1_loss input {index} extent {extent} on axis {axis} exceeds the "
+                    f"{L1_LOSS_OUTPUT_EXTENT_MAX}-element per-axis ceiling"
+                )
+        dtype = getattr(source, "dtype", None)
+        if dtype not in _FLOATING_DTYPES:
+            raise ShapeError(
+                f"l1_loss input {index} dtype {dtype!r} is not supported; "
+                "expected float16, float32, or float64"
+            )
+        shapes.append(shape)
+        dtypes.append(dtype)
+
+    input_shape = shapes[0]
+    if shapes[1] != input_shape:
+        raise ShapeError(
+            f"l1_loss: input shape {input_shape} must equal target shape {shapes[1]}"
+        )
+    if batch_rank < 0 or batch_rank > len(input_shape):
+        raise ShapeError(
+            f"l1_loss: batch_rank {batch_rank} is out of range for rank {len(input_shape)}"
+        )
+
+    output_dtype = promote_variadic_dtypes(tuple(dtypes), "L1_LOSS")
+    output_shape = input_shape if reduction == "none" else input_shape[:batch_rank]
+    reduced_elements = _l1_loss_checked_product(
+        input_shape[batch_rank:],
+        L1_LOSS_WORK_ELEMENT_MAX,
+    )
+    input_elements = _l1_loss_checked_product(
+        input_shape,
+        L1_LOSS_WORK_ELEMENT_MAX,
+    )
+    capacity_elements = _l1_loss_checked_product(
+        tuple(max(1, extent) for extent in input_shape),
+        L1_LOSS_WORK_ELEMENT_MAX,
+    )
+    # Forward plus both-input closure/symbolic derivatives can each traverse
+    # the complete element domain. Keep one conservative aggregate ceiling
+    # rather than letting individually bounded phases multiply the work limit.
+    if capacity_elements > L1_LOSS_WORK_ELEMENT_MAX // L1_LOSS_WORK_VISIT_FACTOR:
+        work_elements = L1_LOSS_WORK_ELEMENT_MAX + 1
+    else:
+        work_elements = capacity_elements * L1_LOSS_WORK_VISIT_FACTOR
+    if work_elements > L1_LOSS_WORK_ELEMENT_MAX:
+        raise ShapeError(
+            f"l1_loss: projected work exceeds the "
+            f"{L1_LOSS_WORK_ELEMENT_MAX}-element-visit ceiling"
+        )
+
+    output_elements = _l1_loss_checked_product(
+        output_shape,
+        L1_LOSS_OUTPUT_BYTE_MAX,
+    )
+    output_bytes = output_elements * _VARIADIC_DTYPE_BYTES[output_dtype]
+    if output_bytes > L1_LOSS_OUTPUT_BYTE_MAX:
+        raise ShapeError(
+            f"l1_loss: output requires {output_bytes} bytes, exceeding the "
+            f"{L1_LOSS_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+
+    compute_dtype = "float32" if output_dtype == "float16" else output_dtype
+    compute_bytes = _VARIADIC_DTYPE_BYTES[compute_dtype]
+    cast_bytes = sum(
+        input_elements * compute_bytes for dtype in dtypes if dtype != compute_dtype
+    )
+    # Peak closure backward retains both source-dtype cotangents while the
+    # second derivative owns one signed buffer, one compute buffer, and an
+    # equality mask. Count them all; "largest gradient" would understate the
+    # real two-input lifetime.
+    intermediate_bytes = input_elements * (compute_bytes * 2 + 1)
+    gradient_bytes = input_elements * sum(
+        _VARIADIC_DTYPE_BYTES[dtype] for dtype in dtypes
+    )
+    workspace_bytes = output_bytes + cast_bytes + intermediate_bytes + gradient_bytes
+    if workspace_bytes > L1_LOSS_WORKSPACE_BYTE_MAX:
+        raise ShapeError(
+            "l1_loss: projected output/cast/intermediate/gradient workspace "
+            f"requires {workspace_bytes} bytes, exceeding the "
+            f"{L1_LOSS_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+
+    return L1LossContract(
+        input_shape=input_shape,
+        input_dtypes=(dtypes[0], dtypes[1]),
+        output_shape=output_shape,
+        output_dtype=output_dtype,
+        reduction=reduction,
+        batch_rank=batch_rank,
+        reduced_elements=reduced_elements,
+        work_elements=work_elements,
+        workspace_bytes=workspace_bytes,
+    )
+
+
+def _validate_l1_loss_runtime_arrays(
+    contract: L1LossContract,
+    arrays: tuple[np.ndarray, ...],
+) -> None:
+    if type(arrays) is not tuple or len(arrays) != 2:
+        raise ShapeError("l1_loss execution requires exactly two arrays")
+    for index, (array, dtype) in enumerate(zip(arrays, contract.input_dtypes)):
+        if type(array) is not np.ndarray:
+            raise ShapeError(
+                f"l1_loss runtime input {index} must be an exact ndarray"
+            )
+        if tuple(array.shape) != contract.input_shape:
+            raise ShapeError(
+                f"l1_loss runtime input {index} shape {tuple(array.shape)} does not "
+                f"match {contract.input_shape}"
+            )
+        if array.dtype.name != dtype:
+            raise ShapeError(
+                f"l1_loss runtime input {index} dtype {array.dtype.name!r} does not "
+                f"match {dtype!r}"
+            )
+
+
+def execute_l1_loss_arrays(
+    contract: L1LossContract,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_l1_loss_runtime_arrays(contract, arrays)
+    compute_dtype = "float32" if contract.output_dtype == "float16" else contract.output_dtype
+    left = arrays[0].astype(np.dtype(compute_dtype), copy=False)
+    right = arrays[1].astype(np.dtype(compute_dtype), copy=False)
+    per_element = np.abs(left - right)
+    reduction_axes = tuple(range(contract.batch_rank, len(contract.input_shape)))
+    if contract.reduction == "none" or not reduction_axes:
+        result = per_element
+    elif contract.reduction == "sum":
+        result = per_element.sum(axis=reduction_axes, dtype=np.dtype(compute_dtype))
+    elif contract.reduced_elements == 0:
+        result = np.full(contract.output_shape, np.nan, dtype=np.dtype(compute_dtype))
+    else:
+        result = per_element.sum(
+            axis=reduction_axes,
+            dtype=np.dtype(compute_dtype),
+        ) / float(contract.reduced_elements)
+    return np.array(result, dtype=np.dtype(contract.output_dtype), copy=True)
+
+
+def execute_l1_loss_vjp_array(
+    contract: L1LossContract,
+    operand: int,
+    dy: np.ndarray,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_l1_loss_runtime_arrays(contract, arrays)
+    if type(operand) is not int or operand not in (0, 1):
+        raise ShapeError("l1_loss VJP operand must be 0 or 1")
+    if not isinstance(dy, np.ndarray):
+        raise ShapeError("l1_loss VJP cotangent must be an ndarray")
+    if tuple(dy.shape) != contract.output_shape or dy.dtype.name != contract.output_dtype:
+        raise ShapeError(
+            f"l1_loss VJP cotangent must have shape {contract.output_shape} and "
+            f"dtype {contract.output_dtype!r}"
+        )
+    target_dtype = contract.input_dtypes[operand]
+    if contract.reduced_elements == 0:
+        return np.zeros(contract.input_shape, dtype=np.dtype(target_dtype))
+
+    compute_dtype = "float32" if contract.output_dtype == "float16" else contract.output_dtype
+    left = arrays[0].astype(np.dtype(compute_dtype), copy=False)
+    right = arrays[1].astype(np.dtype(compute_dtype), copy=False)
+    signed = np.empty(contract.input_shape, dtype=np.dtype(compute_dtype))
+    np.subtract(left, right, out=signed)
+    np.sign(signed, out=signed)
+    upstream = dy.astype(np.dtype(compute_dtype), copy=False)
+    if contract.reduction != "none":
+        user_rank = len(contract.input_shape) - contract.batch_rank
+        upstream = upstream.reshape(contract.output_shape + (1,) * user_rank)
+        upstream = np.broadcast_to(upstream, contract.input_shape)
+        if contract.reduction == "mean":
+            upstream = upstream / float(contract.reduced_elements)
+    gradient = np.empty(contract.input_shape, dtype=np.dtype(compute_dtype))
+    np.multiply(signed, upstream, out=gradient)
+    if operand == 1:
+        np.negative(gradient, out=gradient)
+        gradient[signed == 0] = 0.0
+    if gradient.dtype.name == target_dtype:
+        return gradient
+    return gradient.astype(np.dtype(target_dtype), copy=True)
 
 
 _EINSUM_LABEL_ORDER = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -2544,6 +2803,81 @@ def _validate_masked_fill(
     return value
 
 
+def _validate_l1_loss(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> L1LossContract:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict or set(arg) != {"reduction", "batch_rank"}:
+        raise ShapeError("L1_LOSS arg fields must be exactly 'reduction' and 'batch_rank'")
+    normalized = infer_l1_loss_contract(
+        getattr(node, "inputs", None),
+        arg["reduction"],
+        arg["batch_rank"],
+    )
+    if getattr(node, "shape", None) != normalized.output_shape:
+        raise ShapeError(
+            f"L1_LOSS declared shape {getattr(node, 'shape', None)!r} does not "
+            f"match derived shape {normalized.output_shape!r}"
+        )
+    if getattr(node, "dtype", None) != normalized.output_dtype:
+        raise ShapeError(
+            f"L1_LOSS declared dtype {getattr(node, 'dtype', None)!r} does not "
+            f"match promoted dtype {normalized.output_dtype!r}"
+        )
+    return normalized
+
+
+def _validate_l1_loss_vjp(node: Any) -> Tuple[L1LossContract, int]:
+    if getattr(node, "op", None) != "L1_LOSS_VJP":
+        raise ShapeError(
+            f"L1_LOSS_VJP validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or len(inputs) != 3:
+        raise ShapeError("L1_LOSS_VJP must have exactly dy, input, and target inputs")
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("L1_LOSS_VJP arg must be a plain dict")
+    fields = set(arg)
+    if not {"reduction", "batch_rank", "operand"}.issubset(fields) or not fields.issubset(
+        {"reduction", "batch_rank", "operand", "vjp_of"}
+    ):
+        raise ShapeError(
+            "L1_LOSS_VJP arg fields must be exactly 'reduction', 'batch_rank', "
+            "and 'operand' plus optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("L1_LOSS_VJP arg.vjp_of must reference a UOp")
+    operand = arg["operand"]
+    if type(operand) is not int or operand not in (0, 1):
+        raise ShapeError("L1_LOSS_VJP arg.operand must be 0 or 1")
+    normalized = infer_l1_loss_contract(
+        inputs[1:],
+        arg["reduction"],
+        arg["batch_rank"],
+    )
+    dy = inputs[0]
+    if (
+        getattr(dy, "shape", None) != normalized.output_shape
+        or getattr(dy, "dtype", None) != normalized.output_dtype
+    ):
+        raise ShapeError(
+            f"L1_LOSS_VJP dy must have shape {normalized.output_shape!r} and "
+            f"dtype {normalized.output_dtype!r}"
+        )
+    source = inputs[operand + 1]
+    if getattr(node, "shape", None) != getattr(source, "shape", None):
+        raise ShapeError("L1_LOSS_VJP must preserve its selected operand shape")
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("L1_LOSS_VJP must preserve its selected operand dtype")
+    return normalized, operand
+
+
 def _validate_repeat(
     node: Any,
     contract: FrameworkOperationContract,
@@ -2794,6 +3128,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.expand.v1": _validate_broadcast_to,
     "browsergrad.jit.framework.tensor.flip.v1": _validate_flip,
     "browsergrad.jit.framework.tensor.gather.v1": _validate_gather,
+    "browsergrad.jit.framework.functional.l1-loss.v1": _validate_l1_loss,
     "browsergrad.jit.framework.tensor.masked-fill.v1": _validate_masked_fill,
     "browsergrad.jit.framework.tensor.pad.v1": _validate_pad,
     "browsergrad.jit.framework.tensor.prod.v1": _validate_prod,
@@ -2824,6 +3159,7 @@ _BY_OPCODE: Mapping[str, _ExecutableFrameworkOperationContract] = MappingProxyTy
 _INTERNAL_VALIDATORS: Mapping[str, Callable[[Any], Any]] = MappingProxyType({
     "NARROW": _validate_narrow,
     "EINSUM_VJP": _validate_einsum_vjp,
+    "L1_LOSS_VJP": _validate_l1_loss_vjp,
 })
 
 
@@ -2960,6 +3296,17 @@ def validate_gather_contract(node: Any) -> int:
     if record.contract_id != "browsergrad.jit.framework.tensor.gather.v1":
         raise ShapeError("INDEX resolved to the wrong framework-operation contract")
     return normalized
+
+
+def validate_l1_loss_contract(node: Any) -> L1LossContract:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.functional.l1-loss.v1":
+        raise ShapeError("L1_LOSS resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_l1_loss_vjp_contract(node: Any) -> Tuple[L1LossContract, int]:
+    return validate_internal_operation_contract(node)
 
 
 def validate_tril_contract(node: Any) -> int:
@@ -3105,9 +3452,16 @@ __all__ = [
     "EINSUM_OUTPUT_EXTENT_MAX",
     "EINSUM_WORK_ELEMENT_MAX",
     "EINSUM_WORKSPACE_BYTE_MAX",
+    "L1_LOSS_RANK_MAX",
+    "L1_LOSS_OUTPUT_BYTE_MAX",
+    "L1_LOSS_OUTPUT_EXTENT_MAX",
+    "L1_LOSS_WORK_ELEMENT_MAX",
+    "L1_LOSS_WORKSPACE_BYTE_MAX",
+    "L1_LOSS_WORK_VISIT_FACTOR",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "EinsumContract",
+    "L1LossContract",
     "framework_operation_support",
     "has_framework_operation_contract",
     "has_internal_operation_contract",
@@ -3118,6 +3472,7 @@ __all__ = [
     "infer_topk_contract",
     "infer_scatter_contract",
     "infer_einsum_contract",
+    "infer_l1_loss_contract",
     "normalize_pad_request",
     "normalize_pad_value",
     "normalize_sort_request",
@@ -3126,6 +3481,8 @@ __all__ = [
     "scatter_index_violation",
     "execute_einsum_arrays",
     "execute_einsum_vjp_array",
+    "execute_l1_loss_arrays",
+    "execute_l1_loss_vjp_array",
     "einsum_onnx_equation",
     "stable_sort_indices_array",
     "partial_topk_indices_array",
@@ -3147,6 +3504,8 @@ __all__ = [
     "validate_cumsum_contract",
     "validate_flip_contract",
     "validate_gather_contract",
+    "validate_l1_loss_contract",
+    "validate_l1_loss_vjp_contract",
     "validate_gather_scatter_add_contract",
     "validate_tril_contract",
     "validate_triu_contract",

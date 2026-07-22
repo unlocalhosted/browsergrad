@@ -35,6 +35,7 @@ from ._ir import (
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_SORT_INDICES, OP_SORT_VALUES,
     OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_EINSUM_VJP,
+    OP_L1_LOSS, OP_L1_LOSS_VJP,
     OP_WHERE, OP_INDEX, OP_VAR, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_NARROW, OP_TRIL, OP_TRIU, OP_MASK, OP_SCATTER_ADD, OP_BROADCAST_TO,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
@@ -52,6 +53,8 @@ from ._framework_contracts import (
     validate_scatter_contract,
     validate_einsum_contract,
     validate_einsum_vjp_contract,
+    validate_l1_loss_contract,
+    validate_l1_loss_vjp_contract,
     validate_gather_contract,
     validate_gather_scatter_add_contract,
     validate_narrow_contract,
@@ -66,6 +69,7 @@ from ._framework_contracts import (
 _DTYPE_BYTES: Dict[str, int] = {
     "float32": 4,
     "float16": 2,
+    "float64": 8,
     "int64": 8,
     "int32": 4,
     "bool": 1,
@@ -282,6 +286,8 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
         validate_scatter_contract(root)
     elif root.op == OP_EINSUM:
         validate_einsum_contract(root)
+    elif root.op == OP_L1_LOSS:
+        validate_l1_loss_contract(root)
     step_index: Dict[int, int] = {id(node): i for i, node in enumerate(order)}
     last_use: Dict[int, int] = {id(node): i for i, node in enumerate(order)}
     for i, node in enumerate(order):
@@ -308,6 +314,18 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
             raise GpuPlanUnsupported(
                 "GPU tensor plan does not support EINSUM_VJP. Add a canonical "
                 "contraction-gradient lowering before GPU codegen."
+            )
+        elif node.op == OP_L1_LOSS:
+            validate_l1_loss_contract(node)
+            raise GpuPlanUnsupported(
+                "GPU tensor plan does not support L1_LOSS. Add a canonical "
+                "elementwise-loss reduction lowering before GPU codegen."
+            )
+        elif node.op == OP_L1_LOSS_VJP:
+            validate_l1_loss_vjp_contract(node)
+            raise GpuPlanUnsupported(
+                "GPU tensor plan does not support L1_LOSS_VJP. Add a canonical "
+                "loss-gradient lowering before GPU codegen."
             )
         elif node.op == OP_VAR:
             validate_var_contract(node)

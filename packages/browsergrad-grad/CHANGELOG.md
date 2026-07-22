@@ -87,6 +87,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   scalars, uppercase labels, float32 half accumulation, owning output, and
   general snapshot-safe gradients instead of the former explicit-arrow,
   two-operand, float32-only path.
+- `functional.l1_loss` now shares JIT's strict same-shape floating-promotion,
+  exact reduction, empty/scalar, work, and workspace contract. It returns an
+  owning promoted-dtype result, computes half reductions in float32, snapshots
+  the signed difference, and propagates both input and target gradients in
+  their source dtypes instead of casting through float32 and disconnecting the
+  target.
 
 ## [0.5.2] — 2026-07-15
 

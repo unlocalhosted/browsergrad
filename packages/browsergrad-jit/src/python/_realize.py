@@ -48,10 +48,10 @@ from ._ir import (
     OP_LAYER_NORM_BACKWARD_INPUT, OP_LAYER_NORM_BACKWARD_WEIGHT,
     OP_LAYER_NORM_BACKWARD_BIAS, OP_REDUCE,
     OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES,
-    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM,
+    OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_L1_LOSS,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
-    OP_SCATTER_ADD, OP_BROADCAST_TO, OP_EINSUM_VJP,
+    OP_SCATTER_ADD, OP_BROADCAST_TO, OP_EINSUM_VJP, OP_L1_LOSS_VJP,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
@@ -70,6 +70,8 @@ from ._framework_contracts import (
     validate_scatter_contract,
     validate_einsum_contract,
     validate_einsum_vjp_contract,
+    validate_l1_loss_contract,
+    validate_l1_loss_vjp_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -90,6 +92,8 @@ from ._framework_contracts import (
     scatter_index_violation,
     execute_einsum_arrays,
     execute_einsum_vjp_array,
+    execute_l1_loss_arrays,
+    execute_l1_loss_vjp_array,
 )
 
 
@@ -1138,6 +1142,19 @@ def _h_einsum_vjp(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     return execute_einsum_vjp_array(contract, operand, dy, arrays)
 
 
+def _h_l1_loss(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    contract = validate_l1_loss_contract(node)
+    arrays = tuple(vt[id(source)] for source in node.inputs)
+    return execute_l1_loss_arrays(contract, arrays)
+
+
+def _h_l1_loss_vjp(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    contract, operand = validate_l1_loss_vjp_contract(node)
+    dy = vt[id(node.inputs[0])]
+    arrays = tuple(vt[id(source)] for source in node.inputs[1:])
+    return execute_l1_loss_vjp_array(contract, operand, dy, arrays)
+
+
 def _h_where(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     validate_where_contract(node)
     cond = vt[id(node.inputs[0])]
@@ -1474,6 +1491,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_TOPK_VALUES: _h_topk_values,
     OP_SCATTER: _h_scatter,
     OP_EINSUM: _h_einsum,
+    OP_L1_LOSS: _h_l1_loss,
     OP_WHERE:   _h_where,
     OP_INDEX:   _h_index,
     OP_MASK:    _h_mask,
@@ -1485,6 +1503,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_SCATTER_ADD:       _h_scatter_add,
     OP_BROADCAST_TO:      _h_broadcast_to,
     OP_EINSUM_VJP:        _h_einsum_vjp,
+    OP_L1_LOSS_VJP:       _h_l1_loss_vjp,
     # Mixed precision (PRD-010)
     OP_ISNAN:             _h_isnan,
     # Optimizer/update IR

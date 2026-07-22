@@ -21,13 +21,17 @@ import numpy as np
 from ._ir import (
     UOp, OP_WHERE, OP_CONST, OP_CUSTOM, OP_CONV1D, OP_CONV2D,
     OP_CONV_TRANSPOSE2D, OP_CONV3D,
-    OP_LAYER_NORM, OP_REDUCE, OP_DIV, OP_PAD,
+    OP_LAYER_NORM, OP_REDUCE, OP_DIV, OP_PAD, OP_L1_LOSS,
 )
 from ._tensor_proxy import (
     TensorProxy, _BackwardCtx, _should_track, _to_proxy, from_numpy, where,
 )
 from ._errors import ShapeError
-from ._framework_contracts import normalize_pad_request
+from ._framework_contracts import (
+    execute_l1_loss_vjp_array,
+    infer_l1_loss_contract,
+    normalize_pad_request,
+)
 
 
 def _pair2(value: Any, name: str) -> Tuple[int, int]:
@@ -354,13 +358,47 @@ def l1_loss(
     target: TensorProxy,
     reduction: str = "mean",
 ) -> TensorProxy:
-    def _forward(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
-        return np.abs(input_arr - target_arr)
+    if not isinstance(input, TensorProxy):
+        raise TypeError(
+            f"l1_loss: input must be a TensorProxy, got {type(input).__name__}"
+        )
+    if not isinstance(target, TensorProxy):
+        raise TypeError(
+            f"l1_loss: target must be a TensorProxy, got {type(target).__name__}"
+        )
+    if target._get_session() is not input._get_session():
+        raise ShapeError("l1_loss: input and target must belong to the same session")
+    contract = infer_l1_loss_contract(
+        (input._uop, target._uop),
+        reduction,
+        0,
+    )
+    uop = UOp(
+        op=OP_L1_LOSS,
+        inputs=(input._uop, target._uop),
+        shape=contract.output_shape,
+        dtype=contract.output_dtype,
+        arg={"reduction": contract.reduction, "batch_rank": contract.batch_rank},
+    )
 
-    def _grad(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
-        return np.sign(input_arr - target_arr)
+    def _bw(
+        dy: np.ndarray,
+        ins: Tuple[np.ndarray, ...],
+    ) -> Tuple[Optional[np.ndarray], ...]:
+        arrays = (ins[0], ins[1])
+        return (
+            execute_l1_loss_vjp_array(contract, 0, dy, arrays),
+            execute_l1_loss_vjp_array(contract, 1, dy, arrays),
+        )
 
-    return _custom_elementwise_loss(input, target, reduction, "l1_loss", _forward, _grad)
+    requires = _should_track(input, target)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(input, target)) if requires else None
+    return TensorProxy(
+        uop,
+        session=input._get_session(),
+        requires_grad=requires,
+        ctx=ctx,
+    )
 
 
 def binary_cross_entropy(
