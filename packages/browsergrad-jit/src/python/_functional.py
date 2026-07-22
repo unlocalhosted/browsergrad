@@ -22,6 +22,7 @@ from ._ir import (
     UOp, OP_WHERE, OP_CONST, OP_CUSTOM, OP_CONV1D, OP_CONV2D,
     OP_CONV_TRANSPOSE2D, OP_CONV3D,
     OP_LAYER_NORM, OP_REDUCE, OP_DIV, OP_PAD, OP_L1_LOSS, OP_SMOOTH_L1_LOSS,
+    OP_BINARY_CROSS_ENTROPY,
 )
 from ._tensor_proxy import (
     TensorProxy, _BackwardCtx, _should_track, _to_proxy, from_numpy, where,
@@ -30,8 +31,10 @@ from ._errors import ShapeError
 from ._framework_contracts import (
     execute_l1_loss_vjp_array,
     execute_smooth_l1_loss_vjp_array,
+    execute_binary_cross_entropy_vjp_array,
     infer_l1_loss_contract,
     infer_smooth_l1_loss_contract,
+    infer_binary_cross_entropy_contract,
     normalize_pad_request,
 )
 
@@ -408,22 +411,50 @@ def binary_cross_entropy(
     target: TensorProxy,
     reduction: str = "mean",
 ) -> TensorProxy:
-    def _forward(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
-        p = input_arr.astype(np.float64, copy=False)
-        t = target_arr.astype(np.float64, copy=False)
-        eps = 1e-12
-        p_clamped = np.clip(p, eps, 1.0 - eps)
-        return -(t * np.log(p_clamped) + (1.0 - t) * np.log(1.0 - p_clamped))
+    if not isinstance(input, TensorProxy):
+        raise TypeError(
+            "binary_cross_entropy: input must be a TensorProxy, got "
+            f"{type(input).__name__}"
+        )
+    if not isinstance(target, TensorProxy):
+        raise TypeError(
+            "binary_cross_entropy: target must be a TensorProxy, got "
+            f"{type(target).__name__}"
+        )
+    if target._get_session() is not input._get_session():
+        raise ShapeError(
+            "binary_cross_entropy: input and target must belong to the same session"
+        )
+    contract = infer_binary_cross_entropy_contract(
+        (input._uop, target._uop),
+        reduction,
+        0,
+    )
+    uop = UOp(
+        op=OP_BINARY_CROSS_ENTROPY,
+        inputs=(input._uop, target._uop),
+        shape=contract.output_shape,
+        dtype=contract.output_dtype,
+        arg={"reduction": contract.reduction, "batch_rank": contract.batch_rank},
+    )
 
-    def _grad(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
-        p = input_arr.astype(np.float64, copy=False)
-        t = target_arr.astype(np.float64, copy=False)
-        eps = 1e-12
-        p_clamped = np.clip(p, eps, 1.0 - eps)
-        return (1.0 - t) / (1.0 - p_clamped) - t / p_clamped
+    def _bw(
+        dy: np.ndarray,
+        ins: Tuple[np.ndarray, ...],
+    ) -> Tuple[Optional[np.ndarray], ...]:
+        arrays = (ins[0], ins[1])
+        return (
+            execute_binary_cross_entropy_vjp_array(contract, 0, dy, arrays),
+            execute_binary_cross_entropy_vjp_array(contract, 1, dy, arrays),
+        )
 
-    return _custom_elementwise_loss(
-        input, target, reduction, "binary_cross_entropy", _forward, _grad
+    requires = _should_track(input, target)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(input, target)) if requires else None
+    return TensorProxy(
+        uop,
+        session=input._get_session(),
+        requires_grad=requires,
+        ctx=ctx,
     )
 
 

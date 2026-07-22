@@ -6,6 +6,27 @@
   },
   "operations": [
     {
+      "contractId": "browsergrad.jit.framework.functional.binary-cross-entropy.v1",
+      "publicSurface": "torch.nn.functional.binary_cross_entropy",
+      "opcode": "BINARY_CROSS_ENTROPY",
+      "semanticState": "typed",
+      "shapeContract": "same-shape-elementwise-loss-with-batched-reduction",
+      "dtypeContract": "promote-floating-inputs-with-fp32-half-accumulator",
+      "decisions": {
+        "cpu": "supported-numpy-owning-bounded-bce-reduction",
+        "closureAutograd": "supported-clamped-bce-derivatives-for-both-inputs",
+        "symbolicVjp": "supported-clamped-bce-derivatives-for-both-inputs",
+        "functionalGrad": "supported-for-both-floating-inputs-via-symbolic-vjp",
+        "vmap": "supported-leading-batch-axis-with-per-example-reduction",
+        "onnxExport": "refused-runtime-probability-domain-cannot-fail-closed",
+        "tensorPlan": "refused-no-canonical-loss-reduction-lowering",
+        "webgpu": "refused-no-tensor-plan-kernel",
+        "residency": "host-materialized",
+        "materialization": "cpu-owning-array"
+      },
+      "retiredOpaqueOperationId": "jit.custom.binary-cross-entropy.v0"
+    },
+    {
       "contractId": "browsergrad.jit.framework.functional.l1-loss.v1",
       "publicSurface": "torch.nn.functional.l1_loss",
       "opcode": "L1_LOSS",

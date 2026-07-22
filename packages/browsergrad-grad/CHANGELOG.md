@@ -98,6 +98,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   workspace contract. It supports the zero-beta L1 limit, snapshots the
   piecewise derivative, and returns both input and target gradients in source
   dtype instead of casting through float32 and disconnecting the target.
+- `functional.binary_cross_entropy` now shares JIT's strict same-shape
+  floating promotion, finite `[0, 1]` runtime domains, exact reduction,
+  empty/scalar, endpoint, bounded work, and workspace contract. It clamps
+  forward logarithms to `-100`, snapshots the independent input and unclamped
+  target derivatives, and returns both gradients in source dtype instead of
+  clipping probabilities and disconnecting the target.
 
 ## [0.5.2] — 2026-07-15
 

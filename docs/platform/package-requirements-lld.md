@@ -152,8 +152,10 @@ Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
 `Tensor.repeat_interleave`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`,
 `Tensor.var`, top-level `torch.cat`, top-level `torch.stack`, and
 `torch.nn.functional.pad`, plus both values and indices from `torch.sort` and
-`torch.topk`, `torch.scatter`, `torch.einsum`, and
-`torch.nn.functional.l1_loss`, from the frozen opaque callback inventory.
+`torch.topk`, `torch.scatter`, `torch.einsum`,
+`torch.nn.functional.l1_loss`, `torch.nn.functional.smooth_l1_loss`, and
+`torch.nn.functional.binary_cross_entropy`, from the frozen opaque callback
+inventory.
 Expand emits the existing typed `BROADCAST_TO`
 primitive. One shared contract validates exact arity, closed shape arguments,
 output-shape identity, dtype preservation, rank direction, and broadcast
@@ -180,8 +182,8 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 11 constructor calls and 12 operations under ADR-0002
-and ADR-0004 through ADR-0025. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 11 constructor calls and 11 operations under ADR-0002
+and ADR-0004 through ADR-0026. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -448,12 +450,32 @@ also tightens L1's workspace proof to count the retained upstream compute
 buffer. This is twenty-seven migrated operation records, not Gate 6
 completion.
 
+Binary cross entropy now emits typed binary `BINARY_CROSS_ENTROPY` with exact
+same-shape probability inputs, exact reduction, and transform-owned batch
+rank. Both runtime arrays must be finite and within `[0, 1]` before numerical
+work. Forward clamps each logarithm to `-100`, not the probability, so invalid
+values fail closed while valid endpoint losses remain exactly 100. The input
+derivative uses PyTorch's independent `1e-12` denominator floor; the target
+derivative is the unclamped logit derivative and therefore retains signed
+infinity at valid endpoints. Closure and typed symbolic
+`BINARY_CROSS_ENTROPY_VJP` return source-dtype cotangents for both operands;
+Grad snapshots both derivatives. Float16 uses float32 compute, empty and scalar
+reductions are explicit, and nested vmap preserves per-example reduction.
+Rank, extents, output, casts, four compute buffers, one mask, both retained
+cotangents, and 48-visit work are bounded before allocation. ONNX opset 17
+explicitly refuses the profile because its arithmetic decomposition cannot
+preserve fail-closed runtime probability-domain validation. Tensor-plan and
+WebGPU likewise validate and refuse pending a canonical probability-loss
+lowering and kernel. This is twenty-eight migrated operation records, not Gate
+6 completion.
+
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
 records bind `Tensor.abs`, `torch.cat`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
 `Tensor.flip`, `Tensor.gather`, `Tensor.masked_fill`, `Tensor.prod`,
 `Tensor.repeat_interleave`, `Tensor.repeat`, `Tensor.sign`, `Tensor.sin`,
 `torch.einsum`, `torch.scatter`, `torch.nn.functional.l1_loss`,
+`torch.nn.functional.binary_cross_entropy`,
 `torch.nn.functional.smooth_l1_loss`,
 `torch.sort.indices`, `torch.sort.values`, `torch.stack`,
 `torch.topk.indices`, `torch.topk.values`,
@@ -468,7 +490,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 12 still-opaque and twenty-seven typed retirements. ADR-0003 records
+opaque IDs into 11 still-opaque and twenty-eight typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.

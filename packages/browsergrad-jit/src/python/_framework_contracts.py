@@ -61,6 +61,9 @@ L1_LOSS_WORK_ELEMENT_MAX = 1 << 28
 L1_LOSS_WORKSPACE_BYTE_MAX = 1 << 28
 L1_LOSS_WORK_VISIT_FACTOR = 10
 SMOOTH_L1_LOSS_WORK_VISIT_FACTOR = 32
+BINARY_CROSS_ENTROPY_WORK_VISIT_FACTOR = 48
+BINARY_CROSS_ENTROPY_LOG_FLOOR = -100.0
+BINARY_CROSS_ENTROPY_GRAD_EPSILON = 1e-12
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 32 * 1024
@@ -142,6 +145,7 @@ _ENUMS = {
         "supported-numpy-owning-unique-overwrite-scatter",
         "supported-numpy-owning-greedy-einsum",
         "supported-numpy-owning-loss-reduction",
+        "supported-numpy-owning-bounded-bce-reduction",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -168,6 +172,7 @@ _ENUMS = {
         "supported-general-einsum-vjp",
         "supported-signed-difference-for-both-inputs",
         "supported-piecewise-difference-for-both-inputs",
+        "supported-clamped-bce-derivatives-for-both-inputs",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -194,6 +199,7 @@ _ENUMS = {
         "supported-general-einsum-vjp",
         "supported-signed-difference-for-both-inputs",
         "supported-piecewise-difference-for-both-inputs",
+        "supported-clamped-bce-derivatives-for-both-inputs",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
@@ -240,6 +246,7 @@ _ENUMS = {
         "supported-opset17-resolved-einsum-numeric-dtypes",
         "supported-opset17-sub-abs-reduce-float16-float32-float64",
         "supported-opset17-piecewise-smooth-l1-float16-float32-float64",
+        "refused-runtime-probability-domain-cannot-fail-closed",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -692,6 +699,19 @@ class SmoothL1LossContract:
     beta: float
 
 
+@dataclass(frozen=True, slots=True)
+class BinaryCrossEntropyContract:
+    input_shape: Tuple[int, ...]
+    input_dtypes: Tuple[str, str]
+    output_shape: Tuple[int, ...]
+    output_dtype: str
+    reduction: str
+    batch_rank: int
+    reduced_elements: int
+    work_elements: int
+    workspace_bytes: int
+
+
 def _elementwise_loss_checked_product(extents: Tuple[int, ...], ceiling: int) -> int:
     product = 1
     for extent in extents:
@@ -709,7 +729,13 @@ def _infer_elementwise_loss_geometry(
     batch_rank: Any,
     operation: str,
     work_visit_factor: int,
+    compute_buffers: int = 3,
+    mask_buffers: int = 1,
 ) -> _ElementwiseLossGeometry:
+    if type(compute_buffers) is not int or compute_buffers < 0:
+        raise ShapeError(f"{operation}: compute buffer count must be non-negative")
+    if type(mask_buffers) is not int or mask_buffers < 0:
+        raise ShapeError(f"{operation}: mask buffer count must be non-negative")
     if type(inputs) is not tuple or len(inputs) != 2:
         raise ShapeError(f"{operation} requires exactly two tensor inputs")
     if type(reduction) is not str:
@@ -804,11 +830,12 @@ def _infer_elementwise_loss_geometry(
         input_elements * compute_bytes for dtype in dtypes if dtype != compute_dtype
     )
     # The peak closure lifetime retains both source cotangents, input casts,
-    # the output, and three compute buffers (derivative/difference, upstream,
-    # and result) plus one branch/equality mask. This also covers Smooth L1's
-    # forward piecewise branch without pretending sequential allocations are
-    # free while the first operand cotangent remains live.
-    intermediate_bytes = input_elements * (compute_bytes * 3 + 1)
+    # the output, and the operation-specific compute/mask buffers. Explicit
+    # counts prevent a new loss from silently inheriting a smaller operation's
+    # allocation proof.
+    intermediate_bytes = input_elements * (
+        compute_bytes * compute_buffers + mask_buffers
+    )
     gradient_bytes = input_elements * sum(
         _VARIADIC_DTYPE_BYTES[dtype] for dtype in dtypes
     )
@@ -898,6 +925,26 @@ def infer_smooth_l1_loss_contract(
         for field in _ElementwiseLossGeometry.__dataclass_fields__
     }
     return SmoothL1LossContract(**values, beta=compute_beta)
+
+
+def infer_binary_cross_entropy_contract(
+    inputs: tuple[Any, ...],
+    reduction: Any,
+    batch_rank: Any = 0,
+) -> BinaryCrossEntropyContract:
+    geometry = _infer_elementwise_loss_geometry(
+        inputs,
+        reduction,
+        batch_rank,
+        "binary_cross_entropy",
+        BINARY_CROSS_ENTROPY_WORK_VISIT_FACTOR,
+        compute_buffers=4,
+        mask_buffers=1,
+    )
+    return BinaryCrossEntropyContract(**{
+        field: getattr(geometry, field)
+        for field in BinaryCrossEntropyContract.__dataclass_fields__
+    })
 
 
 def _validate_elementwise_loss_runtime_arrays(
@@ -1077,6 +1124,117 @@ def execute_smooth_l1_loss_vjp_array(
     if difference.dtype.name == target_dtype:
         return difference
     return difference.astype(np.dtype(target_dtype), copy=True)
+
+
+def _validate_binary_cross_entropy_domain(
+    arrays: tuple[np.ndarray, ...],
+) -> None:
+    for index, label in ((0, "input"), (1, "target")):
+        array = arrays[index]
+        if array.size == 0:
+            continue
+        if not bool(np.isfinite(array).all()):
+            raise ShapeError(
+                f"binary_cross_entropy: all elements of {label} must be finite "
+                "and between 0 and 1"
+            )
+        minimum = array.min()
+        maximum = array.max()
+        if bool(minimum < 0.0) or bool(maximum > 1.0):
+            raise ShapeError(
+                f"binary_cross_entropy: all elements of {label} must be between 0 and 1"
+            )
+
+
+def execute_binary_cross_entropy_arrays(
+    contract: BinaryCrossEntropyContract,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_elementwise_loss_runtime_arrays(
+        contract, arrays, "binary_cross_entropy"
+    )
+    _validate_binary_cross_entropy_domain(arrays)
+    compute_dtype = _elementwise_loss_compute_dtype(contract)
+    dtype = np.dtype(compute_dtype)
+    probabilities = arrays[0].astype(dtype, copy=False)
+    targets = arrays[1].astype(dtype, copy=False)
+
+    log_probability = np.empty(contract.input_shape, dtype=dtype)
+    log_one_minus_probability = np.empty(contract.input_shape, dtype=dtype)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        np.log(probabilities, out=log_probability)
+        np.subtract(1.0, probabilities, out=log_one_minus_probability)
+        np.log(log_one_minus_probability, out=log_one_minus_probability)
+    np.maximum(
+        log_probability,
+        BINARY_CROSS_ENTROPY_LOG_FLOOR,
+        out=log_probability,
+    )
+    np.maximum(
+        log_one_minus_probability,
+        BINARY_CROSS_ENTROPY_LOG_FLOOR,
+        out=log_one_minus_probability,
+    )
+
+    per_element = np.empty(contract.input_shape, dtype=dtype)
+    np.multiply(targets, log_probability, out=per_element)
+    np.subtract(1.0, targets, out=log_probability)
+    np.multiply(
+        log_probability,
+        log_one_minus_probability,
+        out=log_probability,
+    )
+    np.add(per_element, log_probability, out=per_element)
+    np.negative(per_element, out=per_element)
+    per_element[per_element == 0.0] = 0.0
+    return _execute_elementwise_loss_reduction(contract, per_element)
+
+
+def execute_binary_cross_entropy_vjp_array(
+    contract: BinaryCrossEntropyContract,
+    operand: int,
+    dy: np.ndarray,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_elementwise_loss_runtime_arrays(
+        contract, arrays, "binary_cross_entropy"
+    )
+    _validate_binary_cross_entropy_domain(arrays)
+    if type(operand) is not int or operand not in (0, 1):
+        raise ShapeError("binary_cross_entropy VJP operand must be 0 or 1")
+    upstream = _elementwise_loss_upstream(
+        contract, dy, "binary_cross_entropy"
+    )
+    target_dtype = contract.input_dtypes[operand]
+    if contract.reduced_elements == 0:
+        return np.zeros(contract.input_shape, dtype=np.dtype(target_dtype))
+
+    compute_dtype = _elementwise_loss_compute_dtype(contract)
+    dtype = np.dtype(compute_dtype)
+    probabilities = arrays[0].astype(dtype, copy=False)
+    targets = arrays[1].astype(dtype, copy=False)
+    gradient = np.empty(contract.input_shape, dtype=dtype)
+    scratch = np.empty(contract.input_shape, dtype=dtype)
+    if operand == 0:
+        np.subtract(probabilities, targets, out=gradient)
+        np.subtract(1.0, probabilities, out=scratch)
+        np.multiply(scratch, probabilities, out=scratch)
+        epsilon = np.asarray(
+            BINARY_CROSS_ENTROPY_GRAD_EPSILON,
+            dtype=dtype,
+        ).item()
+        np.maximum(scratch, epsilon, out=scratch)
+        np.divide(gradient, scratch, out=gradient)
+    else:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            np.log(probabilities, out=gradient)
+            np.subtract(1.0, probabilities, out=scratch)
+            np.log(scratch, out=scratch)
+        np.subtract(scratch, gradient, out=gradient)
+    np.multiply(gradient, upstream, out=gradient)
+    if gradient.dtype.name == target_dtype:
+        return gradient
+    return gradient.astype(np.dtype(target_dtype), copy=True)
 
 
 _EINSUM_LABEL_ORDER = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -3163,6 +3321,95 @@ def _validate_smooth_l1_loss_vjp(node: Any) -> Tuple[SmoothL1LossContract, int]:
     return normalized, operand
 
 
+def _validate_binary_cross_entropy(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> BinaryCrossEntropyContract:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict or set(arg) != {"reduction", "batch_rank"}:
+        raise ShapeError(
+            "BINARY_CROSS_ENTROPY arg fields must be exactly 'reduction' and 'batch_rank'"
+        )
+    normalized = infer_binary_cross_entropy_contract(
+        getattr(node, "inputs", None),
+        arg["reduction"],
+        arg["batch_rank"],
+    )
+    if getattr(node, "shape", None) != normalized.output_shape:
+        raise ShapeError(
+            "BINARY_CROSS_ENTROPY declared shape "
+            f"{getattr(node, 'shape', None)!r} does not match derived shape "
+            f"{normalized.output_shape!r}"
+        )
+    if getattr(node, "dtype", None) != normalized.output_dtype:
+        raise ShapeError(
+            "BINARY_CROSS_ENTROPY declared dtype "
+            f"{getattr(node, 'dtype', None)!r} does not match promoted dtype "
+            f"{normalized.output_dtype!r}"
+        )
+    return normalized
+
+
+def _validate_binary_cross_entropy_vjp(
+    node: Any,
+) -> Tuple[BinaryCrossEntropyContract, int]:
+    if getattr(node, "op", None) != "BINARY_CROSS_ENTROPY_VJP":
+        raise ShapeError(
+            "BINARY_CROSS_ENTROPY_VJP validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or len(inputs) != 3:
+        raise ShapeError(
+            "BINARY_CROSS_ENTROPY_VJP must have exactly dy, input, and target inputs"
+        )
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("BINARY_CROSS_ENTROPY_VJP arg must be a plain dict")
+    fields = set(arg)
+    required = {"reduction", "batch_rank", "operand"}
+    if not required.issubset(fields) or not fields.issubset(required | {"vjp_of"}):
+        raise ShapeError(
+            "BINARY_CROSS_ENTROPY_VJP arg fields must be exactly 'reduction', "
+            "'batch_rank', and 'operand' plus optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError(
+            "BINARY_CROSS_ENTROPY_VJP arg.vjp_of must reference a UOp"
+        )
+    operand = arg["operand"]
+    if type(operand) is not int or operand not in (0, 1):
+        raise ShapeError("BINARY_CROSS_ENTROPY_VJP arg.operand must be 0 or 1")
+    normalized = infer_binary_cross_entropy_contract(
+        inputs[1:],
+        arg["reduction"],
+        arg["batch_rank"],
+    )
+    dy = inputs[0]
+    if (
+        getattr(dy, "shape", None) != normalized.output_shape
+        or getattr(dy, "dtype", None) != normalized.output_dtype
+    ):
+        raise ShapeError(
+            "BINARY_CROSS_ENTROPY_VJP dy must have shape "
+            f"{normalized.output_shape!r} and dtype {normalized.output_dtype!r}"
+        )
+    source = inputs[operand + 1]
+    if getattr(node, "shape", None) != getattr(source, "shape", None):
+        raise ShapeError(
+            "BINARY_CROSS_ENTROPY_VJP must preserve its selected operand shape"
+        )
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError(
+            "BINARY_CROSS_ENTROPY_VJP must preserve its selected operand dtype"
+        )
+    return normalized, operand
+
+
 def _validate_repeat(
     node: Any,
     contract: FrameworkOperationContract,
@@ -3415,6 +3662,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.gather.v1": _validate_gather,
     "browsergrad.jit.framework.functional.l1-loss.v1": _validate_l1_loss,
     "browsergrad.jit.framework.functional.smooth-l1-loss.v1": _validate_smooth_l1_loss,
+    "browsergrad.jit.framework.functional.binary-cross-entropy.v1": _validate_binary_cross_entropy,
     "browsergrad.jit.framework.tensor.masked-fill.v1": _validate_masked_fill,
     "browsergrad.jit.framework.tensor.pad.v1": _validate_pad,
     "browsergrad.jit.framework.tensor.prod.v1": _validate_prod,
@@ -3447,6 +3695,7 @@ _INTERNAL_VALIDATORS: Mapping[str, Callable[[Any], Any]] = MappingProxyType({
     "EINSUM_VJP": _validate_einsum_vjp,
     "L1_LOSS_VJP": _validate_l1_loss_vjp,
     "SMOOTH_L1_LOSS_VJP": _validate_smooth_l1_loss_vjp,
+    "BINARY_CROSS_ENTROPY_VJP": _validate_binary_cross_entropy_vjp,
 })
 
 
@@ -3611,6 +3860,26 @@ def validate_smooth_l1_loss_vjp_contract(
     return validate_internal_operation_contract(node)
 
 
+def validate_binary_cross_entropy_contract(
+    node: Any,
+) -> BinaryCrossEntropyContract:
+    record, normalized = validate_framework_operation_contract(node)
+    if (
+        record.contract_id
+        != "browsergrad.jit.framework.functional.binary-cross-entropy.v1"
+    ):
+        raise ShapeError(
+            "BINARY_CROSS_ENTROPY resolved to the wrong framework-operation contract"
+        )
+    return normalized
+
+
+def validate_binary_cross_entropy_vjp_contract(
+    node: Any,
+) -> Tuple[BinaryCrossEntropyContract, int]:
+    return validate_internal_operation_contract(node)
+
+
 def validate_tril_contract(node: Any) -> int:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.tril.v1":
@@ -3761,11 +4030,15 @@ __all__ = [
     "L1_LOSS_WORKSPACE_BYTE_MAX",
     "L1_LOSS_WORK_VISIT_FACTOR",
     "SMOOTH_L1_LOSS_WORK_VISIT_FACTOR",
+    "BINARY_CROSS_ENTROPY_WORK_VISIT_FACTOR",
+    "BINARY_CROSS_ENTROPY_LOG_FLOOR",
+    "BINARY_CROSS_ENTROPY_GRAD_EPSILON",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "EinsumContract",
     "L1LossContract",
     "SmoothL1LossContract",
+    "BinaryCrossEntropyContract",
     "framework_operation_support",
     "has_framework_operation_contract",
     "has_internal_operation_contract",
@@ -3778,6 +4051,7 @@ __all__ = [
     "infer_einsum_contract",
     "infer_l1_loss_contract",
     "infer_smooth_l1_loss_contract",
+    "infer_binary_cross_entropy_contract",
     "normalize_smooth_l1_beta",
     "normalize_pad_request",
     "normalize_pad_value",
@@ -3791,6 +4065,8 @@ __all__ = [
     "execute_l1_loss_vjp_array",
     "execute_smooth_l1_loss_arrays",
     "execute_smooth_l1_loss_vjp_array",
+    "execute_binary_cross_entropy_arrays",
+    "execute_binary_cross_entropy_vjp_array",
     "einsum_onnx_equation",
     "stable_sort_indices_array",
     "partial_topk_indices_array",
@@ -3816,6 +4092,8 @@ __all__ = [
     "validate_l1_loss_vjp_contract",
     "validate_smooth_l1_loss_contract",
     "validate_smooth_l1_loss_vjp_contract",
+    "validate_binary_cross_entropy_contract",
+    "validate_binary_cross_entropy_vjp_contract",
     "validate_gather_scatter_add_contract",
     "validate_tril_contract",
     "validate_triu_contract",

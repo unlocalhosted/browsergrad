@@ -75,7 +75,7 @@ from ._ir import (
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_PAD,
     OP_SORT_INDICES, OP_SORT_VALUES,
     OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_L1_LOSS,
-    OP_SMOOTH_L1_LOSS,
+    OP_SMOOTH_L1_LOSS, OP_BINARY_CROSS_ENTROPY,
     OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
@@ -94,6 +94,7 @@ from ._framework_contracts import (
     validate_einsum_contract,
     validate_l1_loss_contract,
     validate_smooth_l1_loss_contract,
+    validate_binary_cross_entropy_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -502,7 +503,12 @@ def export_inference(
             # LOAD is a pass-through over BUFFER; reuse the BUFFER's name.
             uop_to_name[id(node)] = uop_to_name[id(node.inputs[0])]
             continue
-        if node.op not in (OP_EINSUM, OP_L1_LOSS, OP_SMOOTH_L1_LOSS) and node.dtype not in _LEGACY_GRAPH_DTYPES:
+        if node.op not in (
+            OP_EINSUM,
+            OP_L1_LOSS,
+            OP_SMOOTH_L1_LOSS,
+            OP_BINARY_CROSS_ENTROPY,
+        ) and node.dtype not in _LEGACY_GRAPH_DTYPES:
             raise OnnxUnmappableOp(
                 f"export_inference: {node.op} dtype {node.dtype!r} is not "
                 "exportable; the legacy graph profile supports float32, "
@@ -845,6 +851,13 @@ def export_inference(
                     "Cast",
                     [_emit_attr_int("to", _dtype_or_die(node.dtype))],
                 ))
+        elif node.op == OP_BINARY_CROSS_ENTROPY:
+            validate_binary_cross_entropy_contract(node)
+            raise OnnxUnmappableOp(
+                "export_inference: BINARY_CROSS_ENTROPY requires fail-closed runtime "
+                "validation that every input and target probability is finite and in "
+                "[0, 1]; ONNX opset 17 cannot represent that rejection contract"
+            )
         elif node.op == OP_CONCAT:
             axis, _, legacy_empty = validate_cat_contract(node)
             if node.dtype not in ("float32", "int32", "int64", "bool"):

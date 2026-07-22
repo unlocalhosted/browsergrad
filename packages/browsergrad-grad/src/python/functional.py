@@ -280,6 +280,9 @@ _L1_LOSS_WORK_ELEMENT_MAX = 1 << 28
 _L1_LOSS_WORKSPACE_BYTE_MAX = 1 << 28
 _L1_LOSS_WORK_VISIT_FACTOR = 10
 _SMOOTH_L1_LOSS_WORK_VISIT_FACTOR = 32
+_BINARY_CROSS_ENTROPY_WORK_VISIT_FACTOR = 48
+_BINARY_CROSS_ENTROPY_LOG_FLOOR = -100.0
+_BINARY_CROSS_ENTROPY_GRAD_EPSILON = 1e-12
 _SMOOTH_L1_BETA_TYPES = (
     int,
     float,
@@ -314,7 +317,13 @@ def _elementwise_loss_contract(
     reduction,
     operation: str,
     work_visit_factor: int,
+    compute_buffers: int = 3,
+    mask_buffers: int = 1,
 ):
+    if type(compute_buffers) is not int or compute_buffers < 0:
+        raise ValueError(f"{operation}: compute buffer count must be non-negative")
+    if type(mask_buffers) is not int or mask_buffers < 0:
+        raise ValueError(f"{operation}: mask buffer count must be non-negative")
     if not isinstance(input, Tensor):
         raise TypeError(
             f"{operation}: input must be a Tensor, got {type(input).__name__}"
@@ -396,7 +405,9 @@ def _elementwise_loss_contract(
     workspace_bytes = (
         output_bytes
         + cast_bytes
-        + input_elements * (compute_bytes * 3 + 1)
+        + input_elements * (
+            compute_bytes * compute_buffers + mask_buffers
+        )
         + input_elements * (
             np.dtype(input_dtype).itemsize + np.dtype(target_dtype).itemsize
         )
@@ -442,7 +453,8 @@ def _finish_typed_elementwise_loss(
     reduction: str,
     contract,
     per_element: np.ndarray,
-    derivative: np.ndarray,
+    input_derivative: np.ndarray,
+    target_derivative: np.ndarray | None = None,
 ) -> Tensor:
     (
         shape,
@@ -477,10 +489,13 @@ def _finish_typed_elementwise_loss(
             if reduction == "mean":
                 upstream = upstream / float(input_elements)
         working_gradient = np.empty(shape, dtype=np.dtype(compute_dtype))
-        np.multiply(derivative, upstream, out=working_gradient)
+        np.multiply(input_derivative, upstream, out=working_gradient)
         input_gradient = working_gradient.astype(np.dtype(input_dtype), copy=True)
-        np.negative(working_gradient, out=working_gradient)
-        working_gradient[derivative == 0] = 0.0
+        if target_derivative is None:
+            np.negative(working_gradient, out=working_gradient)
+            working_gradient[input_derivative == 0] = 0.0
+        else:
+            np.multiply(target_derivative, upstream, out=working_gradient)
         target_gradient = working_gradient.astype(np.dtype(target_dtype), copy=True)
         return input_gradient, target_gradient
 
@@ -510,21 +525,94 @@ def l1_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
 
 
 def bce_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
-    """Binary cross-entropy from probabilities. Input must be in (0, 1).
-    Use bce_with_logits_loss if you have raw logits — it's numerically stable.
+    """Typed BCE over probabilities with PyTorch's endpoint semantics."""
+    contract = _elementwise_loss_contract(
+        input,
+        target,
+        reduction,
+        "binary_cross_entropy",
+        _BINARY_CROSS_ENTROPY_WORK_VISIT_FACTOR,
+        compute_buffers=4,
+        mask_buffers=1,
+    )
+    shape, _, _, _, compute_dtype, _ = contract
+    for tensor, label in ((input, "input"), (target, "target")):
+        array = tensor.data
+        if array.size == 0:
+            continue
+        if not bool(np.isfinite(array).all()):
+            raise ValueError(
+                f"binary_cross_entropy: all elements of {label} must be finite "
+                "and between 0 and 1"
+            )
+        if bool(array.min() < 0.0) or bool(array.max() > 1.0):
+            raise ValueError(
+                f"binary_cross_entropy: all elements of {label} must be between 0 and 1"
+            )
 
-    Forward: -(target * log(input) + (1-target) * log(1-input)).reduce()
-    """
-    if input.data.shape != target.data.shape:
-        raise ValueError(f"bce_loss: shape mismatch {input.data.shape} vs {target.data.shape}")
-    p = input.data.astype(np.float64)
-    t = target.data.astype(np.float64)
-    # clamp to avoid log(0) and division by zero in grad
-    eps = 1e-12
-    p_c = np.clip(p, eps, 1.0 - eps)
-    per_elem = -(t * np.log(p_c) + (1.0 - t) * np.log(1.0 - p_c))
-    grad_per_elem = ((1.0 - t) / (1.0 - p_c) - t / p_c).astype(np.float32)
-    return _reduce_loss(per_elem, grad_per_elem, input, reduction, "bce_loss")
+    dtype = np.dtype(compute_dtype)
+    probabilities = input.data.astype(dtype, copy=False)
+    targets = target.data.astype(dtype, copy=False)
+    log_probability = np.empty(shape, dtype=dtype)
+    log_one_minus_probability = np.empty(shape, dtype=dtype)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        np.log(probabilities, out=log_probability)
+        np.subtract(1.0, probabilities, out=log_one_minus_probability)
+        np.log(log_one_minus_probability, out=log_one_minus_probability)
+    np.maximum(
+        log_probability,
+        _BINARY_CROSS_ENTROPY_LOG_FLOOR,
+        out=log_probability,
+    )
+    np.maximum(
+        log_one_minus_probability,
+        _BINARY_CROSS_ENTROPY_LOG_FLOOR,
+        out=log_one_minus_probability,
+    )
+    per_element = np.empty(shape, dtype=dtype)
+    np.multiply(targets, log_probability, out=per_element)
+    target_derivative = np.empty(shape, dtype=dtype)
+    np.subtract(1.0, targets, out=target_derivative)
+    np.multiply(
+        target_derivative,
+        log_one_minus_probability,
+        out=target_derivative,
+    )
+    np.add(per_element, target_derivative, out=per_element)
+    np.negative(per_element, out=per_element)
+    per_element[per_element == 0.0] = 0.0
+
+    # PyTorch differentiates the target through the unclamped logit even
+    # though the forward logs are clamped at -100.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        np.log(probabilities, out=log_probability)
+        np.subtract(1.0, probabilities, out=target_derivative)
+        np.log(target_derivative, out=target_derivative)
+    np.subtract(target_derivative, log_probability, out=target_derivative)
+
+    input_derivative = log_probability
+    np.subtract(probabilities, targets, out=input_derivative)
+    np.subtract(1.0, probabilities, out=log_one_minus_probability)
+    np.multiply(
+        log_one_minus_probability,
+        probabilities,
+        out=log_one_minus_probability,
+    )
+    epsilon = np.asarray(
+        _BINARY_CROSS_ENTROPY_GRAD_EPSILON,
+        dtype=dtype,
+    ).item()
+    np.maximum(log_one_minus_probability, epsilon, out=log_one_minus_probability)
+    np.divide(input_derivative, log_one_minus_probability, out=input_derivative)
+    return _finish_typed_elementwise_loss(
+        input,
+        target,
+        reduction,
+        contract,
+        per_element,
+        input_derivative,
+        target_derivative,
+    )
 
 
 def smooth_l1_loss(input: Tensor, target: Tensor, beta: float = 1.0, reduction: str = "mean") -> Tensor:

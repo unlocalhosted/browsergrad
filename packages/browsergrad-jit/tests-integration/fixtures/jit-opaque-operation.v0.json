@@ -5,10 +5,10 @@
     {
       "id": "jit.custom.shared-refusals.v0",
       "expected": {
-        "label": "binary_cross_entropy",
+        "label": "kl_div",
         "labelField": "name",
-        "cpuValues": [[0.6931471824645996, 0.6931471824645996], [0.6931471824645996, 0.6931471824645996]],
-        "cpuGradient": [[2, -2], [2, -2]],
+        "cpuValues": [[0, 0], [0, 0]],
+        "cpuGradient": [[-1, -1], [-1, -1]],
         "symbolicVjpRegistered": false,
         "functionalGradError": "JitNotImplementedError",
         "vmapError": "JitNotImplementedError",
@@ -68,7 +68,6 @@
         "environment": {"pyodide": "0.26.4", "numpy": "1.26.4"},
         "observedLabels": [
           "batch_norm1d",
-          "binary_cross_entropy",
           "binary_cross_entropy_with_logits",
           "cross_entropy",
           "dropout",
@@ -79,7 +78,6 @@
         "allLabelsMatch": true,
         "closureGradientLabels": [
           "batch_norm1d",
-          "binary_cross_entropy",
           "binary_cross_entropy_with_logits",
           "cross_entropy",
           "dropout",

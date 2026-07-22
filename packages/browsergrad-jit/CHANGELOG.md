@@ -115,13 +115,20 @@ contract in the README](README.md#compatibility-contract).
   piecewise work/workspace, promoted owning reductions, both-input closure and
   symbolic VJP, nested per-example vmap, opset-17 piecewise decomposition, and
   explicit tensor-plan/WebGPU refusal until canonical loss lowering exists.
+- `torch.nn.functional.binary_cross_entropy` now emits typed
+  `BINARY_CROSS_ENTROPY` with fail-closed finite `[0, 1]` probability domains,
+  PyTorch-compatible `-100` forward log floors and independent input-gradient
+  epsilon, bounded work/workspace, promoted owning reductions, both-input
+  closure and symbolic VJP, nested per-example vmap, explicit ONNX refusal when
+  runtime domain validation cannot be preserved, and explicit
+  tensor-plan/WebGPU refusal until canonical probability-loss lowering exists.
 
 ### Added
 
 - Added the bounded v1 executable framework-operation registry and detached
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
-  current table contains `ABS`, `CLAMP`, `CONCAT`, `COS`, `CUMSUM`, `BROADCAST_TO`, `EINSUM`, `L1_LOSS`, `SMOOTH_L1_LOSS`, `FLIP`,
+  current table contains `ABS`, `BINARY_CROSS_ENTROPY`, `CLAMP`, `CONCAT`, `COS`, `CUMSUM`, `BROADCAST_TO`, `EINSUM`, `L1_LOSS`, `SMOOTH_L1_LOSS`, `FLIP`,
   `INDEX`, `PAD`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`,
   `SCATTER`, `SORT_INDICES`, `SORT_VALUES`, `STACK`, `TOPK_INDICES`, `TOPK_VALUES`,
   `TRIL`, `TRIU`, `VAR`, and masked-fill `WHERE`.
