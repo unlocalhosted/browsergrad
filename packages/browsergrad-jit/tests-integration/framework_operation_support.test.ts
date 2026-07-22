@@ -279,6 +279,27 @@ const FRAMEWORK_SUPPORT = {
       },
       retiredOpaqueOperationId: "jit.custom.sin.v0",
     },
+    {
+      contractId: "browsergrad.jit.framework.tensor.tril.v1",
+      publicSurface: "Tensor.tril",
+      opcode: "TRIL",
+      semanticState: "typed",
+      shapeContract: "preserve-batched-lower-triangular",
+      dtypeContract: "preserve-input",
+      decisions: {
+        cpu: "supported-numpy-owning-copy",
+        closureAutograd: "supported-idempotent-triangular-selection",
+        symbolicVjp: "supported-idempotent-triangular-selection",
+        functionalGrad: "supported-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-preserve-matrix-axes",
+        onnxExport: "supported-opset17-trilu-float32-int32-int64-bool",
+        tensorPlan: "refused-no-portable-triangular-selection",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.tril.v0",
+    },
   ].sort((left, right) => left.contractId < right.contractId ? -1 : left.contractId > right.contractId ? 1 : 0),
 };
 
@@ -320,7 +341,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(14);
+    expect(result.first.operations).toHaveLength(15);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

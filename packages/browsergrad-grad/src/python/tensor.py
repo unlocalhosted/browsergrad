@@ -48,6 +48,7 @@ _MASKED_FILL_DTYPES = frozenset({
     "float16", "float32", "float64",
     "int8", "int16", "int32", "int64", "uint8", "bool",
 })
+_TRIL_DTYPES = _MASKED_FILL_DTYPES
 
 
 def _normalize_prod_axes(value, rank: int) -> tuple:
@@ -204,6 +205,20 @@ def _normalize_gather_axis(value, rank: int) -> int:
     if axis < 0 or axis >= rank:
         raise ValueError(f"gather: axis {value} out of range for rank {rank}")
     return axis
+
+
+def _normalize_tril_diagonal(value, shape: tuple) -> int:
+    if len(shape) < 2:
+        raise ValueError(f"tril: input must have rank at least two, got {len(shape)}")
+    if type(value) not in _EXACT_INTEGER_SCALAR_TYPES:
+        raise ValueError(
+            "tril: diagonal must be a built-in or NumPy integer scalar, "
+            f"got {type(value).__name__}"
+        )
+    rows, columns = shape[-2:]
+    if rows == 0 or columns == 0:
+        return 0
+    return min(columns - 1, max(-rows, int(value)))
 
 
 def _validate_gather_index_values(index: np.ndarray, axis_extent: int) -> None:
@@ -660,6 +675,9 @@ class Tensor:
 
     def flip(self, dim: int) -> "Tensor":
         return _flip(self, int(dim))
+
+    def tril(self, diagonal=0) -> "Tensor":
+        return _tril(self, diagonal)
 
     # ─── Shape ops ─────────────────────────────────────────
 
@@ -1245,6 +1263,18 @@ def _masked_fill(a: Tensor, mask, value) -> Tensor:
     return _build_ctx(out, (a,), backward)
 
 
+def _tril(a: Tensor, diagonal=0) -> Tensor:
+    if a.dtype not in _TRIL_DTYPES:
+        raise ValueError(f"tril: dtype {a.dtype!r} is not supported")
+    diagonal_i = _normalize_tril_diagonal(diagonal, a.shape)
+    out_data = np.tril(a.data, k=diagonal_i)
+    out = Tensor(np.array(out_data, dtype=a.data.dtype, copy=True), dtype=a.dtype)
+    def backward(g):
+        gradient = np.tril(g.data, k=diagonal_i)
+        return (np.array(gradient, dtype=a.data.dtype, copy=True),)
+    return _build_ctx(out, (a,), backward)
+
+
 # ─── New reduction / index helpers ────────────────────────
 
 def _prod(a: Tensor, dim=None, keepdims: bool = False) -> Tensor:
@@ -1549,9 +1579,8 @@ def triu(input, diagonal: int = 0) -> Tensor:
 
 
 def tril(input, diagonal: int = 0) -> Tensor:
-    """Lower-triangular part of input. Non-differentiable. Matches torch.tril."""
-    arr = input.data if isinstance(input, Tensor) else np.asarray(input, dtype=np.float32)
-    return Tensor(np.tril(arr, k=diagonal).copy(), dtype=str(arr.dtype))
+    """Lower-triangular part of a matrix or batch of matrices."""
+    return _tril(_wrap(input), diagonal)
 
 
 def multinomial(input, num_samples: int, replacement: bool = True) -> Tensor:

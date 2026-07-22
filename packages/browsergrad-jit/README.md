@@ -185,6 +185,18 @@ mapped broadcast mask. ONNX emits `Where` for float32, int32, int64, and bool.
 Tensor-plan and WebGPU explicitly refuse until portable masked selection
 exists.
 
+`Tensor.tril()` and top-level `tril(input, diagonal)` emit typed `TRIL` over
+the final two matrix axes. Inputs require rank at least two and a supported
+real-numeric or boolean dtype. The diagonal must be an exact built-in or NumPy
+integer and is saturated into the matrix's unique closed all-zero/all-input
+semantic range before entering IR, so hostile conversion hooks and oversized
+integers never reach NumPy or export. CPU returns an owning dtype-preserving result;
+closure and symbolic VJP apply the same idempotent triangular selection; vmap
+preserves the last two matrix axes while inserting its leading batch axis.
+ONNX emits `Trilu` with `upper=0` for float32, int32, int64, and bool.
+Tensor-plan and WebGPU explicitly refuse until portable triangular selection
+exists.
+
 `Tensor.repeat()` emits typed `REPEAT` for bounded exact integer tile
 multipliers. CPU realization returns an owning dtype-preserving array;
 closure and symbolic gradients sum interleaved tile blocks; vmap prepends a

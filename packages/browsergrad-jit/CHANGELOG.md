@@ -53,6 +53,11 @@ contract in the README](README.md#compatibility-contract).
   source-shape broadcasting, an exact source-dtype scalar constant, owning CPU
   results, mask-complement closure/symbolic VJP, vmap, ONNX `Where`, and
   explicit tensor-plan/WebGPU refusal.
+- `Tensor.tril` now emits typed `TRIL` over the final matrix axes, requires
+  rank at least two and an exact non-coercive integer diagonal, preserves
+  shape/dtype in owning CPU results, applies triangular selection in closure
+  and symbolic VJP, supports leading-axis vmap, exports ONNX `Trilu`, and
+  refuses tensor-plan/WebGPU until portable triangular selection exists.
 
 ### Added
 
@@ -60,8 +65,8 @@ contract in the README](README.md#compatibility-contract).
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
   current table contains `ABS`, `CLAMP`, `COS`, `BROADCAST_TO`, `FLIP`,
-  `INDEX`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`, `VAR`, and
-  masked-fill `WHERE`.
+  `INDEX`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`, `TRIL`,
+  `VAR`, and masked-fill `WHERE`.
 
 ## [0.9.0] — 2026-07-15
 

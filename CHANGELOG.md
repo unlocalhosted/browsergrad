@@ -64,6 +64,11 @@ Each package follows independent [SemVer](https://semver.org/).
   with strict bool-mask broadcasting, exact source-dtype scalar fill,
   mask-complement VJP, vmap, ONNX `Where`, and explicit device refusal. Grad
   shares the same fixture and preserves source/output/gradient dtype.
+- Migrates JIT `Tensor.tril` from an opaque callback to typed triangular
+  selection with rank/dtype/diagonal validation, owning CPU results,
+  idempotent closure and symbolic VJP, batch-safe vmap, ONNX `Trilu`, and
+  explicit device refusal. Grad shares the same values, dtype, saturation,
+  gradient, and refusal fixture.
 
 ## 2026-07 — semantic-core, kernels, compiler, and JIT semantic migration
 

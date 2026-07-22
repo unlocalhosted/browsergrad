@@ -58,6 +58,7 @@ _ENUMS = {
     "shapeContract": frozenset({
         "preserve-unary-input",
         "preserve-single-axis-reverse",
+        "preserve-batched-lower-triangular",
         "same-rank-index-shaped-gather",
         "preserve-source-with-broadcast-bool-mask",
         "static-broadcast-with-existing-dim-minus-one",
@@ -82,6 +83,7 @@ _ENUMS = {
         "supported-cos-derivative",
         "supported-inclusive-bound-mask",
         "supported-involutive-flip",
+        "supported-idempotent-triangular-selection",
         "supported-deterministic-scatter-add",
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
@@ -97,6 +99,7 @@ _ENUMS = {
         "supported-cos-derivative",
         "supported-inclusive-bound-mask",
         "supported-involutive-flip",
+        "supported-idempotent-triangular-selection",
         "supported-deterministic-scatter-add",
         "supported-negative-sin-derivative",
         "supported-sign-derivative",
@@ -114,6 +117,7 @@ _ENUMS = {
         "supported-leading-batch-axis-with-axis-shift",
         "supported-leading-batch-axis-with-index-axis-shift",
         "supported-leading-batch-axis-with-mask-broadcast",
+        "supported-leading-batch-axis-preserve-matrix-axes",
         "supported-leading-batch-axis-with-unit-repeat",
     }),
     "onnxExport": frozenset({
@@ -125,6 +129,7 @@ _ENUMS = {
         "supported-opset17-reduce-prod-float32-int32-int64",
         "supported-opset17-variance-decomposition-float32",
         "supported-opset17-slice-float32-int32-int64-bool",
+        "supported-opset17-trilu-float32-int32-int64-bool",
         "supported-opset17-tile-float32-int32-int64-bool",
         "supported-opset17-unsqueeze-tile-reshape-float32-int32-int64-bool",
     }),
@@ -132,6 +137,7 @@ _ENUMS = {
         "refused-negative-stride-profile",
         "refused-no-deterministic-index-lowering",
         "refused-no-portable-masked-selection",
+        "refused-no-portable-triangular-selection",
         "refused-no-canonical-tile-layout-profile",
         "refused-no-canonical-selected-axis-replication-profile",
         "refused-no-portable-lowering",
@@ -155,6 +161,7 @@ _REAL_NUMERIC_DTYPES = frozenset({
 })
 _FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
 _MASKED_FILL_DTYPES = _REAL_NUMERIC_DTYPES | frozenset({"bool"})
+_TRIL_DTYPES = _MASKED_FILL_DTYPES
 _UNARY_DTYPE_PROFILES = MappingProxyType({
     "preserve-floating-input": (_FLOATING_DTYPES, "floating"),
     "preserve-real-numeric-input": (_REAL_NUMERIC_DTYPES, "real numeric"),
@@ -459,6 +466,47 @@ def _validate_flip(node: Any, contract: FrameworkOperationContract) -> int:
     if axis < 0 or axis >= rank:
         raise ShapeError(f"FLIP arg.axis {axis} out of range for rank {rank}")
     return axis
+
+
+def _validate_tril(node: Any, contract: FrameworkOperationContract) -> int:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = _require_single_input_tuple(node, contract.opcode)
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("TRIL arg must be a plain dict")
+    fields = set(arg)
+    if "diagonal" not in fields or not fields.issubset({"diagonal", "vjp_of"}):
+        raise ShapeError(
+            "TRIL arg fields must be exactly 'diagonal' plus optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("TRIL arg.vjp_of must reference a UOp")
+    source = inputs[0]
+    source_shape = getattr(source, "shape", None)
+    if type(source_shape) is not tuple or len(source_shape) < 2:
+        raise ShapeError("TRIL requires an input with rank at least two")
+    if getattr(node, "shape", None) != source_shape:
+        raise ShapeError("TRIL must preserve its input shape")
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("TRIL must preserve its input dtype")
+    if getattr(node, "dtype", None) not in _TRIL_DTYPES:
+        raise ShapeError(
+            f"TRIL does not support dtype {getattr(node, 'dtype', None)!r}"
+        )
+    diagonal = arg["diagonal"]
+    if type(diagonal) is not int:
+        raise ShapeError("TRIL arg.diagonal must be a normalized integer")
+    rows, columns = source_shape[-2:]
+    minimum, maximum = (0, 0) if rows == 0 or columns == 0 else (-rows, columns - 1)
+    if diagonal < minimum or diagonal > maximum:
+        raise ShapeError(
+            f"TRIL arg.diagonal {diagonal} is outside canonical range "
+            f"[{minimum}, {maximum}] for matrix shape {(rows, columns)}"
+        )
+    return diagonal
 
 
 def _validate_gather(node: Any, contract: FrameworkOperationContract) -> int:
@@ -886,6 +934,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.repeat-interleave.v1": _validate_repeat_interleave,
     "browsergrad.jit.framework.tensor.sign.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.sin.v1": _validate_typed_unary,
+    "browsergrad.jit.framework.tensor.tril.v1": _validate_tril,
 })
 _RECORDS = _load_registry()
 if frozenset(_VALIDATORS) != frozenset(record.contract_id for record in _RECORDS):
@@ -939,6 +988,13 @@ def validate_gather_contract(node: Any) -> int:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.gather.v1":
         raise ShapeError("INDEX resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_tril_contract(node: Any) -> int:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.tril.v1":
+        raise ShapeError("TRIL resolved to the wrong framework-operation contract")
     return normalized
 
 
@@ -1054,6 +1110,7 @@ __all__ = [
     "validate_flip_contract",
     "validate_gather_contract",
     "validate_gather_scatter_add_contract",
+    "validate_tril_contract",
     "validate_masked_fill_contract",
     "validate_where_contract",
     "validate_prod_contract",

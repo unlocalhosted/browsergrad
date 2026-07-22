@@ -33,7 +33,7 @@ from ._ir import (
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
-    OP_WHERE, OP_INDEX, OP_VAR, OP_MASK, OP_SCATTER_ADD, OP_BROADCAST_TO,
+    OP_WHERE, OP_INDEX, OP_VAR, OP_TRIL, OP_MASK, OP_SCATTER_ADD, OP_BROADCAST_TO,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM, OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX, OP_CUSTOM,
@@ -43,6 +43,7 @@ from ._framework_contracts import (
     validate_gather_contract,
     validate_gather_scatter_add_contract,
     validate_var_contract,
+    validate_tril_contract,
     validate_where_contract,
 )
 
@@ -265,6 +266,12 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
             validate_gather_scatter_add_contract(node)
         elif node.op == OP_VAR:
             validate_var_contract(node)
+        elif node.op == OP_TRIL:
+            validate_tril_contract(node)
+            raise GpuPlanUnsupported(
+                "GPU tensor plan does not support TRIL. "
+                "Add a portable triangular-selection lowering before GPU codegen."
+            )
         elif node.op == OP_WHERE:
             masked_fill = validate_where_contract(node)
             label = "masked_fill" if masked_fill else "WHERE"

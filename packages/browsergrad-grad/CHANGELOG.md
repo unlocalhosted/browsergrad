@@ -41,6 +41,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   results, compatibility in-place updates, and source gradients preserve the
   source dtype instead of coercing masks and silently casting everything to
   float32.
+- `Tensor.tril` and top-level `tril` now share strict rank, dtype, and exact
+  diagonal semantics with JIT, preserve source dtype in owning results, and
+  propagate the same lower-triangular selection through autograd instead of
+  returning a disconnected forward-only tensor.
 
 ## [0.5.2] — 2026-07-15
 

@@ -5,10 +5,10 @@
     {
       "id": "jit.custom.shared-refusals.v0",
       "expected": {
-        "label": "tril",
+        "label": "triu",
         "labelField": "name",
-        "cpuValues": [[1, 0], [3, 4]],
-        "cpuGradient": [[1, 0], [1, 1]],
+        "cpuValues": [[1, 2], [0, 4]],
+        "cpuGradient": [[1, 1], [0, 1]],
         "symbolicVjpRegistered": false,
         "functionalGradError": "JitNotImplementedError",
         "vmapError": "JitNotImplementedError",
@@ -91,7 +91,6 @@
           "pad",
           "smooth_l1_loss",
           "stack",
-          "tril",
           "triu"
         ],
         "allLabelsMatch": true,
@@ -110,7 +109,6 @@
           "pad",
           "smooth_l1_loss",
           "stack",
-          "tril",
           "triu"
         ],
         "allClosureGradientsPresent": true,
