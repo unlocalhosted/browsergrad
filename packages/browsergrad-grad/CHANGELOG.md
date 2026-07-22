@@ -66,6 +66,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   an owning dtype-preserving result, extracts the unpadded floating gradient,
   rejects hostile coercions before NumPy, and leaves non-constant modes and
   negative cropping explicit rather than silently changing semantics.
+- `sort` now shares JIT's exact axis/flag, stable tie, dtype, ownership,
+  selected-axis work, and paired-output allocation contract. It returns
+  dtype-preserving values plus int64 indices, preserves descending ties without
+  dtype-changing negation, and scatters floating gradients through an immutable
+  captured permutation.
 
 ## [0.5.2] — 2026-07-15
 

@@ -32,6 +32,10 @@ VARIADIC_OUTPUT_BYTE_MAX = 1 << 28
 PAD_RANK_MAX = 32
 PAD_OUTPUT_BYTE_MAX = 1 << 28
 PAD_OUTPUT_EXTENT_MAX = PAD_OUTPUT_BYTE_MAX
+SORT_RANK_MAX = 32
+SORT_AXIS_MAX = 1 << 20
+SORT_OUTPUT_BYTE_MAX = 1 << 28
+SORT_OUTPUT_EXTENT_MAX = SORT_OUTPUT_BYTE_MAX
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 32 * 1024
@@ -73,6 +77,7 @@ _ENUMS = {
         "same-rank-index-shaped-gather",
         "preserve-source-with-broadcast-bool-mask",
         "trailing-dimension-constant-padding",
+        "same-shape-axis-ordering",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
@@ -83,6 +88,7 @@ _ENUMS = {
         "preserve-floating-input",
         "preserve-input",
         "preserve-supported-input-with-exact-fill",
+        "values-preserve-input-indices-int64",
         "preserve-input-require-bool-mask",
         "preserve-real-numeric-input",
         "preserve-source-require-int64-index",
@@ -97,6 +103,8 @@ _ENUMS = {
         "supported-numpy-owning-concatenation-copy",
         "supported-numpy-owning-stack-copy",
         "supported-numpy-owning-constant-pad-copy",
+        "supported-numpy-owning-stable-sort-indices",
+        "supported-numpy-owning-sort-gather",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -117,6 +125,8 @@ _ENUMS = {
         "supported-static-axis-split",
         "supported-static-axis-index",
         "supported-static-interior-slice",
+        "not-applicable-discrete-indices",
+        "supported-permutation-scatter",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -137,12 +147,15 @@ _ENUMS = {
         "supported-static-axis-split",
         "supported-static-axis-index",
         "supported-static-interior-slice",
+        "not-applicable-discrete-indices",
+        "supported-permutation-scatter",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
         "supported-for-floating-source-and-output-via-symbolic-vjp",
         "supported-for-floating-output-via-symbolic-vjp",
         "supported-for-floating-input-via-symbolic-vjp",
+        "not-applicable-discrete-output",
     }),
     "vmap": frozenset({
         "supported-leading-batch-axis",
@@ -171,6 +184,7 @@ _ENUMS = {
         "supported-opset17-concat-with-casts-float32-int32-int64-bool",
         "supported-opset17-unsqueeze-concat-with-casts-float32-int32-int64-bool",
         "supported-opset17-pad-float32-int32-int64",
+        "supported-opset17-full-axis-topk-gather-float32-int32-int64",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -179,6 +193,7 @@ _ENUMS = {
         "refused-no-portable-triangular-selection",
         "refused-no-canonical-variadic-copy-lowering",
         "refused-no-canonical-pad-lowering",
+        "refused-no-canonical-sort-lowering",
         "refused-no-canonical-tile-layout-profile",
         "refused-no-canonical-selected-axis-replication-profile",
         "refused-no-portable-lowering",
@@ -228,6 +243,7 @@ _VARIADIC_DTYPE_BYTES = MappingProxyType({
     "float64": 8,
 })
 _PAD_DTYPES = _VARIADIC_DTYPES
+_SORT_DTYPES = _VARIADIC_DTYPES
 _PAD_INTEGER_TYPES = (
     int,
     np.int8,
@@ -840,6 +856,113 @@ def infer_pad_contract(
     )
 
 
+def _sort_source_metadata(source: Any) -> Tuple[Tuple[int, ...], str]:
+    shape = getattr(source, "shape", None)
+    if type(shape) is not tuple:
+        raise ShapeError("sort: source shape must be a tuple")
+    if len(shape) > SORT_RANK_MAX:
+        raise ShapeError(
+            f"sort: source rank {len(shape)} exceeds the {SORT_RANK_MAX}-rank ceiling"
+        )
+    elements = 1
+    for axis, extent in enumerate(shape):
+        if type(extent) is not int or extent < 0:
+            raise ShapeError(
+                f"sort: source shape[{axis}] must be a non-negative integer"
+            )
+        if extent > SORT_OUTPUT_EXTENT_MAX:
+            raise ShapeError(
+                f"sort: source extent {extent} on axis {axis} exceeds the "
+                f"{SORT_OUTPUT_EXTENT_MAX}-element per-axis ceiling"
+            )
+        elements *= extent
+    dtype = getattr(source, "dtype", None)
+    if dtype not in _SORT_DTYPES:
+        raise ShapeError(f"sort: source dtype {dtype!r} is not supported")
+    output_bytes = elements * (_VARIADIC_DTYPE_BYTES[dtype] + 8)
+    if output_bytes > SORT_OUTPUT_BYTE_MAX:
+        raise ShapeError(
+            f"sort: paired outputs require {output_bytes} bytes, exceeding the "
+            f"{SORT_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    return shape, dtype
+
+
+def normalize_sort_request(
+    source: Any,
+    dim: Any,
+    descending: Any,
+    stable: Any,
+) -> Tuple[int, bool, bool]:
+    shape, _ = _sort_source_metadata(source)
+    if type(dim) not in _PAD_INTEGER_TYPES:
+        raise ShapeError(
+            f"sort: dim must be a built-in or NumPy integer scalar, got {type(dim).__name__}"
+        )
+    if type(descending) is not bool:
+        raise ShapeError(
+            f"sort: descending must be a boolean, got {type(descending).__name__}"
+        )
+    if type(stable) is not bool:
+        raise ShapeError(f"sort: stable must be a boolean, got {type(stable).__name__}")
+    raw_axis = int(dim)
+    if not shape:
+        if raw_axis not in (-1, 0):
+            raise ShapeError(f"sort: dim {raw_axis} out of range for a scalar input")
+        return 0, descending, stable
+    axis = raw_axis + len(shape) if raw_axis < 0 else raw_axis
+    if axis < 0 or axis >= len(shape):
+        raise ShapeError(f"sort: dim {raw_axis} out of range for rank {len(shape)}")
+    if shape[axis] > SORT_AXIS_MAX:
+        raise ShapeError(
+            f"sort: selected axis extent {shape[axis]} exceeds the "
+            f"{SORT_AXIS_MAX}-element sorting ceiling"
+        )
+    return axis, descending, stable
+
+
+def infer_sort_contract(
+    source: Any,
+    axis: Any,
+    descending: Any,
+    stable: Any,
+) -> Tuple[int, bool, bool]:
+    shape, _ = _sort_source_metadata(source)
+    if type(axis) is not int:
+        raise ShapeError("sort: IR axis must be a normalized integer")
+    if type(descending) is not bool or type(stable) is not bool:
+        raise ShapeError("sort: IR descending and stable flags must be booleans")
+    if not shape:
+        if axis != 0:
+            raise ShapeError("sort: scalar IR axis must be canonical zero")
+    elif axis < 0 or axis >= len(shape):
+        raise ShapeError(f"sort: IR axis {axis} out of range for rank {len(shape)}")
+    elif shape[axis] > SORT_AXIS_MAX:
+        raise ShapeError(
+            f"sort: selected axis extent {shape[axis]} exceeds the "
+            f"{SORT_AXIS_MAX}-element sorting ceiling"
+        )
+    return axis, descending, stable
+
+
+def stable_sort_indices_array(
+    array: np.ndarray,
+    axis: int,
+    descending: bool,
+) -> np.ndarray:
+    """Return deterministic stable indices without dtype-changing negation."""
+    if array.ndim == 0:
+        return np.asarray(0, dtype=np.int64)
+    if descending:
+        reversed_array = np.flip(array, axis=axis)
+        reversed_indices = np.argsort(reversed_array, axis=axis, kind="stable")
+        descending_indices = np.flip(reversed_indices, axis=axis)
+        result = array.shape[axis] - 1 - descending_indices
+    else:
+        result = np.argsort(array, axis=axis, kind="stable")
+    return np.array(result, dtype=np.int64, copy=True)
+
+
 def _validate_cat(
     node: Any,
     contract: FrameworkOperationContract,
@@ -936,6 +1059,76 @@ def _validate_pad(
     if getattr(node, "dtype", None) != getattr(inputs[0], "dtype", None):
         raise ShapeError("PAD must preserve the source dtype")
     return pad_width, value
+
+
+def _sort_arg(node: Any, opcode: str) -> Tuple[int, bool, bool]:
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError(f"{opcode} arg must be a plain dict")
+    required = {"axis", "descending", "stable"}
+    fields = set(arg)
+    if not required.issubset(fields) or not fields.issubset(required | {"vjp_of"}):
+        raise ShapeError(
+            f"{opcode} arg fields must be exactly 'axis', 'descending', and "
+            "'stable' plus optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError(f"{opcode} arg.vjp_of must reference a UOp")
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or not inputs:
+        raise ShapeError(f"{opcode} must have a source input")
+    return infer_sort_contract(
+        inputs[0],
+        arg["axis"],
+        arg["descending"],
+        arg["stable"],
+    )
+
+
+def _validate_sort_indices(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> Tuple[int, bool, bool]:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = _require_single_input_tuple(node, "SORT_INDICES")
+    source = inputs[0]
+    normalized = _sort_arg(node, "SORT_INDICES")
+    if getattr(node, "shape", None) != getattr(source, "shape", None):
+        raise ShapeError("SORT_INDICES must preserve the source shape")
+    if getattr(node, "dtype", None) != "int64":
+        raise ShapeError("SORT_INDICES output dtype must be int64")
+    return normalized
+
+
+def _validate_sort_values(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> Tuple[int, bool, bool]:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
+        )
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or len(inputs) != 2:
+        raise ShapeError("SORT_VALUES must have source and SORT_INDICES inputs")
+    source, indices = inputs
+    normalized = _sort_arg(node, "SORT_VALUES")
+    if getattr(node, "shape", None) != getattr(source, "shape", None):
+        raise ShapeError("SORT_VALUES must preserve the source shape")
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("SORT_VALUES must preserve the source dtype")
+    if getattr(indices, "op", None) != "SORT_INDICES":
+        raise ShapeError("SORT_VALUES second input must be typed SORT_INDICES")
+    index_inputs = getattr(indices, "inputs", None)
+    if type(index_inputs) is not tuple or len(index_inputs) != 1 or index_inputs[0] is not source:
+        raise ShapeError("SORT_VALUES indices must derive from the exact same source")
+    index_normalized = validate_sort_indices_contract(indices)
+    if index_normalized != normalized:
+        raise ShapeError("SORT_VALUES and SORT_INDICES ordering arguments must match")
+    return normalized
 
 
 def _validate_narrow(node: Any) -> Tuple[int, int, int]:
@@ -1513,6 +1706,8 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.var.v1": _validate_var,
     "browsergrad.jit.framework.tensor.repeat.v1": _validate_repeat,
     "browsergrad.jit.framework.tensor.repeat-interleave.v1": _validate_repeat_interleave,
+    "browsergrad.jit.framework.tensor.sort-indices.v1": _validate_sort_indices,
+    "browsergrad.jit.framework.tensor.sort-values.v1": _validate_sort_values,
     "browsergrad.jit.framework.tensor.sign.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.sin.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.stack.v1": _validate_stack,
@@ -1595,6 +1790,20 @@ def validate_pad_contract(node: Any) -> Tuple[Tuple[Tuple[int, int], ...], Any]:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.pad.v1":
         raise ShapeError("PAD resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_sort_indices_contract(node: Any) -> Tuple[int, bool, bool]:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.sort-indices.v1":
+        raise ShapeError("SORT_INDICES resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_sort_values_contract(node: Any) -> Tuple[int, bool, bool]:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.sort-values.v1":
+        raise ShapeError("SORT_VALUES resolved to the wrong framework-operation contract")
     return normalized
 
 
@@ -1744,6 +1953,10 @@ __all__ = [
     "PAD_RANK_MAX",
     "PAD_OUTPUT_BYTE_MAX",
     "PAD_OUTPUT_EXTENT_MAX",
+    "SORT_RANK_MAX",
+    "SORT_AXIS_MAX",
+    "SORT_OUTPUT_BYTE_MAX",
+    "SORT_OUTPUT_EXTENT_MAX",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "framework_operation_support",
@@ -1752,8 +1965,11 @@ __all__ = [
     "infer_cat_contract",
     "infer_stack_contract",
     "infer_pad_contract",
+    "infer_sort_contract",
     "normalize_pad_request",
     "normalize_pad_value",
+    "normalize_sort_request",
+    "stable_sort_indices_array",
     "promote_variadic_dtypes",
     "validate_framework_operation_contract",
     "validate_internal_operation_contract",
@@ -1761,6 +1977,8 @@ __all__ = [
     "validate_cat_contract",
     "validate_stack_contract",
     "validate_pad_contract",
+    "validate_sort_indices_contract",
+    "validate_sort_values_contract",
     "validate_clamp_contract",
     "validate_cumsum_contract",
     "validate_flip_contract",

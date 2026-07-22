@@ -30,12 +30,10 @@
         "forwardOnlyLabels": [
           "einsum",
           "scatter",
-          "sort_indices",
-          "sort_values",
           "topk_indices",
           "topk_values"
         ],
-        "forwardOnlyRequiresGrad": [false, false, false, false, false, false],
+        "forwardOnlyRequiresGrad": [false, false, false, false],
         "functionalDisconnectedGradient": [0, 0, 0, 0]
       }
     },

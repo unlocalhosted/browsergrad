@@ -647,8 +647,8 @@ def cumsum(input, dim=0, *, dtype=None, out=None):
     return _cumsum(input, dim=dim, dtype=dtype, out=out)
 
 
-def sort(x, dim=-1, descending=False):
-    return _sort(x, dim=dim, descending=descending)
+def sort(x, dim=-1, descending=False, *, stable=False, out=None):
+    return _sort(x, dim=dim, descending=descending, stable=stable, out=out)
 
 
 def triu(input, diagonal=0):

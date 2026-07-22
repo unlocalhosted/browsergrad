@@ -19,7 +19,8 @@ Scope (v0):
     framework operations additionally cover ABS, SIGN, SIN, COS, CLAMP
     (→Clip), FLIP (→Slice), INDEX (→GatherElements), PROD (→ReduceProd),
     VAR (→ReduceMean/Sub/Mul/ReduceSum/Div), TRIL/TRIU (→Trilu), REPEAT (→Tile), and
-    REPEAT_INTERLEAVE (→Unsqueeze/Tile/Reshape), and constant PAD (→Pad).
+    REPEAT_INTERLEAVE (→Unsqueeze/Tile/Reshape), constant PAD (→Pad), and
+    paired sort indices/values (→TopK/GatherElements).
     Plus lifecycle
     (BUFFER/LOAD/CONST).
   * Opset 17 (axes as attribute on ReduceSum/Mean/Max — opset 18 made
@@ -68,6 +69,7 @@ from ._ir import (
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_PAD,
+    OP_SORT_INDICES, OP_SORT_VALUES,
     OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
@@ -78,6 +80,8 @@ from ._framework_contracts import (
     validate_cat_contract,
     validate_stack_contract,
     validate_pad_contract,
+    validate_sort_indices_contract,
+    validate_sort_values_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -736,6 +740,59 @@ def export_inference(
                 "GatherElements",
                 [_emit_attr_int("axis", axis)],
             ))
+        elif node.op == OP_SORT_INDICES:
+            axis, descending, _ = validate_sort_indices_contract(node)
+            source = node.inputs[0]
+            if not source.shape or source.shape[axis] == 0:
+                raise OnnxUnmappableOp(
+                    "export_inference: SORT_INDICES requires a non-scalar, "
+                    "nonempty selected axis for ONNX TopK"
+                )
+            if source.dtype not in ("float32", "int32", "int64"):
+                raise OnnxUnmappableOp(
+                    f"export_inference: sort source dtype {source.dtype!r} is not "
+                    "exportable; supported dtypes are float32, int32, and int64"
+                )
+            suffix = next_node_id - 1
+            k_name = f"const_sort_k_{suffix}"
+            initializers.append(_emit_tensor_proto(
+                k_name,
+                DT_INT64,
+                (1,),
+                _i64_initializer_for_shape((source.shape[axis],)),
+            ))
+            unused_values_name = f"unused_sort_values_{suffix}"
+            nodes.append(_emit_node(
+                [input_names[0], k_name],
+                [unused_values_name, out_name],
+                nm,
+                "TopK",
+                [
+                    _emit_attr_int("axis", axis),
+                    _emit_attr_int("largest", 1 if descending else 0),
+                    _emit_attr_int("sorted", 1),
+                ],
+            ))
+        elif node.op == OP_SORT_VALUES:
+            axis, _, _ = validate_sort_values_contract(node)
+            source = node.inputs[0]
+            if not source.shape or source.shape[axis] == 0:
+                raise OnnxUnmappableOp(
+                    "export_inference: SORT_VALUES requires a non-scalar, "
+                    "nonempty selected axis for ONNX TopK/GatherElements"
+                )
+            if node.dtype not in ("float32", "int32", "int64"):
+                raise OnnxUnmappableOp(
+                    f"export_inference: SORT_VALUES dtype {node.dtype!r} is not "
+                    "exportable; supported dtypes are float32, int32, and int64"
+                )
+            nodes.append(_emit_node(
+                input_names,
+                [out_name],
+                nm,
+                "GatherElements",
+                [_emit_attr_int("axis", axis)],
+            ))
         elif node.op == OP_PROD:
             axes, keepdims, _ = validate_prod_contract(node)
             if node.dtype not in ("float32", "int32", "int64"):
@@ -868,7 +925,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_PAD, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

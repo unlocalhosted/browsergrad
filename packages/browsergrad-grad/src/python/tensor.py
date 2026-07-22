@@ -88,6 +88,10 @@ _VARIADIC_OUTPUT_BYTE_MAX = 1 << 28
 _PAD_RANK_MAX = 32
 _PAD_OUTPUT_BYTE_MAX = 1 << 28
 _PAD_OUTPUT_EXTENT_MAX = _PAD_OUTPUT_BYTE_MAX
+_SORT_RANK_MAX = 32
+_SORT_AXIS_MAX = 1 << 20
+_SORT_OUTPUT_BYTE_MAX = 1 << 28
+_SORT_OUTPUT_EXTENT_MAX = _SORT_OUTPUT_BYTE_MAX
 
 
 def _normalize_prod_axes(value, rank: int) -> tuple:
@@ -297,6 +301,68 @@ def _normalize_pad_contract(input, pad, mode, value):
         require_finite_float=True,
     )
     return canonical, normalized_value, output_shape
+
+
+def _normalize_sort_contract(input, dim, descending, stable):
+    if type(input) is not Tensor:
+        raise TypeError(f"sort: input must be a Tensor, got {type(input).__name__}")
+    if input.dtype not in _MASKED_FILL_DTYPES:
+        raise ValueError(f"sort: input dtype {input.dtype!r} is not supported")
+    if input.ndim > _SORT_RANK_MAX:
+        raise ValueError(
+            f"sort: input rank {input.ndim} exceeds the {_SORT_RANK_MAX}-rank ceiling"
+        )
+    elements = 1
+    for axis_index, extent in enumerate(input.shape):
+        if extent > _SORT_OUTPUT_EXTENT_MAX:
+            raise ValueError(
+                f"sort: input extent {extent} on axis {axis_index} exceeds the "
+                f"{_SORT_OUTPUT_EXTENT_MAX}-element per-axis ceiling"
+            )
+        elements *= extent
+    output_bytes = elements * (_VARIADIC_DTYPE_BYTES[input.dtype] + 8)
+    if output_bytes > _SORT_OUTPUT_BYTE_MAX:
+        raise ValueError(
+            f"sort: paired outputs require {output_bytes} bytes, exceeding the "
+            f"{_SORT_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    if type(dim) not in _EXACT_INTEGER_SCALAR_TYPES:
+        raise TypeError(
+            f"sort: dim must be a built-in or NumPy integer scalar, got {type(dim).__name__}"
+        )
+    if type(descending) is not bool:
+        raise TypeError(
+            f"sort: descending must be a boolean, got {type(descending).__name__}"
+        )
+    if type(stable) is not bool:
+        raise TypeError(f"sort: stable must be a boolean, got {type(stable).__name__}")
+    raw_axis = int(dim)
+    if input.ndim == 0:
+        if raw_axis not in (-1, 0):
+            raise ValueError(f"sort: dim {raw_axis} out of range for a scalar input")
+        return 0, descending, stable
+    axis = raw_axis + input.ndim if raw_axis < 0 else raw_axis
+    if axis < 0 or axis >= input.ndim:
+        raise ValueError(f"sort: dim {raw_axis} out of range for rank {input.ndim}")
+    if input.shape[axis] > _SORT_AXIS_MAX:
+        raise ValueError(
+            f"sort: selected axis extent {input.shape[axis]} exceeds the "
+            f"{_SORT_AXIS_MAX}-element sorting ceiling"
+        )
+    return axis, descending, stable
+
+
+def _stable_sort_indices_array(array, axis: int, descending: bool):
+    if array.ndim == 0:
+        return np.asarray(0, dtype=np.int64)
+    if descending:
+        reversed_array = np.flip(array, axis=axis)
+        reversed_indices = np.argsort(reversed_array, axis=axis, kind="stable")
+        descending_indices = np.flip(reversed_indices, axis=axis)
+        result = array.shape[axis] - 1 - descending_indices
+    else:
+        result = np.argsort(array, axis=axis, kind="stable")
+    return np.array(result, dtype=np.int64, copy=True)
 
 
 def _normalize_masked_fill_inputs(source, mask, value):
@@ -835,6 +901,9 @@ class Tensor:
         idx = sort_idx[tuple(slices)]
         values = np.take_along_axis(self.data, idx, axis=ax)
         return Tensor(values.astype(np.float32)), Tensor(idx.astype(np.float32))
+
+    def sort(self, dim=-1, descending=False, *, stable=False):
+        return sort(self, dim=dim, descending=descending, stable=stable)
 
     def expand(self, *shape) -> "Tensor":
         """Broadcast size-1 dims to a larger size. Returns a tensor that
@@ -2024,17 +2093,35 @@ def cumsum(x, dim=0, *, dtype=None, out=None) -> Tensor:
     return out_tensor
 
 
-def sort(x, dim: int = -1, descending: bool = False):
-    """Sort along dim. Returns (values, indices). Non-differentiable."""
-    xw = _wrap(x)
-    ax = dim % xw.data.ndim if xw.data.ndim > 0 else 0
-    sort_idx = np.argsort(xw.data, axis=ax)
-    if descending:
-        slices = [slice(None)] * xw.data.ndim
-        slices[ax] = slice(None, None, -1)
-        sort_idx = sort_idx[tuple(slices)]
-    values = np.take_along_axis(xw.data, sort_idx, axis=ax)
-    return Tensor(values.astype(np.float32)), Tensor(sort_idx.astype(np.int64), dtype="int64")
+def sort(x, dim=-1, descending=False, *, stable=False, out=None):
+    """Sort along one axis and return owning values plus int64 indices."""
+    if out is not None:
+        raise NotImplementedError(
+            "sort: out= is not supported because eager mutation has no shared effect contract"
+        )
+    ax, descending_flag, _ = _normalize_sort_contract(x, dim, descending, stable)
+    sort_idx = _stable_sort_indices_array(x.data, ax, descending_flag)
+    if x.ndim == 0:
+        values_data = np.array(x.data, dtype=x.data.dtype, copy=True)
+    else:
+        values_data = np.take_along_axis(x.data, sort_idx, axis=ax)
+    values = Tensor(
+        np.array(values_data, dtype=x.data.dtype, copy=True),
+        dtype=x.dtype,
+    )
+    indices = Tensor(np.array(sort_idx, dtype=np.int64, copy=True), dtype="int64")
+    gradient_indices = np.array(sort_idx, dtype=np.int64, copy=True)
+
+    def backward(g):
+        if x.ndim == 0:
+            return (np.array(g.data, dtype=x.data.dtype, copy=True),)
+        gradient = np.zeros_like(x.data)
+        np.put_along_axis(gradient, gradient_indices, g.data, axis=ax)
+        return (gradient.astype(x.data.dtype, copy=False),)
+
+    if x.requires_grad and x.dtype in _VARIADIC_FLOATING_DTYPES:
+        values = _build_ctx(values, (x,), backward)
+    return values, indices
 
 
 def minimum(a, b) -> Tensor:

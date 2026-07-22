@@ -321,6 +321,48 @@
       "retiredOpaqueOperationId": "jit.custom.sin.v0"
     },
     {
+      "contractId": "browsergrad.jit.framework.tensor.sort-indices.v1",
+      "publicSurface": "torch.sort.indices",
+      "opcode": "SORT_INDICES",
+      "semanticState": "typed",
+      "shapeContract": "same-shape-axis-ordering",
+      "dtypeContract": "values-preserve-input-indices-int64",
+      "decisions": {
+        "cpu": "supported-numpy-owning-stable-sort-indices",
+        "closureAutograd": "not-applicable-discrete-indices",
+        "symbolicVjp": "not-applicable-discrete-indices",
+        "functionalGrad": "not-applicable-discrete-output",
+        "vmap": "supported-leading-batch-axis-with-axis-shift",
+        "onnxExport": "supported-opset17-full-axis-topk-gather-float32-int32-int64",
+        "tensorPlan": "refused-no-canonical-sort-lowering",
+        "webgpu": "refused-no-tensor-plan-kernel",
+        "residency": "host-materialized",
+        "materialization": "cpu-owning-copy"
+      },
+      "retiredOpaqueOperationId": "jit.custom.sort-indices.v0"
+    },
+    {
+      "contractId": "browsergrad.jit.framework.tensor.sort-values.v1",
+      "publicSurface": "torch.sort.values",
+      "opcode": "SORT_VALUES",
+      "semanticState": "typed",
+      "shapeContract": "same-shape-axis-ordering",
+      "dtypeContract": "values-preserve-input-indices-int64",
+      "decisions": {
+        "cpu": "supported-numpy-owning-sort-gather",
+        "closureAutograd": "supported-permutation-scatter",
+        "symbolicVjp": "supported-permutation-scatter",
+        "functionalGrad": "supported-for-floating-input-via-symbolic-vjp",
+        "vmap": "supported-leading-batch-axis-with-axis-shift",
+        "onnxExport": "supported-opset17-full-axis-topk-gather-float32-int32-int64",
+        "tensorPlan": "refused-no-canonical-sort-lowering",
+        "webgpu": "refused-no-tensor-plan-kernel",
+        "residency": "host-materialized",
+        "materialization": "cpu-owning-copy"
+      },
+      "retiredOpaqueOperationId": "jit.custom.sort-values.v0"
+    },
+    {
       "contractId": "browsergrad.jit.framework.tensor.stack.v1",
       "publicSurface": "torch.stack",
       "opcode": "STACK",

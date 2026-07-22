@@ -217,6 +217,48 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.pad.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.tensor.sort-indices.v1",
+      publicSurface: "torch.sort.indices",
+      opcode: "SORT_INDICES",
+      semanticState: "typed",
+      shapeContract: "same-shape-axis-ordering",
+      dtypeContract: "values-preserve-input-indices-int64",
+      decisions: {
+        cpu: "supported-numpy-owning-stable-sort-indices",
+        closureAutograd: "not-applicable-discrete-indices",
+        symbolicVjp: "not-applicable-discrete-indices",
+        functionalGrad: "not-applicable-discrete-output",
+        vmap: "supported-leading-batch-axis-with-axis-shift",
+        onnxExport: "supported-opset17-full-axis-topk-gather-float32-int32-int64",
+        tensorPlan: "refused-no-canonical-sort-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.sort-indices.v0",
+    },
+    {
+      contractId: "browsergrad.jit.framework.tensor.sort-values.v1",
+      publicSurface: "torch.sort.values",
+      opcode: "SORT_VALUES",
+      semanticState: "typed",
+      shapeContract: "same-shape-axis-ordering",
+      dtypeContract: "values-preserve-input-indices-int64",
+      decisions: {
+        cpu: "supported-numpy-owning-sort-gather",
+        closureAutograd: "supported-permutation-scatter",
+        symbolicVjp: "supported-permutation-scatter",
+        functionalGrad: "supported-for-floating-input-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-axis-shift",
+        onnxExport: "supported-opset17-full-axis-topk-gather-float32-int32-int64",
+        tensorPlan: "refused-no-canonical-sort-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.sort-values.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.prod.v1",
       publicSurface: "Tensor.prod",
       opcode: "PROD",
@@ -446,7 +488,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(20);
+    expect(result.first.operations).toHaveLength(22);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

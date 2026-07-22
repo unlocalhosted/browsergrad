@@ -47,7 +47,7 @@ from ._ir import (
     OP_CONV3D_BACKWARD_BIAS, OP_LAYER_NORM,
     OP_LAYER_NORM_BACKWARD_INPUT, OP_LAYER_NORM_BACKWARD_WEIGHT,
     OP_LAYER_NORM_BACKWARD_BIAS, OP_REDUCE,
-    OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
+    OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_BROADCAST_TO,
@@ -62,6 +62,8 @@ from ._framework_contracts import (
     validate_cat_contract,
     validate_stack_contract,
     validate_pad_contract,
+    validate_sort_indices_contract,
+    validate_sort_values_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -77,6 +79,7 @@ from ._framework_contracts import (
     validate_repeat_interleave_contract,
     validate_real_numeric_unary_contract,
     validate_typed_unary_contract,
+    stable_sort_indices_array,
 )
 
 
@@ -1063,6 +1066,22 @@ def _h_pad(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     return np.array(padded, dtype=np.dtype(node.dtype), copy=True)
 
 
+def _h_sort_indices(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    axis, descending, _ = validate_sort_indices_contract(node)
+    source = vt[id(node.inputs[0])]
+    return stable_sort_indices_array(source, axis, descending)
+
+
+def _h_sort_values(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    axis, _, _ = validate_sort_values_contract(node)
+    source = vt[id(node.inputs[0])]
+    indices = vt[id(node.inputs[1])]
+    if source.ndim == 0:
+        return np.array(source, dtype=np.dtype(node.dtype), copy=True)
+    values = np.take_along_axis(source, indices, axis=axis)
+    return np.array(values, dtype=np.dtype(node.dtype), copy=True)
+
+
 def _h_where(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     validate_where_contract(node)
     cond = vt[id(node.inputs[0])]
@@ -1393,6 +1412,8 @@ _DISPATCH: dict[str, Handler] = {
     OP_PERMUTE: _h_permute,
     OP_SLICE:   _h_slice,
     OP_PAD:     _h_pad,
+    OP_SORT_INDICES: _h_sort_indices,
+    OP_SORT_VALUES: _h_sort_values,
     OP_WHERE:   _h_where,
     OP_INDEX:   _h_index,
     OP_MASK:    _h_mask,

@@ -68,7 +68,8 @@ from ._ir import (
     OP_WHERE, OP_BROADCAST_TO, OP_ISNAN, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
-    OP_PAD, OP_SLICE, OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
+    OP_PAD, OP_SLICE, OP_SORT_INDICES, OP_SORT_VALUES,
+    OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
     OP_STORE,
 )
@@ -79,6 +80,8 @@ from ._framework_contracts import (
     validate_cat_contract,
     validate_stack_contract,
     validate_pad_contract,
+    validate_sort_indices_contract,
+    validate_sort_values_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -649,6 +652,66 @@ def _vmap_pad(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
         shape=(B,) + node.shape,
         dtype=node.dtype,
         arg={"pad_width": mapped_pad_width, "mode": "constant", "value": value},
+    )
+
+
+@register_vmap(OP_SORT_INDICES)
+def _vmap_sort_indices(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    """Shift the logical sort axis past one leading mapped axis."""
+    axis, descending, stable = validate_sort_indices_contract(node)
+    source = node.inputs[0]
+    inner = batched[id(source)]
+    if inner.shape == source.shape:
+        return node
+    if inner.shape != (B,) + source.shape:
+        raise JitNotImplementedError(
+            "vmap sort requires its source to be captured or on the leading mapped axis"
+        )
+    if not source.shape:
+        zero = UOp(OP_CONST, (), (), "int64", arg={"value": 0})
+        return UOp(
+            OP_BROADCAST_TO,
+            (zero,),
+            (B,),
+            "int64",
+            arg={"shape": (B,)},
+        )
+    return UOp(
+        op=OP_SORT_INDICES,
+        inputs=(inner,),
+        shape=(B,) + node.shape,
+        dtype="int64",
+        arg={"axis": axis + 1, "descending": descending, "stable": stable},
+    )
+
+
+@register_vmap(OP_SORT_VALUES)
+def _vmap_sort_values(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    """Map the source and its paired ordering together."""
+    axis, descending, stable = validate_sort_values_contract(node)
+    source, indices = node.inputs
+    mapped_source = batched[id(source)]
+    mapped_indices = batched[id(indices)]
+    source_batched = mapped_source.shape != source.shape
+    indices_batched = mapped_indices.shape != indices.shape
+    if source_batched != indices_batched:
+        raise JitNotImplementedError(
+            "vmap sort values require source and indices to share the leading batch axis"
+        )
+    if not source_batched:
+        return node
+    if mapped_source.shape != (B,) + source.shape:
+        raise JitNotImplementedError(
+            "vmap sort requires its source on the leading mapped axis"
+        )
+    if not source.shape:
+        return mapped_source
+    return UOp(
+        op=OP_SORT_VALUES,
+        inputs=(mapped_source, mapped_indices),
+        shape=(B,) + node.shape,
+        dtype=node.dtype,
+        arg={"axis": axis + 1, "descending": descending, "stable": stable},
     )
 
 

@@ -83,6 +83,11 @@ contract in the README](README.md#compatibility-contract).
   allocation semantics, owning CPU realization, typed interior-slice
   closure/symbolic VJP, batch-safe vmap, exact ONNX `Pad`, and explicit
   tensor-plan/WebGPU refusal until canonical padding/layout lowering exists.
+- `torch.sort` now emits paired typed `SORT_INDICES` and `SORT_VALUES` with one
+  strict axis/ordering contract, deterministic stable CPU permutations,
+  dtype-preserving owning values and int64 indices, permutation-scatter
+  closure/symbolic VJP, batch-safe vmap, exact ONNX `TopK`/`GatherElements`,
+  bounded work/output, and explicit tensor-plan/WebGPU refusal.
 
 ### Added
 
@@ -90,7 +95,8 @@ contract in the README](README.md#compatibility-contract).
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
   current table contains `ABS`, `CLAMP`, `CONCAT`, `COS`, `CUMSUM`, `BROADCAST_TO`, `FLIP`,
-  `INDEX`, `PAD`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`, `STACK`,
+  `INDEX`, `PAD`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`,
+  `SORT_INDICES`, `SORT_VALUES`, `STACK`,
   `TRIL`, `TRIU`, `VAR`, and masked-fill `WHERE`.
 
 ## [0.9.0] — 2026-07-15
