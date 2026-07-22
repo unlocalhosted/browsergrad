@@ -269,7 +269,6 @@ def check(label, output, source):
     gradient_present[label] = source.grad is not None
 
 a = leaf([[1.0, 3.0], [5.0, 7.0]]); check("batch_norm1d", bg.nn.BatchNorm1d(2, affine=False)(a), a)
-a = leaf([-1.0, 1.0]); check("binary_cross_entropy_with_logits", F.binary_cross_entropy_with_logits(a, constant([0.0, 1.0])), a)
 a = leaf([[1.0, 2.0], [3.0, 1.0]]); check("cross_entropy", F.cross_entropy(a, constant([1, 0], np.int64)), a)
 np.random.seed(17)
 a = leaf([[1.0, 1.0], [1.0, 1.0]]); check("dropout", F.dropout(a, p=0.5, training=True), a)

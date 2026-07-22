@@ -7,6 +7,27 @@ const FRAMEWORK_SUPPORT = {
   version: { major: 1, minor: 0 },
   operations: [
     {
+      contractId: "browsergrad.jit.framework.functional.binary-cross-entropy-with-logits.v1",
+      publicSurface: "torch.nn.functional.binary_cross_entropy_with_logits",
+      opcode: "BINARY_CROSS_ENTROPY_WITH_LOGITS",
+      semanticState: "typed",
+      shapeContract: "same-shape-elementwise-loss-with-batched-reduction",
+      dtypeContract: "promote-floating-inputs-with-fp32-half-accumulator",
+      decisions: {
+        cpu: "supported-numpy-owning-stable-bce-with-logits-reduction",
+        closureAutograd: "supported-stable-bce-with-logits-derivatives-for-both-inputs",
+        symbolicVjp: "supported-stable-bce-with-logits-derivatives-for-both-inputs",
+        functionalGrad: "supported-for-both-floating-inputs-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-per-example-reduction",
+        onnxExport: "supported-opset17-stable-bce-with-logits-float16-float32-float64",
+        tensorPlan: "refused-no-canonical-loss-reduction-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-array",
+      },
+      retiredOpaqueOperationId: "jit.custom.binary-cross-entropy-with-logits.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.functional.binary-cross-entropy.v1",
       publicSurface: "torch.nn.functional.binary_cross_entropy",
       opcode: "BINARY_CROSS_ENTROPY",
@@ -635,7 +656,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(29);
+    expect(result.first.operations).toHaveLength(30);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

@@ -28,10 +28,13 @@ class BCEWithLogitsLoss(Module):
       max(x, 0) - x*y + log(1 + exp(-|x|))
     so very large/small logits don't overflow.
     """
-    def forward(self, logits: Tensor, targets) -> Tensor:
-        return F.bce_with_logits_loss(logits, targets)
+    def __init__(self, reduction: str = "mean"):
+        super().__init__()
+        self.reduction = reduction
+    def forward(self, logits: Tensor, targets: Tensor) -> Tensor:
+        return F.bce_with_logits_loss(logits, targets, reduction=self.reduction)
     def __repr__(self):
-        return "BCEWithLogitsLoss()"
+        return f"BCEWithLogitsLoss(reduction={self.reduction!r})"
 
 
 class BCELoss(Module):
@@ -89,4 +92,3 @@ class KLDivLoss(Module):
 
 # The MultiheadAttention lowercase alias is set at the BOTTOM of this module,
 # after MultiHeadAttention is defined.
-

@@ -104,6 +104,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   forward logarithms to `-100`, snapshots the independent input and unclamped
   target derivatives, and returns both gradients in source dtype instead of
   clipping probabilities and disconnecting the target.
+- `functional.binary_cross_entropy_with_logits` and
+  `functional.bce_with_logits_loss` now share JIT's strict same-shape floating
+  promotion, stable finite-extreme softplus math, exact reductions,
+  empty/scalar, bounded work, and workspace contract. They snapshot stable
+  logits and exact target derivatives, preserve both source dtypes, and reject
+  unsupported weighting explicitly. `nn.BCEWithLogitsLoss` now carries its
+  reduction, and the exact PyTorch functional alias is installed.
 
 ## [0.5.2] — 2026-07-15
 

@@ -155,36 +155,77 @@ def cross_entropy_loss(logits: Tensor, targets) -> Tensor:
     return _build_ctx(out, (logits,), lambda g: (g.data * grad_logits,))
 
 
-def bce_with_logits_loss(logits: Tensor, targets) -> Tensor:
-    """Binary cross-entropy from logits, numerically stable.
-
-    Matches torch.nn.functional.binary_cross_entropy_with_logits with the
-    default reduction='mean'. Stable formula:
-      per_element = max(logits, 0) - logits * targets + log(1 + exp(-|logits|))
-      loss = per_element.mean()
-
-    Gradient (derived from sigmoid + cross-entropy):
-      d(loss)/d(logit_i) = (sigmoid(logit_i) - target_i) / N
-    """
-    if isinstance(targets, Tensor):
-        t_data = targets.data.astype(np.float32)
-    else:
-        t_data = np.asarray(targets, dtype=np.float32)
-    x = logits.data
-    if t_data.shape != x.shape:
-        raise ValueError(
-            f"bce_with_logits_loss: logits shape {x.shape} ≠ targets shape {t_data.shape}"
+def bce_with_logits_loss(
+    logits: Tensor,
+    targets: Tensor,
+    reduction: str = "mean",
+) -> Tensor:
+    """Typed, numerically stable binary cross entropy from raw logits."""
+    if not isinstance(logits, Tensor):
+        raise TypeError(
+            "binary_cross_entropy_with_logits: logits must be a Tensor, got "
+            f"{type(logits).__name__}"
         )
-    abs_x = np.abs(x)
-    max_x_0 = np.maximum(x, 0.0)
-    log1pexp = np.log1p(np.exp(-abs_x))
-    per_element = max_x_0 - x * t_data + log1pexp
-    loss_data = float(per_element.mean())
-    out = Tensor(np.float32(loss_data))
-    sigmoid = 1.0 / (1.0 + np.exp(-x))
-    n = float(x.size)
-    grad_logits = (sigmoid - t_data) / n
-    return _build_ctx(out, (logits,), lambda g: (g.data * grad_logits.astype(np.float32),))
+    if not isinstance(targets, Tensor):
+        raise TypeError(
+            "binary_cross_entropy_with_logits: targets must be a Tensor, got "
+            f"{type(targets).__name__}"
+        )
+    contract = _elementwise_loss_contract(
+        logits,
+        targets,
+        reduction,
+        "binary_cross_entropy_with_logits",
+        _BINARY_CROSS_ENTROPY_WITH_LOGITS_WORK_VISIT_FACTOR,
+        compute_buffers=4,
+        mask_buffers=1,
+    )
+    shape, _, _, _, compute_dtype, _ = contract
+    dtype = np.dtype(compute_dtype)
+    logits_array = logits.data.astype(dtype, copy=False)
+    targets_array = targets.data.astype(dtype, copy=False)
+
+    softplus_negative = np.empty(shape, dtype=dtype)
+    np.abs(logits_array, out=softplus_negative)
+    np.negative(softplus_negative, out=softplus_negative)
+    with np.errstate(over="ignore", invalid="ignore"):
+        np.exp(softplus_negative, out=softplus_negative)
+        np.log1p(softplus_negative, out=softplus_negative)
+    negative_logits = np.empty(shape, dtype=dtype)
+    np.negative(logits_array, out=negative_logits)
+    np.maximum(negative_logits, 0.0, out=negative_logits)
+    np.add(softplus_negative, negative_logits, out=softplus_negative)
+
+    per_element = np.empty(shape, dtype=dtype)
+    np.subtract(1.0, targets_array, out=per_element)
+    np.multiply(per_element, logits_array, out=per_element)
+    np.add(per_element, softplus_negative, out=per_element)
+    per_element[per_element == 0.0] = 0.0
+
+    # Reuse the forward temporaries to retain exact stable derivatives for
+    # eager backward without holding another copy of either source tensor.
+    input_derivative = softplus_negative
+    np.abs(logits_array, out=input_derivative)
+    np.negative(input_derivative, out=input_derivative)
+    with np.errstate(over="ignore", invalid="ignore"):
+        np.exp(input_derivative, out=input_derivative)
+    denominator = negative_logits
+    np.add(1.0, input_derivative, out=denominator)
+    np.divide(input_derivative, denominator, out=input_derivative)
+    nonnegative = logits_array >= 0.0
+    np.divide(1.0, denominator, out=input_derivative, where=nonnegative)
+    np.subtract(input_derivative, targets_array, out=input_derivative)
+    target_derivative = np.empty(shape, dtype=dtype)
+    np.negative(logits_array, out=target_derivative)
+    return _finish_typed_elementwise_loss(
+        logits,
+        targets,
+        reduction,
+        contract,
+        per_element,
+        input_derivative,
+        target_derivative,
+    )
 
 
 def one_hot(indices, num_classes: int) -> Tensor:
@@ -283,6 +324,7 @@ _SMOOTH_L1_LOSS_WORK_VISIT_FACTOR = 32
 _BINARY_CROSS_ENTROPY_WORK_VISIT_FACTOR = 48
 _BINARY_CROSS_ENTROPY_LOG_FLOOR = -100.0
 _BINARY_CROSS_ENTROPY_GRAD_EPSILON = 1e-12
+_BINARY_CROSS_ENTROPY_WITH_LOGITS_WORK_VISIT_FACTOR = 36
 _SMOOTH_L1_BETA_TYPES = (
     int,
     float,
@@ -943,3 +985,4 @@ def scaled_dot_product_attention(query: Tensor, key: Tensor, value: Tensor,
 cross_entropy = cross_entropy_loss
 nll = nll_loss
 bce_with_logits = bce_with_logits_loss
+binary_cross_entropy_with_logits = bce_with_logits_loss

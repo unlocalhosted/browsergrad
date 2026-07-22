@@ -23,6 +23,7 @@ from ._ir import (
     OP_CONV_TRANSPOSE2D, OP_CONV3D,
     OP_LAYER_NORM, OP_REDUCE, OP_DIV, OP_PAD, OP_L1_LOSS, OP_SMOOTH_L1_LOSS,
     OP_BINARY_CROSS_ENTROPY,
+    OP_BINARY_CROSS_ENTROPY_WITH_LOGITS,
 )
 from ._tensor_proxy import (
     TensorProxy, _BackwardCtx, _should_track, _to_proxy, from_numpy, where,
@@ -32,9 +33,11 @@ from ._framework_contracts import (
     execute_l1_loss_vjp_array,
     execute_smooth_l1_loss_vjp_array,
     execute_binary_cross_entropy_vjp_array,
+    execute_binary_cross_entropy_with_logits_vjp_array,
     infer_l1_loss_contract,
     infer_smooth_l1_loss_contract,
     infer_binary_cross_entropy_contract,
+    infer_binary_cross_entropy_with_logits_contract,
     normalize_pad_request,
 )
 
@@ -560,67 +563,57 @@ def binary_cross_entropy_with_logits(
     targets: TensorProxy,
     reduction: str = "mean",
 ) -> TensorProxy:
-    """Binary cross-entropy from raw logits.
-
-    Stable formula:
-      max(x, 0) - x*y + log(1 + exp(-abs(x)))
-    Backward:
-      sigmoid(x) - y, scaled by the reduction.
-    """
-    targets = _to_proxy(targets, logits._get_session())
-    if logits.shape != targets.shape:
+    """Typed, numerically stable binary cross entropy from raw logits."""
+    if not isinstance(logits, TensorProxy):
+        raise TypeError(
+            "binary_cross_entropy_with_logits: logits must be a TensorProxy, got "
+            f"{type(logits).__name__}"
+        )
+    if not isinstance(targets, TensorProxy):
+        raise TypeError(
+            "binary_cross_entropy_with_logits: targets must be a TensorProxy, got "
+            f"{type(targets).__name__}"
+        )
+    if targets._get_session() is not logits._get_session():
         raise ShapeError(
-            "binary_cross_entropy_with_logits: logits and targets must have "
-            f"the same shape, got {logits.shape} vs {targets.shape}"
+            "binary_cross_entropy_with_logits: logits and targets must belong "
+            "to the same session"
         )
-    if reduction not in ("mean", "sum", "none"):
-        raise ValueError(
-            f"binary_cross_entropy_with_logits: unknown reduction {reduction!r}"
-        )
-    sess = logits._get_session()
-
-    def _bce_forward(logits_arr: np.ndarray, targets_arr: np.ndarray) -> np.ndarray:
-        x = logits_arr.astype(np.float32, copy=False)
-        y = targets_arr.astype(np.float32, copy=False)
-        per_elem = np.maximum(x, 0.0) - x * y + np.log1p(np.exp(-np.abs(x)))
-        if reduction == "mean":
-            return np.asarray(per_elem.mean(), dtype=x.dtype)
-        if reduction == "sum":
-            return np.asarray(per_elem.sum(), dtype=x.dtype)
-        return per_elem.astype(x.dtype, copy=False)
-
-    out_shape: Tuple[int, ...] = () if reduction in ("mean", "sum") else logits.shape
+    contract = infer_binary_cross_entropy_with_logits_contract(
+        (logits._uop, targets._uop),
+        reduction,
+        0,
+    )
     uop = UOp(
-        op=OP_CUSTOM,
+        op=OP_BINARY_CROSS_ENTROPY_WITH_LOGITS,
         inputs=(logits._uop, targets._uop),
-        shape=out_shape,
-        dtype=logits.dtype,
-        arg={
-            "fn": _bce_forward,
-            "captures": (),
-            "name": "binary_cross_entropy_with_logits",
-        },
+        shape=contract.output_shape,
+        dtype=contract.output_dtype,
+        arg={"reduction": contract.reduction, "batch_rank": contract.batch_rank},
     )
 
-    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
-        logits_arr, targets_arr = ins
-        sigmoid = np.empty_like(logits_arr, dtype=np.float32)
-        positive = logits_arr >= 0
-        sigmoid[positive] = 1.0 / (1.0 + np.exp(-logits_arr[positive]))
-        exp_x = np.exp(logits_arr[~positive])
-        sigmoid[~positive] = exp_x / (1.0 + exp_x)
-        grad_logits = sigmoid - targets_arr
-        if reduction == "mean":
-            grad_logits *= dy / float(logits_arr.size)
-        elif reduction == "sum":
-            grad_logits *= dy
-        else:
-            grad_logits *= dy
-        return (grad_logits.astype(logits_arr.dtype, copy=False), None)
+    def _bw(
+        dy: np.ndarray,
+        ins: Tuple[np.ndarray, ...],
+    ) -> Tuple[Optional[np.ndarray], ...]:
+        arrays = (ins[0], ins[1])
+        return (
+            execute_binary_cross_entropy_with_logits_vjp_array(
+                contract, 0, dy, arrays
+            ),
+            execute_binary_cross_entropy_with_logits_vjp_array(
+                contract, 1, dy, arrays
+            ),
+        )
 
-    requires = _should_track(logits)
+    requires = _should_track(logits, targets)
     ctx = _BackwardCtx(fn=_bw, input_proxies=(logits, targets)) if requires else None
-    return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
+    return TensorProxy(
+        uop,
+        session=logits._get_session(),
+        requires_grad=requires,
+        ctx=ctx,
+    )
 
 
 def one_hot(indices: Any, num_classes: int) -> TensorProxy:

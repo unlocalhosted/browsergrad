@@ -68,7 +68,6 @@
         "environment": {"pyodide": "0.26.4", "numpy": "1.26.4"},
         "observedLabels": [
           "batch_norm1d",
-          "binary_cross_entropy_with_logits",
           "cross_entropy",
           "dropout",
           "interpolate",
@@ -78,7 +77,6 @@
         "allLabelsMatch": true,
         "closureGradientLabels": [
           "batch_norm1d",
-          "binary_cross_entropy_with_logits",
           "cross_entropy",
           "dropout",
           "interpolate",

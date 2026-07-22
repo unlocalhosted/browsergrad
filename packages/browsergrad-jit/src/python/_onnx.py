@@ -22,7 +22,8 @@ Scope (v0):
     REPEAT_INTERLEAVE (→Unsqueeze/Tile/Reshape), constant PAD (→Pad),
     SCATTER (→ScatterElements), EINSUM (→Einsum), L1_LOSS
     (→Sub/Abs/ReduceSum or ReduceMean), SMOOTH_L1_LOSS
-    (→Sub/Abs/Less/Mul/Where/reduce), and paired sort and selected top-k
+    (→Sub/Abs/Less/Mul/Where/reduce), BCE with logits
+    (→Neg/Softplus/Sub/Mul/Add/reduce), and paired sort and selected top-k
     indices/values (→TopK/GatherElements).
     Plus lifecycle
     (BUFFER/LOAD/CONST).
@@ -76,6 +77,7 @@ from ._ir import (
     OP_SORT_INDICES, OP_SORT_VALUES,
     OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_L1_LOSS,
     OP_SMOOTH_L1_LOSS, OP_BINARY_CROSS_ENTROPY,
+    OP_BINARY_CROSS_ENTROPY_WITH_LOGITS,
     OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
@@ -95,6 +97,7 @@ from ._framework_contracts import (
     validate_l1_loss_contract,
     validate_smooth_l1_loss_contract,
     validate_binary_cross_entropy_contract,
+    validate_binary_cross_entropy_with_logits_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -508,6 +511,7 @@ def export_inference(
             OP_L1_LOSS,
             OP_SMOOTH_L1_LOSS,
             OP_BINARY_CROSS_ENTROPY,
+            OP_BINARY_CROSS_ENTROPY_WITH_LOGITS,
         ) and node.dtype not in _LEGACY_GRAPH_DTYPES:
             raise OnnxUnmappableOp(
                 f"export_inference: {node.op} dtype {node.dtype!r} is not "
@@ -858,6 +862,108 @@ def export_inference(
                 "validation that every input and target probability is finite and in "
                 "[0, 1]; ONNX opset 17 cannot represent that rejection contract"
             )
+        elif node.op == OP_BINARY_CROSS_ENTROPY_WITH_LOGITS:
+            contract = validate_binary_cross_entropy_with_logits_contract(node)
+            suffix = next_node_id - 1
+            compute_dtype = "float32" if node.dtype == "float16" else node.dtype
+            loss_inputs = []
+            for index, (source, source_name) in enumerate(zip(node.inputs, input_names)):
+                loss_input = source_name
+                if source.dtype != compute_dtype:
+                    cast_name = f"bce_with_logits_cast_{suffix}_{index}"
+                    nodes.append(_emit_node(
+                        [source_name],
+                        [cast_name],
+                        f"{nm}_cast_{index}",
+                        "Cast",
+                        [_emit_attr_int("to", _dtype_or_die(compute_dtype))],
+                    ))
+                    loss_input = cast_name
+                loss_inputs.append(loss_input)
+
+            one_name = f"bce_with_logits_one_{suffix}"
+            initializers.append(_emit_tensor_proto(
+                one_name,
+                _dtype_or_die(compute_dtype),
+                (),
+                _initializer_bytes_for_scalar(1.0, compute_dtype),
+            ))
+            negative_logits_name = f"bce_with_logits_negative_{suffix}"
+            softplus_name = f"bce_with_logits_softplus_{suffix}"
+            one_minus_target_name = f"bce_with_logits_one_minus_target_{suffix}"
+            linear_name = f"bce_with_logits_linear_{suffix}"
+            per_element_name = f"bce_with_logits_per_element_{suffix}"
+            nodes.append(_emit_node(
+                [loss_inputs[0]],
+                [negative_logits_name],
+                f"{nm}_negative",
+                "Neg",
+            ))
+            nodes.append(_emit_node(
+                [negative_logits_name],
+                [softplus_name],
+                f"{nm}_softplus",
+                "Softplus",
+            ))
+            nodes.append(_emit_node(
+                [one_name, loss_inputs[1]],
+                [one_minus_target_name],
+                f"{nm}_one_minus_target",
+                "Sub",
+            ))
+            nodes.append(_emit_node(
+                [one_minus_target_name, loss_inputs[0]],
+                [linear_name],
+                f"{nm}_linear",
+                "Mul",
+            ))
+            nodes.append(_emit_node(
+                [linear_name, softplus_name],
+                [per_element_name],
+                f"{nm}_per_element",
+                "Add",
+            ))
+
+            reduction_axes = tuple(range(contract.batch_rank, len(contract.input_shape)))
+            compute_result_name = (
+                out_name
+                if compute_dtype == node.dtype
+                else f"bce_with_logits_compute_result_{suffix}"
+            )
+            if contract.reduction == "none":
+                nodes.append(_emit_node(
+                    [per_element_name],
+                    [compute_result_name],
+                    f"{nm}_identity",
+                    "Identity",
+                ))
+            elif reduction_axes:
+                reduction_op = "ReduceSum" if contract.reduction == "sum" else "ReduceMean"
+                nodes.append(_emit_node(
+                    [per_element_name],
+                    [compute_result_name],
+                    f"{nm}_reduce",
+                    reduction_op,
+                    [
+                        _emit_attr_ints("axes", reduction_axes),
+                        _emit_attr_int("keepdims", 0),
+                    ],
+                ))
+            else:
+                nodes.append(_emit_node(
+                    [per_element_name],
+                    [compute_result_name],
+                    f"{nm}_identity",
+                    "Identity",
+                ))
+            if compute_dtype != node.dtype:
+                nodes.append(_emit_node(
+                    [compute_result_name],
+                    [out_name],
+                    f"{nm}_output_cast",
+                    "Cast",
+                    [_emit_attr_int("to", _dtype_or_die(node.dtype))],
+                ))
         elif node.op == OP_CONCAT:
             axis, _, legacy_empty = validate_cat_contract(node)
             if node.dtype not in ("float32", "int32", "int64", "bool"):
