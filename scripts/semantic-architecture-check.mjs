@@ -734,7 +734,7 @@ function checkJitFrameworkOperationContracts(root, manifest, failures) {
   ];
   const allowed = {
     semanticState: new Set(["typed"]),
-    shapeContract: new Set(["preserve-batched-lower-triangular", "preserve-single-axis-reverse", "preserve-source-with-broadcast-bool-mask", "preserve-unary-input", "same-rank-index-shaped-gather", "selected-axis-times-repeat-count", "static-broadcast-with-existing-dim-minus-one", "static-product-reduction", "static-variance-reduction", "tile-multipliers-with-left-rank-padding"]),
+    shapeContract: new Set(["preserve-batched-lower-triangular", "preserve-batched-upper-triangular", "preserve-single-axis-reverse", "preserve-source-with-broadcast-bool-mask", "preserve-unary-input", "same-rank-index-shaped-gather", "selected-axis-times-repeat-count", "static-broadcast-with-existing-dim-minus-one", "static-product-reduction", "static-variance-reduction", "tile-multipliers-with-left-rank-padding"]),
     dtypeContract: new Set(["preserve-floating-input", "preserve-input", "preserve-input-require-bool-mask", "preserve-real-numeric-input", "preserve-source-require-int64-index"]),
     cpu: new Set(["supported-numpy-dtype-preserving", "supported-numpy-owning-copy", "supported-numpy-owning-copy-with-range-check"]),
     closureAutograd: new Set(["supported-centered-variance-rule", "supported-cos-derivative", "supported-deterministic-scatter-add", "supported-idempotent-triangular-selection", "supported-inclusive-bound-mask", "supported-involutive-flip", "supported-mask-complement-selection", "supported-negative-sin-derivative", "supported-selected-axis-block-sum", "supported-sign-derivative", "supported-tile-block-sum", "supported-unbroadcast-sum", "supported-zero-aware-product-rule", "supported-zero-derivative"]),

@@ -69,6 +69,11 @@ Each package follows independent [SemVer](https://semver.org/).
   idempotent closure and symbolic VJP, batch-safe vmap, ONNX `Trilu`, and
   explicit device refusal. Grad shares the same values, dtype, saturation,
   gradient, and refusal fixture.
+- Migrates JIT `Tensor.triu` from the final opaque triangular callback to typed
+  upper selection with the shared strict triangular contract, owning CPU
+  results, idempotent closure and symbolic VJP, batch-safe vmap, exact ONNX
+  `Trilu upper=1`, and explicit device refusal. Grad and JIT now consume one
+  two-variant triangular conformance harness.
 
 ## 2026-07 — semantic-core, kernels, compiler, and JIT semantic migration
 

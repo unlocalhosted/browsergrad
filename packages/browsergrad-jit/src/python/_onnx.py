@@ -18,7 +18,7 @@ Scope (v0):
     (→Equal/Greater/Less), and BROADCAST_TO (→Expand). Registry-admitted
     framework operations additionally cover ABS, SIGN, SIN, COS, CLAMP
     (→Clip), FLIP (→Slice), INDEX (→GatherElements), PROD (→ReduceProd),
-    VAR (→ReduceMean/Sub/Mul/ReduceSum/Div), TRIL (→Trilu), REPEAT (→Tile), and
+    VAR (→ReduceMean/Sub/Mul/ReduceSum/Div), TRIL/TRIU (→Trilu), REPEAT (→Tile), and
     REPEAT_INTERLEAVE (→Unsqueeze/Tile/Reshape). Plus lifecycle
     (BUFFER/LOAD/CONST).
   * Opset 17 (axes as attribute on ReduceSum/Mean/Max — opset 18 made
@@ -54,7 +54,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_TRIL, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -77,6 +77,7 @@ from ._framework_contracts import (
     validate_clamp_contract,
     validate_flip_contract,
     validate_tril_contract,
+    validate_triu_contract,
     validate_gather_contract,
     validate_prod_contract,
     validate_var_contract,
@@ -549,10 +550,15 @@ def export_inference(
                 ))
                 slice_inputs.append(initializer_name)
             nodes.append(_emit_node(slice_inputs, [out_name], nm, "Slice"))
-        elif node.op == OP_TRIL:
-            diagonal = validate_tril_contract(node)
+        elif node.op in (OP_TRIL, OP_TRIU):
+            upper = node.op == OP_TRIU
+            diagonal = (
+                validate_triu_contract(node)
+                if upper
+                else validate_tril_contract(node)
+            )
             _dtype_or_die(node.dtype)
-            diagonal_name = f"const_tril_diagonal_{next_node_id - 1}"
+            diagonal_name = f"const_{node.op.lower()}_diagonal_{next_node_id - 1}"
             initializers.append(_emit_tensor_proto(
                 diagonal_name,
                 DT_INT64,
@@ -564,7 +570,7 @@ def export_inference(
                 [out_name],
                 nm,
                 "Trilu",
-                [_emit_attr_int("upper", 0)],
+                [_emit_attr_int("upper", int(upper))],
             ))
         elif node.op == OP_INDEX:
             axis = validate_gather_contract(node)
@@ -708,7 +714,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_TRIL, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

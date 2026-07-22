@@ -197,6 +197,15 @@ ONNX emits `Trilu` with `upper=0` for float32, int32, int64, and bool.
 Tensor-plan and WebGPU explicitly refuse until portable triangular selection
 exists.
 
+`Tensor.triu()` and top-level `triu(input, diagonal)` emit the corresponding
+typed `TRIU` over the same final two axes and share the exact rank, dtype, and
+non-coercive diagonal admission contract with `TRIL`. Its canonical nonempty
+diagonal range is `[1 - rows, columns]`, spanning the unique all-input through
+all-zero representatives. CPU, closure/symbolic VJP, and leading-axis vmap
+apply the same idempotent upper selection. ONNX emits `Trilu` with `upper=1`
+for float32, int32, int64, and bool; tensor-plan and WebGPU retain the same
+explicit portable-lowering refusal.
+
 `Tensor.repeat()` emits typed `REPEAT` for bounded exact integer tile
 multipliers. CPU realization returns an owning dtype-preserving array;
 closure and symbolic gradients sum interleaved tile blocks; vmap prepends a

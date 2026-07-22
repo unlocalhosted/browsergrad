@@ -59,6 +59,7 @@ _ENUMS = {
         "preserve-unary-input",
         "preserve-single-axis-reverse",
         "preserve-batched-lower-triangular",
+        "preserve-batched-upper-triangular",
         "same-rank-index-shaped-gather",
         "preserve-source-with-broadcast-bool-mask",
         "static-broadcast-with-existing-dim-minus-one",
@@ -161,7 +162,7 @@ _REAL_NUMERIC_DTYPES = frozenset({
 })
 _FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
 _MASKED_FILL_DTYPES = _REAL_NUMERIC_DTYPES | frozenset({"bool"})
-_TRIL_DTYPES = _MASKED_FILL_DTYPES
+_TRIANGULAR_DTYPES = _MASKED_FILL_DTYPES
 _UNARY_DTYPE_PROFILES = MappingProxyType({
     "preserve-floating-input": (_FLOATING_DTYPES, "floating"),
     "preserve-real-numeric-input": (_REAL_NUMERIC_DTYPES, "real numeric"),
@@ -468,45 +469,64 @@ def _validate_flip(node: Any, contract: FrameworkOperationContract) -> int:
     return axis
 
 
-def _validate_tril(node: Any, contract: FrameworkOperationContract) -> int:
+def _validate_triangular(
+    node: Any,
+    contract: FrameworkOperationContract,
+    *,
+    upper: bool,
+) -> int:
+    opcode = contract.opcode
     if getattr(node, "op", None) != contract.opcode:
         raise ShapeError(
             f"{contract.contract_id} validator received opcode {getattr(node, 'op', None)!r}"
         )
-    inputs = _require_single_input_tuple(node, contract.opcode)
+    inputs = _require_single_input_tuple(node, opcode)
     arg = getattr(node, "arg", None)
     if type(arg) is not dict:
-        raise ShapeError("TRIL arg must be a plain dict")
+        raise ShapeError(f"{opcode} arg must be a plain dict")
     fields = set(arg)
     if "diagonal" not in fields or not fields.issubset({"diagonal", "vjp_of"}):
         raise ShapeError(
-            "TRIL arg fields must be exactly 'diagonal' plus optional 'vjp_of'"
+            f"{opcode} arg fields must be exactly 'diagonal' plus optional 'vjp_of'"
         )
     if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
-        raise ShapeError("TRIL arg.vjp_of must reference a UOp")
+        raise ShapeError(f"{opcode} arg.vjp_of must reference a UOp")
     source = inputs[0]
     source_shape = getattr(source, "shape", None)
     if type(source_shape) is not tuple or len(source_shape) < 2:
-        raise ShapeError("TRIL requires an input with rank at least two")
+        raise ShapeError(f"{opcode} requires an input with rank at least two")
     if getattr(node, "shape", None) != source_shape:
-        raise ShapeError("TRIL must preserve its input shape")
+        raise ShapeError(f"{opcode} must preserve its input shape")
     if getattr(node, "dtype", None) != getattr(source, "dtype", None):
-        raise ShapeError("TRIL must preserve its input dtype")
-    if getattr(node, "dtype", None) not in _TRIL_DTYPES:
+        raise ShapeError(f"{opcode} must preserve its input dtype")
+    if getattr(node, "dtype", None) not in _TRIANGULAR_DTYPES:
         raise ShapeError(
-            f"TRIL does not support dtype {getattr(node, 'dtype', None)!r}"
+            f"{opcode} does not support dtype {getattr(node, 'dtype', None)!r}"
         )
     diagonal = arg["diagonal"]
     if type(diagonal) is not int:
-        raise ShapeError("TRIL arg.diagonal must be a normalized integer")
+        raise ShapeError(f"{opcode} arg.diagonal must be a normalized integer")
     rows, columns = source_shape[-2:]
-    minimum, maximum = (0, 0) if rows == 0 or columns == 0 else (-rows, columns - 1)
+    if rows == 0 or columns == 0:
+        minimum, maximum = 0, 0
+    elif upper:
+        minimum, maximum = 1 - rows, columns
+    else:
+        minimum, maximum = -rows, columns - 1
     if diagonal < minimum or diagonal > maximum:
         raise ShapeError(
-            f"TRIL arg.diagonal {diagonal} is outside canonical range "
+            f"{opcode} arg.diagonal {diagonal} is outside canonical range "
             f"[{minimum}, {maximum}] for matrix shape {(rows, columns)}"
         )
     return diagonal
+
+
+def _validate_tril(node: Any, contract: FrameworkOperationContract) -> int:
+    return _validate_triangular(node, contract, upper=False)
+
+
+def _validate_triu(node: Any, contract: FrameworkOperationContract) -> int:
+    return _validate_triangular(node, contract, upper=True)
 
 
 def _validate_gather(node: Any, contract: FrameworkOperationContract) -> int:
@@ -935,6 +955,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.tensor.sign.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.sin.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.tril.v1": _validate_tril,
+    "browsergrad.jit.framework.tensor.triu.v1": _validate_triu,
 })
 _RECORDS = _load_registry()
 if frozenset(_VALIDATORS) != frozenset(record.contract_id for record in _RECORDS):
@@ -995,6 +1016,13 @@ def validate_tril_contract(node: Any) -> int:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.tril.v1":
         raise ShapeError("TRIL resolved to the wrong framework-operation contract")
+    return normalized
+
+
+def validate_triu_contract(node: Any) -> int:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.tensor.triu.v1":
+        raise ShapeError("TRIU resolved to the wrong framework-operation contract")
     return normalized
 
 
@@ -1111,6 +1139,7 @@ __all__ = [
     "validate_gather_contract",
     "validate_gather_scatter_add_contract",
     "validate_tril_contract",
+    "validate_triu_contract",
     "validate_masked_fill_contract",
     "validate_where_contract",
     "validate_prod_contract",

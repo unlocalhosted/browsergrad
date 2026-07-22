@@ -34,18 +34,19 @@ browsergrad_jit.__version__
     expect(version).toBe(pkg.version);
   });
 
-  it("exposes 66 opcodes in ALL_OPS (core + typed framework + CNN + norm + fusion + autograd + AMP + optimizer)", async () => {
+  it("exposes 67 opcodes in ALL_OPS (core + typed framework + CNN + norm + fusion + autograd + AMP + optimizer)", async () => {
     const target = await getJitTarget();
     const ops = await target.run<string[]>(`
 from browsergrad_jit._ir import ALL_OPS
 sorted(ALL_OPS)
 `);
-    expect(ops).toHaveLength(66);
+    expect(ops).toHaveLength(67);
     expect(ops).toContain("ABS");
     expect(ops).toContain("CLAMP");
     expect(ops).toContain("COS");
     expect(ops).toContain("FLIP");
     expect(ops).toContain("TRIL");
+    expect(ops).toContain("TRIU");
     expect(ops).toContain("INDEX");
     expect(ops).toContain("PROD");
     expect(ops).toContain("VAR");

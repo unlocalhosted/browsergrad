@@ -279,6 +279,27 @@
       "retiredOpaqueOperationId": "jit.custom.tril.v0"
     },
     {
+      "contractId": "browsergrad.jit.framework.tensor.triu.v1",
+      "publicSurface": "Tensor.triu",
+      "opcode": "TRIU",
+      "semanticState": "typed",
+      "shapeContract": "preserve-batched-upper-triangular",
+      "dtypeContract": "preserve-input",
+      "decisions": {
+        "cpu": "supported-numpy-owning-copy",
+        "closureAutograd": "supported-idempotent-triangular-selection",
+        "symbolicVjp": "supported-idempotent-triangular-selection",
+        "functionalGrad": "supported-via-symbolic-vjp",
+        "vmap": "supported-leading-batch-axis-preserve-matrix-axes",
+        "onnxExport": "supported-opset17-trilu-float32-int32-int64-bool",
+        "tensorPlan": "refused-no-portable-triangular-selection",
+        "webgpu": "refused-no-tensor-plan-kernel",
+        "residency": "host-materialized",
+        "materialization": "cpu-owning-copy"
+      },
+      "retiredOpaqueOperationId": "jit.custom.triu.v0"
+    },
+    {
       "contractId": "browsergrad.jit.framework.tensor.var.v1",
       "publicSurface": "Tensor.var",
       "opcode": "VAR",

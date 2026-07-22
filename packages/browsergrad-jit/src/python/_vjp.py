@@ -48,7 +48,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from ._ir import (
     UOp,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_TRIL, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CAST, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -69,6 +69,7 @@ from ._framework_contracts import (
     validate_clamp_contract,
     validate_flip_contract,
     validate_tril_contract,
+    validate_triu_contract,
     validate_gather_contract,
     validate_prod_contract,
     validate_var_contract,
@@ -335,6 +336,21 @@ def _vjp_tril(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[U
     (source,) = inputs
     return (_vjp_uop(
         OP_TRIL,
+        (dy,),
+        source.shape,
+        source.dtype,
+        output,
+        arg={"diagonal": diagonal},
+    ),)
+
+
+@register_vjp(OP_TRIU)
+def _vjp_triu(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """Upper-triangular selection is idempotent and therefore its own VJP."""
+    diagonal = validate_triu_contract(output)
+    (source,) = inputs
+    return (_vjp_uop(
+        OP_TRIU,
         (dy,),
         source.shape,
         source.dtype,

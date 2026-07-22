@@ -58,6 +58,11 @@ contract in the README](README.md#compatibility-contract).
   shape/dtype in owning CPU results, applies triangular selection in closure
   and symbolic VJP, supports leading-axis vmap, exports ONNX `Trilu`, and
   refuses tensor-plan/WebGPU until portable triangular selection exists.
+- `Tensor.triu` now emits typed `TRIU` through the shared triangular
+  normalizer/validator, preserves owning source-shaped/source-dtype CPU
+  results, applies upper selection in closure and symbolic VJP, supports
+  leading-axis vmap, exports exact ONNX `Trilu` with `upper=1`, and refuses
+  tensor-plan/WebGPU until portable triangular selection exists.
 
 ### Added
 
@@ -66,7 +71,7 @@ contract in the README](README.md#compatibility-contract).
   come from the same validator bindings used by execution boundaries; the
   current table contains `ABS`, `CLAMP`, `COS`, `BROADCAST_TO`, `FLIP`,
   `INDEX`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`, `TRIL`,
-  `VAR`, and masked-fill `WHERE`.
+  `TRIU`, `VAR`, and masked-fill `WHERE`.
 
 ## [0.9.0] — 2026-07-15
 

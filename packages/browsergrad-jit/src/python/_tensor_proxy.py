@@ -45,7 +45,7 @@ from ._ir import (
     UOp,
     OP_BUFFER,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_TRIL, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM, OP_BROADCAST_TO, OP_INDEX,
@@ -94,7 +94,7 @@ _MASKED_FILL_DTYPES = frozenset({
     "float16", "float32", "float64",
     "int8", "int16", "int32", "int64", "uint8", "bool",
 })
-_TRIL_DTYPES = _MASKED_FILL_DTYPES
+_TRIANGULAR_DTYPES = _MASKED_FILL_DTYPES
 
 
 class no_grad:
@@ -150,18 +150,27 @@ def _normalize_single_axis(op_name: str, value: Any, rank: int) -> int:
     return axis
 
 
-def _normalize_tril_diagonal(value: Any, shape: Tuple[int, ...]) -> int:
+def _normalize_triangular_diagonal(
+    value: Any,
+    shape: Tuple[int, ...],
+    *,
+    upper: bool,
+) -> int:
+    operation = "triu" if upper else "tril"
     if len(shape) < 2:
-        raise ShapeError(f"tril: input must have rank at least two, got {len(shape)}")
+        raise ShapeError(
+            f"{operation}: input must have rank at least two, got {len(shape)}"
+        )
     if type(value) not in _EXACT_INTEGER_SCALAR_TYPES:
         raise ShapeError(
-            "tril: diagonal must be a built-in or NumPy integer scalar, "
+            f"{operation}: diagonal must be a built-in or NumPy integer scalar, "
             f"got {type(value).__name__}"
         )
     rows, columns = shape[-2:]
     if rows == 0 or columns == 0:
         return 0
-    return min(columns - 1, max(-rows, int(value)))
+    minimum, maximum = (1 - rows, columns) if upper else (-rows, columns - 1)
+    return min(maximum, max(minimum, int(value)))
 
 
 def _validate_gather_index_values(index: np.ndarray, axis_extent: int) -> None:
@@ -1046,12 +1055,19 @@ class TensorProxy:
         return TensorProxy(uop, session=self._get_session(),
                            requires_grad=requires, ctx=ctx)
 
-    def tril(self, diagonal: Any = 0) -> "TensorProxy":
-        if self.dtype not in _TRIL_DTYPES:
-            raise ShapeError(f"tril: dtype {self.dtype!r} is not supported")
-        diagonal_i = _normalize_tril_diagonal(diagonal, self.shape)
+    def _triangular(self, diagonal: Any, *, upper: bool) -> "TensorProxy":
+        operation = "triu" if upper else "tril"
+        opcode = OP_TRIU if upper else OP_TRIL
+        selector = np.triu if upper else np.tril
+        if self.dtype not in _TRIANGULAR_DTYPES:
+            raise ShapeError(f"{operation}: dtype {self.dtype!r} is not supported")
+        diagonal_i = _normalize_triangular_diagonal(
+            diagonal,
+            self.shape,
+            upper=upper,
+        )
         uop = UOp(
-            op=OP_TRIL,
+            op=opcode,
             inputs=(self._uop,),
             shape=self.shape,
             dtype=self.dtype,
@@ -1059,13 +1075,19 @@ class TensorProxy:
         )
 
         def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:
-            gradient = np.tril(dy, k=diagonal_i)
+            gradient = selector(dy, k=diagonal_i)
             return (np.array(gradient, dtype=np.dtype(self.dtype), copy=True),)
 
         requires = _should_track(self)
         ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
         return TensorProxy(uop, session=self._get_session(),
                            requires_grad=requires, ctx=ctx)
+
+    def tril(self, diagonal: Any = 0) -> "TensorProxy":
+        return self._triangular(diagonal, upper=False)
+
+    def triu(self, diagonal: Any = 0) -> "TensorProxy":
+        return self._triangular(diagonal, upper=True)
 
     def _reduce(self, op: str, axis: Any = None, keepdims: bool = False) -> "TensorProxy":
         # Normalize axis to a tuple or None.
@@ -2472,27 +2494,7 @@ def _topk(x: Any, k: int, dim: int = -1, largest: bool = True):
 
 def triu(input: Any, diagonal: int = 0) -> "TensorProxy":
     proxy = _to_proxy(input, None)
-
-    def _triu_forward(x_arr: np.ndarray) -> np.ndarray:
-        return np.triu(x_arr, k=int(diagonal)).copy()
-
-    uop = UOp(
-        op=OP_CUSTOM,
-        inputs=(proxy._uop,),
-        shape=proxy.shape,
-        dtype=proxy.dtype,
-        arg={"fn": _triu_forward, "captures": (), "name": "triu"},
-    )
-
-    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
-        (x_arr,) = ins
-        mask = np.triu(np.ones_like(x_arr), k=int(diagonal))
-        return ((dy * mask).astype(x_arr.dtype, copy=False),)
-
-    requires = _should_track(proxy)
-    ctx = _BackwardCtx(fn=_bw, input_proxies=(proxy,)) if requires else None
-    return TensorProxy(uop, session=proxy._get_session(),
-                       requires_grad=requires, ctx=ctx)
+    return proxy.triu(diagonal)
 
 
 def tril(input: Any, diagonal: int = 0) -> "TensorProxy":

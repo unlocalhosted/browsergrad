@@ -52,7 +52,7 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_TRIL, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
+    OP_ABS, OP_CLAMP, OP_COS, OP_FLIP, OP_TRIL, OP_TRIU, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE,
     OP_SIGN, OP_SIN, OP_CMP,
     OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
@@ -79,6 +79,7 @@ from ._framework_contracts import (
     validate_clamp_contract,
     validate_flip_contract,
     validate_tril_contract,
+    validate_triu_contract,
     validate_gather_contract,
     validate_gather_scatter_add_contract,
     validate_prod_contract,
@@ -243,6 +244,23 @@ def _vmap_tril(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
         )
     return UOp(
         op=OP_TRIL,
+        inputs=(inner,),
+        shape=inner.shape,
+        dtype=node.dtype,
+        arg={"diagonal": diagonal},
+    )
+
+
+@register_vmap(OP_TRIU)
+def _vmap_triu(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    diagonal = validate_triu_contract(node)
+    inner = batched[id(node.inputs[0])]
+    if len(inner.shape) != len(node.inputs[0].shape) + 1 or inner.shape[0] != B:
+        raise JitNotImplementedError(
+            "vmap triu requires the source tensor on the leading mapped axis"
+        )
+    return UOp(
+        op=OP_TRIU,
         inputs=(inner,),
         shape=inner.shape,
         dtype=node.dtype,
@@ -790,7 +808,7 @@ def vmap(
         TensorProxy input. Other axes raise.
       * `out_dims=0` only — output's batch ends up at axis 0.
       * Supported opcodes include BUFFER, LOAD, CONST, ADD, MUL, DIV, NEG,
-        EXP, LOG, ABS, CLAMP, COS, FLIP, TRIL, INDEX, REPEAT, VAR, SIGN, SIN, CMP, WHERE,
+        EXP, LOG, ABS, CLAMP, COS, FLIP, TRIL, TRIU, INDEX, REPEAT, VAR, SIGN, SIN, CMP, WHERE,
         CAST, MATMUL, REDUCE, RESHAPE, PERMUTE, SCATTER_ADD, and BROADCAST_TO. Anything else
         raises with a pointer to PRD-014b.
     """
