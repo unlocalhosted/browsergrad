@@ -86,19 +86,19 @@ pnpm --filter @unlocalhosted/browsergrad-compiler run verify:browser-clang-wasm:
 
 It builds once, runs the no-rebuild lock check, and exercises the build-plan,
 runtime-ABI, browser-profile, and browser-asset identity chain sequentially.
-At the current 2026-07-19 checkpoint it passes 437 tests across 50 files in
-35.32 seconds end to end on Node 25; the test phase alone is 24.55 seconds.
+At the current 2026-07-24 checkpoint it passes 736 tests across 84 files in
+about 14 seconds end to end on Node 25.
 The set includes package invocation,
-Worker entry, production-controller lifecycle, seven-archive admission, strict
+Worker entry, production-controller lifecycle, eight-archive admission, strict
 tar/Debian normalization, collision-free source extraction, exact header-tree
 inventory/materialization, exact CUDA redistribution-index admission, the
 complete per-file header distribution review input, exact component-license
 and aggregate-notice materialization, notice verification, and package-pinned
 two-clean-build reproducibility coverage.
 Use `test:browser-clang-wasm-build-plan` for the broader native/sanitizer
-pre-commit gate; its same-checkpoint run passed 239 tests with 9 intentional
-platform skips in 106.12 seconds. Do not run package entrypoints that clean
-`dist` concurrently in one worktree.
+pre-commit gate; its same-checkpoint run passed 261 tests with 9 intentional
+platform skips across 49 files in about 55 seconds. Do not run package
+entrypoints that clean `dist` concurrently in one worktree.
 
 Remote cached validation is diagnostic and ordinarily takes four to five
 minutes. Uncached clean and two-build reproducibility modes remain deliberately
@@ -126,28 +126,31 @@ six exact hashes, and the package-pinned reproducible Wasm before starting a
 browser. `observe` runs the raw-Wasm verifier and compiler Workers in Chromium
 and emits either `compiled` or the exact authenticated blocker. Use
 `verify:browser-cpp-cute-real-compile` with the same arguments for the strict
-Artifact V3 gate; it rejects a `blocked` observation. At the 2026-07-23
-checkpoint, preflight takes under one second and observation takes about seven
-seconds.
+Artifact V3 gate; it rejects a `blocked` observation. At the 2026-07-24
+checkpoint, preflight takes under one second and an unchanged CuTe layout
+compile takes about 21 seconds inside the Worker and about 25 seconds end to
+end.
 
 For source-iteration only, an exact locally hashed fast-build Wasm may be
 observed by adding `--allow-untrusted-diagnostic-wasm`. Its evidence explicitly
 records `untrustedDiagnosticWasm=true` and
 `pinnedReproducibleWasmMatched=false`; strict verification refuses it even if
 compilation succeeds. Worker protocol v2 failure details report bounded
-frontend-work, allocator, and VFS state before cleanup. The current exact
-source completes one CUDA semantic pass after 56,150 macro expansions,
-238,041 tokens, and 49,690 AST nodes, then returns an internal error at the
-one-pass diagnostic/artifact or second-pass boundary. Worker execution,
-lowering, and release authority therefore remain false.
+frontend-work, allocator, and VFS state before cleanup. The current diagnostic
+Wasm completes both CUDA semantic passes over the closed five-pack VFS and
+returns one accepted Artifact V3 for unchanged C++17/CuTe layout source. That
+observation proves real browser Worker execution and source-derived layout
+semantics only; producer trust, header-license approval, lowering authority,
+backend execution, and release authority remain false.
 
-To turn the seven exact locked archives into the five source-derived VFS packs,
+To turn the eight exact locked archives into the five source-derived VFS packs,
 use the one-process command so its opaque authorities remain live:
 
 ```sh
 pnpm --filter @unlocalhosted/browsergrad-compiler run materialize:browser-header-packs-from-archives -- \
   --cuda-cccl-linux-x86-64=/absolute/cccl.tar.xz \
   --cuda-cudart-linux-x86-64=/absolute/cudart.tar.xz \
+  --cuda-libcurand-linux-x86-64=/absolute/libcurand.tar.xz \
   --cuda-nvcc-linux-x86-64=/absolute/nvcc.tar.xz \
   --cutlass=/absolute/cutlass.tar.gz \
   --llvm-project=/absolute/llvm.tar.xz \
@@ -166,7 +169,7 @@ build. It verifies the locked WebAssembly-only Clang configuration has an
 empty generated-header set and excludes the upstream build manifest from the
 distributed pack. It also writes the deterministic
 `assets/browsergrad-cpp-cute/license-inventory.json` review input: every one of
-the 5,768 distributed files is bound to its exact pack identity, component,
+the 5,788 distributed files is bound to its exact pack identity, component,
 package notice, upstream license/copyright evidence, and CUDA index record.
 It then materializes all ten build-lock-declared component-license files plus
 the deterministic 115,316-byte
@@ -194,6 +197,7 @@ independently rehash all 17 outputs in both trees, use:
 pnpm --filter @unlocalhosted/browsergrad-compiler run verify:browser-header-distribution-reproducibility -- \
   --cuda-cccl-linux-x86-64=/absolute/cccl.tar.xz \
   --cuda-cudart-linux-x86-64=/absolute/cudart.tar.xz \
+  --cuda-libcurand-linux-x86-64=/absolute/libcurand.tar.xz \
   --cuda-nvcc-linux-x86-64=/absolute/nvcc.tar.xz \
   --cutlass=/absolute/cutlass.tar.gz \
   --llvm-project=/absolute/llvm.tar.xz \
