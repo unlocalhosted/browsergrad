@@ -228,8 +228,8 @@ vi.mock("../../src/cpp_cute_browser_worker_platform.js", () => ({
             listener({
               data: Object.freeze({
                 kind: "browsergrad-cpp-cute-worker-terminal",
-                version: 1,
-                controllerProtocol: "browsergrad.compiler.cpp-cute.browser-worker-controller@1",
+                version: 2,
+                controllerProtocol: "browsergrad.compiler.cpp-cute.browser-worker-controller@2",
                 invocationId: production.invocationId,
                 invocationNonceSha256: production.nonce,
                 controlBytes: Uint8Array.of(7),

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Adds a fail-closed diagnostic authority for exact fast-build Clang-Wasm
+  bytes. `--allow-untrusted-diagnostic-wasm` permits only a locally hashed
+  real-browser observation; strict compile still requires the package-pinned
+  two-clean-build output and a compiled Artifact V3. Worker controller protocol
+  v2 carries a bounded sanitized deepest failure detail, and failed C-ABI
+  invocations now report exact live frontend-work, allocator, and VFS state
+  before cleanup. The regenerated deterministic zero-import compiler Worker is
+  575,477 bytes at SHA-256
+  `500356a0cb2b6ac1df23124b7bcbe4043c302409f5195d1e847e935804c62bea`.
+- Separates instrumented frontend work from retained Artifact V3 collection
+  ceilings. A request may admit real-header macro and template work up to its
+  profile limits while the artifact verifier independently retains its bounded
+  8,192-record structural ceilings. The exact browser source consequently
+  advanced from a pre-AST macro-limit failure to 56,150 macro expansions,
+  238,041 preprocessed tokens, 49,690 AST nodes, and one completed CUDA
+  semantic pass in about 7.8 seconds. The remaining blocker is now isolated to
+  the one-pass diagnostic/artifact or second-pass boundary; Worker execution,
+  lowering, producer trust, external license approval, and release remain
+  false.
 - Corrects the exact Clang 22 C++/CuTe invocation by removing the unsupported
   `-fno-experimental-new-constant-interpreter` driver option. The native test
   now executes the production device/host argument vectors and separately

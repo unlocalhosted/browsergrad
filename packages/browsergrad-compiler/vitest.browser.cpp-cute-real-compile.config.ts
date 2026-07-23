@@ -14,10 +14,14 @@ interface ExternalAsset {
 
 interface ExternalInputs {
   readonly schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs";
-  readonly version: 1;
+  readonly version: 2;
   readonly authority: "local-exact-byte-preflight-only";
   readonly assets: readonly ExternalAsset[];
-  readonly pinnedReproducibleWasmMatched: true;
+  readonly wasmAuthority:
+    | "package-pinned-two-clean-build-output"
+    | "untrusted-diagnostic-local-byte-observation-only";
+  readonly pinnedReproducibleWasmMatched: boolean;
+  readonly untrustedDiagnosticWasm: boolean;
   readonly headerDistributionLicenseApproved: false;
   readonly producerTrusted: false;
   readonly workerExecutionObserved: false;
@@ -35,7 +39,9 @@ const browserInputs = {
   version: inputs.version,
   authority: inputs.authority,
   assets: inputs.assets.map(({ path: _path, ...asset }) => asset),
+  wasmAuthority: inputs.wasmAuthority,
   pinnedReproducibleWasmMatched: inputs.pinnedReproducibleWasmMatched,
+  untrustedDiagnosticWasm: inputs.untrustedDiagnosticWasm,
   headerDistributionLicenseApproved: inputs.headerDistributionLicenseApproved,
   producerTrusted: inputs.producerTrusted,
   workerExecutionObserved: inputs.workerExecutionObserved,
@@ -85,10 +91,18 @@ function externalAssetServer(): Plugin {
 function parseInputs(value: string | undefined): ExternalInputs {
   if (value === undefined) throw new Error("BG_CPP_CUTE_REAL_COMPILE_INPUTS is required");
   const parsed = JSON.parse(value) as Partial<ExternalInputs>;
+  const pinned =
+    parsed.pinnedReproducibleWasmMatched === true &&
+    parsed.untrustedDiagnosticWasm === false &&
+    parsed.wasmAuthority === "package-pinned-two-clean-build-output";
+  const diagnostic =
+    parsed.pinnedReproducibleWasmMatched === false &&
+    parsed.untrustedDiagnosticWasm === true &&
+    parsed.wasmAuthority === "untrusted-diagnostic-local-byte-observation-only";
   if (parsed.schema !== "browsergrad.compiler.cpp-cute.browser-real-compile-inputs" ||
-      parsed.version !== 1 ||
+      parsed.version !== 2 ||
       parsed.authority !== "local-exact-byte-preflight-only" ||
-      parsed.pinnedReproducibleWasmMatched !== true ||
+      (!pinned && !diagnostic) ||
       parsed.headerDistributionLicenseApproved !== false ||
       parsed.producerTrusted !== false ||
       parsed.workerExecutionObserved !== false ||

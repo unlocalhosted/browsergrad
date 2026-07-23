@@ -720,13 +720,14 @@ describe("C++/CuTe browser Worker transfer boundary", () => {
     expect(transferredViews.every((view) => view.byteLength === 0)).toBe(true);
     expect(terminalMessages).toEqual([{
       kind: "browsergrad-cpp-cute-worker-failure",
-      version: 1,
-      controllerProtocol: "browsergrad.compiler.cpp-cute.browser-worker-controller@1",
+      version: 2,
+      controllerProtocol: "browsergrad.compiler.cpp-cute.browser-worker-controller@2",
       invocationId: INVOCATION_ID,
       invocationNonceSha256: NONCE,
       phase: "runtime-start",
       failureCode: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-EXECUTION",
       failurePath: "$.runtime.execution",
+      failureDetail: expect.any(String),
       workerExecutionObserved: false,
       loweringAuthorityMinted: false,
     }]);

@@ -123,6 +123,17 @@ export interface CppCuteBrowserWasmRuntimeObservationV1 {
   readonly loweringAuthorityReady: false;
 }
 
+/** Non-authoritative sample used only to explain a failed active phase. */
+export interface CppCuteBrowserWasmRuntimeFailureDiagnosticV1 {
+  readonly authority: "wasm-runtime-failure-diagnostic-only";
+  readonly profileHash: string;
+  readonly activePhase: CppCuteBrowserWasmRuntimePhase | null;
+  readonly completedPhaseCount: number;
+  readonly current: CppCuteBrowserWasmRuntimeSampleV1;
+  readonly workerExecutionObserved: false;
+  readonly loweringAuthorityReady: false;
+}
+
 declare const preparedMetricsBrand: unique symbol;
 
 /** Runtime-local collector. It is neither result-frame nor Worker authority. */
@@ -437,6 +448,26 @@ export function cancelCppCuteBrowserWasmRuntimeMetrics(
 ): void {
   const stored = activeStored(prepared);
   disposeStored(stored, "cancelled");
+}
+
+/**
+ * Reads the current memory and allocator record without completing the active
+ * phase or advancing normal observations.
+ */
+export function diagnoseCppCuteBrowserWasmRuntimeFailure(
+  prepared: PreparedCppCuteBrowserWasmRuntimeMetrics,
+): CppCuteBrowserWasmRuntimeFailureDiagnosticV1 {
+  const stored = activeStored(prepared);
+  const current = readRuntimeSample(stored, "$.failureDiagnostic");
+  return NATIVE_OBJECT_FREEZE({
+    authority: "wasm-runtime-failure-diagnostic-only",
+    profileHash: stored.profileHash,
+    activePhase: stored.activePhase?.phase ?? null,
+    completedPhaseCount: stored.phases.length,
+    current: publicSample(current),
+    workerExecutionObserved: false,
+    loweringAuthorityReady: false,
+  });
 }
 
 export function closeCppCuteBrowserWasmRuntimeMetrics(

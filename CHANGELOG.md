@@ -14,6 +14,14 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Adds an authority-separated fast Wasm diagnostic lane for the real browser
+  C++/CuTe gate. Exact local fast-build bytes may now be observed without
+  satisfying the package-pinned clean/reproducible or strict-compile gates.
+  Bounded Worker protocol v2 failures include live frontend-work, allocator,
+  and VFS diagnostics. Real CuTe work budgets are decoupled from retained
+  Artifact V3 collection limits, advancing the unchanged source from a
+  pre-AST 8,193-macro rejection through 56,150 macro expansions, 238,041
+  tokens, 49,690 AST nodes, and one completed CUDA semantic pass in Chromium.
 - Generates Grad's 22-record framework/platform support source directly from
   its frozen executable eager compatibility inventory. Runtime's dependency-safe
   platform view now composes both Grad and JIT without flattening eager

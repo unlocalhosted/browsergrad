@@ -4,6 +4,7 @@ export interface CppCuteBrowserRealCompileRunnerInput {
   readonly evidenceOutput?: string;
   readonly preflightOnly?: boolean;
   readonly requireCompiled?: boolean;
+  readonly allowUntrustedDiagnosticWasm?: boolean;
 }
 
 export interface CppCuteBrowserRealCompileAsset {
@@ -16,12 +17,16 @@ export interface CppCuteBrowserRealCompileAsset {
 
 export interface CppCuteBrowserRealCompilePreflight {
   readonly schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs";
-  readonly version: 1;
+  readonly version: 2;
   readonly authority: "local-exact-byte-preflight-only";
   readonly wasmPath: string;
   readonly packRoot: string;
   readonly assets: readonly CppCuteBrowserRealCompileAsset[];
-  readonly pinnedReproducibleWasmMatched: true;
+  readonly wasmAuthority:
+    | "package-pinned-two-clean-build-output"
+    | "untrusted-diagnostic-local-byte-observation-only";
+  readonly pinnedReproducibleWasmMatched: boolean;
+  readonly untrustedDiagnosticWasm: boolean;
   readonly headerDistributionLicenseApproved: false;
   readonly producerTrusted: false;
   readonly workerExecutionObserved: false;

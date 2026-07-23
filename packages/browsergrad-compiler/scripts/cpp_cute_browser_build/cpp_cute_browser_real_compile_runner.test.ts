@@ -80,6 +80,38 @@ describe("real browser C++/CuTe compile runner", () => {
       path: "$.assets[0]",
       message: expect.stringContaining("package-pinned two-clean-build output"),
     }) as Partial<CppCuteBrowserRealCompileRunnerError>);
+
+    await expect(preflightCppCuteBrowserRealCompileInputs({
+      wasmPath: wasm,
+      packRoot: packs,
+      allowUntrustedDiagnosticWasm: true,
+    })).resolves.toMatchObject({
+      schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs",
+      version: 2,
+      wasmAuthority: "untrusted-diagnostic-local-byte-observation-only",
+      pinnedReproducibleWasmMatched: false,
+      untrustedDiagnosticWasm: true,
+      workerExecutionObserved: false,
+      releaseReady: false,
+      assets: expect.arrayContaining([
+        expect.objectContaining({
+          assetId: "clang-wasm",
+          sha256: "cd5d4935a48c0672cb06407bb443bc0087aff947c6b864bac886982c73b3027f",
+          byteLength: 4,
+        }),
+      ]),
+    });
+
+    await expect(preflightCppCuteBrowserRealCompileInputs({
+      wasmPath: wasm,
+      packRoot: packs,
+      allowUntrustedDiagnosticWasm: true,
+      requireCompiled: true,
+    })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REAL-COMPILE-RUNNER",
+      path: "$.assets[0]",
+      message: expect.stringContaining("strict compile requires"),
+    });
   });
 });
 

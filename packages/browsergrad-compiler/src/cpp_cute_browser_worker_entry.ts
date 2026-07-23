@@ -30,6 +30,8 @@ const NATIVE_AGGREGATE_ERROR = AggregateError;
 const NATIVE_OBJECT_FREEZE = Object.freeze;
 const NATIVE_REGEXP_TEST = RegExp.prototype.test;
 const NATIVE_REFLECT_APPLY = Reflect.apply;
+const NATIVE_STRING_CHAR_AT = String.prototype.charAt;
+const NATIVE_STRING_CHAR_CODE_AT = String.prototype.charCodeAt;
 
 export type CppCuteBrowserWorkerTerminalEmitter = (
   message: CppCuteBrowserWorkerControllerInboundMessage,
@@ -150,13 +152,14 @@ function terminalFailure(
   const candidate = errorProjection(cause, phase);
   return NATIVE_OBJECT_FREEZE({
     kind: "browsergrad-cpp-cute-worker-failure",
-    version: 1,
+    version: 2,
     controllerProtocol: CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
     invocationId: identity.invocationId,
     invocationNonceSha256: identity.invocationNonceSha256,
     phase,
     failureCode: candidate.code,
     failurePath: candidate.path,
+    failureDetail: candidate.detail,
     workerExecutionObserved: false,
     loweringAuthorityMinted: false,
   });
@@ -184,7 +187,7 @@ function terminalSuccess(
   return NATIVE_OBJECT_FREEZE({
     message: NATIVE_OBJECT_FREEZE({
       kind: "browsergrad-cpp-cute-worker-terminal",
-      version: 1,
+      version: 2,
       controllerProtocol: CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
       invocationId: identity.invocationId,
       invocationNonceSha256: identity.invocationNonceSha256,
@@ -232,28 +235,39 @@ function settleUnadoptedRealmInput(
 function errorProjection(
   cause: unknown,
   phase: CppCuteBrowserWorkerEntryFailurePhase,
-): { readonly code: string; readonly path: string } {
+): { readonly code: string; readonly path: string; readonly detail: string } {
   let current = cause;
-  let projection: { readonly code: string; readonly path: string } | undefined;
+  let projection: {
+    readonly code: string;
+    readonly path: string;
+    readonly detail: string;
+  } | undefined;
   for (let depth = 0; depth < 16 &&
       typeof current === "object" && current !== null; depth += 1) {
     let next: unknown;
     let code: unknown;
     let path: unknown;
+    let message: unknown;
     try {
       const descriptors = NATIVE_GET_OWN_PROPERTY_DESCRIPTORS(current);
       code = descriptors["code"]?.value;
       path = descriptors["path"]?.value;
+      message = descriptors["message"]?.value;
       next = descriptors["cause"]?.value;
     } catch {
       code = undefined;
       path = undefined;
+      message = undefined;
       next = undefined;
     }
     if (typeof code === "string" && typeof path === "string" &&
         NATIVE_REFLECT_APPLY(NATIVE_REGEXP_TEST, FAILURE_CODE, [code]) === true &&
         validFailurePath(path)) {
-      projection = NATIVE_OBJECT_FREEZE({ code, path });
+      projection = NATIVE_OBJECT_FREEZE({
+        code,
+        path,
+        detail: boundedFailureDetail(message),
+      });
     }
     if (next === current) break;
     current = next;
@@ -261,7 +275,26 @@ function errorProjection(
   return projection ?? NATIVE_OBJECT_FREEZE({
     code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-ENTRY-INTERNAL",
     path: phase === "runtime-adoption" ? "$.runtime.adoption" : "$.runtime.start",
+    detail: "bounded diagnostic unavailable",
   });
+}
+
+function boundedFailureDetail(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0) {
+    return "bounded diagnostic unavailable";
+  }
+  let detail = "";
+  for (let index = 0; index < value.length && detail.length < 4_096; index += 1) {
+    const code = NATIVE_REFLECT_APPLY(
+      NATIVE_STRING_CHAR_CODE_AT,
+      value,
+      [index],
+    ) as number;
+    detail += code <= 0x1f || code === 0x7f
+      ? "\ufffd"
+      : NATIVE_REFLECT_APPLY(NATIVE_STRING_CHAR_AT, value, [index]) as string;
+  }
+  return detail;
 }
 
 function validFailurePath(value: string): boolean {

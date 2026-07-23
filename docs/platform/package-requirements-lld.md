@@ -1069,7 +1069,12 @@ An active or failed run is not build, ABI, reproducibility, Worker, browser, or
 release evidence. The Worker-local runtime now executes the pinned generated
 factory and C ABI, verifies exact frontend-work/VFS/runtime observations, and
 emits canonical control plus artifact bytes. The package-owned Worker graph is
-pinned at SHA-256 `d9bd0eea4b9084eb7dd0768b35fadd0f14667b3a09dd4662a3bc052fb331c4e9`.
+pinned at SHA-256
+`500356a0cb2b6ac1df23124b7bcbe4043c302409f5195d1e847e935804c62bea`
+and 575,477 bytes. Worker controller protocol v2 preserves one bounded,
+sanitized deepest failure detail. Failed C-ABI invocations snapshot exact
+frontend-work, allocator, and VFS state before cleanup without minting Worker
+execution or lowering authority.
 The production host path now consumes those bytes through the captured platform
 and package invocation. It remains evidence-blocked from lowering until a valid
 real Worker compile authenticates the exact terminal frame, Artifact V3,

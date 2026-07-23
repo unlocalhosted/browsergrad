@@ -106,10 +106,14 @@ interface ExternalAssetInput {
 
 interface BrowserExternalInputs {
   readonly schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs";
-  readonly version: 1;
+  readonly version: 2;
   readonly authority: "local-exact-byte-preflight-only";
   readonly assets: readonly ExternalAssetInput[];
-  readonly pinnedReproducibleWasmMatched: true;
+  readonly wasmAuthority:
+    | "package-pinned-two-clean-build-output"
+    | "untrusted-diagnostic-local-byte-observation-only";
+  readonly pinnedReproducibleWasmMatched: boolean;
+  readonly untrustedDiagnosticWasm: boolean;
   readonly headerDistributionLicenseApproved: false;
   readonly producerTrusted: false;
   readonly workerExecutionObserved: false;
@@ -242,10 +246,15 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
         syntax: "unchanged-cpp17-cute",
         selectedDeclaration: "layout",
       },
-      inputs: {
-        externalAssetCount: externalAssets.length,
-        totalExternalByteLength: environment.totalExternalByteLength,
-        wasmSha256: externalAssets.find((asset) => asset.assetId === "clang-wasm")?.sha256,
+    inputs: {
+      externalAssetCount: externalAssets.length,
+      totalExternalByteLength: environment.totalExternalByteLength,
+      wasmSha256: externalAssets.find((asset) => asset.assetId === "clang-wasm")?.sha256,
+      wasmAuthority: __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.wasmAuthority,
+      pinnedReproducibleWasmMatched:
+        __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.pinnedReproducibleWasmMatched,
+      untrustedDiagnosticWasm:
+        __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.untrustedDiagnosticWasm,
         assetSetSha256: environment.manifest.assetSetSha256,
         packCount: vfsInstallation.packCount,
         installedFileCount: vfsInstallation.fileCount,
@@ -257,6 +266,7 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
         phase: cause.workerFailure.phase,
         failureCode: cause.workerFailure.failureCode,
         failurePath: cause.workerFailure.failurePath,
+        failureDetail: cause.workerFailure.failureDetail,
         compileElapsedMilliseconds: Math.round(compileElapsedMilliseconds),
         totalElapsedMilliseconds: Math.round(performance.now() - started),
         verifierEvidenceId: independentWasmConformance.evidenceId,
@@ -270,6 +280,7 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
         status: "internal-error",
         code: cause.workerFailure.failureCode,
         path: cause.workerFailure.failurePath,
+        detail: cause.workerFailure.failureDetail,
       },
       headerDistributionLicenseApproved: false,
       producerTrusted: false,
@@ -344,10 +355,15 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
       syntax: "unchanged-cpp17-cute",
       selectedDeclaration: "layout",
     },
-    inputs: {
-      externalAssetCount: externalAssets.length,
-      totalExternalByteLength: environment.totalExternalByteLength,
-      wasmSha256: externalAssets.find((asset) => asset.assetId === "clang-wasm")?.sha256,
+      inputs: {
+        externalAssetCount: externalAssets.length,
+        totalExternalByteLength: environment.totalExternalByteLength,
+        wasmSha256: externalAssets.find((asset) => asset.assetId === "clang-wasm")?.sha256,
+        wasmAuthority: __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.wasmAuthority,
+        pinnedReproducibleWasmMatched:
+          __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.pinnedReproducibleWasmMatched,
+        untrustedDiagnosticWasm:
+          __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.untrustedDiagnosticWasm,
       assetSetSha256: environment.manifest.assetSetSha256,
       packCount: vfsInstallation.packCount,
       installedFileCount: vfsInstallation.fileCount,
@@ -424,8 +440,11 @@ async function prepareRealCompileEnvironment(
     cppCuteBrowserReproducibilityResourceBytes(),
   );
   const wasm = requireExternalAsset(externalAssets, "clang-wasm");
-  if (wasm.sha256 !== reproducibility.wasmSha256 ||
-      wasm.byteLength !== reproducibility.wasmByteLength) {
+  const matchesReproducibility =
+    wasm.sha256 === reproducibility.wasmSha256 &&
+    wasm.byteLength === reproducibility.wasmByteLength;
+  if (matchesReproducibility !==
+      __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.pinnedReproducibleWasmMatched) {
     throw new Error("external Clang-Wasm differs from package reproducibility evidence");
   }
   const packInspections = new Map<string, Awaited<ReturnType<typeof inspectCppCuteBrowserVfsPack>>>();
@@ -762,14 +781,14 @@ function requestLimits(
   return {
     maxSourceFiles: limits.maxSourceFiles,
     maxSourceBytes: limits.maxSourceBytes,
-    maxHeaderFiles: 100,
+    maxHeaderFiles: 512,
     maxHeaderBytes: limits.maxHeaderBytes,
     maxIncludeDepth: limits.maxIncludeDepth,
-    maxMacroExpansions: 8_192,
+    maxMacroExpansions: limits.maxMacroExpansions,
     maxPreprocessedTokens: limits.maxPreprocessedTokens,
     maxAstNodes: limits.maxAstNodes,
     maxConstexprSteps: limits.maxConstexprSteps,
-    maxTemplateInstantiations: 8_192,
+    maxTemplateInstantiations: limits.maxTemplateInstantiations,
     maxTemplateDepth: limits.maxTemplateDepth,
     maxDeclarations: 16_384,
     maxTypes: 16_384,

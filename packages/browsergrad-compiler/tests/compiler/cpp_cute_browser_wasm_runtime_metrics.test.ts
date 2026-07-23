@@ -9,6 +9,7 @@ import {
   cancelCppCuteBrowserWasmRuntimeMetrics,
   closeCppCuteBrowserWasmRuntimeMetrics,
   completeCppCuteBrowserWasmRuntimePhase,
+  diagnoseCppCuteBrowserWasmRuntimeFailure,
   observeCppCuteBrowserWasmRuntimeMetrics,
   prepareCppCuteBrowserWasmRuntimeMetrics,
 } from "../../src/cpp_cute_browser_wasm_runtime_metrics.js";
@@ -216,6 +217,46 @@ describe("C++/CuTe runtime-local Wasm metrics", () => {
       "BG-COMPILER-CPP-CUTE-BROWSER-WASM-METRICS-STATE",
       "$prepared",
     );
+  });
+
+  it("samples an active failed phase without completing or authorizing it", () => {
+    const memory = memoryFixture();
+    const metrics = prepareCppCuteBrowserWasmRuntimeMetrics({
+      profile,
+      memory,
+      allocatorRecordPointer: ALLOCATOR_RECORD_POINTER,
+    });
+    beginCppCuteBrowserWasmRuntimePhase(metrics, "input-frame-copy");
+    writeAllocatorRecord(memory, {
+      currentLiveGlobalRequestedByteLength: 64n,
+      peakLiveGlobalRequestedByteLength: 128n,
+      cumulativeGlobalAllocatedRequestedByteLength: 192n,
+      cumulativeGlobalFreedRequestedByteLength: 128n,
+      successfulAllocationCount: 3n,
+      freeCount: 2n,
+      failedAllocationCount: 1n,
+    });
+
+    expect(diagnoseCppCuteBrowserWasmRuntimeFailure(metrics)).toMatchObject({
+      authority: "wasm-runtime-failure-diagnostic-only",
+      profileHash: profile.profileHash,
+      activePhase: "input-frame-copy",
+      completedPhaseCount: 0,
+      current: {
+        allocator: {
+          values: {
+            currentLiveGlobalRequestedByteLength: "64",
+            peakLiveGlobalRequestedByteLength: "128",
+            successfulAllocationCount: "3",
+            freeCount: "2",
+            failedAllocationCount: "1",
+          },
+        },
+      },
+      workerExecutionObserved: false,
+      loweringAuthorityReady: false,
+    });
+    cancelCppCuteBrowserWasmRuntimeMetrics(metrics);
   });
 
   it("rejects pointer overflow, inconsistent or over-ceiling allocator records, and hostile memory", () => {

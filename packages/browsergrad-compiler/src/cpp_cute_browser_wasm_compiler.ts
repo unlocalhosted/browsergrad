@@ -15,6 +15,7 @@ import {
   closeCppCuteBrowserFrontendWorkMetrics,
   completeCppCuteBrowserFrontendWorkMetrics,
   CppCuteBrowserFrontendWorkMetricsError,
+  diagnoseCppCuteBrowserFrontendWorkFailure,
   prepareCppCuteBrowserFrontendWorkMetrics,
   type CppCuteBrowserFrontendWorkObservationV1,
   type PreparedCppCuteBrowserFrontendWorkMetrics,
@@ -25,6 +26,7 @@ import {
   closeCppCuteBrowserWasmRuntimeMetrics,
   completeCppCuteBrowserWasmRuntimePhase,
   CppCuteBrowserWasmRuntimeMetricsError,
+  diagnoseCppCuteBrowserWasmRuntimeFailure,
   prepareCppCuteBrowserWasmRuntimeMetrics,
   type CppCuteBrowserWasmRuntimeObservationV1,
   type PreparedCppCuteBrowserWasmRuntimeMetrics,
@@ -213,7 +215,7 @@ export function executeCppCuteBrowserWasmCompiler(
       "$.runtime.alloc",
     );
     if (inputPointer === 0) {
-      compileStatus("$.runtime.alloc", readStatus(taken), taken);
+      compileStatus("$.runtime.alloc", readStatus(taken), state);
     }
     expectStatus(taken, INPUT_ALLOCATED_STATUS, "$.runtime.statusAfterAlloc");
     const inputEpoch = inspectMemory(taken.memory, "$.runtime.inputMemory");
@@ -232,7 +234,7 @@ export function executeCppCuteBrowserWasmCompiler(
       mismatch("$.runtime.compile", "compile return differs from the readable runtime status");
     }
     if (compileState !== ARTIFACT_READY_STATUS) {
-      compileStatus("$.runtime.compile", compileState, taken);
+      compileStatus("$.runtime.compile", compileState, state);
     }
 
     const resultPointer = callU32(
@@ -588,7 +590,7 @@ function rangesOverlap(
 function compileStatus(
   path: string,
   status: number,
-  taken: TakenCppCuteBrowserEmscriptenFactory,
+  state: ExecutionState,
 ): never {
   let name = "unknown";
   for (const entry of RUNTIME_ABI.compileStatuses) {
@@ -600,8 +602,63 @@ function compileStatus(
   fail(
     "BG-COMPILER-CPP-CUTE-BROWSER-WASM-COMPILER-COMPILE-STATUS",
     path,
-    `C ABI execution terminated with status ${status} (${name})${factoryLogSuffix(taken)}`,
+    `C ABI execution terminated with status ${status} (${name})` +
+      `${failureObservationSuffix(state)}${factoryLogSuffix(state.taken)}`,
   );
+}
+
+function failureObservationSuffix(state: ExecutionState): string {
+  const parts: string[] = [];
+  try {
+    if (state.frontendWork !== undefined) {
+      const frontend = diagnoseCppCuteBrowserFrontendWorkFailure(state.frontendWork);
+      parts.push(
+        `frontendPhase=${frontend.phase},frontendFlags=${frontend.flags},` +
+          `frontendGeneration=${frontend.generation},` +
+          `completedSemanticPasses=${frontend.values.completedSemanticPasses},` +
+          `includeDepth=${frontend.values.includeDepth},` +
+          `macroExpansions=${frontend.values.macroExpansions},` +
+          `preprocessedTokens=${frontend.values.preprocessedTokens},` +
+          `astNodes=${frontend.values.astNodes},` +
+          `constexprSteps=${frontend.values.constexprSteps},` +
+          `templateInstantiations=${frontend.values.templateInstantiations}`,
+      );
+    }
+  } catch {
+    parts.push("frontend=unavailable");
+  }
+  try {
+    if (state.metrics !== undefined) {
+      const runtime = diagnoseCppCuteBrowserWasmRuntimeFailure(state.metrics);
+      const allocator = runtime.current.allocator.values;
+      parts.push(
+        `runtimePhase=${runtime.activePhase ?? "none"},` +
+          `wasmPages=${runtime.current.wasmMemory.pages},` +
+          `allocatorLiveBytes=${allocator.currentLiveGlobalRequestedByteLength},` +
+          `allocatorPeakBytes=${allocator.peakLiveGlobalRequestedByteLength},` +
+          `allocatorAllocations=${allocator.successfulAllocationCount},` +
+          `allocatorFrees=${allocator.freeCount},` +
+          `allocatorFailures=${allocator.failedAllocationCount}`,
+      );
+    }
+  } catch {
+    parts.push("runtime=unavailable");
+  }
+  try {
+    const vfs = observeCppCuteBrowserVfsSession(state.taken.vfsSession);
+    const latestOpened = vfs.openedFiles.at(-1)?.virtualPath ?? "none";
+    const latestMiss = vfs.lookupMisses.uniquePaths.at(-1) ?? "none";
+    parts.push(
+      `vfsCalls=${vfs.counters.totalSessionCalls},` +
+        `vfsOpenedFiles=${vfs.openedFiles.length},` +
+        `vfsLookupMisses=${vfs.lookupMisses.total},` +
+        `vfsLatestOpened=${sanitizeFactoryLog(latestOpened)},` +
+        `vfsLatestMiss=${sanitizeFactoryLog(latestMiss)}`,
+    );
+  } catch {
+    parts.push("vfs=unavailable");
+  }
+  return `; failure observation: ${parts.join(",")}`;
 }
 
 function factoryLogSuffix(taken: TakenCppCuteBrowserEmscriptenFactory): string {

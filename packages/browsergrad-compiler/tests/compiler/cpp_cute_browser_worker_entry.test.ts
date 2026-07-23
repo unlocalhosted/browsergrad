@@ -57,13 +57,14 @@ describe("C++/CuTe browser Worker entry", () => {
 
     expect(terminal).toEqual([{
       kind: "browsergrad-cpp-cute-worker-failure",
-      version: 1,
-      controllerProtocol: "browsergrad.compiler.cpp-cute.browser-worker-controller@1",
+      version: 2,
+      controllerProtocol: "browsergrad.compiler.cpp-cute.browser-worker-controller@2",
       invocationId: INVOCATION_ID,
       invocationNonceSha256: NONCE,
       phase: "runtime-start",
       failureCode: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CAPABILITY",
       failurePath: "$.bundle",
+      failureDetail: "blocked",
       workerExecutionObserved: false,
       loweringAuthorityMinted: false,
     }]);
@@ -89,6 +90,7 @@ describe("C++/CuTe browser Worker entry", () => {
       phase: "runtime-start",
       failureCode: "BG-COMPILER-CPP-CUTE-BROWSER-WASM-COMPILER-COMPILE-STATUS",
       failurePath: "$.runtime.compile",
+      failureDetail: "producer failed",
       workerExecutionObserved: false,
       loweringAuthorityMinted: false,
     });
@@ -109,6 +111,7 @@ describe("C++/CuTe browser Worker entry", () => {
       phase: "runtime-adoption",
       failureCode: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-ENTRY-INTERNAL",
       failurePath: "$.runtime.adoption",
+      failureDetail: "bounded diagnostic unavailable",
     });
     expect(terminal[0]).not.toHaveProperty("message");
     expect(runtime.discard).toHaveBeenCalledTimes(1);
@@ -130,6 +133,7 @@ describe("C++/CuTe browser Worker entry", () => {
     expect(terminal[0]).toMatchObject({
       phase: "runtime-adoption",
       failureCode: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-MISMATCH",
+      failureDetail: "cleaned after take",
     });
   });
 

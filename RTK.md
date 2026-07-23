@@ -128,9 +128,18 @@ and emits either `compiled` or the exact authenticated blocker. Use
 `verify:browser-cpp-cute-real-compile` with the same arguments for the strict
 Artifact V3 gate; it rejects a `blocked` observation. At the 2026-07-23
 checkpoint, preflight takes under one second and observation takes about seven
-seconds. The current exact source reaches `$.runtime.compile` but returns the
-producer's internal-error status, so Worker execution, lowering, and release
-authority remain false.
+seconds.
+
+For source-iteration only, an exact locally hashed fast-build Wasm may be
+observed by adding `--allow-untrusted-diagnostic-wasm`. Its evidence explicitly
+records `untrustedDiagnosticWasm=true` and
+`pinnedReproducibleWasmMatched=false`; strict verification refuses it even if
+compilation succeeds. Worker protocol v2 failure details report bounded
+frontend-work, allocator, and VFS state before cleanup. The current exact
+source completes one CUDA semantic pass after 56,150 macro expansions,
+238,041 tokens, and 49,690 AST nodes, then returns an internal error at the
+one-pass diagnostic/artifact or second-pass boundary. Worker execution,
+lowering, and release authority therefore remain false.
 
 To turn the seven exact locked archives into the five source-derived VFS packs,
 use the one-process command so its opaque authorities remain live:

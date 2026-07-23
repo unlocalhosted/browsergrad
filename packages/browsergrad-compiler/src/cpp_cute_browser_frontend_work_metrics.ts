@@ -73,6 +73,24 @@ export interface CppCuteBrowserFrontendWorkObservationV1 {
   readonly loweringAuthorityReady: false;
 }
 
+/**
+ * Bounded local snapshot used only to explain a failed C-ABI invocation.
+ * It is not a completed metrics observation and grants no execution authority.
+ */
+export interface CppCuteBrowserFrontendWorkFailureDiagnosticV1 {
+  readonly authority: "wasm-frontend-work-failure-diagnostic-only";
+  readonly protocol: typeof CPP_CUTE_BROWSER_FRONTEND_WORK_METRICS_PROTOCOL;
+  readonly profileHash: string;
+  readonly source: "wasm-memory-frontend-work-metrics-record-v1";
+  readonly confidence: "record-exact-unverified-failed-producer";
+  readonly phase: "idle" | "collecting" | "complete" | "failed";
+  readonly flags: number;
+  readonly generation: WireU64;
+  readonly values: CppCuteBrowserFrontendWorkValuesV1;
+  readonly workerExecutionObserved: false;
+  readonly loweringAuthorityReady: false;
+}
+
 declare const preparedFrontendWorkBrand: unique symbol;
 
 /** Single-use local record reader. It cannot mint Worker or lowering authority. */
@@ -293,6 +311,46 @@ export function cancelCppCuteBrowserFrontendWorkMetrics(
   }
   stored.complete = undefined;
   stored.state = "failed";
+}
+
+/**
+ * Snapshots the live record before failed-execution cleanup. The result is
+ * diagnostic only: it deliberately does not enforce completion or limits.
+ */
+export function diagnoseCppCuteBrowserFrontendWorkFailure(
+  prepared: PreparedCppCuteBrowserFrontendWorkMetrics,
+): CppCuteBrowserFrontendWorkFailureDiagnosticV1 {
+  const stored = authenticStored(prepared);
+  if (stored.state !== "prepared" && stored.state !== "complete") {
+    state("$.frontendWork", "only an active frontend-work reader may be diagnosed");
+  }
+  const record = readRecord(
+    stored.memory,
+    stored.recordPointer,
+    "$.frontendWork.failureDiagnostic",
+  );
+  return NATIVE_OBJECT_FREEZE({
+    authority: "wasm-frontend-work-failure-diagnostic-only",
+    protocol: CPP_CUTE_BROWSER_FRONTEND_WORK_METRICS_PROTOCOL,
+    profileHash: stored.profileHash,
+    source: "wasm-memory-frontend-work-metrics-record-v1",
+    confidence: "record-exact-unverified-failed-producer",
+    phase: phaseName(record.phase),
+    flags: record.flags,
+    generation: encodeWireU64(record.generation),
+    values: publicCounters(record),
+    workerExecutionObserved: false,
+    loweringAuthorityReady: false,
+  });
+}
+
+function phaseName(
+  phase: number,
+): CppCuteBrowserFrontendWorkFailureDiagnosticV1["phase"] {
+  if (phase === IDLE_PHASE) return "idle";
+  if (phase === CONTRACT.lifecycle.collectingPhase) return "collecting";
+  if (phase === COMPLETE_PHASE) return "complete";
+  return "failed";
 }
 
 function enforceLimits(record: FrontendWorkRecord, limits: FrontendWorkLimits): void {

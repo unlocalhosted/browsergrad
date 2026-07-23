@@ -167,7 +167,8 @@ export class CppCuteBrowserWorkerReportedFailureError
       "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-CONTROLLER-WORKER-FAILURE",
       "$.terminal.failure",
       `owned Worker failed during ${workerFailure.phase}: ` +
-        `${workerFailure.failureCode} at ${workerFailure.failurePath}`,
+        `${workerFailure.failureCode} at ${workerFailure.failurePath}: ` +
+        workerFailure.failureDetail,
     );
     this.name = "CppCuteBrowserWorkerReportedFailureError";
   }
@@ -859,13 +860,13 @@ function parseTerminalMessage(
       ]
     : [
         "kind", "version", "controllerProtocol", "invocationId", "invocationNonceSha256",
-        "phase", "failureCode", "failurePath", "workerExecutionObserved",
+        "phase", "failureCode", "failurePath", "failureDetail", "workerExecutionObserved",
         "loweringAuthorityMinted",
       ];
   const data = exactDataRecord(value, "$.terminal", keys);
-  if (data["version"] !== 1 ||
+  if (data["version"] !== 2 ||
       data["controllerProtocol"] !== CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL) {
-    terminal("$.terminal", "terminal envelope differs from controller protocol v1");
+    terminal("$.terminal", "terminal envelope differs from controller protocol v2");
   }
   if (data["invocationId"] !== invocation.invocationId ||
       data["invocationNonceSha256"] !== invocation.invocationNonceSha256) {
@@ -885,6 +886,11 @@ function parseTerminalMessage(
       terminal("$.terminal.failurePath", "Worker failure path is invalid");
     }
     const failurePath = data["failurePath"];
+    if (typeof data["failureDetail"] !== "string" ||
+        !validWorkerFailureDetail(data["failureDetail"])) {
+      terminal("$.terminal.failureDetail", "Worker failure detail is invalid");
+    }
+    const failureDetail = data["failureDetail"];
     if (data["workerExecutionObserved"] !== false ||
         data["loweringAuthorityMinted"] !== false) {
       terminal(
@@ -894,20 +900,21 @@ function parseTerminalMessage(
     }
     return Object.freeze({
       kind,
-      version: 1,
+      version: 2,
       controllerProtocol: CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
       invocationId: invocation.invocationId,
       invocationNonceSha256: invocation.invocationNonceSha256,
       phase: data["phase"],
       failureCode,
       failurePath,
+      failureDetail,
       workerExecutionObserved: false,
       loweringAuthorityMinted: false,
     }) as CppCuteBrowserWorkerControllerFailureMessage;
   }
   return Object.freeze({
     kind,
-    version: 1,
+    version: 2,
     controllerProtocol: CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
     invocationId: invocation.invocationId,
     invocationNonceSha256: invocation.invocationNonceSha256,
@@ -922,6 +929,15 @@ function parseTerminalMessage(
       invocation.maxArtifactByteLength,
     ),
   });
+}
+
+function validWorkerFailureDetail(value: string): boolean {
+  if (value.length === 0 || value.length > 4_096) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) return false;
+  }
+  return true;
 }
 
 function terminalKind(

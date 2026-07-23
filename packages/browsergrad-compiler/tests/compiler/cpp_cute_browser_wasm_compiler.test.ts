@@ -143,6 +143,7 @@ interface RuntimeOptions {
   readonly trapCompile?: boolean;
   readonly stdout?: readonly string[];
   readonly stderr?: readonly string[];
+  readonly failedFrontendWork?: FrontendWorkCounters;
 }
 
 interface RuntimeFixture {
@@ -234,15 +235,43 @@ describe("C++/CuTe local Wasm C ABI compiler execution", () => {
   });
 
   it("reports exact non-success status and discards the instance without further ABI calls", () => {
-    const fixture = runtimeFixture({ compileReturn: 105, readableCompileStatus: 105 });
-    expectCompilerError(
-      () => executeCppCuteBrowserWasmCompiler({
+    const fixture = runtimeFixture({
+      compileReturn: 105,
+      readableCompileStatus: 105,
+      failedFrontendWork: {
+        includeDepth: 3n,
+        macroExpansions: 4n,
+        preprocessedTokens: 128n,
+        astNodes: 64n,
+        constexprSteps: 2n,
+        templateInstantiations: 9n,
+        templateDepth: 2n,
+        completedSemanticPasses: 1n,
+      },
+    });
+    let observed: unknown;
+    try {
+      executeCppCuteBrowserWasmCompiler({
         factory: fixture.factory,
         profile,
         inputFrameBytes: FRAME_BYTES,
-      }),
-      "BG-COMPILER-CPP-CUTE-BROWSER-WASM-COMPILER-COMPILE-STATUS",
-      "$.runtime.compile",
+      });
+    } catch (cause) {
+      observed = cause;
+    }
+    expect(observed).toBeInstanceOf(CppCuteBrowserWasmCompilerError);
+    expect(observed).toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-WASM-COMPILER-COMPILE-STATUS",
+      path: "$.runtime.compile",
+    });
+    expect((observed as Error).message).toContain(
+      "frontendPhase=failed,frontendFlags=0,frontendGeneration=1," +
+        "completedSemanticPasses=1,includeDepth=3,macroExpansions=4," +
+        "preprocessedTokens=128,astNodes=64,constexprSteps=2," +
+        "templateInstantiations=9",
+    );
+    expect((observed as Error).message).toContain(
+      "vfsCalls=0,vfsOpenedFiles=0,vfsLookupMisses=0",
     );
     expect(fixture.calls).toEqual({ alloc: 1, compile: 1, free: 0, reset: 0 });
     expect(fixture.vfsState).toMatchObject({
@@ -275,7 +304,7 @@ describe("C++/CuTe local Wasm C ABI compiler execution", () => {
     expect(message).toContain("bounded module log:");
     expect(message).toContain("last-line");
     expect(message).not.toMatch(/[\u0000-\u001f\u007f]/u);
-    expect(message.length).toBeLessThan(2_300);
+    expect(message.length).toBeLessThan(2_800);
   });
 
   it("fails closed on status disagreement, result aliasing, and traps", () => {
@@ -425,6 +454,8 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
           templateDepth: 2n,
           completedSemanticPasses: 2n,
         });
+      } else if (options.failedFrontendWork !== undefined) {
+        writeFrontendWorkRecord(memory, 3, 0, 1n, options.failedFrontendWork);
       }
       return compileReturn;
     },

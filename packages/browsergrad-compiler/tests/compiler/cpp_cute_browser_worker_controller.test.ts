@@ -178,7 +178,7 @@ function terminalMessage(
 ): CppCuteBrowserWorkerControllerTerminalMessage {
   return {
     kind: "browsergrad-cpp-cute-worker-terminal",
-    version: 1,
+    version: 2,
     controllerProtocol: CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
     invocationId: `bg.cpp.browser-worker-invocation.sha256.${HASH}`,
     invocationNonceSha256: NONCE,
@@ -193,13 +193,14 @@ function failureMessage(
 ): CppCuteBrowserWorkerControllerFailureMessage {
   return {
     kind: "browsergrad-cpp-cute-worker-failure",
-    version: 1,
+    version: 2,
     controllerProtocol: CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL,
     invocationId: `bg.cpp.browser-worker-invocation.sha256.${HASH}`,
     invocationNonceSha256: NONCE,
     phase: "runtime-start",
     failureCode: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-CAPABILITY",
     failurePath: "$.bundle",
+    failureDetail: "bundle capability is unavailable",
     workerExecutionObserved: false,
     loweringAuthorityMinted: false,
     ...overrides,

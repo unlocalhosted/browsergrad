@@ -1,9 +1,9 @@
 export const CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL =
-  "browsergrad.compiler.cpp-cute.browser-worker-controller@1";
+  "browsergrad.compiler.cpp-cute.browser-worker-controller@2";
 
 export interface CppCuteBrowserWorkerControllerTerminalMessage {
   readonly kind: "browsergrad-cpp-cute-worker-terminal";
-  readonly version: 1;
+  readonly version: 2;
   readonly controllerProtocol: typeof CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL;
   readonly invocationId: string;
   readonly invocationNonceSha256: string;
@@ -22,13 +22,14 @@ export type CppCuteBrowserWorkerEntryFailurePhase =
  */
 export interface CppCuteBrowserWorkerControllerFailureMessage {
   readonly kind: "browsergrad-cpp-cute-worker-failure";
-  readonly version: 1;
+  readonly version: 2;
   readonly controllerProtocol: typeof CPP_CUTE_BROWSER_WORKER_CONTROLLER_PROTOCOL;
   readonly invocationId: string;
   readonly invocationNonceSha256: string;
   readonly phase: CppCuteBrowserWorkerEntryFailurePhase;
   readonly failureCode: string;
   readonly failurePath: string;
+  readonly failureDetail: string;
   readonly workerExecutionObserved: false;
   readonly loweringAuthorityMinted: false;
 }

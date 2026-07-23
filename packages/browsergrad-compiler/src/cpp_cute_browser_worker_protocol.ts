@@ -1695,8 +1695,6 @@ function verifyFrontendWorkLimits(
 type AdmissionDerivedArtifactLimitName =
   | "maxIncludeRoots"
   | "maxFiles"
-  | "maxMacroExpansions"
-  | "maxTemplateInstantiations"
   | "maxDeclarations"
   | "maxTypes"
   | "maxConstants"
@@ -1720,8 +1718,6 @@ function workerArtifactVerificationContract(
   >> = {
     maxIncludeRoots: includeRootCount,
     maxFiles: limits.maxSourceFiles + limits.maxHeaderFiles,
-    maxMacroExpansions: limits.maxMacroExpansions,
-    maxTemplateInstantiations: limits.maxTemplateInstantiations,
     maxDeclarations: limits.maxDeclarations,
     maxTypes: limits.maxTypes,
     maxConstants: limits.maxConstants,
@@ -1755,7 +1751,11 @@ function workerArtifactVerificationContract(
   // Pass every artifact-v3 structural ceiling explicitly. Admission-derived
   // dimensions may lower the fixed verifier contract; dimensions not exposed
   // by the request remain fixed implementation ceilings rather than hidden
-  // defaults that can drift independently from Worker admission.
+  // defaults that can drift independently from Worker admission. Instrumented
+  // frontend-work ceilings for macro expansion and template instantiation are
+  // intentionally independent from the number of retained Artifact V3 records:
+  // real headers may perform far more work than the bounded semantic projection
+  // preserves.
   const artifactLimits: CppCuteFrontendArtifactLimits = Object.freeze({
     ...DEFAULT_CPP_CUTE_FRONTEND_ARTIFACT_LIMITS,
     ...admissionDerivedLimits,

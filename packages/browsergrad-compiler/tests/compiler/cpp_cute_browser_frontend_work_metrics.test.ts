@@ -5,8 +5,10 @@ import {
   CPP_CUTE_BROWSER_FRONTEND_WORK_RECORD_MAGIC,
   CPP_CUTE_BROWSER_FRONTEND_WORK_RECORD_VERSION,
   CppCuteBrowserFrontendWorkMetricsError,
+  cancelCppCuteBrowserFrontendWorkMetrics,
   closeCppCuteBrowserFrontendWorkMetrics,
   completeCppCuteBrowserFrontendWorkMetrics,
+  diagnoseCppCuteBrowserFrontendWorkFailure,
   prepareCppCuteBrowserFrontendWorkMetrics,
 } from "../../src/cpp_cute_browser_frontend_work_metrics.js";
 import {
@@ -81,6 +83,45 @@ describe("Clang-Wasm frontend-work record", () => {
     });
     expect(Object.isFrozen(observation)).toBe(true);
     expect(Object.isFrozen(observation.values)).toBe(true);
+  });
+
+  it("exposes a non-authoritative live failure diagnostic without closing the reader", () => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 2 });
+    writeRecord(memory, 0, 1, 4n, zeroCounters());
+    const prepared = prepareCppCuteBrowserFrontendWorkMetrics({
+      profile,
+      memory,
+      recordPointer: RECORD_POINTER,
+    });
+    writeRecord(memory, 3, 0, 5n, {
+      ...zeroCounters(),
+      astNodes: 17n,
+      completedSemanticPasses: 1n,
+    });
+
+    expect(diagnoseCppCuteBrowserFrontendWorkFailure(prepared)).toEqual({
+      authority: "wasm-frontend-work-failure-diagnostic-only",
+      protocol: "browsergrad.compiler.cpp-cute.frontend-work-metrics@1",
+      profileHash: profile.profileHash,
+      source: "wasm-memory-frontend-work-metrics-record-v1",
+      confidence: "record-exact-unverified-failed-producer",
+      phase: "failed",
+      flags: 0,
+      generation: "5",
+      values: {
+        includeDepth: "0",
+        macroExpansions: "0",
+        preprocessedTokens: "0",
+        astNodes: "17",
+        constexprSteps: "0",
+        templateInstantiations: "0",
+        templateDepth: "0",
+        completedSemanticPasses: "1",
+      },
+      workerExecutionObserved: false,
+      loweringAuthorityReady: false,
+    });
+    cancelCppCuteBrowserFrontendWorkMetrics(prepared);
   });
 
   it("rejects non-idle initial state and forged authorities", () => {

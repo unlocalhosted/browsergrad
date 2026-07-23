@@ -60,9 +60,20 @@ export async function preflightCppCuteBrowserRealCompileInputs(input) {
     });
   }));
   const wasm = assets[0];
-  if (wasm === undefined ||
-      wasm.sha256 !== PINNED_REPRODUCIBLE_WASM.sha256 ||
-      wasm.byteLength !== PINNED_REPRODUCIBLE_WASM.byteLength) {
+  if (wasm === undefined) {
+    invalid("$.assets[0]", "Clang-Wasm observation is missing");
+  }
+  const pinnedReproducibleWasmMatched =
+    wasm.sha256 === PINNED_REPRODUCIBLE_WASM.sha256 &&
+    wasm.byteLength === PINNED_REPRODUCIBLE_WASM.byteLength;
+  if (!pinnedReproducibleWasmMatched && values.requireCompiled) {
+    invalid(
+      "$.assets[0]",
+      "strict compile requires the exact package-pinned two-clean-build Wasm",
+    );
+  }
+  if (!pinnedReproducibleWasmMatched &&
+      !values.allowUntrustedDiagnosticWasm) {
     invalid(
       "$.assets[0]",
       "Clang-Wasm differs from the exact package-pinned two-clean-build output",
@@ -70,12 +81,16 @@ export async function preflightCppCuteBrowserRealCompileInputs(input) {
   }
   return Object.freeze({
     schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs",
-    version: 1,
+    version: 2,
     authority: "local-exact-byte-preflight-only",
     wasmPath,
     packRoot,
     assets: Object.freeze(assets),
-    pinnedReproducibleWasmMatched: true,
+    wasmAuthority: pinnedReproducibleWasmMatched
+      ? "package-pinned-two-clean-build-output"
+      : "untrusted-diagnostic-local-byte-observation-only",
+    pinnedReproducibleWasmMatched,
+    untrustedDiagnosticWasm: !pinnedReproducibleWasmMatched,
     headerDistributionLicenseApproved: false,
     producerTrusted: false,
     workerExecutionObserved: false,
@@ -142,10 +157,12 @@ export async function runCppCuteBrowserRealCompile(argv = process.argv.slice(2))
     invalid("$.browser", `real browser compile verifier exited with status ${exitCode}`);
   }
   const evidence = parseEvidence(captured);
-  if (options.requireCompiled && evidence.outcome !== "compiled") {
+  if (options.requireCompiled &&
+      (evidence.outcome !== "compiled" ||
+       !preflight.pinnedReproducibleWasmMatched)) {
     invalid(
       "$.evidence.outcome",
-      "real browser compile remains blocked; observation did not produce Artifact V3",
+      "strict compile requires a package-pinned Wasm and one compiled Artifact V3 observation",
     );
   }
   if (options.evidenceOutput !== undefined) {
@@ -179,6 +196,13 @@ function parseArguments(argv) {
       values.requireCompiled = true;
       continue;
     }
+    if (argument === "--allow-untrusted-diagnostic-wasm") {
+      if (values.allowUntrustedDiagnosticWasm === true) {
+        invalid("$.argv", "duplicate --allow-untrusted-diagnostic-wasm");
+      }
+      values.allowUntrustedDiagnosticWasm = true;
+      continue;
+    }
     const separator = argument.indexOf("=");
     if (!argument.startsWith("--") || separator < 3) {
       invalid("$.argv", `unsupported argument ${JSON.stringify(argument)}`);
@@ -207,6 +231,7 @@ function exactInput(value) {
     "evidenceOutput",
     "preflightOnly",
     "requireCompiled",
+    "allowUntrustedDiagnosticWasm",
   ]);
   for (const key of Reflect.ownKeys(descriptors)) {
     if (typeof key !== "string" || !allowed.has(key)) {
@@ -229,7 +254,19 @@ function exactInput(value) {
   if (typeof requireCompiled !== "boolean") {
     invalid("$.requireCompiled", "expected boolean");
   }
-  return { wasmPath, packRoot, evidenceOutput, preflightOnly, requireCompiled };
+  const allowUntrustedDiagnosticWasm =
+    descriptors.allowUntrustedDiagnosticWasm?.value ?? false;
+  if (typeof allowUntrustedDiagnosticWasm !== "boolean") {
+    invalid("$.allowUntrustedDiagnosticWasm", "expected boolean");
+  }
+  return {
+    wasmPath,
+    packRoot,
+    evidenceOutput,
+    preflightOnly,
+    requireCompiled,
+    allowUntrustedDiagnosticWasm,
+  };
 }
 
 function requiredAbsolutePath(value, path) {
@@ -326,6 +363,12 @@ function parseEvidence(output) {
         evidence?.authority !== (compiled
           ? "local-real-browser-worker-execution-observation-only"
           : "local-real-browser-worker-terminal-observation-only") ||
+        evidence?.inputs?.wasmAuthority !==
+          (evidence?.inputs?.pinnedReproducibleWasmMatched === true
+            ? "package-pinned-two-clean-build-output"
+            : "untrusted-diagnostic-local-byte-observation-only") ||
+        evidence?.inputs?.untrustedDiagnosticWasm !==
+          !evidence?.inputs?.pinnedReproducibleWasmMatched ||
         evidence?.releaseReady !== false) {
       invalid("$.evidence", "browser evidence has an invalid authority boundary");
     }
