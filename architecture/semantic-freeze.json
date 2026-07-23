@@ -506,6 +506,7 @@
         "torchCompatFile": "packages/browsergrad-grad/src/python/_torch_compat_real.py",
         "torchCompatLimitedFile": "packages/browsergrad-grad/src/python/_torch_compat_limited.py",
         "inventoryFile": "architecture/grad-compatibility-inventory.json",
+        "platformSupportRegistryFile": "packages/browsergrad-grad/src/framework-platform-support.generated.ts",
         "inventorySha256": "eb795542a3ac413b316bbd7a1d7930505f5a612aa7f637ff240f0b8e3e36088a",
         "behaviorFixtureFile": "packages/browsergrad-grad/tests-integration/fixtures/grad-view-bf16.v0.json",
         "behaviorFixtureSha256": "42c84886771a323618f4b24388edcd882e037383ca78d462cd8a95aa04eb2251",

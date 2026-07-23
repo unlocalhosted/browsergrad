@@ -24,6 +24,7 @@ import {
   validateGradCompatibilityInventory,
   validateJitOpaqueOperationInventory,
   validateAssignmentRequirementRegistrySource,
+  validateGradFrameworkPlatformSupportSource,
   validatePlatformVocabularySnapshot,
   validateProgramCapabilityRegistrySource,
   validateSemanticFreezeManifest,
@@ -323,6 +324,41 @@ describe("semantic architecture guardrails", () => {
     ).toContainEqual(
       expect.stringContaining("duplicate platform vocabulary ID"),
     );
+  });
+
+  it("rejects generated Grad framework platform support drift", () => {
+    const registrySource = readFileSync(
+      join(
+        repoRoot,
+        "packages/browsergrad-grad/src/framework-platform-support.generated.ts",
+      ),
+      "utf8",
+    );
+    const inventory = JSON.parse(
+      readFileSync(
+        join(repoRoot, "architecture/grad-compatibility-inventory.json"),
+        "utf8",
+      ),
+    ) as { behaviors: unknown[] };
+
+    expect(
+      validateGradFrameworkPlatformSupportSource(registrySource, inventory),
+    ).toEqual([]);
+    expect(
+      validateGradFrameworkPlatformSupportSource(
+        registrySource.replace(
+          '"operationId": "browsergrad.grad.view.expand.v1"',
+          '"operationId": "browsergrad.grad.view.mutated.v1"',
+        ),
+        inventory,
+      ),
+    ).toContainEqual(expect.stringContaining("is stale"));
+
+    const duplicated = structuredClone(inventory);
+    duplicated.behaviors.push(duplicated.behaviors[0]);
+    expect(
+      validateGradFrameworkPlatformSupportSource(registrySource, duplicated),
+    ).toContainEqual(expect.stringContaining("is duplicated"));
   });
 
   it("rejects runtime readiness consumers that drop resolution records", () => {

@@ -11,7 +11,7 @@
     "typecheck": "pnpm -r run typecheck",
     "lint": "pnpm -r run lint",
     "architecture:check": "node scripts/semantic-architecture-check.mjs",
-    "architecture:generate-requirements": "node scripts/generate-assignment-requirement-usage.mjs && node scripts/generate-assignment-requirement-registry.mjs && node scripts/generate-program-capability-registry.mjs",
+    "architecture:generate-requirements": "node scripts/generate-assignment-requirement-usage.mjs && node scripts/generate-assignment-requirement-registry.mjs && node scripts/generate-program-capability-registry.mjs && node scripts/generate-grad-framework-platform-support.mjs",
     "verify:release": "node scripts/verify-release.mjs",
     "test:release-packages": "python3 scripts/snapshot-package-tar.test.py && node --test scripts/npm-read-only-environment.test.mjs scripts/package-publish-order.test.mjs scripts/publish-missing-npm.test.mjs scripts/require-npm-version.test.mjs scripts/verify-published-package-equivalence.test.mjs scripts/verify-npm-provenance.test.mjs && node scripts/test-release-packages.mjs",
     "validate:prd": "node scripts/validate-research-gated-prd.mjs",

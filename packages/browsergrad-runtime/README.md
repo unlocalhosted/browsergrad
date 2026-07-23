@@ -409,8 +409,11 @@ import {
   createFrameworkPlatformSupportView,
 } from "@unlocalhosted/browsergrad-runtime";
 import {
-  frameworkPlatformSupportSource,
+  frameworkPlatformSupportSource as jitFrameworkPlatformSupportSource,
 } from "@unlocalhosted/browsergrad-jit";
+import {
+  frameworkPlatformSupportSource as gradFrameworkPlatformSupportSource,
+} from "@unlocalhosted/browsergrad-grad";
 
 const requirements = createAssignmentRequirementResolutionEnvironment({
   environmentId: "browser.local",
@@ -444,7 +447,10 @@ const view = createFrameworkPlatformSupportView({
       },
     ],
   },
-  frameworks: [frameworkPlatformSupportSource()],
+  frameworks: [
+    gradFrameworkPlatformSupportSource(),
+    jitFrameworkPlatformSupportSource(),
+  ],
 });
 ```
 
@@ -454,7 +460,8 @@ operation contracts in separate fields. It validates the ten decision
 categories, bounds source and operation counts, rejects duplicates/open
 records, and never converts contract strings into a generic `supported`
 boolean. Runtime does not import or depend on JIT; any framework can provide
-the same structural source.
+the same structural source. The packed integration gate currently proves the
+generated 22-record Grad and 36-record JIT sources together.
 
 Use `runAssignmentJavascriptProfile()` when the platform has a full JS-routed
 profile and wants BrowserGrad to own preflight, route validation, mount

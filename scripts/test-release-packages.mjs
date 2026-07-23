@@ -918,6 +918,8 @@ try {
       "browsergrad-runtime",
       "browsergrad-semantic-core",
       "browsergrad-jit",
+      "browsergrad-kernels",
+      "browsergrad-grad",
     ],
     { pyodide: `file:${pyodidePeer}` },
   );
@@ -1360,7 +1362,11 @@ await import("@unlocalhosted/browsergrad-runtime/worker");
 
 function verifyInstalledGradConsumer(consumer, expectedVersion) {
   const source = `
-import { GradInstallError, installGrad } from "@unlocalhosted/browsergrad-grad";
+import {
+  GradInstallError,
+  installGrad,
+  frameworkPlatformSupportSource,
+} from "@unlocalhosted/browsergrad-grad";
 import { MOUNT_ROOT, SOURCE_FILES } from "@unlocalhosted/browsergrad-grad/source";
 import { createNodePyodideTarget } from "@unlocalhosted/browsergrad-grad/node-adapter";
 import { createGradKernelDeviceBridge } from "@unlocalhosted/browsergrad-grad/kernel-device";
@@ -1368,6 +1374,7 @@ import gradPackage from "@unlocalhosted/browsergrad-grad/package.json" with { ty
 
 if (gradPackage.version !== ${JSON.stringify(expectedVersion)}) throw new Error("unexpected packed Grad version");
 if (typeof installGrad !== "function" || !(new GradInstallError("test") instanceof Error)) throw new Error("packed Grad root exports invalid");
+if (frameworkPlatformSupportSource().operations.length !== 22) throw new Error("packed Grad generated framework support invalid");
 if (MOUNT_ROOT !== "/lib/browsergrad_grad_src" || !SOURCE_FILES.some(({ path }) => path === "browsergrad_grad/__init__.py")) throw new Error("packed Grad source export invalid");
 if (typeof createNodePyodideTarget !== "function" || typeof createGradKernelDeviceBridge !== "function") throw new Error("packed Grad adapters missing");
 `;
@@ -1556,8 +1563,11 @@ import {
 } from "@unlocalhosted/browsergrad-runtime";
 import {
   JIT_FRAMEWORK_VERSION,
-  frameworkPlatformSupportSource,
+  frameworkPlatformSupportSource as jitFrameworkPlatformSupportSource,
 } from "@unlocalhosted/browsergrad-jit";
+import {
+  frameworkPlatformSupportSource as gradFrameworkPlatformSupportSource,
+} from "@unlocalhosted/browsergrad-grad";
 import runtimePackage from "@unlocalhosted/browsergrad-runtime/package.json" with { type: "json" };
 import jitPackage from "@unlocalhosted/browsergrad-jit/package.json" with { type: "json" };
 
@@ -1588,13 +1598,18 @@ const view = createFrameworkPlatformSupportView({
       preservationLevel: "observable-equivalent",
     }],
   },
-  frameworks: [frameworkPlatformSupportSource()],
+  frameworks: [
+    jitFrameworkPlatformSupportSource(),
+    gradFrameworkPlatformSupportSource(),
+  ],
 });
 if (
   view.environmentId !== "browser.release-consumer"
   || view.programSupport.decisions[0]?.state !== "supported"
-  || view.frameworks[0]?.frameworkId !== "browsergrad.jit"
-  || view.frameworks[0]?.operations.length !== 36
+  || view.frameworks[0]?.frameworkId !== "browsergrad.grad"
+  || view.frameworks[0]?.operations.length !== 22
+  || view.frameworks[1]?.frameworkId !== "browsergrad.jit"
+  || view.frameworks[1]?.operations.length !== 36
 ) throw new Error("packed cross-package framework platform view invalid");
 `;
   writeFileSync(join(consumer, "consumer.mjs"), source);

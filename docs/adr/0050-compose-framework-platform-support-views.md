@@ -50,3 +50,5 @@ provide the same structural source without changing runtime.
 JIT now has a real generated platform source. Grad still needs a generated
 source derived from its frozen executable compatibility contracts before the
 cross-framework view represents both BrowserGrad framework surfaces.
+ADR-0051 subsequently supplies that source and proves the combined packed
+consumer.

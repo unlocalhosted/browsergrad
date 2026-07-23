@@ -15,8 +15,8 @@ general emphasis.
 
 ## Implementation Checkpoint — Active 2026-07-23
 
-Gates 0 through 2 and Gates 4 through 5 are verified; Gate 3 remains active;
-Gate 6 is in progress; Gate 7 has not started. Gate 4 is verified for its initial
+Gates 0 through 2 and Gates 4 through 6 are verified; Gate 3 remains active;
+Gate 7 has not started. Gate 4 is verified for its initial
 closed portable profile only: dense row-major, 4-byte-aligned, certified exact-input `f32`
 GEMM. The strict native producer, pinned no-shell Clang-Wasm executor,
 isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
@@ -146,7 +146,8 @@ extractor Wasm/factory reproducibility; the package binds their canonical v3
 evidence without claiming reproducibility of the still-incomplete distributed
 asset set.
 
-Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
+Gate 6's initial framework-convergence profile is verified. It began by
+retiring public `Tensor.expand`, `Tensor.abs`,
 `Tensor.sign`, `Tensor.sin`, `Tensor.cos`, `Tensor.clamp`, `Tensor.flip`,
 `Tensor.gather`, `Tensor.masked_fill`, `Tensor.prod`, `Tensor.repeat`,
 `Tensor.repeat_interleave`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`,
@@ -686,9 +687,10 @@ opaque IDs into one intentional user-kernel opaque identity, thirty-six typed
 retirements, and two removed unsupported surfaces. ADR-0003 records this
 public contract; ADR-0034 and ADR-0035 record the unsupported-surface
 classifications, and ADR-0036 records the final advertised opaque migration.
-The table currently covers typed migrations only; completing the remaining
-operation families and making runtime/profile UI consume these records remain
-Gate 6 work.
+The JIT table covers every formerly opaque advertised operation in the frozen
+Gate 6 profile. Pre-existing typed families not in that baseline require new
+executable records before they can be advertised through the same source; they
+do not weaken the closed profile's result.
 
 ADR-0047 and ADR-0048 now make the separate assignment-requirement model
 executable. Semantic-core `/requirement` definitions are generated for all 53
@@ -716,8 +718,11 @@ one provider-bound requirement environment and one program-support input,
 then bounds, validates, sorts, and freezes one or more framework sources.
 Requirement availability, program lowering state, framework decision strings,
 and terminal execution evidence remain separate fields and protocols. Runtime
-does not import JIT, and JIT does not import runtime. A generated Grad source
-and terminal execution evidence remain separate work.
+does not import JIT, and JIT does not import runtime. ADR-0051 generates Grad's
+22 verified eager records from its frozen executable compatibility inventory
+and proves that a packed consumer composes both framework sources. Terminal
+execution evidence remains a separate protocol rather than being inferred
+from either source.
 
 Browser asset manifest v1.4 now binds one build-signature predicate, exact
 trust-store digest, and canonical builder allowlist into the profile-pinned
@@ -2769,9 +2774,10 @@ the resolution environment directly and retain each profile's relevant
 provider/evidence records. The compatibility shape remains admitted only for
 existing callers. ADR-0049 adds artifact/program-scoped lowering records, and
 ADR-0050 adds a framework-neutral platform view plus a JIT JavaScript source
-generated from the executable 36-operation registry. Grad still needs an
-equivalent generated source before both framework surfaces appear in that
-view.
+generated from the executable 36-operation registry. ADR-0051 adds Grad's
+equivalent generated 22-record eager source, and the packed consumer proves
+both framework surfaces in one view without introducing runtime-to-framework
+dependencies.
 
 ### Adapter ledger
 
@@ -2957,6 +2963,14 @@ proved algorithm and execution profiles.
 
 **Exit:** framework-facing support tables are generated from the same contracts
 used to compile and execute.
+
+**Current verified profile:** JIT generates 36 records from its
+validator-bound executable operation registry. Grad generates 22 records from
+its frozen source- and fixture-bound eager compatibility inventory. Runtime
+composes both with provider-bound requirement resolutions and subject-bound
+lowering decisions while retaining terminal execution evidence as a separate
+authority. New framework operations or backend profiles require new executable
+contracts and regenerated records.
 
 ### Gate 7 — Host graphs and optional systems expansion
 

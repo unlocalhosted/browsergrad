@@ -14,6 +14,11 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Generates Grad's 22-record framework/platform support source directly from
+  its frozen executable eager compatibility inventory. Runtime's dependency-safe
+  platform view now composes both Grad and JIT without flattening eager
+  refusals, lazy transform decisions, program lowering, requirement
+  availability, or terminal execution evidence.
 - Adds a dependency-safe framework/platform support view. Runtime now composes
   provider-bound requirement resolutions, exact program lowering decisions,
   and generated framework-operation sources without importing a framework

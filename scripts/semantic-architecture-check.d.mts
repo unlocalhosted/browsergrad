@@ -82,6 +82,11 @@ export function validateProgramCapabilityRegistrySource(
   vocabulary: unknown,
 ): string[];
 
+export function validateGradFrameworkPlatformSupportSource(
+  source: string,
+  inventory: unknown,
+): string[];
+
 export function checkFrozenCompilerPointerScalarMemorySource(
   typescript: typeof ts,
   source: string,

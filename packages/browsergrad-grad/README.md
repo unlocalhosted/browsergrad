@@ -107,6 +107,27 @@ await installGrad(createNodePyodideTarget(py));
 `pyodide` is an optional peer — direct-adapter consumers bring their own
 compatible version. The adapter has no other dependencies.
 
+## Framework platform support
+
+Platform code can inspect Grad's verified eager contracts without installing
+Grad into Pyodide:
+
+```ts
+import {
+  frameworkPlatformSupportSource,
+} from "@unlocalhosted/browsergrad-grad";
+
+const gradSupport = frameworkPlatformSupportSource();
+console.log(gradSupport.frameworkId);       // browsergrad.grad
+console.log(gradSupport.operations.length); // 22
+```
+
+The source is generated from the frozen executable compatibility inventory,
+not inferred from method presence. Its ten decision fields distinguish CPU
+execution or refusal, eager autograd, unavailable lazy transforms/export,
+tensor planning, WebGPU, residency, and materialization. It reports contracts,
+not current device availability or terminal execution evidence.
+
 Optional WebGPU forward dispatch:
 
 ```ts

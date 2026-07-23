@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildAssignmentRequirementRegistrySource } from "./assignment-requirement-registry.mjs";
+import { buildGradFrameworkPlatformSupportSource } from "./grad-framework-platform-support.mjs";
 import { buildProgramCapabilityRegistrySource } from "./program-capability-registry.mjs";
 
 const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -327,6 +328,26 @@ export function validateProgramCapabilityRegistrySource(
   } catch (error) {
     failures.push(
       `cannot generate program capability registry: ${errorMessage(error)}`,
+    );
+  }
+  return failures;
+}
+
+export function validateGradFrameworkPlatformSupportSource(
+  source,
+  inventory,
+) {
+  const failures = [];
+  try {
+    const expected = buildGradFrameworkPlatformSupportSource(inventory);
+    if (source !== expected) {
+      failures.push(
+        "generated Grad framework platform support is stale; run pnpm architecture:generate-requirements",
+      );
+    }
+  } catch (error) {
+    failures.push(
+      `cannot generate Grad framework platform support: ${errorMessage(error)}`,
     );
   }
   return failures;
@@ -1835,7 +1856,13 @@ function checkGradViewBf16(root, freeze, failures) {
   const inventoryFile = resolveManifestFile(root, freeze.inventoryFile, "inventoryFile", failures);
   const behaviorFixtureFile = resolveManifestFile(root, freeze.behaviorFixtureFile, "behaviorFixtureFile", failures);
   const behaviorTestFile = resolveManifestFile(root, freeze.behaviorTestFile, "behaviorTestFile", failures);
-  if ([tensorFile, torchCompatFile, torchCompatLimitedFile, inventoryFile, behaviorFixtureFile, behaviorTestFile].some((value) => value === undefined)) return;
+  const platformSupportRegistryFile = resolveManifestFile(
+    root,
+    freeze.platformSupportRegistryFile,
+    "platformSupportRegistryFile",
+    failures,
+  );
+  if ([tensorFile, torchCompatFile, torchCompatLimitedFile, inventoryFile, behaviorFixtureFile, behaviorTestFile, platformSupportRegistryFile].some((value) => value === undefined)) return;
 
   failures.push(...checkFrozenGradCompatibilitySources(
     fs.readFileSync(tensorFile, "utf8"),
@@ -1846,6 +1873,10 @@ function checkGradViewBf16(root, freeze, failures) {
   const inventory = readJson(inventoryFile, failures);
   const fixture = readJson(behaviorFixtureFile, failures);
   failures.push(...validateGradCompatibilityInventory(inventory, fixture, freeze, relative(root, inventoryFile)));
+  failures.push(...validateGradFrameworkPlatformSupportSource(
+    fs.readFileSync(platformSupportRegistryFile, "utf8"),
+    inventory,
+  ));
 
   for (const [file, expected] of [
     [inventoryFile, freeze.inventorySha256],

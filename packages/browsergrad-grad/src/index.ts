@@ -26,6 +26,18 @@
 export { installGrad } from "./install.js";
 export type { GradTarget, InstallOptions } from "./types.js";
 export { GradInstallError } from "./types.js";
+export {
+  GRAD_FRAMEWORK_CONTRACT_SCHEMA,
+  GRAD_FRAMEWORK_CONTRACT_VERSION,
+  GRAD_FRAMEWORK_DECISION_FIELDS,
+  GRAD_FRAMEWORK_ID,
+  GRAD_FRAMEWORK_VERSION,
+  frameworkPlatformSupportSource,
+  type GradFrameworkDecisionField,
+  type GradFrameworkOperationDecisions,
+  type GradFrameworkPlatformOperation,
+  type GradFrameworkPlatformSupportSource,
+} from "./framework-platform-support.js";
 
 // The Python source itself is exported at the `./source` subpath
 // for tools that want to install grad through their own Pyodide bootstrap.

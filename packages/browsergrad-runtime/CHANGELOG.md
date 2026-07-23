@@ -13,7 +13,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   requirement resolutions, exact program lowering decisions, and one or more
   generated framework-operation sources as distinct records. Framework and
   operation identities are deterministic, duplicate/open inputs fail closed,
-  and no framework package becomes a runtime dependency.
+  and no framework package becomes a runtime dependency. Packed fresh-consumer
+  coverage composes the generated 22-record Grad and 36-record JIT sources in
+  one view.
 - Generated semantic capability/backend definitions and deterministic
   program-support views built only from actual program- or artifact-scoped
   lowering decisions. Static vocabulary records never imply support, and

@@ -7,6 +7,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- `frameworkPlatformSupportSource()` projects all 22 frozen, verified eager
+  compatibility records into the framework-neutral ten-decision platform
+  schema. The generated source preserves CPU/refusal, dtype, autograd,
+  materialization, residency, and eager-only non-applicability facts and is
+  checked byte-for-byte against the executable compatibility inventory.
+
 ### Changed
 
 - `torch.tensor` now implements a bounded copying-constructor contract:
