@@ -5,6 +5,7 @@
 #include "llvm/Support/VirtualFileSystem.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -229,6 +230,29 @@ int main() {
   BG_CHECK(!macro_include.vfs_failed);
   BG_CHECK(
       macro_include.vfs_failure == ImportedVfsObserverFailure::kNone);
+  BG_CHECK(complete_frontend_work_invocation(1U));
+  BG_CHECK(frontend_work_metrics_ready());
+
+  reset_frontend_work_metrics();
+  BG_CHECK(begin_frontend_work_invocation(frontend_limits));
+  install_source(
+      source, "/workspace/dependency.h",
+      "static_assert(true, \"forced include reached\");\n");
+  std::vector<std::string> forced_arguments = arguments("host");
+  forced_arguments.insert(
+      forced_arguments.end() - 1,
+      {"-include", "/workspace/dependency.h"});
+  constexpr std::array<ClangForcedIncludeObservation, 1U> forced_includes{{
+      {"/workspace/dependency.h", 1U},
+  }};
+  ClangPassReview forced_include;
+  BG_CHECK(run_cpp_cute_clang_pass_for_review(
+      forced_arguments, anchor, forced_includes,
+      ImportedVfsObservationLimits{}, 1024U, 1024U * 1024U,
+      forced_include));
+  BG_CHECK(!forced_include.vfs_failed);
+  BG_CHECK(
+      forced_include.vfs_failure == ImportedVfsObserverFailure::kNone);
   BG_CHECK(complete_frontend_work_invocation(1U));
   BG_CHECK(frontend_work_metrics_ready());
 

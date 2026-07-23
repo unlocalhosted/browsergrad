@@ -381,6 +381,19 @@ class LayoutTraceConsumer final : public clang::SemaConsumer {
   ClangPassReview& review_;
 };
 
+void normalize_observed_virtual_path(
+    const llvm::StringRef path, std::string& result) {
+  std::array<char, kCppCuteMaximumVirtualPathByteLength> canonical{};
+  std::size_t canonical_size = 0U;
+  if (!cpp_cute_normalize_virtual_path(
+          std::string_view(path.data(), path.size()), canonical.data(),
+          canonical.size(), canonical_size)) {
+    result = path.str();
+    return;
+  }
+  result.assign(canonical.data(), canonical_size);
+}
+
 class IncludeObservationCallbacks final : public clang::PPCallbacks {
  public:
   IncludeObservationCallbacks(
@@ -456,26 +469,25 @@ class IncludeObservationCallbacks final : public clang::PPCallbacks {
       static_cast<void>(observer_->record_invalid_include_source_range());
       return;
     }
-    const llvm::StringRef including_file = source_manager_.getFilename(hash);
+    const clang::FileID including_file_id = source_manager_.getFileID(hash);
+    const clang::OptionalFileEntryRef including_file =
+        source_manager_.getFileEntryRefForID(including_file_id);
+    if (!including_file.has_value()) {
+      // Clang reports the synthetic command-line include directive as a
+      // callback from a pseudo buffer. The exact forced-include edge was
+      // already recorded from its closed compiler option and has no source
+      // directive range or including source file.
+      return;
+    }
     const llvm::StringRef resolved_file = file->getName();
     const std::uint64_t begin = source_manager_.getFileOffset(hash);
     const std::uint64_t end = source_manager_.getFileOffset(filename_end);
     ImportedVfsIncludeEdgeObservation edge;
     edge.kind = is_angled ? ImportedVfsIncludeKind::kSourceAngle
                           : ImportedVfsIncludeKind::kSourceQuote;
-    edge.including_file_path = including_file.str();
-    std::array<char, kCppCuteMaximumVirtualPathByteLength>
-        canonical_resolved_file{};
-    std::size_t canonical_resolved_file_size = 0U;
-    if (!cpp_cute_normalize_virtual_path(
-            std::string_view(resolved_file.data(), resolved_file.size()),
-            canonical_resolved_file.data(), canonical_resolved_file.size(),
-            canonical_resolved_file_size)) {
-      edge.resolved_file_path = resolved_file.str();
-    } else {
-      edge.resolved_file_path.assign(
-          canonical_resolved_file.data(), canonical_resolved_file_size);
-    }
+    normalize_observed_virtual_path(
+        including_file->getName(), edge.including_file_path);
+    normalize_observed_virtual_path(resolved_file, edge.resolved_file_path);
     edge.spelling = file_name.str();
     edge.directive_start_byte_offset = begin;
     edge.directive_end_byte_offset = end;

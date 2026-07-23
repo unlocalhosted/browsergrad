@@ -537,11 +537,6 @@ async function prepareRealCompileEnvironment(
     runtimeAbiManifestSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
     buildProvenanceLockSha256,
   }));
-  (profileInput.language as {
-    options: typeof profileInput.language.options;
-  }).options = profileInput.language.options.filter(
-    (option) => option.kind !== "forced-include",
-  );
   (profileInput.toolchain.compiler as {
     binarySha256: string;
     resourceDirectorySha256: string;
