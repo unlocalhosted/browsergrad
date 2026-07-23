@@ -1724,6 +1724,33 @@ function validateProfileReferences(
       );
     }
   }
+  const cudaDependency = toolchain.dependencies.find(
+    (dependency) => dependency.kind === "cuda-toolkit",
+  );
+  if (cudaDependency === undefined) {
+    invalid("$.toolchain.dependencies", "toolchain has no CUDA toolkit dependency");
+  }
+  const cudaIncludeRoots = virtualFileSystem.includeRoots.filter(
+    (root) =>
+      root.owner.kind === "dependency" &&
+      root.owner.dependencyId === cudaDependency.dependencyId,
+  );
+  if (cudaIncludeRoots.length !== 1) {
+    invalid(
+      "$.virtualFileSystem.includeRoots",
+      "CUDA toolkit dependency must own exactly one include root",
+    );
+  }
+  const cudaIncludeRoot = cudaIncludeRoots[0]!;
+  if (
+    cudaIncludeRoot.virtualPath === "/include" ||
+    !cudaIncludeRoot.virtualPath.endsWith("/include")
+  ) {
+    invalid(
+      "$.virtualFileSystem.includeRoots",
+      "CUDA toolkit include root must be the include child of its toolkit root",
+    );
+  }
   let priorSearchRank = -1;
   for (const [index, root] of virtualFileSystem.includeRoots.entries()) {
     const searchRank = includeRootSearchRank(root, dependencies);

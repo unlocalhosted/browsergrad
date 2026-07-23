@@ -144,6 +144,7 @@ class DecodedCompileSession final {
   std::string_view compilation_contract_hash() const noexcept;
   std::string_view compiler_version() const noexcept;
   std::string_view compiler_resource_directory_virtual_path() const noexcept;
+  std::string_view cuda_toolkit_root_virtual_path() const noexcept;
   std::string_view request_id() const noexcept;
   std::string_view request_hash() const noexcept;
   std::string_view main_virtual_path() const noexcept;

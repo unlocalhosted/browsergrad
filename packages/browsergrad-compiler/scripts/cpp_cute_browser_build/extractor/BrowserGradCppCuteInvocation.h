@@ -89,6 +89,7 @@ struct CppCuteInvocationInput {
   std::string_view main_source_virtual_path;
   InvocationSemanticPass semantic_pass;
   std::string_view resource_directory_virtual_path;
+  std::string_view cuda_toolkit_root_virtual_path;
   std::span<const InvocationIncludeRoot> include_roots;
   /** Array position and each option's compiler_option_ordinal must match. */
   std::span<const InvocationCompilerOption> compiler_options;
@@ -103,6 +104,9 @@ enum class InvocationMaterializationStatus : std::uint8_t {
   kInvalidAuxiliaryTargetTriple,
   kInvalidDeviceArchitecture,
   kInvalidResourceDirectoryPath,
+  kInvalidCudaToolkitRootPath,
+  kMissingCudaToolkitIncludeRoot,
+  kInvalidCudaToolkitIncludeRoot,
   kMissingIncludeRoots,
   kTooManyIncludeRoots,
   kInvalidIncludeRootOrdinal,
@@ -137,6 +141,7 @@ enum class InvocationErrorField : std::uint8_t {
   kMainSource,
   kSemanticPass,
   kResourceDirectory,
+  kCudaToolkit,
   kIncludeRoot,
   kCompilerOption,
   kArguments,

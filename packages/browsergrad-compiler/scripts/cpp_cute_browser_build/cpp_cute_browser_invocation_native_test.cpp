@@ -65,6 +65,7 @@ CppCuteInvocationInput valid_input(
       "/workspace/project/kernel.cu",
       device_pass(),
       "/toolchain/clang/lib/clang/22",
+      "/toolchain/cuda",
       include_roots,
       compiler_options,
   };
@@ -103,6 +104,7 @@ int run_exact_order_tests() {
       "--cuda-gpu-arch=sm_80",
       "-resource-dir",
       "/toolchain/clang/lib/clang/22",
+      "--cuda-path=/toolchain/cuda",
       "--cuda-path-ignore-env",
       "-nostdinc",
       "-nostdinc++",
@@ -161,6 +163,8 @@ MaterializedCppCuteInvocation build_from_temporary_storage() {
       InvocationIncludeRoot{1U, "clang-resource",
                             InvocationIncludeMode::kSystem,
                             resource_include},
+      InvocationIncludeRoot{2U, "cuda", InvocationIncludeMode::kSystem,
+                            "/toolchain/cuda/include"},
   };
   const std::array<InvocationCompilerOption, 4U> options = {{
       InvocationDefineOption{0U, {macro_name, macro_value}},
@@ -174,6 +178,7 @@ MaterializedCppCuteInvocation build_from_temporary_storage() {
       {0U, CudaSemanticPass::kDeviceExtraction,
        "nvptx64-nvidia-cuda", host_triple, architecture},
       resource_directory,
+      "/toolchain/cuda",
       roots,
       options,
   };
@@ -189,13 +194,13 @@ int run_ownership_and_no_shell_tests() {
            "/workspace/x;$(literal)/--cuda-host-only.cu");
   BG_CHECK(result.arguments[6] == "--target=x86_64-unknown-linux-gnu");
   BG_CHECK(result.arguments[7] == "--cuda-gpu-arch=sm_90a");
-  BG_CHECK(result.arguments[16] == "/workspace/x;$(literal)");
-  BG_CHECK(result.arguments[22] ==
+  BG_CHECK(result.arguments[17] == "/workspace/x;$(literal)");
+  BG_CHECK(result.arguments[25] ==
            "-DMESSAGE=x y;$(still-not-a-shell)");
-  BG_CHECK(result.arguments[24] ==
+  BG_CHECK(result.arguments[27] ==
            "/workspace/x;$(literal)/prelude with spaces.h");
-  BG_CHECK(result.arguments[25] == "-fsyntax-only");
-  BG_CHECK(result.arguments[26] == "-ferror-limit=20");
+  BG_CHECK(result.arguments[28] == "-fsyntax-only");
+  BG_CHECK(result.arguments[29] == "-ferror-limit=20");
   return 0;
 }
 
@@ -277,6 +282,17 @@ int run_identity_and_pass_rejection_tests() {
       input,
       InvocationMaterializationStatus::kInvalidResourceDirectoryPath,
       InvocationErrorField::kResourceDirectory));
+  input = valid_input();
+  input.cuda_toolkit_root_virtual_path = "/toolchain/../cuda";
+  BG_CHECK(rejects(
+      input,
+      InvocationMaterializationStatus::kInvalidCudaToolkitRootPath,
+      InvocationErrorField::kCudaToolkit));
+  input.cuda_toolkit_root_virtual_path = "/";
+  BG_CHECK(rejects(
+      input,
+      InvocationMaterializationStatus::kInvalidCudaToolkitRootPath,
+      InvocationErrorField::kCudaToolkit));
   return 0;
 }
 
@@ -341,6 +357,18 @@ int run_include_root_rejection_tests() {
       valid_input(roots),
       InvocationMaterializationStatus::kMissingMainSourceIncludeRoot,
       InvocationErrorField::kIncludeRoot));
+  roots = kIncludeRoots;
+  roots[2].virtual_path = "/other/cuda/include";
+  BG_CHECK(rejects(
+      valid_input(roots),
+      InvocationMaterializationStatus::kMissingCudaToolkitIncludeRoot,
+      InvocationErrorField::kCudaToolkit));
+  roots = kIncludeRoots;
+  roots[2].mode = InvocationIncludeMode::kQuote;
+  BG_CHECK(rejects(
+      valid_input(roots),
+      InvocationMaterializationStatus::kInvalidCudaToolkitIncludeRoot,
+      InvocationErrorField::kIncludeRoot, 2U));
   return 0;
 }
 

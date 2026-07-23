@@ -44,6 +44,7 @@ std::vector<std::string> arguments(const std::string_view pass) {
       "--cuda-gpu-arch=sm_80",
       "-resource-dir",
       "/toolchain/clang/lib/clang/22",
+      "--cuda-path=/toolchain/cuda",
       "--cuda-path-ignore-env",
       "-nostdinc",
       "-nostdinc++",
@@ -185,14 +186,19 @@ int main() {
   BG_CHECK(rejected.clang_error_count != 0U);
   BG_CHECK(!rejected.diagnostic_capture_failed);
   BG_CHECK(!rejected.diagnostics.empty());
-  BG_CHECK(rejected.diagnostics[0].custom);
-  BG_CHECK(rejected.diagnostics[0].custom_code ==
+  const auto custom_diagnostic = std::find_if(
+      rejected.diagnostics.begin(), rejected.diagnostics.end(),
+      [](const ClangDiagnosticObservation& diagnostic) {
+        return diagnostic.custom;
+      });
+  BG_CHECK(custom_diagnostic != rejected.diagnostics.end());
+  BG_CHECK(custom_diagnostic->custom_code ==
            CustomDiagnosticCode::kTemporalMacroForbidden);
-  BG_CHECK(rejected.diagnostics[0].stage ==
+  BG_CHECK(custom_diagnostic->stage ==
            RawDiagnosticStage::kPreprocessor);
-  BG_CHECK(rejected.diagnostics[0].severity ==
+  BG_CHECK(custom_diagnostic->severity ==
            RawDiagnosticSeverity::kError);
-  BG_CHECK(rejected.diagnostics[0].virtual_path == "/workspace/main.cu");
+  BG_CHECK(custom_diagnostic->virtual_path == "/workspace/main.cu");
   BG_CHECK(complete_frontend_work_invocation(1U));
   BG_CHECK(frontend_work_metrics_ready());
   BG_CHECK(frontend_work_metrics_record_for_testing()

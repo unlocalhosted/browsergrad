@@ -182,7 +182,8 @@ struct SessionStorage final {
         extractor_binary_sha256(&memory), compiler_binary_sha256(&memory),
         compiler_version(&memory),
         compiler_resource_virtual_path(&memory),
-        compiler_resource_sha256(&memory), source_roots(&memory),
+        compiler_resource_sha256(&memory),
+        cuda_toolkit_root_virtual_path(&memory), source_roots(&memory),
         options(&memory), passes(&memory), include_roots(&memory),
         dependencies(&memory), source_files(&memory), entry(&memory) {}
 
@@ -199,6 +200,7 @@ struct SessionStorage final {
   PmrString compiler_version;
   PmrString compiler_resource_virtual_path;
   PmrString compiler_resource_sha256;
+  PmrString cuda_toolkit_root_virtual_path;
   std::pmr::vector<PmrString> source_roots;
   std::pmr::vector<OwnedCompilerOption> options;
   std::pmr::vector<OwnedSemanticPass> passes;
@@ -1484,6 +1486,18 @@ void validate_virtual_file_system(const JsonDocument& document,
         reject(CompileSessionDecodeStatus::kInvalidFrame, region,
                CompileSessionDecodeReason::kSchema, root.begin);
       }
+      if (dependency->kind == "cuda-toolkit") {
+        constexpr std::string_view kIncludeSuffix = "/include";
+        if (!storage.cuda_toolkit_root_virtual_path.empty() ||
+            output.virtual_path.size() <= kIncludeSuffix.size() ||
+            !std::string_view(output.virtual_path).ends_with(kIncludeSuffix)) {
+          reject(CompileSessionDecodeStatus::kInvalidFrame, region,
+                 CompileSessionDecodeReason::kSchema, root.begin);
+        }
+        storage.cuda_toolkit_root_virtual_path.assign(
+            output.virtual_path.begin(),
+            output.virtual_path.end() - kIncludeSuffix.size());
+      }
     } else {
       reject(CompileSessionDecodeStatus::kInvalidFrame, region,
              CompileSessionDecodeReason::kSchema, owner.begin);
@@ -2024,6 +2038,11 @@ std::string_view DecodedCompileSession::compiler_version() const noexcept {
 std::string_view
 DecodedCompileSession::compiler_resource_directory_virtual_path() const noexcept {
   return implementation_->storage.compiler_resource_virtual_path;
+}
+
+std::string_view
+DecodedCompileSession::cuda_toolkit_root_virtual_path() const noexcept {
+  return implementation_->storage.cuda_toolkit_root_virtual_path;
 }
 
 std::string_view DecodedCompileSession::request_id() const noexcept {

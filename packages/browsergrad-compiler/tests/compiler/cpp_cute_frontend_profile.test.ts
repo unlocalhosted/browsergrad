@@ -457,6 +457,42 @@ describe("C++/CuTe frontend profile", () => {
     await expectProfileError(windows, "BG-COMPILER-CPP-CUTE-PROFILE-INVALID", "$.virtualFileSystem.includeRoots[0].virtualPath");
   });
 
+  it("requires one derivable CUDA toolkit root with no ambient path inference", async () => {
+    const invalid = cloneCppCuteProfileInput();
+    const includeRoots = (invalid["virtualFileSystem"] as Record<string, unknown>)
+      ["includeRoots"] as Record<string, unknown>[];
+    const cuda = includeRoots.find(
+      (root) =>
+        (root["owner"] as Record<string, unknown>)["dependencyId"] === "cuda",
+    );
+    if (cuda === undefined) throw new Error("fixture lost CUDA include root");
+    cuda["virtualPath"] = "/toolchain/cuda/headers";
+    await expectProfileError(
+      invalid,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.virtualFileSystem.includeRoots",
+    );
+
+    const duplicate = cloneCppCuteProfileInput();
+    const duplicateRoots = (duplicate["virtualFileSystem"] as Record<string, unknown>)
+      ["includeRoots"] as Record<string, unknown>[];
+    const duplicateCuda = duplicateRoots.find(
+      (root) =>
+        (root["owner"] as Record<string, unknown>)["dependencyId"] === "cuda",
+    );
+    if (duplicateCuda === undefined) throw new Error("fixture lost CUDA include root");
+    duplicateRoots.splice(2, 0, {
+      ...structuredClone(duplicateCuda),
+      includeRootId: "cuda-extra",
+      virtualPath: "/toolchain/cuda-extra/include",
+    });
+    await expectProfileError(
+      duplicate,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.virtualFileSystem.includeRoots",
+    );
+  });
+
   it("requires canonical runner, container, trust, compiler, dependency, and header identities", async () => {
     const runner = cloneCppCuteProfileInput();
     const runnerDeployment = runner["deployment"] as Record<string, unknown>;

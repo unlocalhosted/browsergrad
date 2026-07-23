@@ -118,7 +118,7 @@ describe("browser source-archive admission", () => {
 
     expect(current).toMatchObject({
       buildInputLockId:
-        "bg.cpp.browser-build-input-lock.sha256.6a1bdad0619fbe2973deba7b4b43e9d5e0664020d55ab9d3dac06c4308122ff0",
+        "bg.cpp.browser-build-input-lock.sha256.9b088b98ad8d50ac5065cc31870531f667572428cd7a0325345a9f34371cd5d6",
       sources: [
         {
           sourceId: "cutlass",

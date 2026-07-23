@@ -216,6 +216,7 @@ PrepareCppCuteCompilePlanResult prepare_cpp_cute_compile_plan(
               session.main_virtual_path(),
               semantic_pass,
               session.compiler_resource_directory_virtual_path(),
+              session.cuda_toolkit_root_virtual_path(),
               include_roots,
               compiler_options,
           });

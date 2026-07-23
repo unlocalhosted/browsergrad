@@ -353,6 +353,8 @@ ArtifactV3CompileResult decode_callback(
     g_ready_shape = exact_order &&
                     decoded.session->compiler_resource_directory_virtual_path() ==
                         "/toolchain/clang/lib/clang/22" &&
+                    decoded.session->cuda_toolkit_root_virtual_path() ==
+                        "/toolchain/cuda" &&
                     decoded.session->compiler_option(0).name_or_id == "CUTE_SM80_ENABLED" &&
                     decoded.session->compiler_option(1).include_root_id == "clang-resource" &&
                     decoded.session->compiler_option(2).name_or_id == "syntax-only" &&
@@ -382,6 +384,10 @@ ArtifactV3CompileResult decode_callback(
           std::find(device.begin(), device.end(), "--cuda-device-only") !=
               device.end() &&
           std::find(host.begin(), host.end(), "--cuda-host-only") != host.end() &&
+          std::find(device.begin(), device.end(),
+                    "--cuda-path=/toolchain/cuda") != device.end() &&
+          std::find(host.begin(), host.end(),
+                    "--cuda-path=/toolchain/cuda") != host.end() &&
           std::find(device.begin(), device.end(), "-ferror-limit=100000") !=
               device.end() &&
           std::find(host.begin(), host.end(), "-ferror-limit=100000") !=

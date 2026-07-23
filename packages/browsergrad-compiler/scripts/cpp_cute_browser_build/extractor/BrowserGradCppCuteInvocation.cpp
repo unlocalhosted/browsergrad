@@ -241,6 +241,16 @@ MaterializedCppCuteInvocation materialize_cpp_cute_invocation(
         InvocationMaterializationStatus::kInvalidResourceDirectoryPath,
         InvocationErrorField::kResourceDirectory);
   }
+  if (!cpp_cute_valid_canonical_virtual_path(
+          input.cuda_toolkit_root_virtual_path) ||
+      input.cuda_toolkit_root_virtual_path == "/" ||
+      input.cuda_toolkit_root_virtual_path.size() +
+              std::string_view("/include").size() >
+          kCppCuteMaximumVirtualPathByteLength) {
+    return reject(
+        InvocationMaterializationStatus::kInvalidCudaToolkitRootPath,
+        InvocationErrorField::kCudaToolkit);
+  }
   if (input.include_roots.empty()) {
     return reject(InvocationMaterializationStatus::kMissingIncludeRoots,
                   InvocationErrorField::kIncludeRoot);
@@ -257,7 +267,10 @@ MaterializedCppCuteInvocation materialize_cpp_cute_invocation(
   root_paths.reserve(input.include_roots.size());
   const std::string resource_include_path = joined_argument(
       input.resource_directory_virtual_path, "/include");
+  const std::string cuda_include_path = joined_argument(
+      input.cuda_toolkit_root_virtual_path, "/include");
   bool has_resource_include_root = false;
+  bool has_cuda_include_root = false;
   bool has_main_source_include_root = false;
   for (std::size_t index = 0U; index < input.include_roots.size(); ++index) {
     const InvocationIncludeRoot& root = input.include_roots[index];
@@ -298,6 +311,14 @@ MaterializedCppCuteInvocation materialize_cpp_cute_invocation(
       }
       has_resource_include_root = true;
     }
+    if (root.virtual_path == cuda_include_path) {
+      if (root.mode != InvocationIncludeMode::kSystem) {
+        return reject(
+            InvocationMaterializationStatus::kInvalidCudaToolkitIncludeRoot,
+            InvocationErrorField::kIncludeRoot, index);
+      }
+      has_cuda_include_root = true;
+    }
     if (root.mode == InvocationIncludeMode::kQuote &&
         cpp_cute_virtual_path_contains(root.virtual_path,
                                        input.main_source_virtual_path)) {
@@ -308,6 +329,11 @@ MaterializedCppCuteInvocation materialize_cpp_cute_invocation(
     return reject(
         InvocationMaterializationStatus::kMissingResourceIncludeRoot,
         InvocationErrorField::kIncludeRoot);
+  }
+  if (!has_cuda_include_root) {
+    return reject(
+        InvocationMaterializationStatus::kMissingCudaToolkitIncludeRoot,
+        InvocationErrorField::kCudaToolkit);
   }
   if (!has_main_source_include_root) {
     return reject(
@@ -442,7 +468,7 @@ MaterializedCppCuteInvocation materialize_cpp_cute_invocation(
 
   MaterializedCppCuteInvocation result;
   const std::size_t expected_argument_count =
-      16U + input.include_roots.size() * 2U +
+      17U + input.include_roots.size() * 2U +
       input.compiler_options.size() * 2U +
       kTemporalDefenseInDepthArgv.size();
   if (expected_argument_count > kMaximumArgumentCount) {
@@ -464,6 +490,8 @@ MaterializedCppCuteInvocation materialize_cpp_cute_invocation(
       "--cuda-gpu-arch=", input.semantic_pass.device_architecture));
   result.arguments.emplace_back("-resource-dir");
   result.arguments.emplace_back(input.resource_directory_virtual_path);
+  result.arguments.push_back(joined_argument(
+      "--cuda-path=", input.cuda_toolkit_root_virtual_path));
   result.arguments.emplace_back("--cuda-path-ignore-env");
   result.arguments.emplace_back("-nostdinc");
   result.arguments.emplace_back("-nostdinc++");
