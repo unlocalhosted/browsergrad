@@ -182,7 +182,8 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
     verifyCppCuteBrowserWorkerBundle(),
   ]);
   const resource = CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE;
-  if (worker.sha256 !==
+  const currentWorkerSha256: string = worker.sha256;
+  if (currentWorkerSha256 !==
       CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256) {
     mismatch("$.workerBundle", "observation does not bind the current package Worker");
   }

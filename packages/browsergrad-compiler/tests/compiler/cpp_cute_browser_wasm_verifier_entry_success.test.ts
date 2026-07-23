@@ -28,9 +28,9 @@ vi.mock("../../src/cpp_cute_browser_wasm_inspection.js", async (importOriginal) 
     wasmByteLength: 8,
     observedProjectionSha256: PROJECTION_SHA256,
     runtimeAbiManifestId:
-      "bg.cpp.browser-runtime-abi.sha256.0758386fa646d9c70b508ae0573c4c43cb155fdab48a35dfc7470d20b988a39c",
+      "bg.cpp.browser-runtime-abi.sha256.d2a18b132528aa3dcde74effc007b732c9083c4ffdf6ae06da18f39e2cbd68de",
     runtimeAbiContractSha256:
-      "d0e04083688896ae67a033e7aa54e523fea48d6a4d8d345d9572e056c0cf15e5",
+      "5b1646d576c49c2702ec16aff79ae5b96be94de9a9fabe3e40d9fbdfe67dd159",
     exactInterfaceConformance: true,
     mismatches: Object.freeze([]),
     projection: Object.freeze({

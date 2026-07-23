@@ -21,16 +21,16 @@ import {
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
-export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 13;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 14;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.0758386fa646d9c70b508ae0573c4c43cb155fdab48a35dfc7470d20b988a39c";
+  "bg.cpp.browser-runtime-abi.sha256.d2a18b132528aa3dcde74effc007b732c9083c4ffdf6ae06da18f39e2cbd68de";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "65cc7181fa6c75b79bf6f18c00cf9feaa1328c1c1bc76a4e0e236a3bd2918535";
+  "375be060931c57b8016b2b3655d77a9ff618e826b917bbad031bccdc28c56541";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "d0e04083688896ae67a033e7aa54e523fea48d6a4d8d345d9572e056c0cf15e5";
+  "5b1646d576c49c2702ec16aff79ae5b96be94de9a9fabe3e40d9fbdfe67dd159";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
-  "8d320d2fb15525ef548446a5e3bb993369dc4d4cfcfe9cc0faaf5fd3639a370d";
+  "20214c6cd9f968c1a298f5f3749a3fc0fcceb7a364d201f96f9d3d546864949d";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 =
   "54fcf849f006f656162394c9feaeec801af059cbc7b0d61e612bcdebc6abb361";
 
@@ -393,8 +393,8 @@ function validateBodyInvariants(value: JsonObject): void {
         structural.tables.maximumElementsCeiling !== 65_536 ||
         structural.tables.exactReviewedProjection.length !== 1 ||
         structural.tables.exactReviewedProjection[0]?.elementType !== "funcref" ||
-        structural.tables.exactReviewedProjection[0].minimum !== 15_168 ||
-        structural.tables.exactReviewedProjection[0].maximum !== 15_168) {
+        structural.tables.exactReviewedProjection[0].minimum !== 15_304 ||
+        structural.tables.exactReviewedProjection[0].maximum !== 15_304) {
       invalid("$.body.wasm.structuralPolicy.tables", "table policy differs from the exact reviewed v1 projection");
     }
     assertExactStrings(
@@ -784,7 +784,7 @@ function validateBodyInvariants(value: JsonObject): void {
         generatedImports.status !== "independently-reviewed-hash-pinned" ||
         generatedImports.allowlistSha256 !==
           CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 ||
-        generatedImports.exactFunctions.length !== 66 ||
+        generatedImports.exactFunctions.length !== 69 ||
         generatedImports.unlistedGeneratedImports !== "forbidden" ||
         generatedImports.observedModuleCannotExtendAllowlist !== true ||
         generatedImports.capabilityCeiling !==
@@ -813,7 +813,7 @@ function validateBodyInvariants(value: JsonObject): void {
       "-sINCOMING_MODULE_JS_API=['instantiateWasm','onAbort','print','printErr']",
     ], "$.body.hostImports.generatedImportAllowlist.independentReview.lockedFlags");
     const expectedGeneratedRoles = [
-      ["javascript-exception-control-flow", 62, "none"],
+      ["javascript-exception-control-flow", 65, "none"],
       ["bounded-memory-growth", 2, "none"],
       ["stack-overflow-trap", 1, "none"],
       ["stdout-stderr-only", 1, "caller-provided-output-hooks-only"],

@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.564b1f555f5488df381b0bcf7e9f95e52270607cef5ad24eaf0fe659ed78230a",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.db34b034376090b931897ad4da03ef27fd7ee79d3c19ab5116296477e7bff922",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -30,9 +30,9 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
       outputPath: "assets/browsergrad-cpp-cute/runtime-abi-manifest.json",
       mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
       runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
-      manifestId: "bg.cpp.browser-runtime-abi.sha256.0758386fa646d9c70b508ae0573c4c43cb155fdab48a35dfc7470d20b988a39c",
-      resourceSha256: "65cc7181fa6c75b79bf6f18c00cf9feaa1328c1c1bc76a4e0e236a3bd2918535",
-      resourceByteLength: "43734",
+      manifestId: "bg.cpp.browser-runtime-abi.sha256.d2a18b132528aa3dcde74effc007b732c9083c4ffdf6ae06da18f39e2cbd68de",
+      resourceSha256: "375be060931c57b8016b2b3655d77a9ff618e826b917bbad031bccdc28c56541",
+      resourceByteLength: "44233",
       byteIdentity: "must-equal-package-canonical-resource",
       authority: "design-reference-only-no-wasm-conformance-worker-or-release-authority",
     },

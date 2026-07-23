@@ -159,7 +159,7 @@ describe("C++/CuTe frontend profile", () => {
     const aot = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("87887fe14195c0f77f900eef0dbd42c416495d4b00e5a0f9c1189c2983dd4e38");
+    expect(first.profileHash).toBe("11a95467970684bd857af4360409ed734ba8a05e7dfed1a235cafe2c6a332ab1");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.browser-clang@1");
     expect(first.deploymentMode).toBe("browser-local");
     expect(first.compilationContractHash).toBe(aot.compilationContractHash);

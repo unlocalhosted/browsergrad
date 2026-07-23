@@ -29,14 +29,14 @@ describe("C++/CuTe package Worker bundle authoring", () => {
       authority: "package-worker-bundle-authoring-projection-only",
       entryPath: "src/cpp_cute_browser_worker_module.ts",
       outputFileName: "browsergrad-cpp-cute-worker.mjs",
-      sha256: "eb7df701054a82f59486c011e9a861e1565525c688e402fc1d3fe1724f2530f6",
-      byteLength: 582_580,
+      sha256: "c69678649bd3c152b4381cadec5b570a239d9e7ac8c4f302e897cea47d2bab50",
+      byteLength: 583_032,
       staticImportCount: 0,
       dynamicImportCount: 0,
       factorySha256: "f64d5239d5c258f44e859834b57e1ea330b7efdf7a405dead3126b53330a5534",
       factoryByteLength: 27_285,
-      verifierSha256: "e8d84c7e3aa7257c6a8b7f48d5849a692ac678a9053f948ea74845a83cd05740",
-      verifierByteLength: 157_378,
+      verifierSha256: "8e346123d86cc18c1c6acbdc7e97ca981f4de6e4c4969291c92e1e3aa668e5ad",
+      verifierByteLength: 157_830,
     });
     expect(projection.source).not.toContain("sourceMappingURL=");
     expect(projection.source).not.toContain("//#region");
@@ -57,12 +57,12 @@ describe("C++/CuTe package Worker bundle authoring", () => {
         checked: true,
         bundles: [
           {
-            sha256: "eb7df701054a82f59486c011e9a861e1565525c688e402fc1d3fe1724f2530f6",
-            byteLength: 582_580,
+            sha256: "c69678649bd3c152b4381cadec5b570a239d9e7ac8c4f302e897cea47d2bab50",
+            byteLength: 583_032,
           },
           {
-            sha256: "e8d84c7e3aa7257c6a8b7f48d5849a692ac678a9053f948ea74845a83cd05740",
-            byteLength: 157_378,
+            sha256: "8e346123d86cc18c1c6acbdc7e97ca981f4de6e4c4969291c92e1e3aa668e5ad",
+            byteLength: 157_830,
           },
         ],
       });

@@ -1014,14 +1014,15 @@ Every admitted build runs the independent production-scale raw-Wasm inspector
 and uploads its exact report. The original 98-function import surface contained
 92 generated Emscripten imports, including forbidden clock, random, process,
 environment, and ambient-filesystem services. Those capabilities were closed
-inside the module before review. The current observed 72-function surface is exactly six
-`browsergrad_vfs_v1` functions plus 66 hash-pinned generated functions: 62
-JavaScript-exception/control-flow shims, two bounded memory-growth helpers, one
-stack-overflow trap, and output-only `fd_write`. The 29 worker-internal support
-functions and one fixed 15,167-entry `funcref` dispatch table are separately pinned; absent
-`target_features` metadata is advisory because static opcode/section inspection
-remains authoritative. ABI 1.9 keeps browser-visible required features
-separate from the inspector-only `bulk-memory-opt` opcode-subset marker.
+inside the module before review. The current observed 75-function surface is
+exactly six `browsergrad_vfs_v1` functions plus 69 hash-pinned generated
+functions: 65 JavaScript-exception/control-flow shims, two bounded
+memory-growth helpers, one stack-overflow trap, and output-only `fd_write`.
+The 29 worker-internal support functions and one fixed 15,304-entry `funcref`
+dispatch table are separately pinned; absent `target_features` metadata is
+advisory because static opcode/section inspection remains authoritative. ABI
+1.14 keeps browser-visible required features separate from the inspector-only
+`bulk-memory-opt` opcode-subset marker.
 The build workflow invokes the reviewer in strict mode after persisting its
 bounded observation, so any mismatch fails both cached validation and clean
 reproducibility before browser execution.
@@ -1083,8 +1084,8 @@ release evidence. The Worker-local runtime executes the generated factory and
 C ABI, verifies exact frontend-work/VFS/runtime observations, and emits
 canonical control plus artifact bytes. The package-owned Worker graph is pinned
 at SHA-256
-`eb7df701054a82f59486c011e9a861e1565525c688e402fc1d3fe1724f2530f6`
-and 582,580 bytes. Worker controller protocol v2 preserves one bounded,
+`c69678649bd3c152b4381cadec5b570a239d9e7ac8c4f302e897cea47d2bab50`
+and 583,032 bytes. Worker controller protocol v2 preserves one bounded,
 sanitized deepest failure detail. Failed C-ABI invocations snapshot exact
 frontend-work, allocator, and VFS state before cleanup without minting Worker
 execution or lowering authority.
@@ -1098,18 +1099,25 @@ The clean diagnostic host path first consumed those bytes through the captured
 platform and package invocation. Chromium compiled unchanged C++17/CuTe source
 in 22.369 seconds and authenticated accepted Artifact V3
 `bg.artifact.cpp-cute-frontend.sha256.4489656ea0da6faef2a37164fd73e36e201e15f4fba640fa88395a46deb81991`.
-The package-pinned two-clean-build Wasm then repeated that same accepted
+The prior package-pinned two-clean-build Wasm repeated that same accepted
 Artifact V3 in Chromium: compilation took 21.133 seconds and total browser
-execution took 24.331 seconds. Strict Worker evidence is
+execution took 24.331 seconds. Its historical strict Worker evidence is
 `bg.cpp.browser-worker-execution.sha256.fbff539a3f5a3ad532e21d24ab07665f1f7b5b434b8aec74d57b7ba5e3b69019`;
 the shared rank-2 candidate is
 `bg.cpp.browser-worker-layout-candidate.sha256.72f3b5933de96569359767f19fdaaed3eaadadc56ca5c297238abcc149c0d34d`.
 The exact 2,886-byte observation is package-pinned at SHA-256
 `bf4d378a92eda260a120da15651deac8d42c7324de490ad1009224a3e7761496`.
-This closes strict reproducible layout-only browser execution, but it does not
-establish an externally trusted producer, approve header redistribution,
-produce dynamic Tensor/view-copy semantics, authorize lowering or backend
-execution, or make the release ready.
+Runtime ABI 1.14 and the exact Worker bundle have since changed. The package
+verifier therefore rejects that prior observation rather than treating it as
+current authority. Diagnostic build `30053246445` completed isolated
+compile/link in about 3 minutes 18 seconds and produced a 31,835,141-byte Wasm
+with SHA-256
+`7939cb244b1d02346dbd511c61b4bdaf4d58c9321dfd62dba20bf7c57558cc8f`;
+detached local review against ABI 1.14 reports zero mismatches. Two-clean-build
+reproducibility, detached package evidence, and fresh strict Chromium execution
+remain required before the source-derived Tensor/view-copy result can become
+current browser authority. Externally trusted producer, header redistribution,
+lowering, backend execution, and release authorities remain separate and false.
 Use the linked implementation ledger
 for exact chronology, failures, and evidence. This checkpoint is informational: the
 remainder of this document continues to define the normative target and does
