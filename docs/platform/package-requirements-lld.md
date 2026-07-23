@@ -1008,10 +1008,13 @@ inside the module before review. The current observed 72-function surface is exa
 `browsergrad_vfs_v1` functions plus 66 hash-pinned generated functions: 62
 JavaScript-exception/control-flow shims, two bounded memory-growth helpers, one
 stack-overflow trap, and output-only `fd_write`. The 29 worker-internal support
-functions and one fixed 15,166-entry `funcref` dispatch table are separately pinned; absent
+functions and one fixed 15,167-entry `funcref` dispatch table are separately pinned; absent
 `target_features` metadata is advisory because static opcode/section inspection
-remains authoritative. ABI 1.8 keeps browser-visible required features
+remains authoritative. ABI 1.9 keeps browser-visible required features
 separate from the inspector-only `bulk-memory-opt` opcode-subset marker.
+The build workflow invokes the reviewer in strict mode after persisting its
+bounded observation, so any mismatch fails both cached validation and clean
+reproducibility before browser execution.
 Production run `29674599138` at `348d7373` completed in 4 minutes 44 seconds and
 reviewed a 31,307,826-byte module with SHA-256
 `b7a5daf6d121c306a2d07b5d3c14c00a664aaa2ff4ae3357a8b389326eeeb06f`, zero

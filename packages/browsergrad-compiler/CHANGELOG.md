@@ -7,11 +7,15 @@
   authority. Allocator poisoning now retains its first internal cause for the
   module lifetime instead of exposing only a generic status 106. Diagnostics
   contain no caller source, path, or rendered message and use only the pinned
-  bounded stderr capability. The source lock is
-  `bg.cpp.browser-build-input-lock.sha256.c0c7ee66b05951ee3b977ccac0de68e5e417106d6c8894e1152771a4a775dbf3`.
-  A fresh 34-second two-root pipeline reverified all 17 header-distribution
-  outputs under that lock at reproducibility ID
-  `bg.cpp.browser-header-distribution-reproducibility.sha256.9f98374557977e35bff019faa9d09cae1e1aa19fc6397ec703810d68dae987cf`;
+  bounded stderr capability. Runtime ABI 1.9 reviews and pins the resulting
+  15,167-entry exception-dispatch table without adding any import. The raw-Wasm
+  review CLI now has a strict mode, and both cached and clean CI lanes fail
+  immediately when an authentic report contains any interface mismatch. The
+  source lock is
+  `bg.cpp.browser-build-input-lock.sha256.27b4735cf1ca2970e0acbcc2c0f9b7b73bc35aeab84007b1a9ae4ca9ef9855a9`.
+  A fresh two-root pipeline reverified all 17 header-distribution outputs under
+  that lock at reproducibility ID
+  `bg.cpp.browser-header-distribution-reproducibility.sha256.00ec67e05c5c950557e3963502e3bc772d36978467398c063e91a285dcaa05e2`;
   license, producer, Worker-execution, lowering, and release authorities remain
   false.
 - Adds a fail-closed diagnostic authority for exact fast-build Clang-Wasm

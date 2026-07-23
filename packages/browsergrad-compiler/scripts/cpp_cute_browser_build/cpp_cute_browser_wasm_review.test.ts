@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   parseCppCuteBrowserWasmReviewArguments,
+  requireExactCppCuteBrowserWasmInterface,
   reviewCppCuteBrowserWasmFile,
   writeCppCuteBrowserWasmReviewReport,
 } from "./cpp_cute_browser_wasm_review.mjs";
@@ -108,6 +109,24 @@ describe("build-produced Clang-Wasm review report", () => {
       path: "$report",
     });
   });
+
+  it("turns an authentic mismatch observation into a strict validation failure", async () => {
+    const { wasmPath } = await fixture();
+    const report = await reviewCppCuteBrowserWasmFile({ wasmPath });
+
+    expect(() => requireExactCppCuteBrowserWasmInterface(report)).toThrowError(
+      expect.objectContaining({
+        code: "BG-COMPILER-CPP-CUTE-BROWSER-WASM-REVIEW-MISMATCH",
+        path: "$report.exactInterfaceConformance",
+      }),
+    );
+    expect(() => requireExactCppCuteBrowserWasmInterface({ ...report })).toThrowError(
+      expect.objectContaining({
+        code: "BG-COMPILER-CPP-CUTE-BROWSER-WASM-REVIEW-INVALID",
+        path: "$report",
+      }),
+    );
+  });
 });
 
 describe("Clang-Wasm review CLI arguments", () => {
@@ -117,6 +136,16 @@ describe("Clang-Wasm review CLI arguments", () => {
       "--output=/work/review.json",
     ])).toEqual({
       output: "/work/review.json",
+      requireExactInterface: false,
+      wasm: "/work/clang-extractor.wasm",
+    });
+    expect(parseCppCuteBrowserWasmReviewArguments([
+      "--require-exact-interface",
+      "--wasm=/work/clang-extractor.wasm",
+      "--output=/work/review.json",
+    ])).toEqual({
+      output: "/work/review.json",
+      requireExactInterface: true,
       wasm: "/work/clang-extractor.wasm",
     });
     expect(() => parseCppCuteBrowserWasmReviewArguments([

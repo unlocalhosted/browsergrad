@@ -103,6 +103,7 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain(
       "--output=\"${bg_output_root}/clang-wasm-runtime-abi-review.v1.json\"",
     );
+    expect(workflow.match(/--require-exact-interface/gu)).toHaveLength(2);
     expect(workflow).toContain("--first-root=\"${BG_CLANG_REPRO_ROOT}/first\"");
     expect(workflow).toContain("--second-root=\"${BG_CLANG_REPRO_ROOT}/second\"");
     expect(workflow).toContain("clang-wasm-runtime-abi-review.v1.json");

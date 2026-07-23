@@ -9,7 +9,8 @@ export interface ReviewCppCuteBrowserWasmFileInput {
 export type CppCuteBrowserWasmReviewErrorCode =
   | "BG-COMPILER-CPP-CUTE-BROWSER-WASM-REVIEW-INVALID"
   | "BG-COMPILER-CPP-CUTE-BROWSER-WASM-REVIEW-CONFLICT"
-  | "BG-COMPILER-CPP-CUTE-BROWSER-WASM-REVIEW-IO";
+  | "BG-COMPILER-CPP-CUTE-BROWSER-WASM-REVIEW-IO"
+  | "BG-COMPILER-CPP-CUTE-BROWSER-WASM-REVIEW-MISMATCH";
 
 export class CppCuteBrowserWasmReviewError extends Error {
   readonly code: CppCuteBrowserWasmReviewErrorCode;
@@ -35,9 +36,14 @@ export function writeCppCuteBrowserWasmReviewReport(
   readonly mismatchCount: number;
 }>>;
 
+export function requireExactCppCuteBrowserWasmInterface(
+  report: CppCuteBrowserWasmInspectionReport,
+): void;
+
 export function parseCppCuteBrowserWasmReviewArguments(
   argv: readonly string[],
 ): Readonly<{
   wasm: string;
   output: string;
+  requireExactInterface: boolean;
 }>;

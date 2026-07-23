@@ -21,8 +21,10 @@ import {
 const INVALID = "BG-COMPILER-CPP-CUTE-BROWSER-WASM-REVIEW-INVALID";
 const CONFLICT = "BG-COMPILER-CPP-CUTE-BROWSER-WASM-REVIEW-CONFLICT";
 const IO = "BG-COMPILER-CPP-CUTE-BROWSER-WASM-REVIEW-IO";
+const MISMATCH = "BG-COMPILER-CPP-CUTE-BROWSER-WASM-REVIEW-MISMATCH";
 const PORTABLE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._+/-]+$/u;
 const ARGUMENT_NAMES = Object.freeze(["output", "wasm"]);
+const REQUIRE_EXACT_INTERFACE = "--require-exact-interface";
 const REVIEW_REPORTS = new WeakSet();
 
 export class CppCuteBrowserWasmReviewError extends Error {
@@ -37,9 +39,17 @@ export class CppCuteBrowserWasmReviewError extends Error {
 
 /** @param {readonly string[]} argv */
 export function parseCppCuteBrowserWasmReviewArguments(argv) {
-  if (argv.length !== ARGUMENT_NAMES.length) invalid("$argv", "expected exactly two named arguments");
+  if (argv.length < ARGUMENT_NAMES.length || argv.length > ARGUMENT_NAMES.length + 1) {
+    invalid("$argv", "expected two named paths and optional --require-exact-interface");
+  }
   const values = new Map();
+  let requireExactInterface = false;
   for (const [index, argument] of argv.entries()) {
+    if (argument === REQUIRE_EXACT_INTERFACE) {
+      if (requireExactInterface) invalid(`$argv[${index}]`, `duplicate argument ${REQUIRE_EXACT_INTERFACE}`);
+      requireExactInterface = true;
+      continue;
+    }
     if (typeof argument !== "string" || !argument.startsWith("--")) {
       invalid(`$argv[${index}]`, "expected --name=/absolute/path");
     }
@@ -50,7 +60,13 @@ export function parseCppCuteBrowserWasmReviewArguments(argv) {
     if (values.has(name)) invalid(`$argv[${index}]`, `duplicate argument ${name}`);
     values.set(name, portableAbsolutePath(argument.slice(equals + 1), `$argv.${name}`));
   }
-  return Object.freeze(Object.fromEntries(ARGUMENT_NAMES.map((name) => [name, values.get(name)])));
+  if (values.size !== ARGUMENT_NAMES.length) {
+    invalid("$argv", "expected both --wasm and --output absolute paths");
+  }
+  return Object.freeze({
+    ...Object.fromEntries(ARGUMENT_NAMES.map((name) => [name, values.get(name)])),
+    requireExactInterface,
+  });
 }
 
 /**
@@ -121,6 +137,24 @@ export async function writeCppCuteBrowserWasmReviewReport(outputPath, report) {
     exactInterfaceConformance: report.exactInterfaceConformance,
     mismatchCount: report.mismatches.length,
   });
+}
+
+/**
+ * Converts an authentic observation into a failing validation boundary when
+ * the exact package-owned interface does not match.
+ *
+ * @param {import("../../dist/cpp_cute_browser_wasm_inspection.js").CppCuteBrowserWasmInspectionReport} report
+ */
+export function requireExactCppCuteBrowserWasmInterface(report) {
+  if (typeof report !== "object" || report === null || !REVIEW_REPORTS.has(report)) {
+    invalid("$report", "expected reviewer-issued raw-Wasm report");
+  }
+  if (report.exactInterfaceConformance !== true || report.mismatches.length !== 0) {
+    mismatch(
+      "$report.exactInterfaceConformance",
+      "built Wasm does not exactly conform to the pinned runtime ABI",
+    );
+  }
 }
 
 async function readExactWasmSnapshot(path) {
@@ -219,12 +253,19 @@ function io(path, message, options) {
   throw new CppCuteBrowserWasmReviewError(IO, path, message, options);
 }
 
+function mismatch(path, message, options) {
+  throw new CppCuteBrowserWasmReviewError(MISMATCH, path, message, options);
+}
+
 const mainUrl = process.argv[1] === undefined ? undefined : pathToFileURL(resolve(process.argv[1])).href;
 if (mainUrl === import.meta.url) {
   try {
     const arguments_ = parseCppCuteBrowserWasmReviewArguments(process.argv.slice(2));
     const report = await reviewCppCuteBrowserWasmFile({ wasmPath: arguments_.wasm });
     const result = await writeCppCuteBrowserWasmReviewReport(arguments_.output, report);
+    if (arguments_.requireExactInterface) {
+      requireExactCppCuteBrowserWasmInterface(report);
+    }
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (cause) {
     const error = cause instanceof Error ? cause : new Error("unknown Wasm review failure");

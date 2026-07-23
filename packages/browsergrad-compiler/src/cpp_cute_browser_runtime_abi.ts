@@ -21,14 +21,14 @@ import {
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
-export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 8;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 9;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.4e870314f139bd8af2f0e45a7410d8d3c6eaa2a8d358064bffd534ae7a91cb18";
+  "bg.cpp.browser-runtime-abi.sha256.dee3716770d8521f478505323adfd771737778dc917fc5c9777dadd9b8f71056";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "7b6c8891081d7a46c3064069aaf56b5e85635d72e17fe4d19bef021a922f68bc";
+  "f4892b5f3a09d0543d48ab8da4ebadcc00476223470fab95b0ba2b06dff4a886";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "ba81bacb5111e69336d75bf5676297098953fb2313f2c3d0f03987527fbbf103";
+  "15f4ef0a1e1ebd2a5394521bbc2e5d0107b5dcff0931056fb3967795dc8a479c";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "8d320d2fb15525ef548446a5e3bb993369dc4d4cfcfe9cc0faaf5fd3639a370d";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 =
@@ -393,8 +393,8 @@ function validateBodyInvariants(value: JsonObject): void {
         structural.tables.maximumElementsCeiling !== 65_536 ||
         structural.tables.exactReviewedProjection.length !== 1 ||
         structural.tables.exactReviewedProjection[0]?.elementType !== "funcref" ||
-        structural.tables.exactReviewedProjection[0].minimum !== 15_166 ||
-        structural.tables.exactReviewedProjection[0].maximum !== 15_166) {
+        structural.tables.exactReviewedProjection[0].minimum !== 15_167 ||
+        structural.tables.exactReviewedProjection[0].maximum !== 15_167) {
       invalid("$.body.wasm.structuralPolicy.tables", "table policy differs from the exact reviewed v1 projection");
     }
     assertExactStrings(
