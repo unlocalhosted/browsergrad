@@ -54,6 +54,7 @@ from ._ir import (
     OP_KL_DIV,
     OP_NLL_LOSS,
     OP_CROSS_ENTROPY,
+    OP_DROPOUT,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_BROADCAST_TO, OP_EINSUM_VJP, OP_L1_LOSS_VJP,
@@ -62,6 +63,7 @@ from ._ir import (
     OP_KL_DIV_VJP,
     OP_NLL_LOSS_VJP,
     OP_CROSS_ENTROPY_VJP,
+    OP_DROPOUT_VJP,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
@@ -94,6 +96,8 @@ from ._framework_contracts import (
     validate_nll_loss_vjp_contract,
     validate_cross_entropy_contract,
     validate_cross_entropy_vjp_contract,
+    validate_dropout_contract,
+    validate_dropout_vjp_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -128,6 +132,8 @@ from ._framework_contracts import (
     execute_nll_loss_vjp_array,
     execute_cross_entropy_arrays,
     execute_cross_entropy_vjp_array,
+    execute_dropout_array,
+    execute_dropout_vjp_array,
 )
 
 
@@ -1287,6 +1293,20 @@ def _h_cross_entropy_vjp(
     )
 
 
+def _h_dropout(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    contract = validate_dropout_contract(node)
+    return execute_dropout_array(contract, vt[id(node.inputs[0])])
+
+
+def _h_dropout_vjp(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    contract = validate_dropout_vjp_contract(node)
+    return execute_dropout_vjp_array(
+        contract,
+        vt[id(node.inputs[0])],
+        vt[id(node.inputs[1])],
+    )
+
+
 def _h_where(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     validate_where_contract(node)
     cond = vt[id(node.inputs[0])]
@@ -1630,6 +1650,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_KL_DIV: _h_kl_div,
     OP_NLL_LOSS: _h_nll_loss,
     OP_CROSS_ENTROPY: _h_cross_entropy,
+    OP_DROPOUT: _h_dropout,
     OP_WHERE:   _h_where,
     OP_INDEX:   _h_index,
     OP_MASK:    _h_mask,
@@ -1648,6 +1669,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_KL_DIV_VJP: _h_kl_div_vjp,
     OP_NLL_LOSS_VJP: _h_nll_loss_vjp,
     OP_CROSS_ENTROPY_VJP: _h_cross_entropy_vjp,
+    OP_DROPOUT_VJP: _h_dropout_vjp,
     # Mixed precision (PRD-010)
     OP_ISNAN:             _h_isnan,
     # Optimizer/update IR

@@ -1,0 +1,28 @@
+export const FRAMEWORK_DROPOUT_CONFORMANCE = {
+  schema: "browsergrad.framework.dropout-conformance.v1",
+  probability: 0.25,
+  inputShape: [2, 4],
+  input: [1, 1, 1, 1, 1, 1, 1, 1],
+  floatingDtypes: ["float16", "float32", "float64"],
+  deterministicDropAllDtypes: [
+    "bool",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "float16",
+    "float32",
+    "float64",
+  ],
+  invalidProbabilities: [-0.1, 1.1, "nan", "inf", true],
+  limits: {
+    rank: 32,
+    outputBytes: 1 << 28,
+    workElements: 1 << 28,
+    workspaceBytes: 1 << 28,
+  },
+} as const;

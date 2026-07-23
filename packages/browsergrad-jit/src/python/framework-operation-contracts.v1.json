@@ -69,6 +69,27 @@
       "retiredOpaqueOperationId": "jit.custom.cross-entropy.v0"
     },
     {
+      "contractId": "browsergrad.jit.framework.functional.dropout.v1",
+      "publicSurface": "torch.nn.functional.dropout",
+      "opcode": "DROPOUT",
+      "semanticState": "typed",
+      "shapeContract": "preserve-input-with-elementwise-bernoulli-mask",
+      "dtypeContract": "preserve-input-with-floating-stochastic-profile",
+      "decisions": {
+        "cpu": "supported-numpy-owning-keyed-inverted-dropout",
+        "closureAutograd": "supported-keyed-mask-replay",
+        "symbolicVjp": "supported-keyed-mask-replay",
+        "functionalGrad": "supported-for-floating-input-via-symbolic-vjp",
+        "vmap": "supported-deterministic-drop-all-refuses-stochastic-without-randomness-policy",
+        "onnxExport": "refused-training-dropout-in-inference-export",
+        "tensorPlan": "refused-no-canonical-keyed-rng-lowering",
+        "webgpu": "refused-no-tensor-plan-kernel",
+        "residency": "host-materialized",
+        "materialization": "cpu-owning-array"
+      },
+      "retiredOpaqueOperationId": "jit.custom.dropout.v0"
+    },
+    {
       "contractId": "browsergrad.jit.framework.functional.kl-div.v1",
       "publicSurface": "torch.nn.functional.kl_div",
       "opcode": "KL_DIV",

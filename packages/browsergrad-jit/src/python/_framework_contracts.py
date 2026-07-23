@@ -68,6 +68,12 @@ BINARY_CROSS_ENTROPY_WITH_LOGITS_WORK_VISIT_FACTOR = 36
 KL_DIV_WORK_VISIT_FACTOR = 48
 NLL_LOSS_WORK_VISIT_FACTOR = 32
 CROSS_ENTROPY_WORK_VISIT_FACTOR = 64
+DROPOUT_RANK_MAX = 32
+DROPOUT_OUTPUT_BYTE_MAX = 1 << 28
+DROPOUT_OUTPUT_EXTENT_MAX = DROPOUT_OUTPUT_BYTE_MAX
+DROPOUT_WORK_ELEMENT_MAX = 1 << 28
+DROPOUT_WORKSPACE_BYTE_MAX = 1 << 28
+DROPOUT_WORK_VISIT_FACTOR = 8
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 64 * 1024
@@ -116,6 +122,7 @@ _ENUMS = {
         "same-shape-elementwise-loss-with-batched-reduction",
         "class-axis-index-loss-with-batched-reduction",
         "class-axis-logits-loss-with-index-or-probability-target-and-batched-reduction",
+        "preserve-input-with-elementwise-bernoulli-mask",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
@@ -137,6 +144,7 @@ _ENUMS = {
         "preserve-floating-input-require-index-or-matching-floating-target-and-optional-matching-weight",
         "promote-integral-default-or-explicit-scan-dtype",
         "pytorch-dimensioned-tensor-promotion",
+        "preserve-input-with-floating-stochastic-profile",
     }),
     "cpu": frozenset({
         "supported-numpy-dtype-preserving",
@@ -158,6 +166,7 @@ _ENUMS = {
         "supported-numpy-owning-kl-div-reduction",
         "supported-numpy-owning-bounded-nll-reduction",
         "supported-numpy-owning-stable-cross-entropy-reduction",
+        "supported-numpy-owning-keyed-inverted-dropout",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -189,6 +198,7 @@ _ENUMS = {
         "supported-native-kl-div-derivatives-for-both-inputs",
         "supported-selected-class-negative-weight-gradient",
         "supported-stable-logits-and-probability-target-gradients",
+        "supported-keyed-mask-replay",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -220,6 +230,7 @@ _ENUMS = {
         "supported-native-kl-div-derivatives-for-both-inputs",
         "supported-selected-class-negative-weight-gradient",
         "supported-stable-logits-and-probability-target-gradients",
+        "supported-keyed-mask-replay",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
@@ -246,6 +257,7 @@ _ENUMS = {
         "supported-leading-batch-axis-with-class-axis-shift-and-captured-weight",
         "supported-leading-batch-axis-with-target-mode-class-axis-shift-and-captured-weight",
         "supported-leading-batch-axis-preserving-pad",
+        "supported-deterministic-drop-all-refuses-stochastic-without-randomness-policy",
     }),
     "onnxExport": frozenset({
         "supported-opset17-clip-export-dtypes",
@@ -274,6 +286,7 @@ _ENUMS = {
         "supported-opset17-kl-div-float16-float32-float64",
         "supported-opset17-negative-log-likelihood-loss-unmapped-profile",
         "supported-opset17-softmax-cross-entropy-loss-unmapped-index-profile",
+        "refused-training-dropout-in-inference-export",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -291,6 +304,7 @@ _ENUMS = {
         "refused-no-canonical-selected-axis-replication-profile",
         "refused-no-portable-lowering",
         "supported-primitive",
+        "refused-no-canonical-keyed-rng-lowering",
     }),
     "webgpu": frozenset({
         "profile-nonempty-f32-rank-at-most-4",
@@ -334,6 +348,12 @@ _VARIADIC_DTYPE_BYTES = MappingProxyType({
     "float32": 4,
     "int64": 8,
     "float64": 8,
+})
+_DROPOUT_DTYPE_BYTES = MappingProxyType({
+    **_VARIADIC_DTYPE_BYTES,
+    "uint16": 2,
+    "uint32": 4,
+    "uint64": 8,
 })
 _PAD_DTYPES = _VARIADIC_DTYPES
 _SORT_DTYPES = _VARIADIC_DTYPES
@@ -804,6 +824,21 @@ class CrossEntropyContract:
     label_smoothing: float
     input_elements: int
     target_elements: int
+    work_elements: int
+    workspace_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class DropoutContract:
+    input_shape: Tuple[int, ...]
+    output_shape: Tuple[int, ...]
+    output_dtype: str
+    p: float
+    training: bool
+    inplace: bool
+    seed_key: int
+    mode: str
+    input_elements: int
     work_elements: int
     workspace_bytes: int
 
@@ -1543,6 +1578,181 @@ def infer_cross_entropy_contract(
         work_elements=work_elements,
         workspace_bytes=workspace_bytes,
     )
+
+
+def normalize_dropout_probability(p: Any) -> float:
+    if type(p) not in _PAD_VALUE_TYPES or type(p) is bool:
+        raise ShapeError("dropout: p must be an exact real scalar")
+    normalized = float(p)
+    if not math.isfinite(normalized) or normalized < 0.0 or normalized > 1.0:
+        raise ShapeError(
+            f"dropout: p must be finite and in [0, 1], got {normalized!r}"
+        )
+    return normalized
+
+
+def infer_dropout_contract(
+    source: Any,
+    p: Any,
+    training: Any,
+    inplace: Any,
+    seed_key: Any,
+) -> DropoutContract:
+    normalized_p = normalize_dropout_probability(p)
+    if type(training) is not bool:
+        raise ShapeError("dropout: training must be an exact bool")
+    if type(inplace) is not bool:
+        raise ShapeError("dropout: inplace must be an exact bool")
+    if inplace:
+        raise ShapeError(
+            "dropout: inplace=True requires typed mutation semantics and is "
+            "not supported"
+        )
+    if type(seed_key) is not int or type(seed_key) is bool:
+        raise ShapeError("dropout: seed_key must be an exact integer")
+    if seed_key < 0 or seed_key > (1 << 63) - 1:
+        raise ShapeError("dropout: seed_key must fit unsigned 63-bit range")
+
+    shape = getattr(source, "shape", None)
+    dtype = getattr(source, "dtype", None)
+    if type(shape) is not tuple:
+        raise ShapeError("dropout: input shape must be a tuple")
+    if len(shape) > DROPOUT_RANK_MAX:
+        raise ShapeError(
+            f"dropout: input rank {len(shape)} exceeds the "
+            f"{DROPOUT_RANK_MAX}-rank ceiling"
+        )
+    for axis, extent in enumerate(shape):
+        if type(extent) is not int or extent < 0:
+            raise ShapeError(
+                f"dropout: input shape[{axis}] must be a non-negative integer"
+            )
+        if extent > DROPOUT_OUTPUT_EXTENT_MAX:
+            raise ShapeError(
+                f"dropout: input extent {extent} on axis {axis} exceeds the "
+                f"{DROPOUT_OUTPUT_EXTENT_MAX}-element per-axis ceiling"
+            )
+    if dtype not in _DROPOUT_DTYPE_BYTES:
+        raise ShapeError(
+            f"dropout: input dtype {dtype!r} is not a supported real or bool dtype"
+        )
+
+    input_elements = _elementwise_loss_checked_product(
+        shape, DROPOUT_WORK_ELEMENT_MAX
+    )
+    output_bytes = input_elements * _DROPOUT_DTYPE_BYTES[dtype]
+    if output_bytes > DROPOUT_OUTPUT_BYTE_MAX:
+        raise ShapeError(
+            f"dropout: output requires {output_bytes} bytes, exceeding the "
+            f"{DROPOUT_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+
+    if not training or normalized_p == 0.0 or input_elements == 0:
+        mode = "identity"
+        work_elements = 0
+        workspace_bytes = 0
+    elif normalized_p == 1.0:
+        mode = "drop-all"
+        work_elements = input_elements
+        workspace_bytes = output_bytes
+    else:
+        if dtype not in _FLOATING_DTYPES:
+            raise ShapeError(
+                f"dropout: stochastic training requires float16, float32, or "
+                f"float64 input, got {dtype!r}"
+            )
+        mode = "stochastic"
+        if input_elements > DROPOUT_WORK_ELEMENT_MAX // DROPOUT_WORK_VISIT_FACTOR:
+            work_elements = DROPOUT_WORK_ELEMENT_MAX + 1
+        else:
+            work_elements = input_elements * DROPOUT_WORK_VISIT_FACTOR
+        workspace_bytes = output_bytes + input_elements * 9
+    if work_elements > DROPOUT_WORK_ELEMENT_MAX:
+        raise ShapeError(
+            f"dropout: projected work exceeds the "
+            f"{DROPOUT_WORK_ELEMENT_MAX}-element-visit ceiling"
+        )
+    if workspace_bytes > DROPOUT_WORKSPACE_BYTE_MAX:
+        raise ShapeError(
+            f"dropout: projected workspace requires {workspace_bytes} bytes, "
+            f"exceeding the {DROPOUT_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+
+    return DropoutContract(
+        input_shape=shape,
+        output_shape=shape,
+        output_dtype=dtype,
+        p=normalized_p,
+        training=training,
+        inplace=inplace,
+        seed_key=seed_key,
+        mode=mode,
+        input_elements=input_elements,
+        work_elements=work_elements,
+        workspace_bytes=workspace_bytes,
+    )
+
+
+def _validate_dropout_runtime_array(
+    contract: DropoutContract,
+    array: np.ndarray,
+    role: str,
+) -> None:
+    if type(array) is not np.ndarray:
+        raise ShapeError(f"dropout runtime {role} must be an exact ndarray")
+    if tuple(array.shape) != contract.input_shape:
+        raise ShapeError(
+            f"dropout runtime {role} shape {tuple(array.shape)} does not match "
+            f"{contract.input_shape}"
+        )
+    if array.dtype.name != contract.output_dtype:
+        raise ShapeError(
+            f"dropout runtime {role} dtype {array.dtype.name!r} does not match "
+            f"{contract.output_dtype!r}"
+        )
+
+
+def _dropout_keep_mask(contract: DropoutContract) -> np.ndarray:
+    generator = np.random.default_rng(contract.seed_key)
+    return generator.random(contract.input_shape) >= contract.p
+
+
+def execute_dropout_array(
+    contract: DropoutContract,
+    source: np.ndarray,
+) -> np.ndarray:
+    _validate_dropout_runtime_array(contract, source, "input")
+    if contract.mode == "identity":
+        return np.array(source, dtype=source.dtype, copy=True)
+    if contract.mode == "drop-all":
+        return np.zeros(contract.output_shape, dtype=np.dtype(contract.output_dtype))
+    if contract.mode != "stochastic":
+        raise ShapeError(f"dropout: unknown execution mode {contract.mode!r}")
+    mask = _dropout_keep_mask(contract)
+    result = np.zeros(contract.output_shape, dtype=np.dtype(contract.output_dtype))
+    scale = np.asarray(1.0 / (1.0 - contract.p), dtype=result.dtype)
+    np.multiply(source, scale, out=result, where=mask)
+    return result
+
+
+def execute_dropout_vjp_array(
+    contract: DropoutContract,
+    dy: np.ndarray,
+    source: np.ndarray,
+) -> np.ndarray:
+    _validate_dropout_runtime_array(contract, source, "input")
+    _validate_dropout_runtime_array(contract, dy, "upstream gradient")
+    if contract.mode == "identity":
+        return np.array(dy, dtype=dy.dtype, copy=True)
+    if contract.mode == "drop-all":
+        return np.zeros(contract.input_shape, dtype=np.dtype(contract.output_dtype))
+    if contract.mode != "stochastic":
+        raise ShapeError(f"dropout: unknown VJP mode {contract.mode!r}")
+    mask = _dropout_keep_mask(contract)
+    gradient = np.zeros(contract.input_shape, dtype=np.dtype(contract.output_dtype))
+    scale = np.asarray(1.0 / (1.0 - contract.p), dtype=gradient.dtype)
+    np.multiply(dy, scale, out=gradient, where=mask)
+    return gradient
 
 
 def _validate_elementwise_loss_runtime_arrays(
@@ -5418,6 +5628,101 @@ def _validate_repeat_interleave(
     return repeats, axis
 
 
+def _validate_dropout(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> DropoutContract:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or len(inputs) != 1:
+        raise ShapeError("DROPOUT requires exactly one tensor input")
+    arg = getattr(node, "arg", None)
+    required = {"p", "training", "inplace", "seed_key"}
+    if type(arg) is not dict or set(arg) != required:
+        raise ShapeError(
+            "DROPOUT arg fields must be exactly 'p', 'training', 'inplace', "
+            "and 'seed_key'"
+        )
+    normalized = infer_dropout_contract(
+        inputs[0],
+        arg["p"],
+        arg["training"],
+        arg["inplace"],
+        arg["seed_key"],
+    )
+    if normalized.mode == "identity":
+        raise ShapeError(
+            "DROPOUT identity requests must return the input without emitting "
+            "an effectful UOp"
+        )
+    if getattr(node, "shape", None) != normalized.output_shape:
+        raise ShapeError(
+            f"DROPOUT declared shape {getattr(node, 'shape', None)!r} does not "
+            f"match input shape {normalized.output_shape!r}"
+        )
+    if getattr(node, "dtype", None) != normalized.output_dtype:
+        raise ShapeError(
+            f"DROPOUT declared dtype {getattr(node, 'dtype', None)!r} does not "
+            f"match input dtype {normalized.output_dtype!r}"
+        )
+    return normalized
+
+
+def _validate_dropout_vjp(node: Any) -> DropoutContract:
+    if getattr(node, "op", None) != "DROPOUT_VJP":
+        raise ShapeError(
+            "DROPOUT_VJP validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or len(inputs) != 2:
+        raise ShapeError(
+            "DROPOUT_VJP requires upstream-gradient and source inputs"
+        )
+    arg = getattr(node, "arg", None)
+    required = {"p", "training", "inplace", "seed_key"}
+    if type(arg) is not dict:
+        raise ShapeError("DROPOUT_VJP arg must be a plain dict")
+    fields = set(arg)
+    if not required.issubset(fields) or not fields.issubset(
+        required | {"vjp_of"}
+    ):
+        raise ShapeError(
+            "DROPOUT_VJP arg fields must be the forward contract fields plus "
+            "optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("DROPOUT_VJP arg.vjp_of must reference a UOp")
+    normalized = infer_dropout_contract(
+        inputs[1],
+        arg["p"],
+        arg["training"],
+        arg["inplace"],
+        arg["seed_key"],
+    )
+    if normalized.mode == "identity":
+        raise ShapeError(
+            "DROPOUT_VJP identity requests must not emit a specialized UOp"
+        )
+    upstream = inputs[0]
+    if (
+        getattr(upstream, "shape", None) != normalized.output_shape
+        or getattr(upstream, "dtype", None) != normalized.output_dtype
+    ):
+        raise ShapeError(
+            "DROPOUT_VJP upstream gradient must match the forward output"
+        )
+    if getattr(node, "shape", None) != normalized.input_shape:
+        raise ShapeError("DROPOUT_VJP declared shape must match the source input")
+    if getattr(node, "dtype", None) != normalized.output_dtype:
+        raise ShapeError("DROPOUT_VJP declared dtype must match the source input")
+    return normalized
+
+
 _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = MappingProxyType({
     "browsergrad.jit.framework.tensor.abs.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.cat.v1": _validate_cat,
@@ -5435,6 +5740,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.functional.kl-div.v1": _validate_kl_div,
     "browsergrad.jit.framework.functional.nll-loss.v1": _validate_nll_loss,
     "browsergrad.jit.framework.functional.cross-entropy.v1": _validate_cross_entropy,
+    "browsergrad.jit.framework.functional.dropout.v1": _validate_dropout,
     "browsergrad.jit.framework.tensor.masked-fill.v1": _validate_masked_fill,
     "browsergrad.jit.framework.tensor.pad.v1": _validate_pad,
     "browsergrad.jit.framework.tensor.prod.v1": _validate_prod,
@@ -5472,6 +5778,7 @@ _INTERNAL_VALIDATORS: Mapping[str, Callable[[Any], Any]] = MappingProxyType({
     "KL_DIV_VJP": _validate_kl_div_vjp,
     "NLL_LOSS_VJP": _validate_nll_loss_vjp,
     "CROSS_ENTROPY_VJP": _validate_cross_entropy_vjp,
+    "DROPOUT_VJP": _validate_dropout_vjp,
 })
 
 
@@ -5719,6 +6026,19 @@ def validate_cross_entropy_vjp_contract(
     return validate_internal_operation_contract(node)
 
 
+def validate_dropout_contract(node: Any) -> DropoutContract:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.functional.dropout.v1":
+        raise ShapeError(
+            "DROPOUT resolved to the wrong framework-operation contract"
+        )
+    return normalized
+
+
+def validate_dropout_vjp_contract(node: Any) -> DropoutContract:
+    return validate_internal_operation_contract(node)
+
+
 def validate_tril_contract(node: Any) -> int:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.tril.v1":
@@ -5876,6 +6196,12 @@ __all__ = [
     "KL_DIV_WORK_VISIT_FACTOR",
     "NLL_LOSS_WORK_VISIT_FACTOR",
     "CROSS_ENTROPY_WORK_VISIT_FACTOR",
+    "DROPOUT_RANK_MAX",
+    "DROPOUT_OUTPUT_BYTE_MAX",
+    "DROPOUT_OUTPUT_EXTENT_MAX",
+    "DROPOUT_WORK_ELEMENT_MAX",
+    "DROPOUT_WORKSPACE_BYTE_MAX",
+    "DROPOUT_WORK_VISIT_FACTOR",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "EinsumContract",
@@ -5886,6 +6212,7 @@ __all__ = [
     "KlDivContract",
     "NllLossContract",
     "CrossEntropyContract",
+    "DropoutContract",
     "framework_operation_support",
     "has_framework_operation_contract",
     "has_internal_operation_contract",
@@ -5903,6 +6230,8 @@ __all__ = [
     "infer_kl_div_contract",
     "infer_nll_loss_contract",
     "infer_cross_entropy_contract",
+    "infer_dropout_contract",
+    "normalize_dropout_probability",
     "normalize_smooth_l1_beta",
     "normalize_pad_request",
     "normalize_pad_value",
@@ -5926,6 +6255,8 @@ __all__ = [
     "execute_nll_loss_vjp_array",
     "execute_cross_entropy_arrays",
     "execute_cross_entropy_vjp_array",
+    "execute_dropout_array",
+    "execute_dropout_vjp_array",
     "einsum_onnx_equation",
     "stable_sort_indices_array",
     "partial_topk_indices_array",
@@ -5961,6 +6292,8 @@ __all__ = [
     "validate_nll_loss_vjp_contract",
     "validate_cross_entropy_contract",
     "validate_cross_entropy_vjp_contract",
+    "validate_dropout_contract",
+    "validate_dropout_vjp_contract",
     "validate_gather_scatter_add_contract",
     "validate_tril_contract",
     "validate_triu_contract",

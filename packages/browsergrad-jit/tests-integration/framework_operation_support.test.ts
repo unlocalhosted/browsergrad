@@ -70,6 +70,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.cross-entropy.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.functional.dropout.v1",
+      publicSurface: "torch.nn.functional.dropout",
+      opcode: "DROPOUT",
+      semanticState: "typed",
+      shapeContract: "preserve-input-with-elementwise-bernoulli-mask",
+      dtypeContract: "preserve-input-with-floating-stochastic-profile",
+      decisions: {
+        cpu: "supported-numpy-owning-keyed-inverted-dropout",
+        closureAutograd: "supported-keyed-mask-replay",
+        symbolicVjp: "supported-keyed-mask-replay",
+        functionalGrad: "supported-for-floating-input-via-symbolic-vjp",
+        vmap: "supported-deterministic-drop-all-refuses-stochastic-without-randomness-policy",
+        onnxExport: "refused-training-dropout-in-inference-export",
+        tensorPlan: "refused-no-canonical-keyed-rng-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-array",
+      },
+      retiredOpaqueOperationId: "jit.custom.dropout.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.functional.l1-loss.v1",
       publicSurface: "torch.nn.functional.l1_loss",
       opcode: "L1_LOSS",
@@ -719,7 +740,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(33);
+    expect(result.first.operations).toHaveLength(34);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

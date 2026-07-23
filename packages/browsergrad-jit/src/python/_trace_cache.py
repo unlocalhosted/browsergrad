@@ -32,6 +32,8 @@ Constraints (documented as conditions in the user-facing docstring):
   * Same `training` mode across calls (different mode = different sig).
   * Modules with local or descendant buffers bypass the cache because buffers
     are mutable state and v0 has no versioned buffer identity.
+  * Graphs containing opaque callbacks or random operations bypass the cache.
+    Their effects are not a pure function of the rebound input buffers.
   * No data-dependent control flow (`if x.shape[0] > 32`); the cache key
     only looks at static shape, not runtime values.
 
@@ -53,7 +55,7 @@ How leaf rebinding works:
 from __future__ import annotations
 from typing import Any, Dict, Optional, Tuple
 
-from ._ir import UOp
+from ._ir import UOp, OP_CUSTOM, OP_DROPOUT, OP_RANDOM, toposort
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +281,14 @@ def record(
         # the closure captures input_proxies by identity. Rebinding
         # gives different proxies; the closure would try to read the
         # wrong values.
+        return
+    if any(
+        node.op in (OP_CUSTOM, OP_DROPOUT, OP_RANDOM)
+        for node in toposort(output._uop)
+    ):
+        # CUSTOM has unknown effects; RANDOM and DROPOUT own per-operation
+        # stochastic state. Reusing their UOps would replay a prior key instead
+        # of tracing the next logical random operation.
         return
     input_buffers = tuple(_input_buffer_uop(a) for a in args)
     if any(b is None for b in input_buffers):

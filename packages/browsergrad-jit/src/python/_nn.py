@@ -23,7 +23,8 @@ from ._tensor_proxy import (
     randn,
 )
 from ._ir import UOp, OP_BUFFER, OP_CUSTOM
-from ._errors import ShapeError
+from ._errors import JitNotImplementedError, ShapeError
+from ._framework_contracts import normalize_dropout_probability
 from . import _functional as F
 
 
@@ -569,11 +570,28 @@ class Softmax(Module):
 
 
 class Dropout(Module):
-    def __init__(self, p: float = 0.5) -> None:
+    def __init__(self, p: float = 0.5, inplace: bool = False) -> None:
         super().__init__()
-        self.p = p
+        self.p = normalize_dropout_probability(p)
+        if type(inplace) is not bool:
+            raise ShapeError("Dropout: inplace must be an exact bool")
+        if inplace:
+            raise JitNotImplementedError(
+                "Dropout(inplace=True) requires typed mutation semantics and "
+                "is not supported"
+            )
+        self.inplace = inplace
+
     def forward(self, x: TensorProxy) -> TensorProxy:
-        return F.dropout(x, p=self.p, training=self.training)
+        return F.dropout(
+            x,
+            p=self.p,
+            training=self.training,
+            inplace=self.inplace,
+        )
+
+    def __repr__(self) -> str:
+        return f"Dropout(p={self.p}, inplace={self.inplace})"
 
 
 class Flatten(Module):

@@ -7,8 +7,9 @@
  *   - The IR-rewrite produces fresh clone identities (the cached
  *     forward intermediates are not referenced by the backward graph
  *     after rewrite).
- *   - Refusal modes: use_reentrant=True, preserve_rng_state=True,
- *     nested checkpointing, ops without VJP rules.
+ *   - Keyed stochastic replay with preserve_rng_state=True.
+ *   - Refusal modes: use_reentrant=True, nested checkpointing, ops without
+ *     VJP rules.
  *   - PyTorch shim `torch.utils.checkpoint.checkpoint` resolves
  *     when the alias is installed.
  */
@@ -188,20 +189,29 @@ result
     expect(err).toMatch(/use_reentrant/);
   });
 
-  it("refuses preserve_rng_state=True", async () => {
+  it("accepts preserve_rng_state=True now that stochastic IR owns replay keys", async () => {
     const target = await getJitTarget();
-    const err = await target.run<string>(`
+    const result = await target.run<Record<string, unknown>>(`
 import browsergrad_jit as bg
+import browsergrad_jit.nn.functional as F
+import numpy as np
 from browsergrad_jit.utils.checkpoint import checkpoint
-x = bg.tensor([1.0])
-try:
-    checkpoint(lambda t: t + 1, x, preserve_rng_state=True)
-    result = "no_error"
-except Exception as e:
-    result = type(e).__name__ + ": " + str(e)
-result
+
+bg.manual_seed(321)
+x = bg.from_numpy(np.ones((16,), dtype=np.float32), requires_grad=True)
+y = checkpoint(
+    lambda value: F.dropout(value, p=0.5, training=True),
+    x,
+    preserve_rng_state=True,
+)
+forward = y.numpy()
+y.sum().backward()
+{
+    "opcode": y._uop.op,
+    "gradientMatches": bool(np.array_equal(x.grad.numpy(), forward)),
+}
 `);
-    expect(err).toMatch(/preserve_rng_state/);
+    expect(result).toEqual({ opcode: "DROPOUT", gradientMatches: true });
   });
 
   it("refuses nested checkpointing", async () => {

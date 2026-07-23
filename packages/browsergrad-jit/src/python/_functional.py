@@ -27,11 +27,12 @@ from ._ir import (
     OP_KL_DIV,
     OP_NLL_LOSS,
     OP_CROSS_ENTROPY,
+    OP_DROPOUT,
 )
 from ._tensor_proxy import (
     TensorProxy, _BackwardCtx, _should_track, _to_proxy, from_numpy, where,
 )
-from ._errors import ShapeError
+from ._errors import JitNotImplementedError, ShapeError
 from ._framework_contracts import (
     execute_l1_loss_vjp_array,
     execute_smooth_l1_loss_vjp_array,
@@ -40,6 +41,7 @@ from ._framework_contracts import (
     execute_kl_div_vjp_array,
     execute_nll_loss_vjp_array,
     execute_cross_entropy_vjp_array,
+    execute_dropout_vjp_array,
     infer_l1_loss_contract,
     infer_smooth_l1_loss_contract,
     infer_binary_cross_entropy_contract,
@@ -47,6 +49,7 @@ from ._framework_contracts import (
     infer_kl_div_contract,
     infer_nll_loss_contract,
     infer_cross_entropy_contract,
+    infer_dropout_contract,
     normalize_pad_request,
 )
 
@@ -1320,51 +1323,75 @@ def conv3d(
 
 
 # ---------------------------------------------------------------------------
-# Dropout — needs RANDOM but for v0 we keep it eager (PRD-005 critique
-# documents this as acceptable; the RANDOM opcode lands when we wire it
-# into the IR-cached path).
+# Dropout — typed keyed randomness. The immutable key belongs to the UOp, so
+# forward replay, closure backward, and symbolic checkpoint recomputation all
+# derive the same mask without mutable callback state.
 # ---------------------------------------------------------------------------
 
 
-def dropout(x: TensorProxy, p: float = 0.5, training: bool = True) -> TensorProxy:
-    """Standard dropout. At training time, zero each element independently
-    with probability `p`; scale survivors by 1/(1-p). At eval time, identity.
-    """
-    if not training or p == 0.0:
-        return x
-    if p < 0.0 or p > 1.0:
-        raise ValueError(f"dropout p must be in [0, 1], got {p}")
-    if p == 1.0:
-        return x * _to_proxy(0.0, x._get_session())
-    # CUSTOM op: we sample the mask at forward time; backward uses the same
-    # mask via the closure capture.
-    sess = x._get_session()
+def dropout(
+    input: TensorProxy,
+    p: float = 0.5,
+    training: bool = True,
+    inplace: bool = False,
+) -> TensorProxy:
+    """Typed inverted dropout with one immutable per-operation RNG key."""
+    if not isinstance(input, TensorProxy):
+        raise TypeError(
+            f"dropout: input must be a TensorProxy, got {type(input).__name__}"
+        )
+    if type(inplace) is not bool:
+        raise ShapeError("dropout: inplace must be an exact bool")
+    if inplace:
+        raise JitNotImplementedError(
+            "dropout(inplace=True) requires typed mutation semantics and is "
+            "not supported"
+        )
 
-    def _drop_forward(x_arr: np.ndarray) -> np.ndarray:
-        mask = (np.random.rand(*x_arr.shape) > p).astype(x_arr.dtype)
-        # Persist mask on the closure via mutable container — captured below.
-        captured["mask"] = mask
-        return (x_arr * mask) / (1.0 - p)
-
-    captured: dict = {}
+    prepared = infer_dropout_contract(input._uop, p, training, inplace, 0)
+    if prepared.mode == "identity":
+        return input
+    seed_key = 0
+    if prepared.mode == "stochastic":
+        seed_key = int(np.random.randint(
+            0,
+            np.iinfo(np.int64).max,
+            dtype=np.int64,
+        ))
+    contract = infer_dropout_contract(
+        input._uop,
+        prepared.p,
+        prepared.training,
+        prepared.inplace,
+        seed_key,
+    )
     uop = UOp(
-        op=OP_CUSTOM,
-        inputs=(x._uop,),
-        shape=x.shape,
-        dtype=x.dtype,
-        arg={"fn": _drop_forward, "captures": (), "name": "dropout"},
+        op=OP_DROPOUT,
+        inputs=(input._uop,),
+        shape=contract.output_shape,
+        dtype=contract.output_dtype,
+        arg={
+            "p": contract.p,
+            "training": contract.training,
+            "inplace": contract.inplace,
+            "seed_key": contract.seed_key,
+        },
     )
 
-    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
-        mask = captured.get("mask")
-        if mask is None:
-            # Forward never ran — shouldn't happen on a normal backward.
-            return (dy.copy(),)
-        return ((dy * mask) / (1.0 - p),)
+    def _bw(
+        dy: np.ndarray,
+        arrays: Tuple[np.ndarray, ...],
+    ) -> Tuple[Optional[np.ndarray], ...]:
+        return (execute_dropout_vjp_array(contract, dy, arrays[0]),)
 
-    requires = _should_track(x)
-    ctx = _BackwardCtx(fn=_bw, input_proxies=(x,)) if requires else None
-    return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
+    requires = _should_track(input)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(input,)) if requires else None
+    return TensorProxy(
+        uop,
+        session=input._get_session(),
+        requires_grad=requires,
+        ctx=ctx,
+    )
 
 
 def pad(input: TensorProxy, pad, mode: str = "constant", value=None) -> TensorProxy:

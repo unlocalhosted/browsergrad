@@ -32,13 +32,6 @@
     {
       "id": "jit.custom.stateful-replay.v0",
       "expected": {
-        "dropoutCallbackMinimum": 2,
-        "dropoutBranches": {
-          "activeOpcode": "CUSTOM",
-          "evalReturnsInput": true,
-          "p0ReturnsInput": true,
-          "p1Opcode": "MUL"
-        },
         "batchNormRunningMeanChangedDuringBackward": true,
         "batchNormBranches": {
           "trackedTrainingInputArity": 1,
@@ -68,13 +61,11 @@
         "environment": {"pyodide": "0.26.4", "numpy": "1.26.4"},
         "observedLabels": [
           "batch_norm1d",
-          "dropout",
           "interpolate"
         ],
         "allLabelsMatch": true,
         "closureGradientLabels": [
           "batch_norm1d",
-          "dropout",
           "interpolate"
         ],
         "allClosureGradientsPresent": true,

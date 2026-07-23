@@ -23,10 +23,8 @@ Refusal modes:
 
   * `use_reentrant=True` — PyTorch's deprecated reentrant autograd;
     not implemented.
-  * `preserve_rng_state=True` — requires Philox RNG capture; the
-    factory ops (`randn`, etc.) don't expose per-call seeds yet. The
-    Korthikanti-style dropout decomposition (PRD-007 deliverable §2
-    row 3) will land it.
+  * Stochastic operations must own immutable per-UOp keys. Typed dropout does;
+    opaque callbacks still fail the registered-VJP coverage check.
   * Nested `checkpoint(checkpoint(fn), ...)` — region scoping isn't
     designed for nesting in v0. Raise.
   * A region whose forward contains an op without a registered VJP

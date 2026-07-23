@@ -537,9 +537,9 @@ def new_session() -> Session:
 def manual_seed(seed: int) -> None:
     """Seed NumPy's global RNG. Mirrors torch.manual_seed.
 
-    The JIT's RANDOM opcode uses its own per-call seed_key when wired,
-    but factory functions like randn() and the dropout op fall back to
-    NumPy's default RNG, which this seeds."""
+    RANDOM and stochastic DROPOUT operations capture immutable per-UOp keys
+    from this global sequence. Realization then uses operation-local
+    generators, so replay does not advance or depend on mutable global state."""
     import numpy as _np
     _np.random.seed(seed)
 

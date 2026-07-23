@@ -143,6 +143,7 @@ OP_BINARY_CROSS_ENTROPY_WITH_LOGITS = "BINARY_CROSS_ENTROPY_WITH_LOGITS"  # arg:
 OP_KL_DIV = "KL_DIV"  # arg: {reduction, batch_rank, log_target}
 OP_NLL_LOSS = "NLL_LOSS"  # arg: {reduction, batch_rank, ignore_index, has_weight}
 OP_CROSS_ENTROPY = "CROSS_ENTROPY"  # arg: reduction/batch/target/weight/smoothing
+OP_DROPOUT = "DROPOUT"  # arg: {p, training, inplace, seed_key}
 OP_WHERE   = "WHERE"
 OP_INDEX   = "INDEX"    # arg: {dim: int}, inputs: (source, int64 index) ← gather elements
 OP_MASK    = "MASK"     # arg: None                    ← bool-mask indexing
@@ -174,6 +175,7 @@ OP_BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP = "BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP"
 OP_KL_DIV_VJP = "KL_DIV_VJP"  # inputs: (dy, input, target)
 OP_NLL_LOSS_VJP = "NLL_LOSS_VJP"  # inputs: (dy, input, target[, weight])
 OP_CROSS_ENTROPY_VJP = "CROSS_ENTROPY_VJP"  # inputs: (dy, logits, target[, weight])
+OP_DROPOUT_VJP = "DROPOUT_VJP"  # inputs: (dy, input), same keyed mask as forward
 
 # Mixed-precision support (PRD-010). ISNAN is the per-element NaN
 # check used by GradScaler's overflow detection. The "OR across all
@@ -213,6 +215,7 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_KL_DIV,
     OP_NLL_LOSS,
     OP_CROSS_ENTROPY,
+    OP_DROPOUT,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     # Fusion-emitted (PRD-006)
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
@@ -223,12 +226,13 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_KL_DIV_VJP,
     OP_NLL_LOSS_VJP,
     OP_CROSS_ENTROPY_VJP,
+    OP_DROPOUT_VJP,
     # Mixed precision (PRD-010)
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 })
-assert len(ALL_OPS) == 92, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
+assert len(ALL_OPS) == 94, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -476,6 +480,7 @@ __all__ = [
     "OP_KL_DIV",
     "OP_NLL_LOSS",
     "OP_CROSS_ENTROPY",
+    "OP_DROPOUT",
     "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
     "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",
     "OP_SCATTER_ADD", "OP_BROADCAST_TO", "OP_EINSUM_VJP", "OP_L1_LOSS_VJP",
@@ -484,6 +489,7 @@ __all__ = [
     "OP_KL_DIV_VJP",
     "OP_NLL_LOSS_VJP",
     "OP_CROSS_ENTROPY_VJP",
+    "OP_DROPOUT_VJP",
     "OP_ISNAN", "OP_SGD_UPDATE", "OP_ADAMW_UPDATE_M",
     "OP_ADAMW_UPDATE_V", "OP_ADAMW_UPDATE_PARAM",
     "OP_ADAM_UPDATE_M", "OP_ADAM_UPDATE_V", "OP_ADAM_UPDATE_PARAM",

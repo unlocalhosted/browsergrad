@@ -237,19 +237,97 @@ def one_hot(indices, num_classes: int) -> Tensor:
     return Tensor(out_data)
 
 
-def dropout(x: Tensor, p: float = 0.5, training: bool = True) -> Tensor:
+_DROPOUT_SCALAR_TYPES = (
+    int,
+    float,
+    np.int8,
+    np.int16,
+    np.int32,
+    np.int64,
+    np.uint8,
+    np.uint16,
+    np.uint32,
+    np.uint64,
+    np.float16,
+    np.float32,
+    np.float64,
+)
+
+
+def _normalize_dropout_probability(p) -> float:
+    if type(p) not in _DROPOUT_SCALAR_TYPES or type(p) is bool:
+        raise ValueError("dropout: p must be an exact real scalar")
+    normalized = float(p)
+    if not np.isfinite(normalized) or normalized < 0.0 or normalized > 1.0:
+        raise ValueError(
+            f"dropout: p must be finite and in [0, 1], got {normalized!r}"
+        )
+    return normalized
+
+
+def dropout(
+    input: Tensor,
+    p: float = 0.5,
+    training: bool = True,
+    inplace: bool = False,
+) -> Tensor:
     """Functional inverted dropout. Matches torch.nn.functional.dropout.
 
     When training=False or p==0, returns x unchanged.
     """
-    if not training or p == 0.0:
-        return x
-    if not (0.0 <= p < 1.0):
-        raise ValueError(f"dropout: p must be in [0, 1), got {p}")
-    keep = 1.0 - p
-    mask = (np.random.rand(*x.data.shape) < keep).astype(np.float32) / keep
-    out = Tensor((x.data * mask).astype(np.float32))
-    return _build_ctx(out, (x,), lambda g: (g.data * mask,))
+    if not isinstance(input, Tensor):
+        raise TypeError(
+            f"dropout: input must be a Tensor, got {type(input).__name__}"
+        )
+    normalized_p = _normalize_dropout_probability(p)
+    if type(training) is not bool:
+        raise ValueError("dropout: training must be an exact bool")
+    if type(inplace) is not bool:
+        raise ValueError("dropout: inplace must be an exact bool")
+    if inplace:
+        raise NotImplementedError(
+            "dropout(inplace=True) requires typed mutation semantics and is "
+            "not supported"
+        )
+    if input.data.ndim > 32:
+        raise ValueError("dropout: input rank exceeds the 32-rank ceiling")
+    if any(extent > (1 << 28) for extent in input.data.shape):
+        raise ValueError("dropout: input extent exceeds the per-axis ceiling")
+    if input.data.nbytes > (1 << 28):
+        raise ValueError("dropout: output exceeds the 268435456-byte ceiling")
+    if not training or normalized_p == 0.0 or input.data.size == 0:
+        return input
+    if normalized_p == 1.0:
+        result = np.zeros_like(input.data)
+        out = Tensor(result, dtype=result.dtype.name)
+        return _build_ctx(
+            out,
+            (input,),
+            lambda g: (np.zeros_like(input.data),),
+        )
+    if input.data.dtype.name not in ("float16", "float32", "float64"):
+        raise ValueError(
+            "dropout: stochastic training requires float16, float32, or "
+            f"float64 input, got {input.data.dtype.name!r}"
+        )
+    elements = int(input.data.size)
+    if elements > (1 << 28) // 8:
+        raise ValueError("dropout: projected work exceeds the element-visit ceiling")
+    if input.data.nbytes + elements * 9 > (1 << 28):
+        raise ValueError("dropout: projected workspace exceeds the byte ceiling")
+
+    mask = np.random.random(input.data.shape) >= normalized_p
+    result = np.zeros_like(input.data)
+    scale = np.asarray(1.0 / (1.0 - normalized_p), dtype=input.data.dtype)
+    np.multiply(input.data, scale, out=result, where=mask)
+    out = Tensor(result, dtype=result.dtype.name)
+
+    def backward(g):
+        gradient = np.zeros_like(input.data)
+        np.multiply(g.data, scale, out=gradient, where=mask)
+        return (gradient,)
+
+    return _build_ctx(out, (input,), backward)
 
 
 def _normalize_legacy_loss_reduction(

@@ -157,7 +157,8 @@ Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
 `torch.nn.functional.binary_cross_entropy`, plus
 `torch.nn.functional.binary_cross_entropy_with_logits` and
 `torch.nn.functional.kl_div`, `torch.nn.functional.nll_loss`, and
-`torch.nn.functional.cross_entropy`, from the frozen opaque callback
+`torch.nn.functional.cross_entropy` plus
+`torch.nn.functional.dropout`, from the frozen opaque callback
 inventory.
 Expand emits the existing typed `BROADCAST_TO`
 primitive. One shared contract validates exact arity, closed shape arguments,
@@ -185,8 +186,8 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 7 constructor calls and 7 operations under ADR-0002
-and ADR-0004 through ADR-0030. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 6 constructor calls and 6 operations under ADR-0002
+and ADR-0004 through ADR-0031. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -540,8 +541,18 @@ non-differentiable. Nested vmap owns leading mapped axes and captured/mapped
 weights. Opset-17 `SoftmaxCrossEntropyLoss` is limited to the unmapped
 zero-smoothing index profile; probability, smoothing, mapped export,
 tensor-plan, and WebGPU paths refuse explicitly. Rank, extents, stable
-workspace, visits, and output are bounded before allocation. This is
-thirty-two migrated operation records, not Gate 6 completion.
+workspace, visits, and output are bounded before allocation. Typed `DROPOUT`
+owns one immutable per-operation seed. Evaluation, zero probability, and empty
+inputs return the exact input without consuming RNG; probability one emits an
+owning dtype-preserving zero result; active training accepts float16/32/64 and
+replays the same elementwise mask in CPU, closure, symbolic VJP, and checkpoint
+recomputation. Grad preserves output and gradient dtype and delegates its
+module to the functional contract. Stochastic vmap refuses until an explicit
+same/different randomness policy exists; ONNX inference export and
+tensor-plan/WebGPU execution also refuse rather than weakening the keyed
+contract. Trace caching excludes stochastic/effect-opaque graphs. Rank,
+output, work, and RNG/mask workspace are bounded before key consumption. This
+is thirty-three migrated operation records, not Gate 6 completion.
 
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
@@ -554,6 +565,7 @@ records bind `Tensor.abs`, `torch.cat`, `Tensor.clamp`, `Tensor.cos`, `Tensor.ex
 `torch.nn.functional.kl_div`,
 `torch.nn.functional.nll_loss`,
 `torch.nn.functional.cross_entropy`,
+`torch.nn.functional.dropout`,
 `torch.nn.functional.smooth_l1_loss`,
 `torch.sort.indices`, `torch.sort.values`, `torch.stack`,
 `torch.topk.indices`, `torch.topk.values`,
@@ -568,7 +580,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 7 still-opaque and thirty-two typed retirements. ADR-0003 records
+opaque IDs into 6 still-opaque and thirty-three typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.

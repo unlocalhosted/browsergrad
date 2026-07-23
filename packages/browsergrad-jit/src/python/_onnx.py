@@ -36,6 +36,7 @@ Scope (v0):
 
 Refusals (typed `OnnxUnmappableOp`):
   * OP_RANDOM (no runtime randomness in ONNX inference)
+  * stochastic OP_DROPOUT (training randomness has no admitted export contract)
   * OP_CONV1D/OP_CONV2D/OP_CONV_TRANSPOSE2D/OP_CONV3D and OP_CONV*_BACKWARD_*
     (tensor compiler/export mapping deferred)
   * OP_CUSTOM (opaque)
@@ -82,6 +83,7 @@ from ._ir import (
     OP_KL_DIV,
     OP_NLL_LOSS,
     OP_CROSS_ENTROPY,
+    OP_DROPOUT,
     OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
@@ -105,6 +107,7 @@ from ._framework_contracts import (
     validate_kl_div_contract,
     validate_nll_loss_contract,
     validate_cross_entropy_contract,
+    validate_dropout_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -513,6 +516,13 @@ def export_inference(
             # LOAD is a pass-through over BUFFER; reuse the BUFFER's name.
             uop_to_name[id(node)] = uop_to_name[id(node.inputs[0])]
             continue
+        if node.op == OP_DROPOUT:
+            validate_dropout_contract(node)
+            raise OnnxUnmappableOp(
+                "export_inference: training DROPOUT is not exportable because "
+                "the inference graph cannot preserve its keyed stochastic "
+                "execution contract"
+            )
         if node.op not in (
             OP_EINSUM,
             OP_L1_LOSS,

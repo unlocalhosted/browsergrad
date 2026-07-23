@@ -98,14 +98,6 @@
       "operationIds": ["jit.custom.user.v0"]
     },
     {
-      "id": "functional.dropout",
-      "file": "packages/browsergrad-jit/src/python/_functional.py",
-      "definition": "dropout",
-      "constructorCount": 1,
-      "labelBinding": "static-name",
-      "operationIds": ["jit.custom.dropout.v0"]
-    },
-    {
       "id": "functional.interpolate",
       "file": "packages/browsergrad-jit/src/python/_functional.py",
       "definition": "interpolate",
@@ -162,7 +154,6 @@
   ],
   "operations": [
     {"id":"jit.custom.batch-norm-1d.v0","label":"batch_norm1d","labelField":"name","constructorSite":"nn.batch-norm-1d-forward","policy":"cpu-callback-with-closure","constructorReachability":"always-after-shape-validation","effectCondition":"arity-three-when-affine-else-one;running-stats-mutate-only-when-training-and-tracked;batch-stats-used-when-training-or-untracked","effectClass":"module-stateful","replayContract":"tracked-training-reexecution-mutates-running-stats-and-captured-state","inputArity":"one-without-affine-or-three-with-affine","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"tracked training closure realization may update running statistics more than once","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
-    {"id":"jit.custom.dropout.v0","label":"dropout","labelField":"name","constructorSite":"functional.dropout","policy":"cpu-callback-with-closure","constructorReachability":"training-and-zero-less-than-p-less-than-one","effectCondition":"rng-mask-resampled-on-every-callback-realization","effectClass":"rng-and-captured-state","replayContract":"reexecution-resamples-mask-and-replaces-backward-state","inputArity":"1","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"observed forward and backward may use different masks after replay","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.flash-attention.v0","label":"flash_attention","labelField":"op","constructorSite":"embedded.flash-attention","policy":"legacy-webgpu-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"legacy-webgpu-bridge-required","effectClass":"accelerator-kernel","replayContract":"forward-only-root-materialization","inputArity":"3-or-4","shapeRule":"preserve-query-shape","declaredDtypeRule":"preserve-query-dtype","realizedDtypeRule":"bridge-materialized-as-declared","webgpuRoute":"flash-attention","currentFailure":"CPU and portable tensor plan refuse; input relationships are only partially validated","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze","legacy-webgpu-flash"]},
     {"id":"jit.custom.interpolate.v0","label":"interpolate","labelField":"name","constructorSite":"functional.interpolate","policy":"cpu-callback-with-conditional-closure","constructorReachability":"supported-nearest-or-bilinear-four-dimensional-input","effectCondition":"nearest-has-closure;bilinear-backward-refused","effectClass":"captured-state","replayContract":"nearest-deterministic-bilinear-backward-refused","inputArity":"1","shapeRule":"resized-four-dimensional-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"bilinear forward builds a graph whose backward fails only at execution","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.transformer-block.v0","label":"transformer_block","labelField":"op","constructorSite":"embedded.transformer-block","policy":"constructor-only-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"no-realizer-support","effectClass":"constructor-only","replayContract":"not-realizable","inputArity":"5","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"not-realizable","webgpuRoute":"none","currentFailure":"CPU and WebGPU realizers both refuse; weights, dtype agreement, and head divisibility are not validated","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},

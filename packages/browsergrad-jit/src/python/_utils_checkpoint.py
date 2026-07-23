@@ -2,7 +2,7 @@
 gradient checkpointing.
 
 Surfaces:
-  * `checkpoint(fn, *args, use_reentrant=False, preserve_rng_state=False)`
+  * `checkpoint(fn, *args, use_reentrant=False, preserve_rng_state=True)`
     — wraps fn such that its forward intermediates are dropped after
     the call and re-computed during backward via IR rewrite.
 
@@ -21,7 +21,7 @@ def checkpoint(
     fn: Callable[..., Any],
     *args: Any,
     use_reentrant: bool = False,
-    preserve_rng_state: bool = False,
+    preserve_rng_state: bool = True,
 ) -> Any:
     """Run `fn(*args)` and drop the forward intermediates from the
     realizer's value table after the call returns. When `.backward()`
@@ -36,10 +36,10 @@ def checkpoint(
     Constraints:
       * `use_reentrant=True` is refused. PyTorch's deprecated reentrant
         autograd doesn't exist in this library.
-      * `preserve_rng_state=True` is refused. The forward must be
-        deterministic up to the args; until factory ops (`randn`, etc.)
-        expose per-call Philox seeds (PRD-007 follow-up), recompute
-        with random sampling diverges from the original.
+      * Stochastic operations must own immutable per-UOp keys. Typed dropout
+        does, so the default `preserve_rng_state=True` replays its exact mask.
+        `False` is accepted for API compatibility but does not force a new
+        sample because keyed IR replay remains deterministic.
       * `fn`'s forward must only use ops with registered symbolic VJP
         rules. The closure-backward path can't be safely checkpointed
         (it captures intermediate ndarrays by reference; we can't tell
@@ -55,14 +55,10 @@ def checkpoint(
             "PyTorch's deprecated mode and is not implemented here. "
             "Pass use_reentrant=False (the default in modern PyTorch)."
         )
-    if preserve_rng_state:
+    if type(preserve_rng_state) is not bool:
         raise _checkpoint.CheckpointError(
-            "checkpoint(preserve_rng_state=True): the symbolic backward "
-            "doesn't yet capture per-op Philox state. Stochastic ops "
-            "(dropout, randn, etc.) inside a checkpointed region would "
-            "diverge from their forward values on recompute. This lands "
-            "alongside the dropout-decomposition in PRD-007's CUSTOM "
-            "op migration."
+            "checkpoint(preserve_rng_state=...): preserve_rng_state must be "
+            "an exact bool"
         )
 
     # The anchors are the input TensorProxies. We pass them by tuple so

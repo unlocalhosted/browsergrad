@@ -9,6 +9,13 @@ contract in the README](README.md#compatibility-contract).
 
 ### Changed
 
+- `torch.nn.functional.dropout` and `nn.Dropout` now emit typed keyed
+  `DROPOUT`/`DROPOUT_VJP` IR instead of a mutable `CUSTOM` callback. Exact
+  validation and bounded allocation cover identity, deterministic drop-all,
+  and stochastic inverted-dropout modes; forward, closure, symbolic, and
+  checkpoint replay share one immutable mask key. Stochastic trace caching,
+  `vmap` without a randomness policy, ONNX training export, and tensor-plan
+  lowering fail explicitly.
 - `torch.nn.functional.cross_entropy` now emits typed `CROSS_ENTROPY` with
   stable log-sum-exp, index and probability targets, class weights, ignored
   indices, label smoothing, complete reductions, logits/probability-target

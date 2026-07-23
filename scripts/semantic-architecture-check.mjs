@@ -769,6 +769,22 @@ function checkJitFrameworkOperationContracts(root, manifest, failures) {
   allowed.onnxExport.add(
     "supported-opset17-softmax-cross-entropy-loss-unmapped-index-profile",
   );
+  allowed.shapeContract.add(
+    "preserve-input-with-elementwise-bernoulli-mask",
+  );
+  allowed.dtypeContract.add(
+    "preserve-input-with-floating-stochastic-profile",
+  );
+  allowed.cpu.add("supported-numpy-owning-keyed-inverted-dropout");
+  allowed.closureAutograd.add("supported-keyed-mask-replay");
+  allowed.symbolicVjp.add("supported-keyed-mask-replay");
+  allowed.vmap.add(
+    "supported-deterministic-drop-all-refuses-stochastic-without-randomness-policy",
+  );
+  allowed.onnxExport.add(
+    "refused-training-dropout-in-inference-export",
+  );
+  allowed.tensorPlan.add("refused-no-canonical-keyed-rng-lowering");
   const irSource = fs.readFileSync(
     path.join(root, "packages/browsergrad-jit/src/python/_ir.py"),
     "utf8",

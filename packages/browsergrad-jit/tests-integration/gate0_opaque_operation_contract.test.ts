@@ -109,28 +109,12 @@ except Exception as exc:
     expect(result).toEqual(expected("jit.custom.conditional-backward-refusal.v0"));
   });
 
-  it("records stateful callback replay instead of classifying it as pure", async () => {
+  it("records the remaining stateful BatchNorm callback replay", async () => {
     const target = await getJitTarget();
     const result = await target.run<Record<string, unknown>>(`
 import browsergrad_jit as bg
 import browsergrad_jit.nn.functional as F
 import numpy as np
-
-np.random.seed(7)
-x = bg.from_numpy(np.ones((2, 2), dtype=np.float32), requires_grad=True)
-drop = F.dropout(x, p=0.5, training=True)
-original = drop._uop.arg["fn"]
-calls = [0]
-def counted(*args):
-    calls[0] += 1
-    return original(*args)
-drop._uop.arg["fn"] = counted
-drop.numpy()
-drop.sum().backward()
-
-drop_eval = F.dropout(x, p=0.5, training=False)
-drop_p0 = F.dropout(x, p=0.0, training=True)
-drop_p1 = F.dropout(x, p=1.0, training=True)
 
 bn = bg.nn.BatchNorm1d(2, affine=False, track_running_stats=True)
 bn.train()
@@ -152,13 +136,6 @@ bn_untracked_output = bn_untracked_eval(bn_input)
 untracked_values = bn_untracked_output.numpy()
 
 {
-    "dropoutCallbackMinimum": min(calls[0], 2),
-    "dropoutBranches": {
-        "activeOpcode": drop._uop.op,
-        "evalReturnsInput": drop_eval is x,
-        "p0ReturnsInput": drop_p0 is x,
-        "p1Opcode": drop_p1._uop.op,
-    },
     "batchNormRunningMeanChangedDuringBackward": bool(not np.array_equal(before_backward, bn.running_mean)),
     "batchNormBranches": {
         "trackedTrainingInputArity": len(bn_output._uop.inputs),
@@ -267,8 +244,6 @@ def check(label, output, source):
     gradient_present[label] = source.grad is not None
 
 a = leaf([[1.0, 3.0], [5.0, 7.0]]); check("batch_norm1d", bg.nn.BatchNorm1d(2, affine=False)(a), a)
-np.random.seed(17)
-a = leaf([[1.0, 1.0], [1.0, 1.0]]); check("dropout", F.dropout(a, p=0.5, training=True), a)
 a = leaf([[[[2.0]]]]); check("interpolate", F.interpolate(a, size=(2, 2), mode="nearest"), a)
 {
     "environment": {"pyodide": pyodide.__version__, "numpy": np.__version__},

@@ -72,6 +72,7 @@ from ._ir import (
     OP_KL_DIV, OP_KL_DIV_VJP,
     OP_NLL_LOSS, OP_NLL_LOSS_VJP,
     OP_CROSS_ENTROPY, OP_CROSS_ENTROPY_VJP,
+    OP_DROPOUT, OP_DROPOUT_VJP,
     OP_CONST, OP_BROADCAST_TO, OP_WHERE, OP_INDEX, OP_SCATTER_ADD,
     OP_ISNAN,
 )
@@ -93,6 +94,7 @@ from ._framework_contracts import (
     validate_kl_div_contract,
     validate_nll_loss_contract,
     validate_cross_entropy_contract,
+    validate_dropout_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -1543,6 +1545,34 @@ def _vjp_cross_entropy(
             },
         ))
     return tuple(gradients)
+
+
+@register_vjp(OP_DROPOUT)
+def _vjp_dropout(
+    output: UOp,
+    inputs: Tuple[UOp, ...],
+    dy: UOp,
+) -> Tuple[Optional[UOp], ...]:
+    contract = validate_dropout_contract(output)
+    if inputs != output.inputs or len(inputs) != 1:
+        raise ShapeError("DROPOUT VJP input must equal the forward operand")
+    if dy.shape != output.shape or dy.dtype != output.dtype:
+        raise ShapeError(
+            "DROPOUT VJP upstream gradient must match the forward output"
+        )
+    return (_vjp_uop(
+        OP_DROPOUT_VJP,
+        (dy, inputs[0]),
+        inputs[0].shape,
+        inputs[0].dtype,
+        output,
+        arg={
+            "p": contract.p,
+            "training": contract.training,
+            "inplace": contract.inplace,
+            "seed_key": contract.seed_key,
+        },
+    ),)
 
 
 def _broadcast_batch_shape(

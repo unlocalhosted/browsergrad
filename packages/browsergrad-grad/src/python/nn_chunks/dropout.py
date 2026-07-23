@@ -6,26 +6,28 @@ class Dropout(Module):
     eval mode:  identity (no scaling, no zeroing).
     """
 
-    def __init__(self, p: float = 0.5):
+    def __init__(self, p: float = 0.5, inplace: bool = False):
         super().__init__()
-        if not (0.0 <= p < 1.0):
-            raise ValueError(f"Dropout: p must be in [0, 1), got {p}")
-        self.p = float(p)
+        self.p = F._normalize_dropout_probability(p)
+        if type(inplace) is not bool:
+            raise ValueError("Dropout: inplace must be an exact bool")
+        if inplace:
+            raise NotImplementedError(
+                "Dropout(inplace=True) requires typed mutation semantics and "
+                "is not supported"
+            )
+        self.inplace = inplace
 
     def forward(self, x: Tensor) -> Tensor:
-        if not self.training or self.p == 0.0:
-            return x
-        keep = 1.0 - self.p
-        mask = (np.random.rand(*x.data.shape) < keep).astype(np.float32) / keep
-        out = Tensor((x.data * mask).astype(np.float32))
-
-        def backward(g):
-            return (g.data * mask,)
-
-        return _build_ctx(out, (x,), backward)
+        return F.dropout(
+            x,
+            p=self.p,
+            training=self.training,
+            inplace=self.inplace,
+        )
 
     def __repr__(self):
-        return f"Dropout(p={self.p})"
+        return f"Dropout(p={self.p}, inplace={self.inplace})"
 
 
 class Dropout2d(Module):

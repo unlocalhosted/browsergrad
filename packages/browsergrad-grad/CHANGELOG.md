@@ -9,6 +9,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- `torch.nn.functional.dropout` and `nn.Dropout` now share JIT's strict
+  probability, mode, dtype, and bounded-resource contract. Identity branches
+  preserve tensor identity without consuming RNG state, deterministic
+  drop-all preserves every admitted dtype in owning storage, and stochastic
+  inverted dropout preserves floating output and gradient dtypes while saving
+  its exact backward mask. Unsupported in-place mutation fails explicitly.
 - `torch.nn.functional.cross_entropy` and `CrossEntropyLoss` now match the
   admitted JIT contract for stable logits, spatial/unbatched index targets,
   differentiable probability targets, class weights, ignored indices, label
