@@ -420,3 +420,37 @@ It still cannot honestly claim that the C++/CuTe frontend is available in the
 browser product. That claim begins only after approved exact packs and producer
 trust feed one valid compiler-Worker C++ request through verified Artifact V3,
 shared lowering, and real WebGPU.
+
+## 2026-07-23 real-browser observation addendum
+
+The harness now has a distinct post-build lane for already-produced exact
+Clang-Wasm and header packs. Host preflight rejects non-canonical or symbolic
+paths, hashes all six files concurrently, rechecks each open file identity
+after hashing, and admits only the package-pinned two-clean-build Wasm. A
+dedicated Vitest/Chromium configuration exposes those exact files through
+bounded no-store routes and runs only the real C++/CuTe observation.
+
+The package Worker now projects the deepest bounded authenticated error in its
+cause chain. VFS observations retain a capped, deterministic set of not-found
+paths, and compile-status failures include the last bounded Emscripten module
+log lines when any exist. Focused unit tests cover the error projection,
+lookup-miss accounting, truncation, disposal receipt, and unchanged success
+authority.
+
+The exact current inputs complete preflight in under one second and the browser
+observation in about seven seconds. Chromium verifies the 31,641,377-byte Wasm,
+installs five packs containing 5,768 files, verifies the raw interface in the
+separate verifier Worker, launches the exact compiler Worker, and receives one
+authenticated failure terminal. The terminal is now precise:
+`BG-COMPILER-CPP-CUTE-BROWSER-WASM-COMPILER-COMPILE-STATUS` at
+`$.runtime.compile`. A diagnostic-only same-realm run established that Clang
+opened the source plus 109 installed headers and completed one semantic pass;
+its 180 VFS misses are normal ordered search probes rather than a missing
+required header. That diagnostic run is not retained as production evidence.
+
+This changes the active engineering blocker without widening capability claims.
+The build, asset transport, raw-Wasm verifier, VFS installation, and Worker
+failure protocol are no longer the unknowns. The remaining local blocker is
+inside the producer or rejected Artifact V3 path. The observation command
+accepts and records that exact current blocker; the separate strict verification
+command fails until an authenticated Artifact V3 terminal is produced.

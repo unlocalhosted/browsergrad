@@ -61,6 +61,11 @@ vi.mock("../../src/cpp_cute_browser_vfs_session.js", async (importOriginal) => {
     state: stored.state,
     counters: zeroVfsCounters(),
     openedFiles: Object.freeze([]),
+    lookupMisses: Object.freeze({
+      total: "0",
+      uniquePaths: Object.freeze([]),
+      truncated: false,
+    }),
   });
   return {
     ...actual,
@@ -136,6 +141,8 @@ interface RuntimeOptions {
   readonly resultPointer?: number;
   readonly resultByteLength?: number;
   readonly trapCompile?: boolean;
+  readonly stdout?: readonly string[];
+  readonly stderr?: readonly string[];
 }
 
 interface RuntimeFixture {
@@ -243,6 +250,32 @@ describe("C++/CuTe local Wasm C ABI compiler execution", () => {
       reason: "failed",
       closeCalls: 1,
     });
+  });
+
+  it("bounds and sanitizes module logs attached to compile-status failures", () => {
+    const fixture = runtimeFixture({
+      compileReturn: 106,
+      readableCompileStatus: 106,
+      stdout: [`${"x".repeat(3_000)}\nlast-line`],
+      stderr: ["failure\u0000detail"],
+    });
+    let observed: unknown;
+    try {
+      executeCppCuteBrowserWasmCompiler({
+        factory: fixture.factory,
+        profile,
+        inputFrameBytes: FRAME_BYTES,
+      });
+    } catch (cause) {
+      observed = cause;
+    }
+
+    expect(observed).toBeInstanceOf(CppCuteBrowserWasmCompilerError);
+    const message = (observed as Error).message;
+    expect(message).toContain("bounded module log:");
+    expect(message).toContain("last-line");
+    expect(message).not.toMatch(/[\u0000-\u001f\u007f]/u);
+    expect(message.length).toBeLessThan(2_300);
   });
 
   it("fails closed on status disagreement, result aliasing, and traps", () => {
@@ -431,8 +464,8 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
     memory,
     vfsSession: session,
     moduleFacade: facade,
-    stdout: Object.freeze([]),
-    stderr: Object.freeze([]),
+    stdout: Object.freeze([...(options.stdout ?? [])]),
+    stderr: Object.freeze([...(options.stderr ?? [])]),
   }) as unknown as TakenCppCuteBrowserEmscriptenFactory;
   const factory = Object.freeze({
     authority: "package-generated-factory-instantiation-only",

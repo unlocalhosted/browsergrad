@@ -105,6 +105,33 @@ minutes. Uncached clean and two-build reproducibility modes remain deliberately
 separate release-evidence authorities; their provisioning cost is not an edit
 loop and must not be placed on routine source iteration.
 
+When exact Clang-Wasm and five materialized pack files already exist, use the
+real-browser lane without rebuilding either input:
+
+```sh
+pnpm --filter @unlocalhosted/browsergrad-compiler \
+  run preflight:browser-cpp-cute-real-compile -- \
+  --wasm=/absolute/clang-extractor.wasm \
+  --pack-root=/absolute/materialized-pack-root
+
+pnpm --filter @unlocalhosted/browsergrad-compiler \
+  run observe:browser-cpp-cute-real-compile -- \
+  --wasm=/absolute/clang-extractor.wasm \
+  --pack-root=/absolute/materialized-pack-root \
+  --evidence-output=/absolute/new-evidence.json
+```
+
+`preflight` verifies canonical non-symlink paths, stable file identities, all
+six exact hashes, and the package-pinned reproducible Wasm before starting a
+browser. `observe` runs the raw-Wasm verifier and compiler Workers in Chromium
+and emits either `compiled` or the exact authenticated blocker. Use
+`verify:browser-cpp-cute-real-compile` with the same arguments for the strict
+Artifact V3 gate; it rejects a `blocked` observation. At the 2026-07-23
+checkpoint, preflight takes under one second and observation takes about seven
+seconds. The current exact source reaches `$.runtime.compile` but returns the
+producer's internal-error status, so Worker execution, lowering, and release
+authority remain false.
+
 To turn the seven exact locked archives into the five source-derived VFS packs,
 use the one-process command so its opaque authorities remain live:
 

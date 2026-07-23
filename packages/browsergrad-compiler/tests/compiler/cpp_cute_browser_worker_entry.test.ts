@@ -69,6 +69,31 @@ describe("C++/CuTe browser Worker entry", () => {
     }]);
   });
 
+  it("reports the deepest authenticated runtime failure across the Worker boundary", async () => {
+    const compileFailure = Object.assign(new Error("producer failed"), {
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-WASM-COMPILER-COMPILE-STATUS",
+      path: "$.runtime.compile",
+    });
+    runtime.start.mockRejectedValue(Object.assign(
+      new Error("runtime execution failed", { cause: compileFailure }),
+      {
+        code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-RUNTIME-EXECUTION",
+        path: "$.runtime.execution",
+      },
+    ));
+    const terminal: CppCuteBrowserWorkerControllerInboundMessage[] = [];
+
+    await handleCppCuteBrowserWorkerTransfer({} as never, (message) => terminal.push(message));
+
+    expect(terminal[0]).toMatchObject({
+      phase: "runtime-start",
+      failureCode: "BG-COMPILER-CPP-CUTE-BROWSER-WASM-COMPILER-COMPILE-STATUS",
+      failurePath: "$.runtime.compile",
+      workerExecutionObserved: false,
+      loweringAuthorityMinted: false,
+    });
+  });
+
   it("sanitizes unknown adoption failures instead of leaking attacker-controlled fields", async () => {
     runtime.inspect.mockReturnValue(Object.freeze({ state: "prepared" }));
     runtime.prepare.mockRejectedValue(Object.freeze({

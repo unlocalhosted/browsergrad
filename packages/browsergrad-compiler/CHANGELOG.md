@@ -2,10 +2,13 @@
 
 ## Unreleased
 
-- Regenerates and repins the self-contained package Worker after the typed GEMM
-  artifact parser entered its module graph. The exact bundle remains a
-  deterministic zero-import ES module; its current identity is 571,098 bytes
-  at SHA-256 `01a4c1d10d606773bfa241284160f3af787dec856e1a17e22edd7c34dae043a3`.
+- Adds a post-build real-browser C++/CuTe observation lane with exact six-file
+  preflight, independent raw-Wasm verification, dedicated Chromium execution,
+  strict Artifact V3 mode, and machine-readable blocker evidence. Worker
+  failures now preserve the deepest bounded authenticated cause; VFS misses
+  and Emscripten module logs are bounded diagnostics only. The regenerated
+  deterministic zero-import compiler Worker is 572,534 bytes at SHA-256
+  `25e42408771a2ccd3e0c232082022ba2c9c02ede8b5fc6a2618058a4ffad970f`.
 - Adds closed frontend artifact 3.1 and request 1.1 support for one
   producer-declared, backend-neutral `logical-gemm-tile` fact. Authorized
   typed artifacts lower through semantic-core's canonical dense f32 GEMM

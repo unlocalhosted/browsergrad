@@ -218,6 +218,12 @@ export interface CppCuteBrowserVfsSessionObservation {
   readonly state: "active" | "disposed";
   readonly counters: CppCuteBrowserVfsSessionCounters;
   readonly openedFiles: readonly CppCuteBrowserVfsOpenedFileObservation[];
+  /** Bounded diagnostic-only view of canonical paths that returned not-found. */
+  readonly lookupMisses: {
+    readonly total: WireU64;
+    readonly uniquePaths: readonly string[];
+    readonly truncated: boolean;
+  };
 }
 
 export type CppCuteBrowserVfsSessionTerminalReason =
@@ -353,6 +359,10 @@ interface StoredSession {
   directories: Map<string, SessionDirectory>;
   handles: Map<number, LiveHandle>;
   successfullyReadPaths: Set<string>;
+  lookupMissCount: bigint;
+  lookupMissPaths: Set<string>;
+  lookupMissPathByteLength: number;
+  lookupMissPathsTruncated: boolean;
   readonly counters: SessionCountersMutable;
   nextHandle: number;
   state: "active" | "disposed";
@@ -570,6 +580,10 @@ export function bindCppCuteBrowserVfsMount(
     directories: stored.directories,
     handles: new NATIVE_MAP<number, LiveHandle>(),
     successfullyReadPaths: new NATIVE_SET<string>(),
+    lookupMissCount: 0n,
+    lookupMissPaths: new NATIVE_SET<string>(),
+    lookupMissPathByteLength: 0,
+    lookupMissPathsTruncated: false,
     counters: emptySessionCounters(),
     nextHandle: 1,
     state: "active",
@@ -755,7 +769,10 @@ export function cppCuteBrowserVfsStatus(
     const output = outputRange(epoch, metadataPointer, 32, 8);
     const path = readPath(stored, epoch, pathPointer, pathByteLength);
     const node = stored.files.get(path) ?? stored.directories.get(path);
-    if (node === undefined) throw new AbiStatus(CPP_CUTE_BROWSER_VFS_STATUS.notFound);
+    if (node === undefined) {
+      recordLookupMiss(stored, path, pathByteLength);
+      throw new AbiStatus(CPP_CUTE_BROWSER_VFS_STATUS.notFound);
+    }
     return successWrite(output.pointer, metadataBytes(node, 0));
   });
 }
@@ -771,7 +788,10 @@ export function cppCuteBrowserVfsOpen(
     const path = readPath(stored, epoch, pathPointer, pathByteLength);
     if (stored.directories.has(path)) throw new AbiStatus(CPP_CUTE_BROWSER_VFS_STATUS.isDirectory);
     const file = stored.files.get(path);
-    if (file === undefined) throw new AbiStatus(CPP_CUTE_BROWSER_VFS_STATUS.notFound);
+    if (file === undefined) {
+      recordLookupMiss(stored, path, pathByteLength);
+      throw new AbiStatus(CPP_CUTE_BROWSER_VFS_STATUS.notFound);
+    }
     if (stored.handles.size >= stored.maxLiveFileHandles || stored.nextHandle > U32_MAX) {
       throw new AbiStatus(CPP_CUTE_BROWSER_VFS_STATUS.resourceLimit);
     }
@@ -1388,10 +1408,14 @@ function disposeStored(
   const directories = stored.directories;
   const handles = stored.handles;
   const successfullyReadPaths = stored.successfullyReadPaths;
+  const lookupMissPaths = stored.lookupMissPaths;
   stored.files = new NATIVE_MAP<string, SessionFile>();
   stored.directories = new NATIVE_MAP<string, SessionDirectory>();
   stored.handles = new NATIVE_MAP<number, LiveHandle>();
   stored.successfullyReadPaths = new NATIVE_SET<string>();
+  stored.lookupMissPaths = new NATIVE_SET<string>();
+  stored.lookupMissPathByteLength = 0;
+  if (stored.lookupMissCount !== 0n) stored.lookupMissPathsTruncated = true;
   stored.counters.currentLiveSourceBytes = 0n;
   stored.counters.currentLiveInstalledBytes = 0n;
   stored.installation = undefined;
@@ -1404,6 +1428,7 @@ function disposeStored(
   cleanupFailure = attemptCleanup(cleanupFailure, () => clearMap(files));
   cleanupFailure = attemptCleanup(cleanupFailure, () => clearMap(directories));
   cleanupFailure = attemptCleanup(cleanupFailure, () => clearSet(successfullyReadPaths));
+  cleanupFailure = attemptCleanup(cleanupFailure, () => clearSet(lookupMissPaths));
   const settledReason = cleanupFailure === undefined ? reason : "internal-error";
   const observation = OBJECT_FREEZE({
     ...preDisposalObservation,
@@ -1481,7 +1506,32 @@ function sessionObservation(
       logicalOpenedTotalByteLength: encodeWireU64(logicalSource + logicalInstalled),
     }),
     openedFiles: OBJECT_FREEZE(openedFiles),
+    lookupMisses: OBJECT_FREEZE({
+      total: encodeWireU64(stored.lookupMissCount),
+      uniquePaths: OBJECT_FREEZE([...stored.lookupMissPaths].sort(compareUtf8)),
+      truncated: stored.lookupMissPathsTruncated,
+    }),
   });
+}
+
+const MAX_OBSERVED_LOOKUP_MISS_PATHS = 256;
+const MAX_OBSERVED_LOOKUP_MISS_PATH_BYTES = 32 * 1_024;
+
+function recordLookupMiss(
+  stored: StoredSession,
+  path: string,
+  pathByteLength: number,
+): void {
+  stored.lookupMissCount += 1n;
+  if (stored.lookupMissPaths.has(path)) return;
+  if (stored.lookupMissPaths.size >= MAX_OBSERVED_LOOKUP_MISS_PATHS ||
+      stored.lookupMissPathByteLength + pathByteLength >
+        MAX_OBSERVED_LOOKUP_MISS_PATH_BYTES) {
+    stored.lookupMissPathsTruncated = true;
+    return;
+  }
+  stored.lookupMissPaths.add(path);
+  stored.lookupMissPathByteLength += pathByteLength;
 }
 
 function storedSession(session: PreparedCppCuteBrowserVfsSession): StoredSession {

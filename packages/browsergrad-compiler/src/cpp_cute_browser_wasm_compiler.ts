@@ -66,6 +66,9 @@ const NATIVE_UINT8_ARRAY = Uint8Array;
 const NATIVE_UINT8_ARRAY_SET = Uint8Array.prototype.set;
 const NATIVE_UINT8_ARRAY_FILL = Uint8Array.prototype.fill;
 const NATIVE_ARRAY_PUSH = Array.prototype.push;
+const NATIVE_STRING_CHAR_AT = String.prototype.charAt;
+const NATIVE_STRING_CHAR_CODE_AT = String.prototype.charCodeAt;
+const NATIVE_STRING_SLICE = String.prototype.slice;
 const NATIVE_AGGREGATE_ERROR = AggregateError;
 const NATIVE_BIGINT = BigInt;
 const NATIVE_NUMBER_IS_INTEGER = Number.isInteger;
@@ -210,7 +213,7 @@ export function executeCppCuteBrowserWasmCompiler(
       "$.runtime.alloc",
     );
     if (inputPointer === 0) {
-      compileStatus("$.runtime.alloc", readStatus(taken));
+      compileStatus("$.runtime.alloc", readStatus(taken), taken);
     }
     expectStatus(taken, INPUT_ALLOCATED_STATUS, "$.runtime.statusAfterAlloc");
     const inputEpoch = inspectMemory(taken.memory, "$.runtime.inputMemory");
@@ -229,7 +232,7 @@ export function executeCppCuteBrowserWasmCompiler(
       mismatch("$.runtime.compile", "compile return differs from the readable runtime status");
     }
     if (compileState !== ARTIFACT_READY_STATUS) {
-      compileStatus("$.runtime.compile", compileState);
+      compileStatus("$.runtime.compile", compileState, taken);
     }
 
     const resultPointer = callU32(
@@ -582,7 +585,11 @@ function rangesOverlap(
   return leftBegin < rightEnd && rightBegin < leftEnd;
 }
 
-function compileStatus(path: string, status: number): never {
+function compileStatus(
+  path: string,
+  status: number,
+  taken: TakenCppCuteBrowserEmscriptenFactory,
+): never {
   let name = "unknown";
   for (const entry of RUNTIME_ABI.compileStatuses) {
     if (entry.code === status) {
@@ -593,8 +600,40 @@ function compileStatus(path: string, status: number): never {
   fail(
     "BG-COMPILER-CPP-CUTE-BROWSER-WASM-COMPILER-COMPILE-STATUS",
     path,
-    `C ABI execution terminated with status ${status} (${name})`,
+    `C ABI execution terminated with status ${status} (${name})${factoryLogSuffix(taken)}`,
   );
+}
+
+function factoryLogSuffix(taken: TakenCppCuteBrowserEmscriptenFactory): string {
+  const lines = [
+    ...taken.stderr.map((line) => `stderr: ${line}`),
+    ...taken.stdout.map((line) => `stdout: ${line}`),
+  ];
+  if (lines.length === 0) return "";
+  const sanitized = sanitizeFactoryLog(lines.slice(-8).join(" | "));
+  const bounded = sanitized.length <= 2_048
+    ? sanitized
+    : `…${NATIVE_REFLECT_APPLY(
+        NATIVE_STRING_SLICE,
+        sanitized,
+        [sanitized.length - 2_047],
+      ) as string}`;
+  return `; bounded module log: ${bounded}`;
+}
+
+function sanitizeFactoryLog(value: string): string {
+  let sanitized = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const code = NATIVE_REFLECT_APPLY(
+      NATIVE_STRING_CHAR_CODE_AT,
+      value,
+      [index],
+    ) as number;
+    sanitized += code <= 0x1f || code === 0x7f
+      ? "\ufffd"
+      : NATIVE_REFLECT_APPLY(NATIVE_STRING_CHAR_AT, value, [index]) as string;
+  }
+  return sanitized;
 }
 
 function exactDataRecord(

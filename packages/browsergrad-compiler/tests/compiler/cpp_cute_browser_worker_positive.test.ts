@@ -1146,6 +1146,11 @@ async function createExecution(
         contentSha256: file.contentSha256,
         byteLength: file.byteLength,
       })),
+      lookupMisses: {
+        total: wire(0),
+        uniquePaths: [],
+        truncated: false,
+      },
     },
     cAbiExecutionObserved: true,
     artifactVerificationObserved: false,

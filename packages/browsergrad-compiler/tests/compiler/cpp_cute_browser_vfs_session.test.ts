@@ -531,6 +531,81 @@ describe("C++/CuTe Worker-owned aggregate lazy VFS session", () => {
     closeCppCuteBrowserVfsSession(fixture.session, "completed");
   });
 
+  it("retains a bounded deterministic record of VFS lookup misses", async () => {
+    const fixture = await sessionFixture();
+    const repeatedPath = "/workspace/missing.hpp";
+    writePath(fixture.memory, 64, repeatedPath);
+    expect(cppCuteBrowserVfsStatus(
+      fixture.session,
+      64,
+      byteLength(repeatedPath),
+      512,
+    )).toBe(CPP_CUTE_BROWSER_VFS_STATUS.notFound);
+    expect(cppCuteBrowserVfsOpen(
+      fixture.session,
+      64,
+      byteLength(repeatedPath),
+      560,
+    )).toBe(CPP_CUTE_BROWSER_VFS_STATUS.notFound);
+    expect(observeCppCuteBrowserVfsSession(fixture.session).lookupMisses).toEqual({
+      total: "2",
+      uniquePaths: [repeatedPath],
+      truncated: false,
+    });
+
+    for (let index = 0; index < 256; index += 1) {
+      const path = `/workspace/missing-${String(index).padStart(3, "0")}.hpp`;
+      writePath(fixture.memory, 64, path);
+      expect(cppCuteBrowserVfsStatus(
+        fixture.session,
+        64,
+        byteLength(path),
+        512,
+      )).toBe(CPP_CUTE_BROWSER_VFS_STATUS.notFound);
+    }
+
+    const active = observeCppCuteBrowserVfsSession(fixture.session);
+    expect(active.lookupMisses.total).toBe("258");
+    expect(active.lookupMisses.uniquePaths).toHaveLength(256);
+    expect(active.lookupMisses.uniquePaths).toContain(repeatedPath);
+    expect(active.lookupMisses.uniquePaths).not.toContain(
+      "/workspace/missing-255.hpp",
+    );
+    expect(active.lookupMisses.truncated).toBe(true);
+
+    const closed = closeCppCuteBrowserVfsSession(fixture.session, "completed");
+    expect(unwrapClosedCppCuteBrowserVfsSession(closed).observation.lookupMisses).toEqual(
+      active.lookupMisses,
+    );
+    expect(observeCppCuteBrowserVfsSession(fixture.session).lookupMisses).toEqual({
+      total: "258",
+      uniquePaths: [],
+      truncated: true,
+    });
+  });
+
+  it("bounds retained lookup-miss paths by aggregate UTF-8 bytes", async () => {
+    const fixture = await sessionFixture();
+    for (let index = 0; index < 200; index += 1) {
+      const path =
+        `/workspace/missing-${String(index).padStart(3, "0")}-${"x".repeat(180)}.hpp`;
+      writePath(fixture.memory, 64, path);
+      expect(cppCuteBrowserVfsStatus(
+        fixture.session,
+        64,
+        byteLength(path),
+        512,
+      )).toBe(CPP_CUTE_BROWSER_VFS_STATUS.notFound);
+    }
+
+    const misses = observeCppCuteBrowserVfsSession(fixture.session).lookupMisses;
+    expect(misses.total).toBe("200");
+    expect(misses.uniquePaths.length).toBeGreaterThan(100);
+    expect(misses.uniquePaths.length).toBeLessThan(200);
+    expect(misses.truncated).toBe(true);
+    cancelCppCuteBrowserVfsSession(fixture.session);
+  });
+
   it("observes only unique files with successful content reads", async () => {
     const fixture = await sessionFixture();
     writePath(fixture.memory, 64, MAIN_PATH);

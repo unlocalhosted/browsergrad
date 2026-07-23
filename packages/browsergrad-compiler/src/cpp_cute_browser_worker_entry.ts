@@ -233,24 +233,32 @@ function errorProjection(
   cause: unknown,
   phase: CppCuteBrowserWorkerEntryFailurePhase,
 ): { readonly code: string; readonly path: string } {
-  if (typeof cause === "object" && cause !== null) {
+  let current = cause;
+  let projection: { readonly code: string; readonly path: string } | undefined;
+  for (let depth = 0; depth < 16 &&
+      typeof current === "object" && current !== null; depth += 1) {
+    let next: unknown;
     let code: unknown;
     let path: unknown;
     try {
-      const descriptors = NATIVE_GET_OWN_PROPERTY_DESCRIPTORS(cause);
+      const descriptors = NATIVE_GET_OWN_PROPERTY_DESCRIPTORS(current);
       code = descriptors["code"]?.value;
       path = descriptors["path"]?.value;
+      next = descriptors["cause"]?.value;
     } catch {
       code = undefined;
       path = undefined;
+      next = undefined;
     }
     if (typeof code === "string" && typeof path === "string" &&
         NATIVE_REFLECT_APPLY(NATIVE_REGEXP_TEST, FAILURE_CODE, [code]) === true &&
         validFailurePath(path)) {
-      return NATIVE_OBJECT_FREEZE({ code, path });
+      projection = NATIVE_OBJECT_FREEZE({ code, path });
     }
+    if (next === current) break;
+    current = next;
   }
-  return NATIVE_OBJECT_FREEZE({
+  return projection ?? NATIVE_OBJECT_FREEZE({
     code: "BG-COMPILER-CPP-CUTE-BROWSER-WORKER-ENTRY-INTERNAL",
     path: phase === "runtime-adoption" ? "$.runtime.adoption" : "$.runtime.start",
   });
