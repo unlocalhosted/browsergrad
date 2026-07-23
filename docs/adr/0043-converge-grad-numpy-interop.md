@@ -47,5 +47,5 @@ owning snapshot policy.
 
 This closes the NumPy interop sub-slice. ADR-0044 subsequently closes the
 NumPy-delegated dtype fallback, and ADR-0045 closes constructor-default
-classification. Owning `Tensor.expand()` materialization remains, followed by
-generated runtime/profile support consumption.
+classification. ADR-0046 closes owning `Tensor.expand()` materialization.
+Generated runtime/profile support consumption remains.

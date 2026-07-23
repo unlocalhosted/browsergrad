@@ -40,18 +40,16 @@ The frozen planner decision definition is re-pinned because it now revalidates
 typed `BROADCAST_TO` nodes before scheduling; its `CUSTOM` refusal is unchanged.
 
 Grad's eager `Tensor.expand` adopts the same dimension-validation and dtype-
-preservation contract while retaining its explicitly documented owning,
-contiguous materialization. Its former float16-to-f32 substitution is removed,
-and invalid shapes are rejected before NumPy execution. The frozen Grad
-compatibility inventory and fixture are re-pinned to the aligned dtype and
-validation result. Zero-stride view aliasing remains outside the eager profile,
-so the complete behavior is still reported as compatibility debt rather than
-claimed PyTorch-compatible.
+contiguous materialization at this decision's acceptance. ADR-0046
+subsequently supersedes only that eager ownership choice with a storage-sharing
+zero-stride view. Its former float16-to-f32 substitution remains removed, and
+invalid shapes remain rejected before NumPy execution.
 
 ## Compatibility and removal
 
-Valid `expand` calls retain the public surface, values, owning materialization,
-dtype, and closure-autograd behavior. Shape capture is intentionally stricter:
+Valid `expand` calls retain the public surface, values, dtype, and
+closure-autograd behavior. ADR-0046 changes eager ownership from materialized
+copy to zero-stride view. Shape capture is intentionally stricter:
 booleans, non-index integers such as floats, negative dimensions other than
 `-1`, leading `-1`, rank reduction, and incompatible non-singleton expansion
 now fail before execution instead of relying on NumPy or integer truncation.

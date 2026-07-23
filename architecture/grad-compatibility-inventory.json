@@ -305,28 +305,28 @@
       ]
     },
     {
-      "id": "grad.materialization.expand-copy.v0",
+      "id": "grad.view.expand.v1",
       "surface": "Tensor.expand()",
-      "class": "materialization",
+      "class": "view",
       "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
+      "targetConformance": "pytorch-compatible",
       "referenceContract": "pytorch-shaped-compatibility",
       "dtypeEffect": "preserves",
       "condition": "all-inputs",
       "failurePolicy": "reject-invalid-expand-shape-before-execution",
-      "aliasing": "must-not-alias",
-      "contiguity": "contiguous",
-      "materialization": "always",
+      "aliasing": "must-alias",
+      "contiguity": "input-dependent",
+      "materialization": "none",
       "autograd": "graph-edge",
-      "truth": "Expand validates integer extents and broadcast compatibility before execution, then copies the NumPy broadcast result into independent contiguous storage while preserving the input dtype.",
+      "truth": "Expand validates integer extents and broadcast compatibility before execution, then returns a storage-sharing view with zero strides on expanded axes, source writeability, exact dtype/layout preservation, bidirectional mutation, and an unbroadcast VJP.",
       "sourceDefinitions": [
         "tensor.py:Tensor.expand",
         "tensor.py:_expand",
         "tensor.py:_build_ctx"
       ],
       "fixtureCaseIds": [
-        "grad.materialization.expand-copy.v0",
-        "grad.materialization.expand-dtype-preservation.v0"
+        "grad.view.expand-alias.v1",
+        "grad.view.expand-dtype-layout.v1"
       ]
     },
     {

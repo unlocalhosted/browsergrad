@@ -365,18 +365,28 @@ cases["grad.view.permute-float16-alias-preserves-dtype.v1"] = {
 expand_source = grad.Tensor(np.array([[1.0], [2.0]], dtype=np.float32), requires_grad=True)
 expanded = expand_source.expand(2, 3)
 expanded.sum().backward()
+expand_alias_source = grad.Tensor(np.array([[3.0], [5.0]], dtype=np.float32))
+expand_alias = expand_alias_source.expand(2, 3)
+expand_alias_source.data[0, 0] = 7.0
+expand_source_mutation_visible = float(expand_alias.data[0, 2]) == 7.0
+expand_alias.data[1, 2] = 11.0
+expand_result_mutation_visible = float(expand_alias_source.data[1, 0]) == 11.0
 def expand_error(call):
     try:
         call()
         return "no_error"
     except Exception as exc:
         return type(exc).__name__
-cases["grad.materialization.expand-copy.v0"] = {
+cases["grad.view.expand-alias.v1"] = {
     "sharesMemory": bool(np.shares_memory(expand_source.data, expanded.data)),
     "cContiguous": bool(expanded.data.flags.c_contiguous),
+    "writeable": bool(expanded.data.flags.writeable),
+    "strides": list(expanded.data.strides),
     "requiresGrad": bool(expanded.requires_grad),
     "graphEdge": bool(expanded._ctx is not None),
     "parentIdentity": bool(expanded._ctx[0][0] is expand_source),
+    "sourceMutationVisible": bool(expand_source_mutation_visible),
+    "resultMutationVisible": bool(expand_result_mutation_visible),
     "backwardGradient": expand_source.grad.tolist(),
     "validMinusOneValues": expand_source.expand(-1, 3).tolist(),
     "invalidShapeErrors": {
@@ -392,11 +402,31 @@ float16_expand_source = grad.Tensor(np.array([[1.0], [2.0]], dtype=np.float16), 
 float16_expanded = float16_expand_source.expand(2, 3)
 int32_expand_source = grad.Tensor(np.array([[1], [2]], dtype=np.int32), dtype="int32")
 int32_expanded = int32_expand_source.expand(2, 3)
-cases["grad.materialization.expand-dtype-preservation.v0"] = {
+uint64_expand_source = grad.Tensor(
+    np.array([[1], [2]], dtype=np.uint64),
+    dtype="uint64",
+)
+uint64_expanded = uint64_expand_source.expand(2, 3)
+noncontiguous_expand_source = grad.Tensor(
+    np.arange(6, dtype=np.float16).reshape(1, 2, 3).transpose(0, 2, 1),
+    dtype="float16",
+)
+noncontiguous_expanded = noncontiguous_expand_source.expand(4, 3, 2)
+cases["grad.view.expand-dtype-layout.v1"] = {
     "float16SourceDtype": float16_expand_source.dtype,
     "float16ResultDtype": float16_expanded.dtype,
     "int32SourceDtype": int32_expand_source.dtype,
     "int32ResultDtype": int32_expanded.dtype,
+    "uint64SourceDtype": uint64_expand_source.dtype,
+    "uint64ResultDtype": uint64_expanded.dtype,
+    "noncontiguousSharesMemory": bool(np.shares_memory(
+        noncontiguous_expand_source.data,
+        noncontiguous_expanded.data,
+    )),
+    "noncontiguousSourceStrides": list(
+        noncontiguous_expand_source.data.strides
+    ),
+    "noncontiguousResultStrides": list(noncontiguous_expanded.data.strides),
 }
 
 index_source = grad.Tensor(np.arange(6, dtype=np.float32).reshape(2, 3), requires_grad=True)

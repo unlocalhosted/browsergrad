@@ -43,6 +43,6 @@ available through both explicit string aliases and NumPy dtype objects/scalar
 types.
 
 This closes the dtype-registry compatibility-debt record. ADR-0045
-subsequently closes constructor-default classification. Owning
-`Tensor.expand()` materialization remains as the sole eager Grad compatibility
-record.
+subsequently closes constructor-default classification, and ADR-0046 closes
+owning `Tensor.expand()` materialization. No eager Grad behavior remains
+classified as compatibility debt.

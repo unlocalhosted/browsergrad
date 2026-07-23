@@ -269,13 +269,17 @@
       }
     },
     {
-      "id": "grad.materialization.expand-copy.v0",
+      "id": "grad.view.expand-alias.v1",
       "expected": {
-        "sharesMemory": false,
-        "cContiguous": true,
+        "sharesMemory": true,
+        "cContiguous": false,
+        "writeable": true,
+        "strides": [4, 0],
         "requiresGrad": true,
         "graphEdge": true,
         "parentIdentity": true,
+        "sourceMutationVisible": true,
+        "resultMutationVisible": true,
         "backwardGradient": [[3], [3]],
         "validMinusOneValues": [[1, 1, 1], [2, 2, 2]],
         "invalidShapeErrors": {
@@ -289,12 +293,17 @@
       }
     },
     {
-      "id": "grad.materialization.expand-dtype-preservation.v0",
+      "id": "grad.view.expand-dtype-layout.v1",
       "expected": {
         "float16SourceDtype": "float16",
         "float16ResultDtype": "float16",
         "int32SourceDtype": "int32",
-        "int32ResultDtype": "int32"
+        "int32ResultDtype": "int32",
+        "uint64SourceDtype": "uint64",
+        "uint64ResultDtype": "uint64",
+        "noncontiguousSharesMemory": true,
+        "noncontiguousSourceStrides": [12, 2, 6],
+        "noncontiguousResultStrides": [0, 2, 6]
       }
     },
     {

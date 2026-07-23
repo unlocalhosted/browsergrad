@@ -47,6 +47,5 @@ now executable, separately classified contracts. The torch compatibility
 surface no longer aliases its input or silently changes supported NumPy/Tensor
 dtypes.
 
-This closes the constructor compatibility-debt record. Owning
-`Tensor.expand()` materialization is the only remaining eager Grad
-compatibility-debt record.
+This closes the constructor compatibility-debt record. ADR-0046 subsequently
+closes the final owning-`Tensor.expand()` materialization record.

@@ -236,6 +236,9 @@ Remaining explicit limits:
 - **No `_ctx`-mutability shenanigans.** Each op captures the data it needs at forward time and binds it in a closure. Backward functions are pure.
 - **Contiguous means contiguous.** Non-C-order storage is copied into owning
   C-order storage with a dtype-preserving identity-gradient edge.
+- **Expand means a view.** Broadcast singleton axes use zero strides over the
+  source storage. Dtype/layout and bidirectional mutation are preserved, while
+  backward reduces expanded axes to the original shape.
 - **Global gradient context exists.** `grad.no_grad()` disables graph
   construction for inference sections; `.detach()` returns a distinct
   storage-sharing leaf with no autograd history.

@@ -77,10 +77,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   differentiable probability targets, class weights, ignored indices, label
   smoothing, complete reductions, dtype preservation, bounded allocation, and
   mutation-safe saved backward state.
-- `Tensor.expand` now rejects malformed dimensions before NumPy execution and
-  preserves float16 and integer dtypes while retaining its documented owning,
-  contiguous materialization behavior. Its valid and invalid shape contract is
-  shared with the lazy JIT surface.
+- `Tensor.expand` now returns a storage-sharing zero-stride view after exact
+  shape validation. It preserves floating, integer, unsigned, and
+  non-contiguous source layouts; mutations propagate through aliases; and the
+  existing VJP reduces expanded axes. Its valid and invalid shape contract
+  remains shared with the lazy JIT surface.
 - `Tensor.repeat` now shares bounded exact multiplier conformance with the JIT
   surface, rejects hostile/non-integral/rank-invalid requests before NumPy,
   and preserves float16, integer, and boolean dtypes in owning results instead

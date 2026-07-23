@@ -647,6 +647,11 @@ conditional ndarray aliasing. `torch.tensor` is an owning leaf-copy adapter:
 Python bool/int/float data infer bool/int64/float32, admitted NumPy and Tensor
 inputs preserve dtype unless explicitly converted, unsupported input kinds
 reject, and only floating storage may request gradients.
+ADR-0046 closes the final eager compatibility record. `Tensor.expand` now
+returns a storage-sharing view whose expanded singleton axes have zero stride.
+It preserves source writeability, dtype, and non-expanded strides; mutations
+propagate bidirectionally; and the VJP reduces expanded axes to the input
+shape. Validation still occurs before stride construction.
 
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
@@ -2706,14 +2711,14 @@ source behavior, physical dtype, alias relation, autograd decision, or fixture
 result is an adapter-baseline change under ADR-0001, even when the public
 method signature does not change.
 
-The current Grad baseline, revised through ADR-0045, is
+The current Grad baseline, revised through ADR-0046, is
 `architecture/grad-compatibility-inventory.json`, with executable Pyodide
 evidence in `packages/browsergrad-grad/tests-integration/fixtures/grad-view-bf16.v0.json`.
 Schema version 2 records `bf16` and `bfloat16` as explicitly unsupported,
 keeps `torch.bfloat16` distinct from float32, and rejects construction or
 conversion before allocation. It also records the closed package-owned dtype
 registry, separate direct versus torch constructor inference and ownership,
-conditional reshape/index aliasing, copying expand behavior,
+conditional reshape/index aliasing, zero-stride expand views,
 zero-copy supported writable NumPy input, owning NumPy output snapshots,
 storage-sharing dtype/layout-preserving `detach()`, conditional
 dtype-preserving `contiguous()`
@@ -2721,8 +2726,8 @@ identity/materialization, differentiable floating `to()` casts, and detached
 bool/integer casts. Unrecognized positional `to()` strings are rejected rather
 than being treated as device no-ops. The remaining device
 entrypoints—`torch.tensor(device=...)` and `nn.Module.to(...)`—are also
-CPU-only and fail closed. Remaining eager debt is owning expand
-materialization.
+CPU-only and fail closed. No recorded eager Grad behavior remains classified
+as compatibility debt.
 
 ### Adapter ledger
 
@@ -2736,7 +2741,7 @@ all five.
 | `cute_static_layout` parser path | Compiler | Existing parser integration and pinned regression fixtures only. | No new spellings, ranks, queries, or call sites. | Pinned real frontend handles its fixtures through layout semantics. | Compiler `1.0.0`. |
 | `TensorGpuPlan` shape-only/f32 assumptions | Kernels | Existing JIT plan serializer and kernels executor/bridge only. | No new operation, dtype, view, offset, or alias semantics may enter this schema. | New view/dtype features enter through shared schemas; plan has no unique semantics. | Kernels `1.0.0`. |
 | JIT `OP_CUSTOM` extension boundary | JIT | Explicit user-authored kernel code only; no embedded legacy framework wrappers remain. | No new core labels or constructor sites; only explicitly user-authored kernel IDs may extend. | Advertised core operations have typed IR, CPU/VJP decisions, and backend decisions; this gate is met, while the intentional extension boundary remains fail-closed. | JIT `1.0.0`. |
-| Eager view/materialization compatibility | Grad | Existing owning expand adapter only where accurately documented; constructor ambiguity, NumPy dtype fallback, bfloat16 substitution, non-contiguous no-op, copying detach, floating-cast graph loss, fake device transfer, and inconsistent NumPy ownership have no permitted caller. | No new API may claim view aliasing, differentiable casts, device transfer, NumPy aliasing, unregistered dtype storage, or bf16 storage through these paths. | The remaining expand fixture agrees or rejects; constructors, the dtype registry, bfloat16, contiguous, detach, floating cast, placement, and NumPy interop already meet their narrowed contracts. | Grad `1.0.0`. |
+| Eager compatibility baseline | Grad | No compatibility-debt caller remains; the frozen inventory and executable fixtures are architecture evidence only. | No API may claim view aliasing, differentiable casts, device transfer, NumPy aliasing, unregistered dtype storage, or bf16 storage outside the recorded contracts. | Met for behavior convergence. At Grad `1.0.0`, promote the inventory from a legacy-adapter freeze to the stable behavior contract without losing executable evidence. | Grad `1.0.0`. |
 | `flashAttentionDirect` name | Kernels | Existing public export and realizer compatibility call only. | New APIs and docs use the accurate row-wise online-softmax name. | Real block-tiled implementation is proven and a normal major-removal window passes. | Kernels `1.0.0`. |
 | Generic runtime backend labels | Runtime | Existing assignment requirement compatibility mapping only. | New readiness features use canonical requirement definitions/resolutions; semantic lowering uses capability decisions only where an explicit link exists. | All readiness UI consumes requirement resolutions and program-specific lowering records. | Runtime `1.0.0`. |
 

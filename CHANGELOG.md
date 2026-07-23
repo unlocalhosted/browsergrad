@@ -14,6 +14,9 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Makes eager Grad `Tensor.expand()` a true storage-sharing zero-stride view.
+  It preserves dtype and non-contiguous layout, propagates mutations through
+  aliases, avoids output-sized allocation, and retains its unbroadcast VJP.
 - Separates Grad constructor semantics: direct `Tensor(...)` retains its
   explicit float32-default educational contract, while `torch.tensor(...)`
   now always owns a leaf copy, infers bool/int64/float32 for Python data,
@@ -60,9 +63,9 @@ Each package follows independent [SemVer](https://semver.org/).
   PRD-012c remains an unimplemented typed graph/codegen design.
 - Begins Gate 6 framework convergence by migrating JIT `Tensor.expand` from an
   opaque callback to typed `BROADCAST_TO` across CPU, autograd, transforms,
-  export, planning, and resident WebGPU bridge paths. Grad eager expand now
-  shares its validated shape/dtype fixture, preserves non-f32 dtypes, and
-  retains explicitly owning materialization.
+  export, planning, and resident WebGPU bridge paths. Grad eager expand shares
+  its validated shape/dtype fixture and now separately implements the public
+  zero-stride view contract.
 - Adds the first versioned executable JIT framework-operation registry and
   generates detached public support reporting from its validator-bound typed
   records rather than method presence or hand-written tables.

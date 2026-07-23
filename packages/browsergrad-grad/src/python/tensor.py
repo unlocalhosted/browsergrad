@@ -1544,10 +1544,7 @@ class Tensor:
         return sort(self, dim=dim, descending=descending, stable=stable)
 
     def expand(self, *shape) -> "Tensor":
-        """Broadcast size-1 dims to a larger size. Returns a tensor that
-        appears to have the new shape; we use np.broadcast_to + copy to
-        materialize (PyTorch returns a view but our backward handles it
-        either way)."""
+        """Return a zero-stride view over broadcast size-1 dimensions."""
         if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
             shape = tuple(shape[0])
         return _expand(self, tuple(shape))
@@ -2060,7 +2057,24 @@ def _expand(a: Tensor, shape: tuple) -> Tensor:
             )
         resolved.append(dim)
     resolved = tuple(resolved)
-    out_data = np.broadcast_to(a.data.reshape(padded), resolved).copy()
+    reshaped = a.data.reshape(padded)
+    out_strides = tuple(
+        0 if source_dim == 1 and target_dim != 1 else stride
+        for source_dim, target_dim, stride in zip(
+            padded,
+            resolved,
+            reshaped.strides,
+        )
+    )
+    # Shape/broadcast validation above makes every zero-stride address refer
+    # to an existing source element; no new allocation or out-of-bounds stride
+    # is introduced.
+    out_data = np.lib.stride_tricks.as_strided(
+        reshaped,
+        shape=resolved,
+        strides=out_strides,
+        writeable=reshaped.flags.writeable,
+    )
     out = Tensor(out_data, dtype=a.dtype)
     def backward(g):
         # Sum the gradient back over the broadcasted dimensions.

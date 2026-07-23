@@ -296,6 +296,24 @@ describe("semantic architecture guardrails", () => {
     )).toContainEqual(expect.stringContaining("Tensor.detach changed"));
     expect(checkFrozenGradCompatibilitySources(
       tensorSource.replace(
+        "writeable=reshaped.flags.writeable,",
+        "writeable=False,",
+      ),
+      torchCompatSource,
+      torchCompatLimitedSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("tensor.py:_expand changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace(
+        "0 if source_dim == 1 and target_dim != 1 else stride",
+        "stride",
+      ),
+      torchCompatSource,
+      torchCompatLimitedSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("tensor.py:_expand changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace(
         "and out.dtype in _VARIADIC_FLOATING_DTYPES",
         "and False",
       ),
