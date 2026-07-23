@@ -212,6 +212,7 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(existingArtifactsWorkflow).toContain("run-id: ${{ inputs.source_run_id }}");
     expect(existingArtifactsWorkflow).toContain("clang-wasm-reproducibility.v3.json");
     expect(existingArtifactsWorkflow).toContain("cpp_cute_browser_wasm_review.mjs");
+    expect(existingArtifactsWorkflow).toContain("--require-exact-interface");
     expect(existingArtifactsWorkflow).not.toContain("cpp_cute_browser_build_runner.mjs");
     expect(existingArtifactsWorkflow).not.toContain("docker run");
   });

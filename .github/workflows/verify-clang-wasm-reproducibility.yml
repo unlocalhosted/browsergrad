@@ -119,7 +119,8 @@ jobs:
           node \
             packages/browsergrad-compiler/scripts/cpp_cute_browser_build/cpp_cute_browser_wasm_review.mjs \
             --wasm="${BG_CLANG_REPRO_ROOT}/first/output/browsergrad-cpp-cute/clang-extractor.wasm" \
-            --output="${BG_CLANG_REPRO_ROOT}/clang-wasm-runtime-abi-review.v1.json"
+            --output="${BG_CLANG_REPRO_ROOT}/clang-wasm-runtime-abi-review.v1.json" \
+            --require-exact-interface
           sha256sum "${BG_CLANG_REPRO_ROOT}/clang-wasm-runtime-abi-review.v1.json"
 
       - name: Upload reproducibility and raw-Wasm review evidence
