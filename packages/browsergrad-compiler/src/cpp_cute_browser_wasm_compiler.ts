@@ -68,6 +68,8 @@ const NATIVE_UINT8_ARRAY = Uint8Array;
 const NATIVE_UINT8_ARRAY_SET = Uint8Array.prototype.set;
 const NATIVE_UINT8_ARRAY_FILL = Uint8Array.prototype.fill;
 const NATIVE_ARRAY_PUSH = Array.prototype.push;
+const NATIVE_ARRAY_SLICE = Array.prototype.slice;
+const NATIVE_ARRAY_JOIN = Array.prototype.join;
 const NATIVE_STRING_CHAR_AT = String.prototype.charAt;
 const NATIVE_STRING_CHAR_CODE_AT = String.prototype.charCodeAt;
 const NATIVE_STRING_SLICE = String.prototype.slice;
@@ -662,12 +664,19 @@ function failureObservationSuffix(state: ExecutionState): string {
 }
 
 function factoryLogSuffix(taken: TakenCppCuteBrowserEmscriptenFactory): string {
-  const lines = [
-    ...taken.stderr.map((line) => `stderr: ${line}`),
-    ...taken.stdout.map((line) => `stdout: ${line}`),
-  ];
+  const lines: string[] = [];
+  const stderr = taken.snapshotStderr();
+  const stdout = taken.snapshotStdout();
+  for (let index = 0; index < stderr.length; index += 1) {
+    NATIVE_REFLECT_APPLY(NATIVE_ARRAY_PUSH, lines, [`stderr: ${stderr[index]}`]);
+  }
+  for (let index = 0; index < stdout.length; index += 1) {
+    NATIVE_REFLECT_APPLY(NATIVE_ARRAY_PUSH, lines, [`stdout: ${stdout[index]}`]);
+  }
   if (lines.length === 0) return "";
-  const sanitized = sanitizeFactoryLog(lines.slice(-8).join(" | "));
+  const tail = NATIVE_REFLECT_APPLY(NATIVE_ARRAY_SLICE, lines, [-8]) as string[];
+  const joined = NATIVE_REFLECT_APPLY(NATIVE_ARRAY_JOIN, tail, [" | "]) as string;
+  const sanitized = sanitizeFactoryLog(joined);
   const bounded = sanitized.length <= 2_048
     ? sanitized
     : `…${NATIVE_REFLECT_APPLY(

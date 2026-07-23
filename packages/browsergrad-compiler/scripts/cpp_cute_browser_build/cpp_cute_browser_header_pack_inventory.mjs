@@ -19,6 +19,10 @@ import {
   cppCuteBrowserExtractedHeaderSourceFiles,
   requireCppCuteBrowserHeaderSourceExtractionAuthority,
 } from "./cpp_cute_browser_header_source_extraction.mjs";
+import {
+  CPP_CUTE_BROWSER_LIBCXX_CONFIG_SITE_PROFILE,
+  materializeCppCuteBrowserLibcxxConfigSite,
+} from "./cpp_cute_browser_libcxx_config_site.mjs";
 
 export const CPP_CUTE_BROWSER_HEADER_PACK_INVENTORY_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-header-pack-source-inventory";
@@ -308,8 +312,44 @@ export async function inventoryCppCuteBrowserExtractedHeaderSources(extraction) 
           relativePath: file.relativePath,
           expected,
         }));
+        if (source.sourceId === "llvm-project" &&
+            selection.includeRootId === "cxx-stdlib" &&
+            virtualPath === "__config_site.in") {
+          const configured = materializeCppCuteBrowserLibcxxConfigSite(bytes);
+          const configuredVirtualPath = "__config_site";
+          if (group.filesByPath.has(configuredVirtualPath) ||
+              group.sourceFilesByPath.has(configuredVirtualPath)) {
+            invalid(
+              "$.extraction.files",
+              "configured libc++ header collides with an extracted source path",
+            );
+          }
+          const configuredExpected = Object.freeze({
+            virtualPath: configuredVirtualPath,
+            contentSha256: configured.configuredSha256,
+            byteLength: String(configured.bytes.byteLength),
+            licenseComponentIds: Object.freeze([...selection.licenseComponentIds]),
+          });
+          group.filesByPath.set(configuredVirtualPath, configuredExpected);
+          group.sourceFilesByPath.set(configuredVirtualPath, Object.freeze({
+            extraction,
+            sourceId: source.sourceId,
+            includeRootId: selection.includeRootId,
+            relativePath: file.relativePath,
+            derivedProfile: configured.profile,
+            expected: configuredExpected,
+          }));
+        }
       }
     }
+  }
+
+  const libcxx = groups.get("cxx-stdlib");
+  if (libcxx === undefined || !libcxx.filesByPath.has("__config_site")) {
+    invalid(
+      "$.extraction.cxx-stdlib",
+      "exact libc++ source did not produce its configured __config_site header",
+    );
   }
 
   const packs = [];
@@ -393,6 +433,7 @@ function finalizeInventory(input) {
       networkAccessed: false,
       archiveProvenanceVerified: false,
       generatedClangResourceHeadersComplete: input.headerSourceExtractionId !== undefined,
+      configuredLibcxxHeaderComplete: input.headerSourceExtractionId !== undefined,
       licenseReviewComplete: false,
       headerPackSelectionPrepared: false,
       headerPacksAssembled: false,
@@ -459,6 +500,18 @@ export async function copyCppCuteBrowserHeaderPackInventorySourceFile(
       );
     } catch (cause) {
       invalid("$.virtualPath", "failed to reread extracted inventory source", { cause });
+    }
+    if (source.derivedProfile !== undefined) {
+      if (source.derivedProfile !== CPP_CUTE_BROWSER_LIBCXX_CONFIG_SITE_PROFILE) {
+        invalid("$.virtualPath", "configured libc++ source profile changed");
+      }
+      const configured = materializeCppCuteBrowserLibcxxConfigSite(bytes);
+      if (configured.profile !== source.derivedProfile ||
+          configured.bytes.byteLength !== Number(source.expected.byteLength) ||
+          configured.configuredSha256 !== source.expected.contentSha256) {
+        invalid("$.virtualPath", "configured libc++ inventory source bytes changed");
+      }
+      return configured.bytes;
     }
     if (bytes.byteLength !== Number(source.expected.byteLength) ||
         sha256(bytes) !== source.expected.contentSha256) {

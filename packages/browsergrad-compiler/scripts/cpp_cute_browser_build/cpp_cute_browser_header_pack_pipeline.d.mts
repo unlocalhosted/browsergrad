@@ -92,6 +92,7 @@ export interface CppCuteBrowserHeaderPackPipeline {
     hostToolPackageIdentityPinned: true;
     nodeZstdDecompressorPackageIdentityPinned: true;
     generatedClangResourceHeadersComplete: true;
+    configuredLibcxxHeaderComplete: true;
     exactUpstreamLicenseEvidenceExtracted: true;
     exactCudaRedistributionIndexBound: true;
     exactPerDistributedFileComponentMapPrepared: true;

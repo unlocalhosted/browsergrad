@@ -495,8 +495,8 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
     memory,
     vfsSession: session,
     moduleFacade: facade,
-    stdout: Object.freeze([...(options.stdout ?? [])]),
-    stderr: Object.freeze([...(options.stderr ?? [])]),
+    snapshotStdout: () => Object.freeze([...(options.stdout ?? [])]),
+    snapshotStderr: () => Object.freeze([...(options.stderr ?? [])]),
   }) as unknown as TakenCppCuteBrowserEmscriptenFactory;
   const factory = Object.freeze({
     authority: "package-generated-factory-instantiation-only",

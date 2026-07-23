@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Repairs the real-browser compile observation path at three actual boundaries:
+  Emscripten stdout/stderr are snapshotted when a failure occurs instead of
+  being frozen before compilation; the unchanged CuTe request receives a
+  bounded 1,024-header VFS observation budget beneath Artifact V3's 4,096-file
+  ceiling; and frontend-work admission now honors the ABI's one-or-two-pass
+  rejected-artifact contract while still requiring two passes for acceptance.
+  Canonical Clang rejections are preserved as compact Worker-execution evidence
+  instead of dumping a multi-megabyte artifact or being mislabeled an internal
+  failure. The archive-to-pack pipeline also derives the missing libc++ 22.1.8
+  `__config_site` from its exact upstream template through a closed
+  Linux/x86_64/glibc configuration profile and fails if upstream introduces or
+  removes a CMake input. Two clean header roots reproduce the configured pack
+  byte-for-byte. The regenerated zero-import compiler Worker is 576,084 bytes
+  at SHA-256
+  `cbb1e6f37e7c9b5faa7ebde72791b37dda394f11a54a74d4961cdbd22b876370`.
+  External license approval, producer trust, lowering, backend execution, and
+  release remain false.
 - Adds fixed native first-cause diagnostics for producer, Artifact V3, runtime,
   and allocator-integrity failures without widening the C ABI or artifact
   authority. Allocator poisoning now retains its first internal cause for the

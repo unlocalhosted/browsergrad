@@ -247,11 +247,12 @@ export function completeCppCuteBrowserFrontendWorkMetrics(
       );
     }
     if (record.phase !== COMPLETE_PHASE || record.flags !== HEALTHY_FLAG ||
-        record.completedSemanticPasses !==
+        record.completedSemanticPasses < 1n ||
+        record.completedSemanticPasses >
           NATIVE_BIGINT(CONTRACT.lifecycle.acceptedArtifactPassCount)) {
       mismatch(
         "$.frontendWork.complete",
-        "artifact-ready requires one healthy complete two-pass frontend-work record",
+        "artifact-ready requires one healthy complete one-or-two-pass frontend-work record",
       );
     }
     enforceLimits(record, stored.limits);

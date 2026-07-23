@@ -355,12 +355,14 @@ function parseEvidence(output) {
   try {
     const evidence = JSON.parse(line.slice(offset + EVIDENCE_MARKER.length));
     const compiled = evidence?.outcome === "compiled";
+    const rejected = evidence?.outcome === "rejected";
     const blocked = evidence?.outcome === "blocked";
+    const workerExecuted = compiled || rejected;
     if (evidence?.schema !== "browsergrad.compiler.cpp-cute.browser-real-compile-observation" ||
         evidence?.version !== 1 ||
-        (!compiled && !blocked) ||
-        evidence?.workerExecutionObserved !== compiled ||
-        evidence?.authority !== (compiled
+        (!workerExecuted && !blocked) ||
+        evidence?.workerExecutionObserved !== workerExecuted ||
+        evidence?.authority !== (workerExecuted
           ? "local-real-browser-worker-execution-observation-only"
           : "local-real-browser-worker-terminal-observation-only") ||
         evidence?.inputs?.wasmAuthority !==

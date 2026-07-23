@@ -110,6 +110,8 @@ interface FactoryFixture {
   readonly bytes: Uint8Array;
   readonly factory: CppCuteBrowserGeneratedEmscriptenFactory;
   readonly calls: { count: number };
+  readonly emitStdout: (line: string) => void;
+  readonly emitStderr: (line: string) => void;
 }
 
 interface MountFixture {
@@ -159,8 +161,11 @@ describe("package-generated Emscripten factory binding", () => {
     const taken = takeCppCuteBrowserEmscriptenFactory(prepared);
     expect(taken.memory).toBe(taken.instance.exports.memory);
     expect(taken.vfsSession).toBe(mount.state.session);
-    expect(taken.stdout).toEqual(["factory initialized"]);
-    expect(taken.stderr).toEqual([]);
+    expect(taken.snapshotStdout()).toEqual(["factory initialized"]);
+    expect(taken.snapshotStderr()).toEqual([]);
+    fixture.emitStderr("native compile diagnostic");
+    expect(taken.snapshotStderr()).toEqual(["native compile diagnostic"]);
+    expect(Object.isFrozen(taken.snapshotStderr())).toBe(true);
     expect(taken.moduleFacade._bg_cpp_cute_compile).toBe(
       taken.instance.exports.bg_cpp_cute_compile,
     );
@@ -313,23 +318,25 @@ function mountFixture(): MountFixture {
 function factoryFixture(options: FactoryOptions = {}): FactoryFixture {
   const bytes = abiFactoryModule();
   const calls = { count: 0 };
+  let moduleArgument: CppCuteBrowserEmscriptenFactoryModuleArgument | undefined;
   const generatedImports: Record<string, Function> = {};
   for (const entry of RUNTIME_ABI.hostImports.generatedImportAllowlist.exactFunctions) {
     if (entry.fieldName !== options.omitGeneratedImport) generatedImports[entry.fieldName] = () => 0;
   }
   Object.freeze(generatedImports);
   const factory = async function (
-    moduleArgument: CppCuteBrowserEmscriptenFactoryModuleArgument,
+    nextModuleArgument: CppCuteBrowserEmscriptenFactoryModuleArgument,
   ): Promise<unknown> {
+    moduleArgument = nextModuleArgument;
     calls.count += 1;
-    if (options.logLine !== undefined) moduleArgument.print(options.logLine);
+    if (options.logLine !== undefined) nextModuleArgument.print(options.logLine);
     return new Promise((resolve) => {
       const imports: Record<string, WebAssembly.ModuleImports> = {
         env: generatedImports,
         wasi_snapshot_preview1: generatedImports,
       };
       if (options.extraImportModule === true) imports["ambient_network"] = Object.freeze({});
-      moduleArgument.instantiateWasm(imports, (instance) => {
+      nextModuleArgument.instantiateWasm(imports, (instance) => {
         const facade: Record<string, unknown> = {};
         for (const entry of RUNTIME_ABI.cExports) {
           facade[`_${entry.wasmExportName}`] = instance.exports[entry.wasmExportName];
@@ -341,7 +348,17 @@ function factoryFixture(options: FactoryOptions = {}): FactoryFixture {
       });
     });
   };
-  return { bytes, factory, calls };
+  const emit = (stream: "print" | "printErr", line: string): void => {
+    if (moduleArgument === undefined) throw new Error("test factory has not been invoked");
+    moduleArgument[stream](line);
+  };
+  return {
+    bytes,
+    factory,
+    calls,
+    emitStdout: (line) => emit("print", line),
+    emitStderr: (line) => emit("printErr", line),
+  };
 }
 
 function abiFactoryModule(): Uint8Array {

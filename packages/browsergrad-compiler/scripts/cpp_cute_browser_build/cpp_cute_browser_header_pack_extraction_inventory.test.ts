@@ -34,6 +34,9 @@ import {
   copyCppCuteBrowserHeaderPackInventorySourceFile,
   inventoryCppCuteBrowserExtractedHeaderSources,
 } from "./cpp_cute_browser_header_pack_inventory.mjs";
+import {
+  materializeCppCuteBrowserLibcxxConfigSite,
+} from "./cpp_cute_browser_libcxx_config_site.mjs";
 
 describe("extracted header-source inventory", () => {
   it("deduplicates identical overlays and retains opaque reread authority", async () => {
@@ -42,17 +45,26 @@ describe("extracted header-source inventory", () => {
 
     expect(inventory.authority).toBe("exact-extraction-source-inventory-only");
     expect(inventory.headerSourceExtractionId).toBe(extraction.extractionId);
+    const templateBytes = Buffer.from(configSiteTemplate(), "utf8");
+    const configuredBytes =
+      materializeCppCuteBrowserLibcxxConfigSite(templateBytes).bytes;
     expect(inventory.totals).toEqual({
       packCount: 5,
       sourceCount: 8,
-      fileCount: 6,
-      fileContentByteLength: "77",
+      fileCount: 8,
+      fileContentByteLength: String(77 + templateBytes.byteLength + configuredBytes.byteLength),
     });
     expect(inventory.packs.find(({ includeRootId }) => includeRootId === "cuda"))
       .toMatchObject({ fileCount: 1, fileContentByteLength: "12" });
     expect(inventory.packs.find(({ includeRootId }) => includeRootId === "clang-resource"))
       .toMatchObject({ fileCount: 1, files: [expect.objectContaining({ virtualPath: "stddef.h" })] });
     expect(inventory.claims.generatedClangResourceHeadersComplete).toBe(true);
+    expect(inventory.claims.configuredLibcxxHeaderComplete).toBe(true);
+    expect(Buffer.from(await copyCppCuteBrowserHeaderPackInventorySourceFile(
+      inventory,
+      "cxx-stdlib",
+      "__config_site",
+    )).toString("utf8")).toContain("#define _LIBCPP_HAS_THREADS 1");
     expect(Buffer.from(await copyCppCuteBrowserHeaderPackInventorySourceFile(
       inventory,
       "cuda",
@@ -149,6 +161,13 @@ async function fixtureExtraction(): Promise<FixtureExtraction> {
   setFile(extraction, "llvm-project", "cxx-stdlib", "vector", "libcxx-header\n");
   setFile(
     extraction,
+    "llvm-project",
+    "cxx-stdlib",
+    "__config_site.in",
+    configSiteTemplate(),
+  );
+  setFile(
+    extraction,
     "ubuntu-noble-libc6-dev-amd64-cross",
     "linux-sysroot",
     "assert.h",
@@ -162,6 +181,47 @@ async function fixtureExtraction(): Promise<FixtureExtraction> {
     "linux-header\n",
   );
   return extraction;
+}
+
+function configSiteTemplate(): string {
+  return [
+    "#ifndef _LIBCPP___CONFIG_SITE",
+    "#define _LIBCPP___CONFIG_SITE",
+    "#cmakedefine _LIBCPP_ABI_VERSION @_LIBCPP_ABI_VERSION@",
+    "#cmakedefine _LIBCPP_ABI_NAMESPACE @_LIBCPP_ABI_NAMESPACE@",
+    "#cmakedefine01 _LIBCPP_ABI_FORCE_ITANIUM",
+    "#cmakedefine01 _LIBCPP_ABI_FORCE_MICROSOFT",
+    "#cmakedefine01 _LIBCPP_HAS_THREADS",
+    "#cmakedefine01 _LIBCPP_HAS_MONOTONIC_CLOCK",
+    "#cmakedefine01 _LIBCPP_HAS_TERMINAL",
+    "#cmakedefine01 _LIBCPP_HAS_MUSL_LIBC",
+    "#cmakedefine01 _LIBCPP_HAS_THREAD_API_PTHREAD",
+    "#cmakedefine01 _LIBCPP_HAS_THREAD_API_EXTERNAL",
+    "#cmakedefine01 _LIBCPP_HAS_THREAD_API_WIN32",
+    "#define _LIBCPP_HAS_THREAD_API_C11 0 // FIXME: Is this guarding dead code?",
+    "#cmakedefine _LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS",
+    "#cmakedefine01 _LIBCPP_HAS_VENDOR_AVAILABILITY_ANNOTATIONS",
+    "#cmakedefine _LIBCPP_NO_VCRUNTIME",
+    "#cmakedefine _LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION @_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION@",
+    "#cmakedefine01 _LIBCPP_HAS_FILESYSTEM",
+    "#cmakedefine01 _LIBCPP_HAS_RANDOM_DEVICE",
+    "#cmakedefine01 _LIBCPP_HAS_LOCALIZATION",
+    "#cmakedefine01 _LIBCPP_HAS_UNICODE",
+    "#cmakedefine01 _LIBCPP_HAS_WIDE_CHARACTERS",
+    "#cmakedefine01 _LIBCPP_HAS_TIME_ZONE_DATABASE",
+    "#cmakedefine01 _LIBCPP_INSTRUMENTED_WITH_ASAN",
+    "#cmakedefine _LIBCPP_PSTL_BACKEND_SERIAL",
+    "#cmakedefine _LIBCPP_PSTL_BACKEND_STD_THREAD",
+    "#cmakedefine _LIBCPP_PSTL_BACKEND_LIBDISPATCH",
+    "#cmakedefine _LIBCPP_HARDENING_MODE_DEFAULT @_LIBCPP_HARDENING_MODE_DEFAULT@",
+    "#cmakedefine _LIBCPP_ASSERTION_SEMANTIC_DEFAULT @_LIBCPP_ASSERTION_SEMANTIC_DEFAULT@",
+    "#cmakedefine01 _LIBCPP_LIBC_PICOLIBC",
+    "#cmakedefine01 _LIBCPP_LIBC_NEWLIB",
+    "@_LIBCPP_ABI_DEFINES@",
+    "@_LIBCPP_EXTRA_SITE_DEFINES@",
+    "#endif // _LIBCPP___CONFIG_SITE",
+    "",
+  ].join("\n");
 }
 
 function source(sourceId: string, licenseComponentId: string, includeRootIds: string[]) {

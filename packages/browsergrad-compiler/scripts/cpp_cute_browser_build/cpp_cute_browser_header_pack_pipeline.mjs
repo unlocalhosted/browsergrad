@@ -169,6 +169,7 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
       hostToolPackageIdentityPinned: true,
       nodeZstdDecompressorPackageIdentityPinned: true,
       generatedClangResourceHeadersComplete: true,
+      configuredLibcxxHeaderComplete: true,
       exactUpstreamLicenseEvidenceExtracted: true,
       exactCudaRedistributionIndexBound: true,
       exactPerDistributedFileComponentMapPrepared: true,

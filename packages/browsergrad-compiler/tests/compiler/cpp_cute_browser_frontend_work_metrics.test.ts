@@ -124,6 +124,25 @@ describe("Clang-Wasm frontend-work record", () => {
     cancelCppCuteBrowserFrontendWorkMetrics(prepared);
   });
 
+  it("admits the ABI-defined single-pass record for a rejected artifact", () => {
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 2 });
+    writeRecord(memory, 0, 1, 4n, zeroCounters());
+    const prepared = prepareCppCuteBrowserFrontendWorkMetrics({
+      profile,
+      memory,
+      recordPointer: RECORD_POINTER,
+    });
+    writeRecord(memory, 2, 1, 5n, {
+      ...validCounters(),
+      completedSemanticPasses: 1n,
+    });
+
+    completeCppCuteBrowserFrontendWorkMetrics(prepared);
+    writeRecord(memory, 0, 1, 5n, zeroCounters());
+    expect(closeCppCuteBrowserFrontendWorkMetrics(prepared).values)
+      .toMatchObject({ completedSemanticPasses: "1" });
+  });
+
   it("rejects non-idle initial state and forged authorities", () => {
     const memory = new WebAssembly.Memory({ initial: 1, maximum: 2 });
     writeRecord(memory, 1, 1, 0n, zeroCounters());
@@ -149,7 +168,7 @@ describe("Clang-Wasm frontend-work record", () => {
         phase: 2,
         flags: 1,
         generation: 1n,
-        values: { ...values, completedSemanticPasses: 1n },
+        values: { ...values, completedSemanticPasses: 0n },
       }),
       (values: Counters) => ({
         phase: 2,

@@ -64,6 +64,13 @@ describe("browser header-source plan", () => {
         omittedSourceVirtualPaths: ["CMakeLists.txt"],
       },
     });
+    const libcxxSelection = plan.body.archives
+      .find(({ sourceId }) => sourceId === "llvm-project")?.selections
+      .find(({ includeRootId }) => includeRootId === "cxx-stdlib");
+    expect(libcxxSelection).toMatchObject({
+      contribution: "complete-configured-libcxx-header-output",
+      archiveSubtree: "llvm-project-22.1.8.src/libcxx/include",
+    });
   });
 
   it("binds official CUDA component identities and Ubuntu cross sysroot packages", async () => {

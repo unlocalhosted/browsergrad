@@ -788,7 +788,8 @@ export async function buildCanonicalCppCuteBrowserWorkerResultControl(
       execution.vfs.counters.currentLiveInstalledVfsLogicalReservationByteLength !== "0" ||
       execution.vfs.counters.currentLiveLogicalReservationByteLength !== "0" ||
       execution.frontendWork.resetConfirmed !== true ||
-      execution.frontendWork.values.completedSemanticPasses !== "2") {
+      (execution.frontendWork.values.completedSemanticPasses !== "1" &&
+       execution.frontendWork.values.completedSemanticPasses !== "2")) {
     mismatch(
       "$.execution.observations",
       "runtime, frontend-work, or VFS observation is not the exact completed invocation",
@@ -823,6 +824,13 @@ export async function buildCanonicalCppCuteBrowserWorkerResultControl(
   const artifact = unwrapVerifiedCppCuteFrontendArtifactResource(artifactResource);
   const artifactRecord = unwrapVerifiedCppCuteFrontendArtifact(artifact);
   const payload = artifactRecord.envelope.payload;
+  if (payload.outcome.kind === "accepted" &&
+      execution.frontendWork.values.completedSemanticPasses !== "2") {
+    mismatch(
+      "$.execution.frontendWork.values.completedSemanticPasses",
+      "accepted artifact requires both device and host semantic passes",
+    );
+  }
   await prepareCppCuteFrontendRequestBinding(stored.request, artifactResource);
   verifyInstalledOpenedInputs(stored, artifact);
   verifyObservedOpenedInputs(execution, payload);

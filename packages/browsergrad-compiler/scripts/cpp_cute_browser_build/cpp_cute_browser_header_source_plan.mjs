@@ -484,7 +484,7 @@ function currentGitSourceArchives(sources, notices) {
           includeRootId: "cxx-stdlib",
           archiveSubtree: "llvm-project-22.1.8.src/libcxx/include",
           virtualPrefix: "",
-          contribution: "complete-selected-header-subtree",
+          contribution: "complete-configured-libcxx-header-output",
         }),
       ]),
     }),

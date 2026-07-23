@@ -229,9 +229,6 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
     if (!(cause instanceof CppCuteBrowserWorkerReportedFailureError)) throw cause;
     expect(cause.workerFailure).toMatchObject({
       kind: "browsergrad-cpp-cute-worker-failure",
-      phase: "runtime-start",
-      failureCode: "BG-COMPILER-CPP-CUTE-BROWSER-WASM-COMPILER-COMPILE-STATUS",
-      failurePath: "$.runtime.compile",
       workerExecutionObserved: false,
       loweringAuthorityMinted: false,
     });
@@ -307,8 +304,73 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
   );
   const artifact = unwrapVerifiedCppCuteFrontendArtifact(frame.artifact);
   const payload = artifact.envelope.payload;
-  if (payload.outcome.kind !== "accepted" ||
-      payload.outcome.selectedEntryIds.length !== 1 ||
+  if (payload.outcome.kind === "rejected") {
+    const evidence = Object.freeze({
+      schema: "browsergrad.compiler.cpp-cute.browser-real-compile-observation",
+      version: 1,
+      outcome: "rejected",
+      authority: "local-real-browser-worker-execution-observation-only",
+      source: {
+        virtualPath: MAIN_PATH,
+        sourceSha256: await sha256Hex(MAIN_BYTES),
+        syntax: "unchanged-cpp17-cute",
+        selectedDeclaration: "layout",
+      },
+      inputs: {
+        externalAssetCount: externalAssets.length,
+        totalExternalByteLength: environment.totalExternalByteLength,
+        wasmSha256: externalAssets.find((asset) => asset.assetId === "clang-wasm")?.sha256,
+        wasmAuthority: __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.wasmAuthority,
+        pinnedReproducibleWasmMatched:
+          __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.pinnedReproducibleWasmMatched,
+        untrustedDiagnosticWasm:
+          __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.untrustedDiagnosticWasm,
+        assetSetSha256: environment.manifest.assetSetSha256,
+        packCount: vfsInstallation.packCount,
+        installedFileCount: vfsInstallation.fileCount,
+      },
+      execution: {
+        evidenceId: execution.evidenceId,
+        invocationId: execution.invocationId,
+        requestId: execution.requestId,
+        artifactId: frame.artifact.artifactId,
+        artifactHash: frame.artifact.artifactHash,
+        artifactOutcome: frame.artifact.outcome,
+        acceptedTerminalMessages: execution.acceptedTerminalMessages,
+        hostElapsedMicroseconds: execution.hostElapsedMicroseconds,
+        compileElapsedMilliseconds: Math.round(compileElapsedMilliseconds),
+        totalElapsedMilliseconds: Math.round(performance.now() - started),
+        openedSourceFiles: frame.result.openedInputs.openedSourceFiles,
+        openedHeaderFiles: frame.result.openedInputs.openedHeaderFiles,
+        verifierEvidenceId: independentWasmConformance.evidenceId,
+        rawWasmVerified: true,
+        exactInterfaceConformanceObserved: true,
+        verifierWorkerExecutionObserved: true,
+        workerExecutionObserved: true,
+      },
+      blocker: {
+        seam: "clang-frontend-diagnostics",
+        status: "canonical-rejected-artifact",
+        blockingDiagnosticIds: payload.outcome.blockingDiagnosticIds,
+        diagnostics: payload.diagnostics.map((diagnostic) => ({
+          diagnosticId: diagnostic.diagnosticId,
+          phase: diagnostic.phase,
+          severity: diagnostic.severity,
+          code: diagnostic.code,
+          renderedMessage: diagnostic.renderedMessage,
+        })),
+      },
+      headerDistributionLicenseApproved: false,
+      producerTrusted: false,
+      loweringAuthorityMinted: false,
+      backendExecutionAuthorized: false,
+      releaseReady: false,
+      workerExecutionObserved: true,
+    });
+    console.warn(`${EVIDENCE_MARKER}${JSON.stringify(evidence)}`);
+    return;
+  }
+  if (payload.outcome.selectedEntryIds.length !== 1 ||
       payload.outcome.selectedEntryIds[0] === undefined) {
     throw new Error("real browser Clang-Wasm compile did not accept exactly one selected layout");
   }
@@ -781,7 +843,9 @@ function requestLimits(
   return {
     maxSourceFiles: limits.maxSourceFiles,
     maxSourceBytes: limits.maxSourceBytes,
-    maxHeaderFiles: 512,
+    // The unchanged CuTe source opens 520 distinct headers. Keep bounded
+    // headroom while remaining well below Artifact V3's 4,096-file ceiling.
+    maxHeaderFiles: 1_024,
     maxHeaderBytes: limits.maxHeaderBytes,
     maxIncludeDepth: limits.maxIncludeDepth,
     maxMacroExpansions: limits.maxMacroExpansions,

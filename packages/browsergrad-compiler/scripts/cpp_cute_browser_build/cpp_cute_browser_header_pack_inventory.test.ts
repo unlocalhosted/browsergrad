@@ -79,6 +79,7 @@ describe("browser header-pack source inventory", () => {
       networkAccessed: false,
       archiveProvenanceVerified: false,
       generatedClangResourceHeadersComplete: false,
+      configuredLibcxxHeaderComplete: false,
       licenseReviewComplete: false,
       headerPackSelectionPrepared: false,
       headerPacksAssembled: false,

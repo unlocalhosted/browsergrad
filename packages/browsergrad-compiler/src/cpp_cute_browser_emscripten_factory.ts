@@ -70,6 +70,7 @@ const NATIVE_REFLECT_OWN_KEYS = Reflect.ownKeys;
 const NATIVE_OBJECT_CREATE = Object.create;
 const NATIVE_OBJECT_FREEZE = Object.freeze;
 const NATIVE_ARRAY_PUSH = Array.prototype.push;
+const NATIVE_ARRAY_SLICE = Array.prototype.slice;
 const NATIVE_WEAK_MAP_GET = WeakMap.prototype.get;
 const NATIVE_WEAK_MAP_SET = WeakMap.prototype.set;
 const NATIVE_TEXT_ENCODE = TextEncoder.prototype.encode;
@@ -159,8 +160,8 @@ export interface TakenCppCuteBrowserEmscriptenFactory {
   readonly memory: WebAssembly.Memory;
   readonly vfsSession: PreparedCppCuteBrowserVfsSession;
   readonly moduleFacade: Readonly<Record<RequiredFacadeExportName, Function>>;
-  readonly stdout: readonly string[];
-  readonly stderr: readonly string[];
+  readonly snapshotStdout: () => readonly string[];
+  readonly snapshotStderr: () => readonly string[];
 }
 
 export type CppCuteBrowserEmscriptenFactoryErrorCode =
@@ -189,8 +190,8 @@ interface ActiveFactoryBinding {
   readonly memory: WebAssembly.Memory;
   readonly vfsSession: PreparedCppCuteBrowserVfsSession;
   readonly moduleFacade: Readonly<Record<RequiredFacadeExportName, Function>>;
-  readonly stdout: readonly string[];
-  readonly stderr: readonly string[];
+  readonly snapshotStdout: () => readonly string[];
+  readonly snapshotStderr: () => readonly string[];
 }
 
 interface StoredFactoryBinding {
@@ -242,6 +243,8 @@ export async function prepareCppCuteBrowserEmscriptenFactory(
     const stderr: string[] = [];
     const stdoutSink = boundedLogSink(stdout, "$.factory.stdout");
     const stderrSink = boundedLogSink(stderr, "$.factory.stderr");
+    const snapshotStdout = boundedLogSnapshot(stdout);
+    const snapshotStderr = boundedLogSnapshot(stderr);
     let abortReason: unknown;
     let hookCalls = 0;
     let callbackCalls = 0;
@@ -377,8 +380,8 @@ export async function prepareCppCuteBrowserEmscriptenFactory(
         memory,
         vfsSession,
         moduleFacade,
-        stdout: NATIVE_OBJECT_FREEZE([...stdout]),
-        stderr: NATIVE_OBJECT_FREEZE([...stderr]),
+        snapshotStdout,
+        snapshotStderr,
       }),
       inspection: NATIVE_OBJECT_FREEZE({
         wasmSha256: actualWasmSha256,
@@ -559,6 +562,12 @@ function boundedLogSink(target: string[], path: string): (value: unknown) => voi
     byteLength += bytes.byteLength;
     NATIVE_REFLECT_APPLY(NATIVE_ARRAY_PUSH, target, [value]);
   };
+}
+
+function boundedLogSnapshot(target: string[]): () => readonly string[] {
+  return NATIVE_OBJECT_FREEZE(() => NATIVE_OBJECT_FREEZE(
+    NATIVE_REFLECT_APPLY(NATIVE_ARRAY_SLICE, target, []) as string[],
+  ));
 }
 
 function callI32Export(operation: Function, path: string): number {

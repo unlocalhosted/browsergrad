@@ -66,6 +66,7 @@ export interface CppCuteBrowserHeaderPackInventory {
     networkAccessed: false;
     archiveProvenanceVerified: false;
     generatedClangResourceHeadersComplete: boolean;
+    configuredLibcxxHeaderComplete: boolean;
     licenseReviewComplete: false;
     headerPackSelectionPrepared: false;
     headerPacksAssembled: false;

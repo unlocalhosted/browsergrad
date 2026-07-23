@@ -14,7 +14,8 @@ export interface CppCuteBrowserHeaderSourceSelection {
   readonly licenseComponentIds: readonly string[];
   readonly contribution:
     | "complete-selected-header-subtree"
-    | "complete-configured-resource-header-output";
+    | "complete-configured-resource-header-output"
+    | "complete-configured-libcxx-header-output";
   readonly configuredResourceOutput?: Readonly<{
     upstreamBuildManifest: Readonly<{
       virtualPath: "CMakeLists.txt";
