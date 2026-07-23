@@ -22,10 +22,10 @@ import {
 } from "../../src/cpp_cute_browser_runtime_abi.js";
 
 const LOCK_ID =
-  "bg.cpp.browser-build-input-lock.sha256.9b088b98ad8d50ac5065cc31870531f667572428cd7a0325345a9f34371cd5d6";
-const RESOURCE_SHA256 = "bb3caa752abe7c7da11ee3e12eddbac6b0a8facee317f6573b00e912ef838592";
-const RECIPE_SHA256 = "b7832d5cfca9299f7118be89dc5147dbe78efafc8eee0a465ec39dc8e0798963";
-const EXTRACTOR_SOURCE_SHA256 = "f90a1413e9f15b722a68a732e54af740313156ee90bef076646ebb6097936b08";
+  "bg.cpp.browser-build-input-lock.sha256.5b6ded62849e8ecaa02fd5d00f27cd55f5bec4ec86ed3c11cf74fef467025542";
+const RESOURCE_SHA256 = "1bcfbd031400c6527c8ce4a27a319b79839d1713269db39a3583ae3c7e8ccde1";
+const RECIPE_SHA256 = "407231468ab8672f68bc78d198c1e902a9733c90a5035aa0dd4e5f6d2fce1c09";
+const EXTRACTOR_SOURCE_SHA256 = "9d4ef6de16b63734d316f5d02ed976a21d3e2af72ff3a78f8f9a3e1ce564a597";
 const NOTICE_SHA256 = "ae94cc9272e8d3458778dda90db035388450075d5404f736f6daadc7192163d1";
 const BLOCKERS = [
   "browsergrad-extractor-distributed-materialization",
@@ -52,7 +52,7 @@ describe("browser Clang-WASM build-input lock", () => {
       runtimeAbiManifestId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
       runtimeAbiResourceSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
       runtimeAbiResourceByteLength: cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength,
-      resourceByteLength: 25_470,
+      resourceByteLength: 25_506,
       releaseReady: false,
       releaseBlockerIds: BLOCKERS,
     });
@@ -174,7 +174,7 @@ describe("browser Clang-WASM build-input lock", () => {
     expect(recipe.stages[1]?.linkerFlags).toContain("-sERROR_ON_UNDEFINED_SYMBOLS=0");
     expect(recipe.stages[1]?.linkerFlags).not.toContain("-sERROR_ON_UNDEFINED_SYMBOLS=1");
     expect(recipe.stages[1]?.linkerFlags).toContain(
-      "-sEXPORTED_FUNCTIONS=['_bg_cpp_cute_abi_version','_bg_cpp_cute_alloc','_bg_cpp_cute_allocator_metrics_pointer','_bg_cpp_cute_frontend_work_metrics_pointer','_bg_cpp_cute_compile','_bg_cpp_cute_free','_bg_cpp_cute_reset','_bg_cpp_cute_result_length','_bg_cpp_cute_result_pointer','_bg_cpp_cute_status']",
+      "-sEXPORTED_FUNCTIONS=['_bg_cpp_cute_abi_version','_bg_cpp_cute_alloc','_bg_cpp_cute_allocator_metrics_pointer','_bg_cpp_cute_frontend_work_metrics_pointer','_bg_cpp_cute_compile','_bg_cpp_cute_free','_bg_cpp_cute_reset','_bg_cpp_cute_result_length','_bg_cpp_cute_result_pointer','_bg_cpp_cute_status','_bg_cpp_cute_last_diagnostic_code']",
     );
     expect(recipe.stages[1]?.linkerFlags).toContain(
       "-Wl,--Map=@BUILD_EVIDENCE@/clang-extractor.link.map",

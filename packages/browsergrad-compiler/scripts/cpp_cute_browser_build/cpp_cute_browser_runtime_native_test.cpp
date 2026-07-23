@@ -347,11 +347,24 @@ int run_runtime_tests() {
   static_assert(!std::is_move_assignable_v<ValidatedInputFrameRegions>);
   static_assert(!std::is_copy_constructible_v<ArtifactV3ResultSink>);
   static_assert(!std::is_copy_assignable_v<ArtifactV3ResultSink>);
+  static_assert(static_cast<std::uint32_t>(NativeDiagnosticCode::kNone) == 0U);
+  static_assert(
+      static_cast<std::uint32_t>(
+          NativeDiagnosticCode::kAllocatorUnknownFailure) == 32U);
   g_runtime_test_allocation_hooks = {
       test_allocate,
       test_release,
       test_wire_pointer,
   };
+
+  runtime_reset();
+  BG_CHECK(runtime_last_diagnostic_code() == 0U);
+  report_native_diagnostic(NativeDiagnosticCode::kArtifactWriterInternal);
+  BG_CHECK(runtime_last_diagnostic_code() == 13U);
+  report_native_diagnostic(NativeDiagnosticCode::kProducerException);
+  BG_CHECK(runtime_last_diagnostic_code() == 13U);
+  runtime_reset();
+  BG_CHECK(runtime_last_diagnostic_code() == 0U);
 
   const std::uint32_t resets_before_first_input =
       g_frontend_work_reset_count_for_test;
@@ -363,6 +376,7 @@ int run_runtime_tests() {
   g_callback_count = 0U;
   BG_CHECK(runtime_compile(input, kValidFrameByteLength,
                            successful_artifact) == 0);
+  BG_CHECK(runtime_last_diagnostic_code() == 0U);
   BG_CHECK(g_callback_count == 1U);
   BG_CHECK(runtime_status() == 0);
   BG_CHECK(runtime_result_length() == g_artifact_bytes.size());
@@ -380,6 +394,7 @@ int run_runtime_tests() {
   runtime_reset();
   BG_CHECK(runtime_status() ==
            static_cast<std::int32_t>(WireCompileStatus::kIdle));
+  BG_CHECK(runtime_last_diagnostic_code() == 0U);
   BG_CHECK(runtime_result_pointer() == 0U);
   BG_CHECK(runtime_result_length() == 0U);
   BG_CHECK(live_allocation_count() == 0U);
@@ -562,6 +577,7 @@ int run_runtime_tests() {
   runtime_reset();
   BG_CHECK(runtime_status() ==
            static_cast<std::int32_t>(WireCompileStatus::kInternalError));
+  BG_CHECK(runtime_last_diagnostic_code() == 28U);
   BG_CHECK(live_allocation_count() == 2U);
   discard_test_module_allocations();
   BG_CHECK(live_allocation_count() == 0U);

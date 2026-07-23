@@ -209,6 +209,7 @@ export function executeCppCuteBrowserWasmCompiler(
       recordPointer: factory.frontendWorkMetricsPointer,
     });
     expectStatus(taken, IDLE_STATUS, "$.runtime.initialStatus");
+    expectNativeDiagnostic(taken, 0, "$.runtime.initialNativeDiagnostic");
 
     beginCppCuteBrowserWasmRuntimePhase(state.metrics, "input-frame-copy");
     const inputPointer = callU32(
@@ -238,6 +239,7 @@ export function executeCppCuteBrowserWasmCompiler(
     if (compileState !== ARTIFACT_READY_STATUS) {
       compileStatus("$.runtime.compile", compileState, state);
     }
+    expectNativeDiagnostic(taken, 0, "$.runtime.nativeDiagnosticAfterCompile");
 
     const resultPointer = callU32(
       taken.moduleFacade._bg_cpp_cute_result_pointer,
@@ -283,6 +285,7 @@ export function executeCppCuteBrowserWasmCompiler(
     expectStableResult(taken, resultPointer, resultByteLength, "$.runtime.resultAfterCopy");
     callVoid(taken.moduleFacade._bg_cpp_cute_reset, [], "$.runtime.reset");
     expectStatus(taken, IDLE_STATUS, "$.runtime.statusAfterReset");
+    expectNativeDiagnostic(taken, 0, "$.runtime.nativeDiagnosticAfterReset");
     if (callU32(
       taken.moduleFacade._bg_cpp_cute_result_pointer,
       [],
@@ -517,12 +520,52 @@ function expectStatus(
 ): void {
   const actual = readStatus(taken);
   if (actual !== expected) {
-    mismatch(path, `expected C ABI status ${expected}, observed ${actual}`);
+    const nativeDiagnostic = readNativeDiagnostic(
+      taken,
+      `${path}.nativeDiagnostic`,
+    );
+    mismatch(
+      path,
+      `expected C ABI status ${expected}, observed ${actual}; ` +
+        `nativeDiagnosticCode=${nativeDiagnostic.code},` +
+        `nativeDiagnosticName=${nativeDiagnostic.name}`,
+    );
   }
 }
 
 function readStatus(taken: TakenCppCuteBrowserEmscriptenFactory): number {
   return callStatusExport(taken.moduleFacade._bg_cpp_cute_status, [], "$.runtime.status");
+}
+
+function readNativeDiagnostic(
+  taken: TakenCppCuteBrowserEmscriptenFactory,
+  path: string,
+): { readonly code: number; readonly name: string } {
+  const code = callU32(
+    taken.moduleFacade._bg_cpp_cute_last_diagnostic_code,
+    [],
+    path,
+  );
+  for (const diagnostic of RUNTIME_ABI.nativeDiagnostics.codes) {
+    if (diagnostic.code === code) {
+      return { code, name: diagnostic.name };
+    }
+  }
+  mismatch(path, "native diagnostic export returned a code outside the pinned runtime ABI");
+}
+
+function expectNativeDiagnostic(
+  taken: TakenCppCuteBrowserEmscriptenFactory,
+  expected: number,
+  path: string,
+): void {
+  const actual = readNativeDiagnostic(taken, path);
+  if (actual.code !== expected) {
+    mismatch(
+      path,
+      `expected native diagnostic code ${expected}, observed ${actual.code} (${actual.name})`,
+    );
+  }
 }
 
 function callStatusExport(operation: Function, args: readonly number[], path: string): number {
@@ -601,10 +644,16 @@ function compileStatus(
       break;
     }
   }
+  const nativeDiagnostic = readNativeDiagnostic(
+    state.taken,
+    `${path}.nativeDiagnostic`,
+  );
   fail(
     "BG-COMPILER-CPP-CUTE-BROWSER-WASM-COMPILER-COMPILE-STATUS",
     path,
     `C ABI execution terminated with status ${status} (${name})` +
+      `; nativeDiagnosticCode=${nativeDiagnostic.code},` +
+      `nativeDiagnosticName=${nativeDiagnostic.name}` +
       `${failureObservationSuffix(state)}${factoryLogSuffix(state.taken)}`,
   );
 }

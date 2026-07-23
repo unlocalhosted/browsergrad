@@ -11,8 +11,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const CPP_CUTE_BROWSER_PACKAGE_FACTORY_SHA256 =
-  "796a548237420df7f5eca0c0260d3cbe752aeca155d9c7182c6ad0f5491dfb12";
-export const CPP_CUTE_BROWSER_PACKAGE_FACTORY_BYTE_LENGTH = 27_125;
+  "f64d5239d5c258f44e859834b57e1ea330b7efdf7a405dead3126b53330a5534";
+export const CPP_CUTE_BROWSER_PACKAGE_FACTORY_BYTE_LENGTH = 27_285;
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-PACKAGE-FACTORY";
 const SCRIPT_ROOT = dirname(fileURLToPath(import.meta.url));

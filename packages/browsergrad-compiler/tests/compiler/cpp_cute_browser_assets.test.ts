@@ -76,11 +76,11 @@ describe("C++/CuTe browser-local asset manifest", () => {
       minor: CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR,
     });
     expect(fixture.input.manifestId).toBe(
-      "bg.cpp.browser-assets.sha256.a6f7c6dc59e7ca72fe53e7803edd0e26d1961e209a6fc75811213a29cfd62a31",
+      "bg.cpp.browser-assets.sha256.73edd8c111bb00b83357a7087df979ce236cb652ef22b06a238d701e3ac1ebc7",
     );
-    expect(first.assetSetSha256).toBe("cdea286729d5cf95436f872ec905eb50e3ced49ae42d1e3d8793da4120430c87");
+    expect(first.assetSetSha256).toBe("ca29040c73d4a433034d68900676b5ab9a7eb11f04b2b362ba50d92db3655b4a");
     expect(first.assetCount).toBe(9);
-    expect(first.manifestSha256).toBe("a72ed383bacdcdf9cf9915171f6dcd9fbd2d51fe389e7226813aac6e700fffdc");
+    expect(first.manifestSha256).toBe("b5704c9a9cdfbcf46543bb2af79bd1074a063be5cf027d8a353f430617b32f38");
     expect(first.manifestByteLength).toBe("11381");
     expect(Object.isFrozen(first)).toBe(true);
     const record = unwrapPreparedCppCuteBrowserAssetManifest(first);

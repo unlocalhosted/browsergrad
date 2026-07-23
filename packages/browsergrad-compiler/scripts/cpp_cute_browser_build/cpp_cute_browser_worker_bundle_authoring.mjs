@@ -23,7 +23,7 @@ const VERIFIER_RESOURCE_PATH = resolve(
   "src/resources/cpp_cute_browser_wasm_verifier_bundle_v1.ts",
 );
 const FACTORY_SHA256 =
-  "796a548237420df7f5eca0c0260d3cbe752aeca155d9c7182c6ad0f5491dfb12";
+  "f64d5239d5c258f44e859834b57e1ea330b7efdf7a405dead3126b53330a5534";
 const RESOURCE_SCHEMA = "browsergrad.compiler.cpp-cute.package-worker-bundle-resource";
 const VERIFIER_RESOURCE_SCHEMA =
   "browsergrad.compiler.cpp-cute.package-wasm-verifier-bundle-resource";
@@ -46,13 +46,24 @@ export class CppCuteBrowserWorkerBundleAuthoringError extends Error {
 }
 
 export async function buildCppCuteBrowserWorkerBundleProjection() {
+  const verifierProjection = await buildCppCuteBrowserWasmVerifierBundleProjection();
+  return buildCppCuteBrowserWorkerBundleProjectionAgainstVerifier(verifierProjection);
+}
+
+async function buildCppCuteBrowserWorkerBundleProjectionAgainstVerifier(
+  verifierProjection,
+) {
   const factoryBytes = await readFile(FACTORY_PATH);
   if (digest(factoryBytes) !== FACTORY_SHA256) {
     fail("generated Emscripten factory bytes differ from the reviewed package identity");
   }
+  const virtualModules = new Map([[
+    VERIFIER_RESOURCE_PATH,
+    renderCppCuteBrowserWasmVerifierBundleResource(verifierProjection),
+  ]]);
   // Avoid concurrent mutation of Vite/Rolldown process-global state.
-  const first = await buildBundle(COMPILER_BUNDLE_SPEC);
-  const second = await buildBundle(COMPILER_BUNDLE_SPEC);
+  const first = await buildBundle(COMPILER_BUNDLE_SPEC, virtualModules);
+  const second = await buildBundle(COMPILER_BUNDLE_SPEC, virtualModules);
   if (!equalBytes(first.bytes, second.bytes)) {
     fail("two clean in-process bundle builds produced different bytes");
   }
@@ -69,6 +80,8 @@ export async function buildCppCuteBrowserWorkerBundleProjection() {
     dynamicImportCount: 0,
     factorySha256: FACTORY_SHA256,
     factoryByteLength: factoryBytes.byteLength,
+    verifierSha256: verifierProjection.sha256,
+    verifierByteLength: verifierProjection.byteLength,
     source: first.source,
   });
 }
@@ -144,12 +157,27 @@ export function renderCppCuteBrowserWasmVerifierBundleResource(projection) {
 
 /**
  * @param {{ readonly entryPath: string; readonly outputFileName: string }} spec
+ * @param {ReadonlyMap<string, string>} [virtualModules]
  */
-async function buildBundle(spec) {
+async function buildBundle(spec, virtualModules = new Map()) {
+  const consumedVirtualModules = new Set();
   const result = await build({
     configFile: false,
     logLevel: "silent",
     root: PACKAGE_ROOT,
+    plugins: virtualModules.size === 0
+      ? []
+      : [{
+          name: "browsergrad-cpp-cute-authoring-virtual-modules",
+          enforce: "pre",
+          load(id) {
+            const path = id.split("?", 1)[0];
+            const source = virtualModules.get(path);
+            if (source === undefined) return null;
+            consumedVirtualModules.add(path);
+            return source;
+          },
+        }],
     build: {
       write: false,
       target: "es2022",
@@ -165,6 +193,11 @@ async function buildBundle(spec) {
       },
     },
   });
+  for (const path of virtualModules.keys()) {
+    if (!consumedVirtualModules.has(path)) {
+      fail(`deterministic bundle did not consume virtual module ${relative(PACKAGE_ROOT, path)}`);
+    }
+  }
   if (!Array.isArray(result) || result.length !== 1 ||
       result[0].output.length !== 1) {
     fail("Vite must emit one and only one Worker chunk");
@@ -175,16 +208,21 @@ async function buildBundle(spec) {
       output.fileName !== spec.outputFileName) {
     fail("Worker output must be one self-contained static entry chunk");
   }
-  if (output.code.includes(PACKAGE_ROOT) || output.code.includes("sourceMappingURL=")) {
+  const source = stripBundlerRegionComments(output.code);
+  if (source.includes(PACKAGE_ROOT) || source.includes("sourceMappingURL=")) {
     fail("Worker output contains an ambient source path or source-map reference");
   }
-  const bytes = new TextEncoder().encode(output.code);
+  const bytes = new TextEncoder().encode(source);
   if (bytes.byteLength === 0) fail("Worker output is empty");
   return Object.freeze({
     fileName: output.fileName,
-    source: output.code,
+    source,
     bytes,
   });
+}
+
+function stripBundlerRegionComments(source) {
+  return source.replace(/^\/\/#(?:end)?region[^\r\n]*(?:\r?\n|$)/gmu, "");
 }
 
 function digest(bytes) {
@@ -213,8 +251,9 @@ if (mainUrl === import.meta.url) {
     if (arguments_.length > 1 || arguments_.some((argument) => !ARGUMENTS.has(argument))) {
       fail("expected no arguments or exactly --check");
     }
-    const compilerProjection = await buildCppCuteBrowserWorkerBundleProjection();
     const verifierProjection = await buildCppCuteBrowserWasmVerifierBundleProjection();
+    const compilerProjection =
+      await buildCppCuteBrowserWorkerBundleProjectionAgainstVerifier(verifierProjection);
     const compilerResource = renderCppCuteBrowserWorkerBundleResource(compilerProjection);
     const verifierResource = renderCppCuteBrowserWasmVerifierBundleResource(verifierProjection);
     if (arguments_[0] === "--check") {

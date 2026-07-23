@@ -43,8 +43,8 @@ function supportExport(
  */
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
-  version: { major: 1, minor: 10 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.e999550eaf9e5f7957d7e3a91b654c8b5ed172560d2799803f75bba1c6188d1b",
+  version: { major: 1, minor: 11 },
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.6bad7781cb496d7ccf6c5381a4807053618d27adb6d456dfdfef98a829813207",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -56,7 +56,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
     wasm: {
       moduleRole: "compiler-extractor-only-user-programs-never-linked-or-executed",
       addressBits: 32,
-      cAbiVersion: 65_538,
+      cAbiVersion: 65_539,
       cAbiVersionEncoding: "major-shift-left-16-bitwise-or-minor",
       // Browser-visible WebAssembly capabilities required for instantiation.
       requiredFeatures: [
@@ -320,6 +320,16 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         wasmParameters: [],
         wasmResults: ["i32"],
         resultSemantics: "current-typed-status-without-state-mutation",
+      },
+      {
+        ordinal: 10,
+        cSymbol: "bg_cpp_cute_last_diagnostic_code",
+        wasmExportName: "bg_cpp_cute_last_diagnostic_code",
+        cSignature: "uint32_t bg_cpp_cute_last_diagnostic_code(void)",
+        wasmParameters: [],
+        wasmResults: ["i32"],
+        resultSemantics:
+          "u32-first-source-independent-native-diagnostic-code-zero-when-absent",
       },
     ],
     allocatorMetricsRecord: {
@@ -857,6 +867,49 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
       { code: 105, name: "resource-limit", retry: "reset-required" },
       { code: 106, name: "internal-error", retry: "module-must-not-be-reused" },
     ],
+    nativeDiagnostics: {
+      getterExport: "bg_cpp_cute_last_diagnostic_code",
+      firstCause: "first-nonzero-code-per-runtime-generation",
+      zero: "no-native-diagnostic-reported",
+      reset:
+        "reset-clears-unless-sticky-allocator-integrity-failure-reports-again",
+      authority: "diagnostic-only-never-artifact-or-lowering-authority",
+      codes: [
+        { code: 0, name: "none" },
+        { code: 1, name: "producer-policy-install-failure" },
+        { code: 2, name: "producer-vfs-failure" },
+        { code: 3, name: "producer-diagnostic-capture-limit" },
+        { code: 4, name: "producer-frontend-work-limit" },
+        { code: 5, name: "producer-invocation-failure" },
+        { code: 6, name: "producer-exception" },
+        { code: 7, name: "artifact-decode-internal" },
+        { code: 8, name: "artifact-plan-internal" },
+        { code: 9, name: "artifact-sink-bind-internal" },
+        { code: 10, name: "artifact-frontend-begin-internal" },
+        { code: 11, name: "artifact-frontend-complete-internal" },
+        { code: 12, name: "artifact-producer-internal" },
+        { code: 13, name: "artifact-writer-internal" },
+        { code: 14, name: "runtime-post-compile-phase-invariant" },
+        { code: 15, name: "runtime-artifact-ready-invariant" },
+        { code: 16, name: "runtime-terminal-status-invalid" },
+        { code: 17, name: "allocator-invalid-table-shape" },
+        { code: 18, name: "allocator-table-probe-exhausted" },
+        { code: 19, name: "allocator-table-rehash-failure" },
+        { code: 20, name: "allocator-table-insert-failure" },
+        { code: 21, name: "allocator-table-erase-failure" },
+        { code: 22, name: "allocator-creation-counter-overflow" },
+        { code: 23, name: "allocator-release-invariant-failure" },
+        { code: 24, name: "allocator-reallocation-invariant-failure" },
+        { code: 25, name: "allocator-failed-counter-overflow" },
+        { code: 26, name: "allocator-reentrant-hook" },
+        { code: 27, name: "allocator-duplicate-builtin-pointer" },
+        { code: 28, name: "allocator-untracked-free" },
+        { code: 29, name: "allocator-untracked-reallocation" },
+        { code: 30, name: "allocator-replacement-pointer-collision" },
+        { code: 31, name: "allocator-invalid-metrics-pointer" },
+        { code: 32, name: "allocator-unknown-failure" },
+      ],
+    },
     lifecycle: {
       initialState: "idle",
       states: ["idle", "input-allocated", "compiling-internal", "artifact-ready", "failed"],
@@ -872,7 +925,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         "result-getters-return-zero-unless-state-is-artifact-ready",
         "result-bytes-are-immutable-until-reset",
         "reset-releases-input-result-and-module-side-vfs-state-and-returns-to-idle",
-        "after-abi-mismatch-or-internal-error-the-worker-discards-the-module-instance-after-reading-status",
+        "after-abi-mismatch-or-internal-error-the-worker-discards-the-module-instance-after-reading-status-and-first-native-diagnostic-code",
         "wasm-trap-abort-or-out-of-memory-is-a-worker-infrastructure-failure-with-no-readable-status-guarantee",
       ],
     },

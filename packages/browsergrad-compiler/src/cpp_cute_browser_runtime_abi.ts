@@ -21,14 +21,14 @@ import {
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
-export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 10;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 11;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.e999550eaf9e5f7957d7e3a91b654c8b5ed172560d2799803f75bba1c6188d1b";
+  "bg.cpp.browser-runtime-abi.sha256.6bad7781cb496d7ccf6c5381a4807053618d27adb6d456dfdfef98a829813207";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "1f6ee44a5a34570070b53a0e9129d5073737cc418b6f6bb0718a54f703e78a86";
+  "68b17d0fa99259b0f5fb5d5d313ad8346aa48f29f76df5f3202b535a03cab5a6";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "4373abcd379ceeb784ffcc7a40e43baf18654ff1a608a8efa28d9b44f9489668";
+  "d730c21d86719092991ad4092eefd9612a082e9375c501ffda935f71fc9ea0a8";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "8d320d2fb15525ef548446a5e3bb993369dc4d4cfcfe9cc0faaf5fd3639a370d";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 =
@@ -295,7 +295,7 @@ function validateBodyInvariants(value: JsonObject): void {
       invalid("$.body.authority", "manifest must not claim Wasm observation, execution, or release authority");
     }
     if (body.wasm.moduleRole !== "compiler-extractor-only-user-programs-never-linked-or-executed" ||
-        body.wasm.cAbiVersion !== 65_538 ||
+        body.wasm.cAbiVersion !== 65_539 ||
         body.wasm.cAbiVersionEncoding !== "major-shift-left-16-bitwise-or-minor" ||
         body.wasm.startSection !== "forbidden" || body.wasm.unlistedCExports !== "forbidden") {
       invalid("$.body.wasm", "module role, ABI version, start, or export closure differs from runtime v1");
@@ -502,8 +502,9 @@ function validateBodyInvariants(value: JsonObject): void {
       ["bg_cpp_cute_result_length", "uint32_t bg_cpp_cute_result_length(void)", 0, 1, "u32-result-length-zero-unless-artifact-ready"],
       ["bg_cpp_cute_result_pointer", "uint32_t bg_cpp_cute_result_pointer(void)", 0, 1, "u32-result-pointer-zero-unless-artifact-ready"],
       ["bg_cpp_cute_status", "int32_t bg_cpp_cute_status(void)", 0, 1, "current-typed-status-without-state-mutation"],
+      ["bg_cpp_cute_last_diagnostic_code", "uint32_t bg_cpp_cute_last_diagnostic_code(void)", 0, 1, "u32-first-source-independent-native-diagnostic-code-zero-when-absent"],
     ] as const;
-    if (body.cExports.length !== expectedExports.length) invalid("$.body.cExports", "expected exactly ten C exports");
+    if (body.cExports.length !== expectedExports.length) invalid("$.body.cExports", "expected exactly eleven C exports");
     for (const [index, expected] of expectedExports.entries()) {
       const actual = body.cExports[index];
       if (actual?.ordinal !== index || actual.cSymbol !== expected[0] || actual.wasmExportName !== expected[0] ||
@@ -1011,6 +1012,55 @@ function validateBodyInvariants(value: JsonObject): void {
       "reset-required", "reset-required", "module-must-not-be-reused", "reset-required",
       "reset-required", "module-must-not-be-reused",
     ], "$.body.compileStatuses[*].retry");
+    const nativeDiagnostics = body.nativeDiagnostics;
+    if (nativeDiagnostics.getterExport !== "bg_cpp_cute_last_diagnostic_code" ||
+        nativeDiagnostics.firstCause !== "first-nonzero-code-per-runtime-generation" ||
+        nativeDiagnostics.zero !== "no-native-diagnostic-reported" ||
+        nativeDiagnostics.reset !==
+          "reset-clears-unless-sticky-allocator-integrity-failure-reports-again" ||
+        nativeDiagnostics.authority !==
+          "diagnostic-only-never-artifact-or-lowering-authority") {
+      invalid(
+        "$.body.nativeDiagnostics",
+        "native diagnostic authority or lifecycle differs from runtime v1",
+      );
+    }
+    assertContiguousCodes(nativeDiagnostics.codes, 0, "$.body.nativeDiagnostics.codes");
+    assertExactStrings(nativeDiagnostics.codes.map((entry) => entry.name), [
+      "none",
+      "producer-policy-install-failure",
+      "producer-vfs-failure",
+      "producer-diagnostic-capture-limit",
+      "producer-frontend-work-limit",
+      "producer-invocation-failure",
+      "producer-exception",
+      "artifact-decode-internal",
+      "artifact-plan-internal",
+      "artifact-sink-bind-internal",
+      "artifact-frontend-begin-internal",
+      "artifact-frontend-complete-internal",
+      "artifact-producer-internal",
+      "artifact-writer-internal",
+      "runtime-post-compile-phase-invariant",
+      "runtime-artifact-ready-invariant",
+      "runtime-terminal-status-invalid",
+      "allocator-invalid-table-shape",
+      "allocator-table-probe-exhausted",
+      "allocator-table-rehash-failure",
+      "allocator-table-insert-failure",
+      "allocator-table-erase-failure",
+      "allocator-creation-counter-overflow",
+      "allocator-release-invariant-failure",
+      "allocator-reallocation-invariant-failure",
+      "allocator-failed-counter-overflow",
+      "allocator-reentrant-hook",
+      "allocator-duplicate-builtin-pointer",
+      "allocator-untracked-free",
+      "allocator-untracked-reallocation",
+      "allocator-replacement-pointer-collision",
+      "allocator-invalid-metrics-pointer",
+      "allocator-unknown-failure",
+    ], "$.body.nativeDiagnostics.codes[*].name");
     if (body.lifecycle.initialState !== "idle") invalid("$.body.lifecycle.initialState", "initial state must be idle");
     assertExactStrings(body.lifecycle.states, [
       "idle", "input-allocated", "compiling-internal", "artifact-ready", "failed",
@@ -1027,7 +1077,7 @@ function validateBodyInvariants(value: JsonObject): void {
       "result-getters-return-zero-unless-state-is-artifact-ready",
       "result-bytes-are-immutable-until-reset",
       "reset-releases-input-result-and-module-side-vfs-state-and-returns-to-idle",
-      "after-abi-mismatch-or-internal-error-the-worker-discards-the-module-instance-after-reading-status",
+      "after-abi-mismatch-or-internal-error-the-worker-discards-the-module-instance-after-reading-status-and-first-native-diagnostic-code",
       "wasm-trap-abort-or-out-of-memory-is-a-worker-infrastructure-failure-with-no-readable-status-guarantee",
     ], "$.body.lifecycle.rules");
     if (body.result.maximumByteLength !== memory.maxResultByteLength ||

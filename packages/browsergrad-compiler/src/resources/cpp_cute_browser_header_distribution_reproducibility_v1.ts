@@ -47,19 +47,19 @@ const VALUE: CppCuteBrowserHeaderDistributionReproducibilityResourceV1 = {
   scope: "five-header-packs-license-inventory-and-notice-outputs-only",
   verifierSourceRevision: "00e1f91121045be08a045fe6636ec97ab20c109b",
   buildInputLockId:
-    "bg.cpp.browser-build-input-lock.sha256.9b088b98ad8d50ac5065cc31870531f667572428cd7a0325345a9f34371cd5d6",
+    "bg.cpp.browser-build-input-lock.sha256.5b6ded62849e8ecaa02fd5d00f27cd55f5bec4ec86ed3c11cf74fef467025542",
   buildInputLockResourceSha256:
-    "bb3caa752abe7c7da11ee3e12eddbac6b0a8facee317f6573b00e912ef838592",
+    "1bcfbd031400c6527c8ce4a27a319b79839d1713269db39a3583ae3c7e8ccde1",
   pipelineId:
-    "bg.cpp.browser-header-pack-pipeline.sha256.79a94af71857d9add07b8ef14af11d295abca42958f45ce6a3a28b98fe027727",
+    "bg.cpp.browser-header-pack-pipeline.sha256.45d53638ee008fb36f8f5304431c8f975b6bcbc946823277b79f9303cb1f8153",
   outputVerificationId:
-    "bg.cpp.distribution-output-file-verification.sha256.9058ad9fc35a18dcc902879daafc3da2a76df907aa1902d06fc9488ac7a3b61b",
+    "bg.cpp.distribution-output-file-verification.sha256.dbd720f0602ab6844becba52f5badfc59d73940d2e2d600204dfec183061f87b",
   reproducibilityId:
-    "bg.cpp.browser-header-distribution-reproducibility.sha256.a061cc0d29ed66470ca9a5700b1f9d734fbc886aff9a130e9718fd5732dc75ff",
+    "bg.cpp.browser-header-distribution-reproducibility.sha256.a0bbb1b0ced6201edbd4cac78a148786b2b213e3d1853e5121c8ca1cfe0c6127",
   outputs: [
     {
       outputPath: "assets/browsergrad-cpp-cute/THIRD_PARTY_NOTICES.txt",
-      sha256: "4c540d416f08069912244399a87c4a03703940730bac5711a63b0e3601a1df8d",
+      sha256: "9c06e791a6229d4d5bf929c6b0b470a9004e505b73dea9598ffb178a0f54d530",
       byteLength: "115316",
     },
     {
@@ -84,7 +84,7 @@ const VALUE: CppCuteBrowserHeaderDistributionReproducibilityResourceV1 = {
     },
     {
       outputPath: "assets/browsergrad-cpp-cute/license-inventory.json",
-      sha256: "67785465cb0d72813aa1afa634204011330c513e048ad076dcbd52eb4b596f62",
+      sha256: "8e01f50c5a036cb5da142cb8f404f735d1d77c4f7934f609de38a5bd73172c70",
       byteLength: "1203662",
     },
     {

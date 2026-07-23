@@ -74,7 +74,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256,
       supportFunctionAllowlistSha256:
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256,
-      resourceByteLength: 40_579,
+      resourceByteLength: 42_912,
       designAuthority: true,
       interfaceReviewReady: false,
       observedWasmVerified: false,
@@ -82,8 +82,8 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     });
     expect(canonicalCppCuteBrowserRuntimeAbiManifestBytes(prepared)).toEqual(resource);
     const record = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(prepared);
-    expect(record.manifest.version).toEqual({ major: 1, minor: 10 });
-    expect(record.manifest.body.wasm.cAbiVersion).toBe(65_538);
+    expect(record.manifest.version).toEqual({ major: 1, minor: 11 });
+    expect(record.manifest.body.wasm.cAbiVersion).toBe(65_539);
     expect(await deriveCppCuteBrowserRuntimeAbiManifestId(record.manifest.body)).toBe(
       CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
     );
@@ -101,7 +101,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     });
   });
 
-  it("pins the ten exported C signatures and no generic execution surface", async () => {
+  it("pins the eleven exported C signatures and no generic execution surface", async () => {
     const prepared = await decodeCppCuteBrowserRuntimeAbiManifest(
       cppCuteBrowserRuntimeAbiManifestResourceBytes(),
     );
@@ -128,7 +128,34 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       [7, "bg_cpp_cute_result_length", "uint32_t bg_cpp_cute_result_length(void)", [], ["i32"]],
       [8, "bg_cpp_cute_result_pointer", "uint32_t bg_cpp_cute_result_pointer(void)", [], ["i32"]],
       [9, "bg_cpp_cute_status", "int32_t bg_cpp_cute_status(void)", [], ["i32"]],
+      [10, "bg_cpp_cute_last_diagnostic_code", "uint32_t bg_cpp_cute_last_diagnostic_code(void)", [], ["i32"]],
     ]);
+  });
+
+  it("pins one closed source-independent first-cause diagnostic inventory", async () => {
+    const prepared = await decodeCppCuteBrowserRuntimeAbiManifest(
+      cppCuteBrowserRuntimeAbiManifestResourceBytes(),
+    );
+    const contract = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(prepared)
+      .manifest.body.nativeDiagnostics;
+
+    expect(contract).toMatchObject({
+      getterExport: "bg_cpp_cute_last_diagnostic_code",
+      firstCause: "first-nonzero-code-per-runtime-generation",
+      zero: "no-native-diagnostic-reported",
+      reset: "reset-clears-unless-sticky-allocator-integrity-failure-reports-again",
+      authority: "diagnostic-only-never-artifact-or-lowering-authority",
+    });
+    expect(contract.codes).toHaveLength(33);
+    expect(contract.codes[0]).toEqual({ code: 0, name: "none" });
+    expect(contract.codes[13]).toEqual({
+      code: 13,
+      name: "artifact-writer-internal",
+    });
+    expect(contract.codes[32]).toEqual({
+      code: 32,
+      name: "allocator-unknown-failure",
+    });
   });
 
   it("pins one stable exact frontend-work record with Clang-owned counters", async () => {
@@ -769,7 +796,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
   });
 
   it("rejects unsupported versions before accepting a closed contract", async () => {
-    for (const [field, value] of [["major", 2], ["minor", 11]] as const) {
+    for (const [field, value] of [["major", 2], ["minor", 12]] as const) {
       const resource = mutableResource();
       objectField(resource, "version")[field] = value;
       await expectDecodeError(

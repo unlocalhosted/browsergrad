@@ -61,6 +61,7 @@ const C_EXPORTS = [
   ["bg_cpp_cute_result_length", 0],
   ["bg_cpp_cute_result_pointer", 0],
   ["bg_cpp_cute_status", 0],
+  ["bg_cpp_cute_last_diagnostic_code", 0],
 ] as const;
 
 function targetFeatures(entries: readonly string[]): number[] {
@@ -107,6 +108,7 @@ function abiShapedModule(options: ModuleOptions = {}): Uint8Array {
   const bodies = [
     resultBody(options.firstResultOpcode), resultBody(), resultBody(), resultBody(),
     voidBody(), voidBody(), resultBody(), resultBody(), resultBody(),
+    resultBody(),
   ];
   const standard = [
     section(1, vector(types)),

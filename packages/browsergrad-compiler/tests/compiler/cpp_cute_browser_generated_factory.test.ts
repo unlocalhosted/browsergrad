@@ -24,31 +24,25 @@ it("pins the exact package-owned generated factory without widening its authorit
     `bg.cpp.browser-emscripten-factory.sha256.${CPP_CUTE_BROWSER_GENERATED_FACTORY_SHA256}`,
   );
   expect(CPP_CUTE_BROWSER_GENERATED_FACTORY_SHA256)
-    .toBe("796a548237420df7f5eca0c0260d3cbe752aeca155d9c7182c6ad0f5491dfb12");
-  expect(CPP_CUTE_BROWSER_GENERATED_FACTORY_BYTE_LENGTH).toBe(27_125);
+    .toBe("f64d5239d5c258f44e859834b57e1ea330b7efdf7a405dead3126b53330a5534");
+  expect(CPP_CUTE_BROWSER_GENERATED_FACTORY_BYTE_LENGTH).toBe(27_285);
   expect(CPP_CUTE_BROWSER_GENERATED_FACTORY.constructor.name).toBe("AsyncFunction");
   expect(CPP_CUTE_BROWSER_GENERATED_FACTORY_AUTHORITY).toEqual({
-    source: "reviewed-clean-validation-build-output",
+    source: "reviewed-cached-diagnostic-build-output",
     packageOwned: true,
     exactSourcePinned: true,
-    cleanValidationRunId: "29681845216",
-    cleanValidationSourceRevision: "aca7ee4ea799357b2c0ee3a57f6687e2139e7b7b",
-    cleanValidationWasmSha256:
-      "5fc425bbc051a2f5be588c2acbb164efb5e43f949afb48a373f3ed022c3b8758",
-    cleanValidationWasmByteLength: 31_641_377,
-    exactCleanFactoryMatch: true,
-    cleanBuildVerified: true,
-    reproducibilityBuildRunId: CPP_CUTE_BROWSER_REPRODUCIBILITY_BUILD_RUN_ID,
-    reproducibilityBuildSourceRevision:
-      CPP_CUTE_BROWSER_REPRODUCIBILITY_BUILD_SOURCE_REVISION,
-    reproducibilityVerifierRunId: CPP_CUTE_BROWSER_REPRODUCIBILITY_VERIFIER_RUN_ID,
-    reproducibilityVerifierSourceRevision:
-      CPP_CUTE_BROWSER_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION,
-    reproducibilityEvidenceSha256:
-      CPP_CUTE_BROWSER_REPRODUCIBILITY_RESOURCE_SHA256,
-    reproducibilityEvidenceByteLength:
-      CPP_CUTE_BROWSER_REPRODUCIBILITY_RESOURCE_BYTE_LENGTH,
-    reproducibilityVerified: true,
+    diagnosticBuildRunId: "30037750529",
+    diagnosticBuildSourceRevision:
+      "6a9def86c81051b38650359b6f0ff1e33376f407",
+    diagnosticBuildWasmSha256:
+      "318a5063284b368538afbf620906297c0ff7876aca837ea98c6b510baf477775",
+    diagnosticBuildWasmByteLength: 31_651_668,
+    diagnosticBuildProjectionSha256:
+      "167025594d83ee17a932f27b5a0c3f9880869f0f4500437323bce0d2fd7629d0",
+    exactDiagnosticFactoryMatch: true,
+    exactInterfaceConformance: true,
+    cleanBuildVerified: false,
+    reproducibilityVerified: false,
     workerBundleVerified: false,
     workerExecutionObserved: false,
     releaseReady: false,
@@ -70,16 +64,21 @@ it("admits only the exact package-pinned reproducibility evidence", async () => 
     buildSourceRevision: CPP_CUTE_BROWSER_REPRODUCIBILITY_BUILD_SOURCE_REVISION,
     verifierRunId: CPP_CUTE_BROWSER_REPRODUCIBILITY_VERIFIER_RUN_ID,
     verifierSourceRevision: CPP_CUTE_BROWSER_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION,
-    factoryModuleSha256: CPP_CUTE_BROWSER_GENERATED_FACTORY_SHA256,
-    factoryModuleByteLength: CPP_CUTE_BROWSER_GENERATED_FACTORY_BYTE_LENGTH,
-    wasmSha256: CPP_CUTE_BROWSER_GENERATED_FACTORY_AUTHORITY.cleanValidationWasmSha256,
-    wasmByteLength: CPP_CUTE_BROWSER_GENERATED_FACTORY_AUTHORITY.cleanValidationWasmByteLength,
+    factoryModuleSha256:
+      "796a548237420df7f5eca0c0260d3cbe752aeca155d9c7182c6ad0f5491dfb12",
+    factoryModuleByteLength: 27_125,
+    wasmSha256:
+      "5fc425bbc051a2f5be588c2acbb164efb5e43f949afb48a373f3ed022c3b8758",
+    wasmByteLength: 31_641_377,
     extractorOutputsReproducible: true,
     fullDistributedOutputSetReproducible: false,
     producerAttested: false,
     workerExecutionObserved: false,
     releaseReady: false,
   });
+  expect(authority.factoryModuleSha256).not.toBe(
+    CPP_CUTE_BROWSER_GENERATED_FACTORY_SHA256,
+  );
   expect(() => requireVerifiedCppCuteBrowserReproducibility(authority)).not.toThrow();
   expect(() => requireVerifiedCppCuteBrowserReproducibility({ ...authority })).toThrowError(
     /REPRODUCIBILITY-EVIDENCE-UNVERIFIED/u,
