@@ -9,6 +9,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- `torch.tensor(device=...)` now accepts CPU only and rejects unavailable
+  storage before allocation. The `nn.Module.to(...)` compatibility shim keeps
+  CPU identity but rejects non-CPU placement, dtype conversion, and malformed
+  requests instead of silently leaving parameters unchanged.
 - `Tensor.to()` now distinguishes supported dtype conversion from CPU device
   identity and rejects invalid signatures or unavailable device storage before
   execution. `Tensor.cuda()` raises explicitly instead of returning the same

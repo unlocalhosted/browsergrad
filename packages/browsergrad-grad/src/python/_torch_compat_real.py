@@ -14,6 +14,17 @@ def install_real(torch_mod, _bg, _types):
 
     def _tensor_factory(data, dtype=None, requires_grad=False, device=None):
         """torch.tensor(): infer int64 for integer data, float32 for floats."""
+        if device is not None:
+            if not isinstance(device, str):
+                raise TypeError(
+                    "torch.tensor device must be the string 'cpu'; "
+                    f"got {type(device).__name__}"
+                )
+            if device != "cpu":
+                raise NotImplementedError(
+                    f"torch.tensor(device={device!r}) is unavailable: eager Grad "
+                    "storage is CPU/Pyodide-backed and no device allocation occurred"
+                )
         if dtype is not None:
             return _bg.Tensor(data, dtype=dtype, requires_grad=requires_grad)
         arr = _np.asarray(data)

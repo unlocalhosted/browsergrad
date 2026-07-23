@@ -623,6 +623,12 @@ XPU, Meta, indexed CPU, and other unavailable storage requests fail before
 execution. `Tensor.cuda()` also fails rather than substituting the existing
 CPU/Pyodide tensor. Invalid dtype strings and ambiguous or unsupported
 `Tensor.to()` signatures now reject before allocation.
+ADR-0042 closes the remaining torch-compatibility placement seams.
+`torch.tensor(device=...)` admits only CPU before following the frozen
+constructor dtype/default behavior. `nn.Module.to(...)` admits only no request
+or CPU identity; non-CPU placement and non-null dtype conversion reject before
+parameter access or mutation. The Grad freeze now includes the limited shim
+source as well as the real torch factory.
 
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
@@ -2682,7 +2688,7 @@ source behavior, physical dtype, alias relation, autograd decision, or fixture
 result is an adapter-baseline change under ADR-0001, even when the public
 method signature does not change.
 
-The current Grad baseline, revised through ADR-0041, is
+The current Grad baseline, revised through ADR-0042, is
 `architecture/grad-compatibility-inventory.json`, with executable Pyodide
 evidence in `packages/browsergrad-grad/tests-integration/fixtures/grad-view-bf16.v0.json`.
 Schema version 2 records `bf16` and `bfloat16` as explicitly unsupported,
@@ -2695,8 +2701,9 @@ live NumPy array-protocol exposure, storage-sharing dtype/layout-preserving
 identity/materialization, differentiable floating `to()` casts, and detached
 bool/integer casts. Unrecognized positional `to()` strings are rejected rather
 than being treated as device no-ops. The remaining device
-compatibility debt is the separate `torch.tensor(device=...)` factory and
-`nn.Module.to(...)` shim.
+entrypoints—`torch.tensor(device=...)` and `nn.Module.to(...)`—are also
+CPU-only and fail closed. NumPy interop is the remaining eager compatibility
+domain.
 
 ### Adapter ledger
 
@@ -2710,7 +2717,7 @@ all five.
 | `cute_static_layout` parser path | Compiler | Existing parser integration and pinned regression fixtures only. | No new spellings, ranks, queries, or call sites. | Pinned real frontend handles its fixtures through layout semantics. | Compiler `1.0.0`. |
 | `TensorGpuPlan` shape-only/f32 assumptions | Kernels | Existing JIT plan serializer and kernels executor/bridge only. | No new operation, dtype, view, offset, or alias semantics may enter this schema. | New view/dtype features enter through shared schemas; plan has no unique semantics. | Kernels `1.0.0`. |
 | JIT `OP_CUSTOM` extension boundary | JIT | Explicit user-authored kernel code only; no embedded legacy framework wrappers remain. | No new core labels or constructor sites; only explicitly user-authored kernel IDs may extend. | Advertised core operations have typed IR, CPU/VJP decisions, and backend decisions; this gate is met, while the intentional extension boundary remains fail-closed. | JIT `1.0.0`. |
-| Eager view/materialization compatibility | Grad | Existing constructor/module device and NumPy-interop adapters only where accurately documented; bfloat16 substitution, non-contiguous no-op, copying detach, floating-cast graph loss, and tensor-level fake device transfer have no permitted caller. | No new API may claim view aliasing, differentiable casts, device transfer, or bf16 storage through these paths. | Remaining constructor/module device and interop fixtures agree or reject; bfloat16, contiguous, detach, floating cast, and tensor request behavior already meet their narrowed contracts. | Grad `1.0.0`. |
+| Eager view/materialization compatibility | Grad | Existing NumPy-interop adapters only where accurately documented; bfloat16 substitution, non-contiguous no-op, copying detach, floating-cast graph loss, and fake tensor/constructor/module device transfer have no permitted caller. | No new API may claim view aliasing, differentiable casts, device transfer, or bf16 storage through these paths. | Remaining interop fixtures agree or reject; bfloat16, contiguous, detach, floating cast, and every exposed eager placement entrypoint already meet their narrowed contracts. | Grad `1.0.0`. |
 | `flashAttentionDirect` name | Kernels | Existing public export and realizer compatibility call only. | New APIs and docs use the accurate row-wise online-softmax name. | Real block-tiled implementation is proven and a normal major-removal window passes. | Kernels `1.0.0`. |
 | Generic runtime backend labels | Runtime | Existing assignment requirement compatibility mapping only. | New readiness features use canonical requirement definitions/resolutions; semantic lowering uses capability decisions only where an explicit link exists. | All readiness UI consumes requirement resolutions and program-specific lowering records. | Runtime `1.0.0`. |
 

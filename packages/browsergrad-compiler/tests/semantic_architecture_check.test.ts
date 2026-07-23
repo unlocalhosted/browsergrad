@@ -216,6 +216,7 @@ describe("semantic architecture guardrails", () => {
   it("rejects Grad dtype/view source drift", () => {
     const tensorSource = readFileSync(join(repoRoot, "packages/browsergrad-grad/src/python/tensor.py"), "utf8");
     const torchCompatSource = readFileSync(join(repoRoot, "packages/browsergrad-grad/src/python/_torch_compat_real.py"), "utf8");
+    const torchCompatLimitedSource = readFileSync(join(repoRoot, "packages/browsergrad-grad/src/python/_torch_compat_limited.py"), "utf8");
     const gradFreeze = freeze("grad-view-bf16");
 
     expect(checkFrozenGradCompatibilitySources(
@@ -224,11 +225,13 @@ describe("semantic architecture guardrails", () => {
         'if isinstance(spec, str) and spec == "bf16":',
       ),
       torchCompatSource,
+      torchCompatLimitedSource,
       gradFreeze,
     )).toContainEqual(expect.stringContaining("tensor.py:_resolve_dtype changed"));
     expect(checkFrozenGradCompatibilitySources(
       tensorSource,
       torchCompatSource.replace('torch_mod.bfloat16 = "bfloat16"', 'torch_mod.bfloat16 = "float32"'),
+      torchCompatLimitedSource,
       gradFreeze,
     )).toContainEqual(expect.stringContaining("Grad torch dtype tokens changed"));
     expect(checkFrozenGradCompatibilitySources(
@@ -237,6 +240,7 @@ describe("semantic architecture guardrails", () => {
         "        if True:",
       ),
       torchCompatSource,
+      torchCompatLimitedSource,
       gradFreeze,
     )).toContainEqual(expect.stringContaining("Tensor.contiguous changed"));
     expect(checkFrozenGradCompatibilitySources(
@@ -245,11 +249,13 @@ describe("semantic architecture guardrails", () => {
         '"""Equivalent compatibility wording."""',
       ),
       torchCompatSource,
+      torchCompatLimitedSource,
       gradFreeze,
     )).toEqual([]);
     expect(checkFrozenGradCompatibilitySources(
       tensorSource.replace("    def contiguous(self)", "    @staticmethod\n    def contiguous(self)"),
       torchCompatSource,
+      torchCompatLimitedSource,
       gradFreeze,
     )).toContainEqual(expect.stringContaining("Tensor.contiguous changed"));
     expect(checkFrozenGradCompatibilitySources(
@@ -258,6 +264,7 @@ describe("semantic architecture guardrails", () => {
         "return Tensor(self.data.copy(), dtype=self.data.dtype, requires_grad=False)",
       ),
       torchCompatSource,
+      torchCompatLimitedSource,
       gradFreeze,
     )).toContainEqual(expect.stringContaining("Tensor.detach changed"));
     expect(checkFrozenGradCompatibilitySources(
@@ -266,6 +273,7 @@ describe("semantic architecture guardrails", () => {
         "and False",
       ),
       torchCompatSource,
+      torchCompatLimitedSource,
       gradFreeze,
     )).toContainEqual(expect.stringContaining("Tensor.to changed"));
     expect(checkFrozenGradCompatibilitySources(
@@ -274,6 +282,7 @@ describe("semantic architecture guardrails", () => {
         '    def cpu(self) -> "Tensor":\n        return self.detach()',
       ),
       torchCompatSource,
+      torchCompatLimitedSource,
       gradFreeze,
     )).toContainEqual(expect.stringContaining("Tensor.cpu changed"));
     expect(checkFrozenGradCompatibilitySources(
@@ -282,13 +291,33 @@ describe("semantic architecture guardrails", () => {
         "CPU/Pyodide-backed",
       ),
       torchCompatSource,
+      torchCompatLimitedSource,
       gradFreeze,
     )).toContainEqual(expect.stringContaining("Tensor.cuda changed"));
     expect(checkFrozenGradCompatibilitySources(
       tensorSource.replace("if _GRAD_ENABLED and any(p.requires_grad for p in parents):", "if True and any(p.requires_grad for p in parents):"),
       torchCompatSource,
+      torchCompatLimitedSource,
       gradFreeze,
     )).toContainEqual(expect.stringContaining("tensor.py:_build_ctx changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource,
+      torchCompatSource.replace(
+        'if device != "cpu":',
+        "if False:",
+      ),
+      torchCompatLimitedSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("install_real._tensor_factory changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource,
+      torchCompatSource,
+      torchCompatLimitedSource.replace(
+        'if device_spec != "cpu":',
+        "if False:",
+      ),
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("install_limited._module_to_shim changed"));
   });
 
   it("rejects Grad compatibility inventory and behavior-fixture drift", () => {

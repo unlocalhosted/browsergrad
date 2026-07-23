@@ -348,11 +348,17 @@ export function extractPythonDefinitionTokenDigests(source) {
   return sortRecord(digests);
 }
 
-export function checkFrozenGradCompatibilitySources(tensorSource, torchCompatSource, freeze) {
+export function checkFrozenGradCompatibilitySources(
+  tensorSource,
+  torchCompatSource,
+  torchCompatLimitedSource,
+  freeze,
+) {
   const failures = [];
   const actualDefinitions = {
     "tensor.py": extractPythonDefinitionTokenDigests(tensorSource),
     "_torch_compat_real.py": extractPythonDefinitionTokenDigests(torchCompatSource),
+    "_torch_compat_limited.py": extractPythonDefinitionTokenDigests(torchCompatLimitedSource),
   };
   for (const [file, expectedDefinitions] of Object.entries(freeze.definitionTokenDigests ?? {})) {
     const fileDefinitions = actualDefinitions[file];
@@ -430,8 +436,8 @@ export function validateGradCompatibilityInventory(inventory, fixture, freeze, f
   const targetConformance = new Set(["browsergrad-defined", "compatibility-debt", "pytorch-compatible"]);
   const referenceContracts = new Set(["browsergrad-grad-explicit", "numpy-array-protocol", "pytorch-shaped-compatibility"]);
   const dtypeEffects = new Set(["distinct-unsupported-token", "none-rejected", "preserves", "preserves-float32-otherwise-coerces-float32", "requested-dtype-dependent", "resolved-target", "surface-dependent"]);
-  const conditions = new Set(["all-inputs", "cpu-device-request", "different-dtype-with-nonfloating-endpoint", "different-supported-floating-dtype", "index-kind-dependent", "input-dtype-and-index-kind-dependent", "input-dtype-and-layout-dependent", "input-dtype-dependent", "input-layout-dependent", "invalid-to-request", "no-requested-dtype", "requested-bf16-token", "requested-dtype-dependent", "requested-dtype-equals-storage-dtype", "surface-and-input-dependent", "torch-bfloat16-token", "unsupported-device-request"]);
-  const failurePolicies = new Set(["cpu-only-reject-unsupported-device-before-execution", "delegate-invalid-broadcast-to-numpy", "delegate-invalid-dimension-to-numpy", "delegate-invalid-index-to-numpy", "delegate-invalid-input-to-python-or-numpy", "delegate-invalid-permutation-to-numpy", "delegate-invalid-shape-to-numpy", "no-dedicated-failure-path", "reject-invalid-dtype-after-numpy-delegation", "reject-invalid-expand-shape-before-execution", "reject-invalid-to-request-before-execution", "reject-unsupported-bfloat16-before-allocation"]);
+  const conditions = new Set(["all-inputs", "constructor-device-request", "cpu-device-request", "different-dtype-with-nonfloating-endpoint", "different-supported-floating-dtype", "index-kind-dependent", "input-dtype-and-index-kind-dependent", "input-dtype-and-layout-dependent", "input-dtype-dependent", "input-layout-dependent", "invalid-to-request", "module-device-or-dtype-request", "no-requested-dtype", "requested-bf16-token", "requested-dtype-dependent", "requested-dtype-equals-storage-dtype", "surface-and-input-dependent", "torch-bfloat16-token", "unsupported-device-request"]);
+  const failurePolicies = new Set(["cpu-only-reject-module-transfer-or-dtype-conversion-before-execution", "cpu-only-reject-unsupported-device-before-execution", "delegate-invalid-broadcast-to-numpy", "delegate-invalid-dimension-to-numpy", "delegate-invalid-index-to-numpy", "delegate-invalid-input-to-python-or-numpy", "delegate-invalid-permutation-to-numpy", "delegate-invalid-shape-to-numpy", "no-dedicated-failure-path", "reject-invalid-dtype-after-numpy-delegation", "reject-invalid-expand-shape-before-execution", "reject-invalid-to-request-before-execution", "reject-unsupported-bfloat16-before-allocation"]);
   const aliasing = new Set(["conditional", "must-alias", "must-not-alias", "not-applicable", "same-object"]);
   const contiguity = new Set(["contiguous", "input-dependent", "not-applicable", "preserved"]);
   const materialization = new Set(["always", "conditional", "none", "not-applicable"]);
@@ -457,7 +463,7 @@ export function validateGradCompatibilityInventory(inventory, fixture, freeze, f
     if (!contiguity.has(behavior.contiguity)) failures.push(`${label}.contiguity is not registered`);
     if (!materialization.has(behavior.materialization)) failures.push(`${label}.materialization is not registered`);
     if (!autograd.has(behavior.autograd)) failures.push(`${label}.autograd is not registered`);
-    if (!Array.isArray(behavior.sourceDefinitions) || behavior.sourceDefinitions.length === 0 || behavior.sourceDefinitions.some((entry) => typeof entry !== "string" || !/^(?:tensor|_torch_compat_real)\.py:[A-Za-z_][A-Za-z0-9_.]*$/u.test(entry))) {
+    if (!Array.isArray(behavior.sourceDefinitions) || behavior.sourceDefinitions.length === 0 || behavior.sourceDefinitions.some((entry) => typeof entry !== "string" || !/^(?:tensor|_torch_compat_(?:limited|real))\.py:[A-Za-z_][A-Za-z0-9_.]*$/u.test(entry))) {
       failures.push(`${label}.sourceDefinitions must name Grad Python definitions`);
     } else {
       referencedSourceDefinitions.push(...behavior.sourceDefinitions);
@@ -1616,14 +1622,16 @@ function customLabelFieldsRecord(facts) {
 function checkGradViewBf16(root, freeze, failures) {
   const tensorFile = resolveManifestFile(root, freeze.tensorFile, "tensorFile", failures);
   const torchCompatFile = resolveManifestFile(root, freeze.torchCompatFile, "torchCompatFile", failures);
+  const torchCompatLimitedFile = resolveManifestFile(root, freeze.torchCompatLimitedFile, "torchCompatLimitedFile", failures);
   const inventoryFile = resolveManifestFile(root, freeze.inventoryFile, "inventoryFile", failures);
   const behaviorFixtureFile = resolveManifestFile(root, freeze.behaviorFixtureFile, "behaviorFixtureFile", failures);
   const behaviorTestFile = resolveManifestFile(root, freeze.behaviorTestFile, "behaviorTestFile", failures);
-  if ([tensorFile, torchCompatFile, inventoryFile, behaviorFixtureFile, behaviorTestFile].some((value) => value === undefined)) return;
+  if ([tensorFile, torchCompatFile, torchCompatLimitedFile, inventoryFile, behaviorFixtureFile, behaviorTestFile].some((value) => value === undefined)) return;
 
   failures.push(...checkFrozenGradCompatibilitySources(
     fs.readFileSync(tensorFile, "utf8"),
     fs.readFileSync(torchCompatFile, "utf8"),
+    fs.readFileSync(torchCompatLimitedFile, "utf8"),
     freeze,
   ));
   const inventory = readJson(inventoryFile, failures);

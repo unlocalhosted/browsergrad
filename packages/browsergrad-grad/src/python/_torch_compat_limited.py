@@ -1,8 +1,8 @@
 """Pile B — possible-but-limited shims.
 
 Ships with explicit caveats: autocast is a no-op (no real fp16 path in WASM),
-linalg wraps numpy.linalg (forward-only, no autograd), Module.to accepts a
-device argument but no-ops it.
+linalg wraps numpy.linalg (forward-only, no autograd), and Module.to accepts
+CPU identity while rejecting unavailable placement or dtype conversion.
 
 Depends on Pile A having registered _bg.nn.Module already — the monkey-patch
 on line `_bg.nn.Module.to = ...` reaches into the live class. The orchestrator
@@ -54,11 +54,56 @@ def install_limited(torch_mod, _bg, _types):
     torch_linalg.pinv = _linalg_pinv
     torch_mod.linalg = torch_linalg
 
-    # Multi-GPU shim: nn.Module.to(device) accepts the call but no-ops.
+    # CPU-only module placement shim. It must not imply unavailable device
+    # storage or silently ignore parameter dtype conversion.
     # CRITICAL: this patches the LIVE _bg.nn.Module class. It only propagates
     # to torch.nn.Module because Pile A's shallow copy preserves class
     # identity (see the orchestrator's assertion). If anyone deep-copies
     # _bg.nn into torch_nn, remove this patch and add Module.to to nn.py.
     def _module_to_shim(self, *args, **kwargs):
+        unsupported_kwargs = sorted(set(kwargs) - {"device", "dtype"})
+        if unsupported_kwargs:
+            raise TypeError(
+                "nn.Module.to only supports device= and dtype=; unsupported "
+                f"keyword(s): {', '.join(unsupported_kwargs)}"
+            )
+        if len(args) > 1:
+            raise TypeError(
+                f"nn.Module.to accepts at most one positional argument, got {len(args)}"
+            )
+        dtype_provided = "dtype" in kwargs
+        device_provided = "device" in kwargs
+        dtype_spec = kwargs.get("dtype")
+        device_spec = kwargs.get("device")
+        if args:
+            first = args[0]
+            if (
+                isinstance(first, str)
+                and first.split(":", 1)[0] in ("cpu", "cuda", "mps", "xpu", "meta")
+            ):
+                if device_provided:
+                    raise TypeError("nn.Module.to received device more than once")
+                device_spec = first
+            else:
+                if dtype_provided:
+                    raise TypeError("nn.Module.to received dtype more than once")
+                dtype_spec = first
+
+        if device_spec is not None:
+            if not isinstance(device_spec, str):
+                raise TypeError(
+                    "nn.Module.to device must be the string 'cpu'; "
+                    f"got {type(device_spec).__name__}"
+                )
+            if device_spec != "cpu":
+                raise NotImplementedError(
+                    f"nn.Module.to({device_spec!r}) is unavailable: eager Grad "
+                    "parameters are CPU/Pyodide-backed and no transfer occurred"
+                )
+        if dtype_spec is not None:
+            raise NotImplementedError(
+                f"nn.Module.to(dtype={dtype_spec!r}) is unavailable: module "
+                "parameter conversion is not implemented and no dtype changed"
+            )
         return self
     _bg.nn.Module.to = _module_to_shim

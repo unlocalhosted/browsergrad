@@ -245,6 +245,9 @@ Remaining explicit limits:
 - **Device requests are truthful.** Eager tensor storage is CPU/Pyodide-backed.
   CPU requests preserve identity; unavailable CUDA/MPS/XPU/Meta requests fail
   before execution and never masquerade as a transfer.
+  `torch.tensor(device=...)` follows the same CPU-only boundary.
+  `nn.Module.to("cpu")` preserves identity, while module device or dtype
+  conversion requests reject until recursive parameter conversion exists.
 - **Reverse-mode only.** No forward-mode, no functional transforms (vmap, etc.).
 - **`Tensor.__slots__`.** Slot-based attribute layout to keep memory predictable for tensors in long training loops.
 

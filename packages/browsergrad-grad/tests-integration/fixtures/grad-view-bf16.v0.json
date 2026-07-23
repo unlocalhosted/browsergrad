@@ -386,6 +386,27 @@
         "toIndexedCpu": "NotImplementedError",
         "cudaMethod": "NotImplementedError"
       }
+    },
+    {
+      "id": "grad.device.torch-tensor-constructor.v1",
+      "expected": {
+        "cpuDtype": "int64",
+        "cudaError": "NotImplementedError",
+        "cudaIndexError": "NotImplementedError",
+        "invalidDeviceType": "TypeError"
+      }
+    },
+    {
+      "id": "grad.device.module-to.v1",
+      "expected": {
+        "noArgumentSameObject": true,
+        "cpuSameObject": true,
+        "cpuKeywordSameObject": true,
+        "cudaError": "NotImplementedError",
+        "dtypeError": "NotImplementedError",
+        "unsupportedKeyword": "TypeError",
+        "duplicateDevice": "TypeError"
+      }
     }
   ]
 }

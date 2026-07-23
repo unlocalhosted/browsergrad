@@ -2,7 +2,7 @@
  * Pile B + Pile C — limited / impossible feature surface.
  *
  * Pile B (possible but limited): autocast is a no-op, image transforms are
- * NumPy-only, linalg wraps numpy.linalg, multi-GPU device hooks no-op.
+ * NumPy-only, linalg wraps numpy.linalg, and module placement is CPU-only.
  *
  * Pile C (impossible in browser): compile / fx / jit / cuda.* / distributed /
  * onnx / quantization stubs raise NotImplementedError with an architectural
@@ -72,15 +72,28 @@ identity_max_dev = float(np.max(np.abs(prod - np.eye(2, dtype=np.float32))))
     expect(result.identity_max_dev).toBeLessThan(1e-4);
   });
 
-  it("model.to(device) accepts a device but doesn't move (no-op shim)", async () => {
-    const result = await target.run<{ same: boolean }>(`
+  it("model.to keeps CPU identity and rejects unavailable placement", async () => {
+    const result = await target.run<{
+      cpuSame: boolean;
+      cudaError: string;
+      dtypeError: string;
+    }>(`
 ${PRELUDE}
 import browsergrad_grad.nn as nn
 m = nn.Linear(3, 2)
-m2 = m.to('cuda:0')  # accepted, but ignored
-{"same": m2 is m}
+def error_name(call):
+    try:
+        call()
+        return "no_error"
+    except Exception as exc:
+        return type(exc).__name__
+{"cpuSame": bool(m.to("cpu") is m),
+ "cudaError": error_name(lambda: m.to("cuda:0")),
+ "dtypeError": error_name(lambda: m.to(dtype=torch.float64))}
 `);
-    expect(result.same).toBe(true);
+    expect(result.cpuSame).toBe(true);
+    expect(result.cudaError).toBe("NotImplementedError");
+    expect(result.dtypeError).toBe("NotImplementedError");
   });
 });
 

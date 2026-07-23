@@ -499,24 +499,27 @@
       "newUseProhibition": "No new API may claim view aliasing or bf16 storage through materializing views or f32 aliases.",
       "retirementGate": "View and alias fixtures agree or reject, and bf16 is real storage/conversion or rejected.",
       "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-grad@1.0.0",
-      "baselineDecision": "docs/adr/0041-reject-fake-grad-device-transfers.md",
+      "baselineDecision": "docs/adr/0042-close-grad-constructor-module-device-boundaries.md",
       "freeze": {
         "kind": "grad-view-bf16",
         "tensorFile": "packages/browsergrad-grad/src/python/tensor.py",
         "torchCompatFile": "packages/browsergrad-grad/src/python/_torch_compat_real.py",
+        "torchCompatLimitedFile": "packages/browsergrad-grad/src/python/_torch_compat_limited.py",
         "inventoryFile": "architecture/grad-compatibility-inventory.json",
-        "inventorySha256": "46f794fb5ddb578a1c2f1f0d43a0ad7e4256c62d6f2435cd0209672ed7755511",
+        "inventorySha256": "cfad83fa0bb230352e44ffe42a4a4f2eaae702f667c1c387e031c768befd79f1",
         "behaviorFixtureFile": "packages/browsergrad-grad/tests-integration/fixtures/grad-view-bf16.v0.json",
-        "behaviorFixtureSha256": "e0c57dfe569afa90ea20c2aace24f95436c5df63c6cee912aa3f53d0e967981b",
+        "behaviorFixtureSha256": "0abbf64fb246b1c5c3a79934d535df02b7ec9dffb6f809c6cb632e8447caa0bd",
         "behaviorTestFile": "packages/browsergrad-grad/tests-integration/gate0_dtype_view_contract.test.ts",
-        "behaviorTestSha256": "e7b25c2da1433e192b4c5bfe58b547f7fb87923ae50be803dc1bb4554dc1bafb",
+        "behaviorTestSha256": "1d420a414e22137118f0a77f462d3d097bb9fe3fcfd48b73e75879c23782bf46",
         "behaviorIds": [
           "grad.conversion.to-cross-floating.v1",
           "grad.conversion.to-cross-nonfloating.v1",
           "grad.conversion.to-same-dtype-identity.v0",
           "grad.conversion.to-invalid-request-rejected.v1",
+          "grad.device.module-to.v1",
           "grad.device.tensor-cpu.v1",
           "grad.device.tensor-unsupported-rejected.v1",
+          "grad.device.torch-tensor-constructor.v1",
           "grad.dtype.alias-registry.v0",
           "grad.dtype.bf16-rejected.v1",
           "grad.dtype.constructor-defaults.v0",
@@ -539,6 +542,7 @@
           "grad.conversion.to-cross-nonfloating-detached.v1",
           "grad.conversion.to-same-dtype-identity.v0",
           "grad.conversion.to-invalid-request-rejected.v1",
+          "grad.device.module-to.v1",
           "grad.dtype.alias-registry.v0",
           "grad.dtype.bf16-rejected.v1",
           "grad.dtype.constructor-defaults.v0",
@@ -546,6 +550,7 @@
           "grad.dtype.torch-bfloat16-token-distinct-unsupported.v1",
           "grad.device.tensor-cpu-identity.v1",
           "grad.device.tensor-unsupported-rejected.v1",
+          "grad.device.torch-tensor-constructor.v1",
           "grad.interop.array-protocol-alias.v0",
           "grad.interop.from-numpy-f32-alias.v0",
           "grad.interop.from-numpy-f64-materializes.v0",
@@ -633,7 +638,10 @@
             "from_numpy": ["cbdac3e977453f1e0d77bce67be93e8a4492cbbe79968ace1caeee0ce235d803"]
           },
           "_torch_compat_real.py": {
-            "install_real._tensor_factory": ["b9892093d5bd7185da23f81b9d8fa0ec06a12453cf74df4fd182a56cb808bf66"]
+            "install_real._tensor_factory": ["20576cdf0352676ccb9842007486c77688d7d1861f82a894d8a434858d7e2d0b"]
+          },
+          "_torch_compat_limited.py": {
+            "install_limited._module_to_shim": ["0820cec3ad725a83519e0df438e17dd413f0b945c0e06a4241b4a0e1c8e3cc19"]
           }
         }
       }

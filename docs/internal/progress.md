@@ -43,7 +43,7 @@ Ship "good enough" with explicit caveats in docstrings + STATUS.md.
 | `torch.amp` (mixed precision) | f32 code path; document no real fp16 speedup | ✅ done (autocast no-op) |
 | Basic image transforms (`torchvision.transforms`-like) | NumPy-based resize/normalize/to_tensor | ⏳ deferred |
 | `torch.linalg.*` subset (`norm`, `svd`, `eigh`, `inv`, `det`, `solve`, `pinv`) | Wrap `numpy.linalg` with backward where common | ✅ done (forward; backward via numpy) |
-| Single-notional-device "multi-GPU" hooks | `model.to([0, 1])` accepts but no-ops; document | ✅ done (Module.to is no-op) |
+| CPU-only eager placement hooks | `Tensor.to`, `torch.tensor(device=...)`, and `Module.to` preserve CPU identity and reject unavailable devices; module dtype conversion also rejects | ✅ done (fail-closed, no fake transfer) |
 | Explicit eager WebGPU forward dispatch | `device=` bridge to `browsergrad-kernels` for matmul, softmax, layernorm, attention; backward remains CPU closure autograd | ✅ done |
 
 ## Pile C — physically impossible in browser

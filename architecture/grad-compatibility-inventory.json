@@ -539,6 +539,50 @@
       "fixtureCaseIds": [
         "grad.device.tensor-unsupported-rejected.v1"
       ]
+    },
+    {
+      "id": "grad.device.torch-tensor-constructor.v1",
+      "surface": "torch.tensor(device=...)",
+      "class": "device-placement",
+      "observationStatus": "verified",
+      "targetConformance": "browsergrad-defined",
+      "referenceContract": "browsergrad-grad-explicit",
+      "dtypeEffect": "surface-dependent",
+      "condition": "constructor-device-request",
+      "failurePolicy": "cpu-only-reject-unsupported-device-before-execution",
+      "aliasing": "conditional",
+      "contiguity": "input-dependent",
+      "materialization": "conditional",
+      "autograd": "constructor-policy",
+      "truth": "torch.tensor accepts no device or the exact string 'cpu' and then follows its frozen dtype/default constructor contract; non-CPU or non-string device requests fail before tensor allocation.",
+      "sourceDefinitions": [
+        "_torch_compat_real.py:install_real._tensor_factory"
+      ],
+      "fixtureCaseIds": [
+        "grad.device.torch-tensor-constructor.v1"
+      ]
+    },
+    {
+      "id": "grad.device.module-to.v1",
+      "surface": "nn.Module.to(...)",
+      "class": "device-placement",
+      "observationStatus": "verified",
+      "targetConformance": "browsergrad-defined",
+      "referenceContract": "browsergrad-grad-explicit",
+      "dtypeEffect": "preserves",
+      "condition": "module-device-or-dtype-request",
+      "failurePolicy": "cpu-only-reject-module-transfer-or-dtype-conversion-before-execution",
+      "aliasing": "same-object",
+      "contiguity": "not-applicable",
+      "materialization": "none",
+      "autograd": "preserved",
+      "truth": "nn.Module.to with no request or the exact CPU device returns the same module; unavailable devices, non-string devices, dtype conversion, unsupported keywords, duplicates, and ambiguous signatures fail without mutating parameters.",
+      "sourceDefinitions": [
+        "_torch_compat_limited.py:install_limited._module_to_shim"
+      ],
+      "fixtureCaseIds": [
+        "grad.device.module-to.v1"
+      ]
     }
   ]
 }

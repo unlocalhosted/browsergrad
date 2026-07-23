@@ -529,6 +529,30 @@ cases["grad.device.tensor-unsupported-rejected.v1"] = {
     "toIndexedCpu": to_error(lambda: base.to("cpu:0")),
     "cudaMethod": to_error(lambda: base.cuda()),
 }
+cases["grad.device.torch-tensor-constructor.v1"] = {
+    "cpuDtype": torch.tensor([1, 2], device="cpu").dtype,
+    "cudaError": to_error(
+        lambda: torch.tensor([1.0], device="cuda")
+    ),
+    "cudaIndexError": to_error(
+        lambda: torch.tensor([1.0], device="cuda:0")
+    ),
+    "invalidDeviceType": to_error(
+        lambda: torch.tensor([1.0], device=object())
+    ),
+}
+module = torch.nn.Linear(2, 2)
+cases["grad.device.module-to.v1"] = {
+    "noArgumentSameObject": bool(module.to() is module),
+    "cpuSameObject": bool(module.to("cpu") is module),
+    "cpuKeywordSameObject": bool(module.to(device="cpu") is module),
+    "cudaError": to_error(lambda: module.to("cuda:0")),
+    "dtypeError": to_error(lambda: module.to(dtype=torch.float64)),
+    "unsupportedKeyword": to_error(lambda: module.to(non_blocking=True)),
+    "duplicateDevice": to_error(
+        lambda: module.to("cpu", device="cpu")
+    ),
+}
 
 {
     "environment": {"pyodide": pyodide.__version__, "numpy": np.__version__},

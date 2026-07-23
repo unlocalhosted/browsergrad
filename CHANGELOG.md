@@ -14,6 +14,9 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Closes Grad's remaining fake placement seams: `torch.tensor(device=...)`
+  accepts CPU only, and `nn.Module.to(...)` preserves CPU identity while
+  rejecting unavailable devices or unimplemented parameter dtype conversion.
 - Makes Grad tensor device placement honest: CPU requests preserve identity,
   while CUDA/MPS/XPU/Meta and other unavailable eager devices fail before
   execution. Invalid or ambiguous `Tensor.to()` requests no longer become
