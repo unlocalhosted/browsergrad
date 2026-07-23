@@ -381,19 +381,6 @@ class LayoutTraceConsumer final : public clang::SemaConsumer {
   ClangPassReview& review_;
 };
 
-void normalize_observed_virtual_path(
-    const llvm::StringRef path, std::string& result) {
-  std::array<char, kCppCuteMaximumVirtualPathByteLength> canonical{};
-  std::size_t canonical_size = 0U;
-  if (!cpp_cute_normalize_virtual_path(
-          std::string_view(path.data(), path.size()), canonical.data(),
-          canonical.size(), canonical_size)) {
-    result = path.str();
-    return;
-  }
-  result.assign(canonical.data(), canonical_size);
-}
-
 class IncludeObservationCallbacks final : public clang::PPCallbacks {
  public:
   IncludeObservationCallbacks(
@@ -485,9 +472,30 @@ class IncludeObservationCallbacks final : public clang::PPCallbacks {
     ImportedVfsIncludeEdgeObservation edge;
     edge.kind = is_angled ? ImportedVfsIncludeKind::kSourceAngle
                           : ImportedVfsIncludeKind::kSourceQuote;
-    normalize_observed_virtual_path(
-        including_file->getName(), edge.including_file_path);
-    normalize_observed_virtual_path(resolved_file, edge.resolved_file_path);
+    std::array<char, kCppCuteMaximumVirtualPathByteLength> canonical_path{};
+    std::size_t canonical_path_size = 0U;
+    const llvm::StringRef including_file_name = including_file->getName();
+    if (!cpp_cute_normalize_virtual_path(
+            std::string_view(
+                including_file_name.data(), including_file_name.size()),
+            canonical_path.data(), canonical_path.size(),
+            canonical_path_size)) {
+      edge.including_file_path = including_file_name.str();
+    } else {
+      edge.including_file_path.assign(
+          canonical_path.data(), canonical_path_size);
+    }
+    canonical_path.fill(0);
+    canonical_path_size = 0U;
+    if (!cpp_cute_normalize_virtual_path(
+            std::string_view(resolved_file.data(), resolved_file.size()),
+            canonical_path.data(), canonical_path.size(),
+            canonical_path_size)) {
+      edge.resolved_file_path = resolved_file.str();
+    } else {
+      edge.resolved_file_path.assign(
+          canonical_path.data(), canonical_path_size);
+    }
     edge.spelling = file_name.str();
     edge.directive_start_byte_offset = begin;
     edge.directive_end_byte_offset = end;

@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.6ae4223dcbfbc892f16e4fc8bb57c3f2b18f9d8858988bd38848288e2eff97ed",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.489aa5b8657d2b0a4309869dc4c18e2e32f58be03d25a4c7cf1c0c2b981d28a4",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -253,7 +253,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
         },
       ],
       extractorSource: {
-        sourceSetSha256: "3004cbda8a64d4bcb3c1a57dce78b77b9e60307c29ed10c8f33540d387f954f0",
+        sourceSetSha256: "6a8ec5cfa519cb3e6b8399662c8e2664921845a0dd6e900a4b0ddcd4e28b3c93",
         hashDomain: "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1",
         files: [
           {
@@ -298,8 +298,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteClangAction.cpp",
-            sha256: "61e29eb776cb235cc02e6a3788a1d3c403f77c53f473c5a2892052d949813f21",
-            byteLength: "30369",
+            sha256: "73641dd781d939430dc54061638fc25ce8cbc6d55c39d1d14213ba6f6ad19538",
+            byteLength: "30780",
           },
           {
             path: "BrowserGradCppCuteClangAction.h",
