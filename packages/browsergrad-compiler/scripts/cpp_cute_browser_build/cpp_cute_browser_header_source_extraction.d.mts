@@ -53,11 +53,12 @@ export interface CppCuteBrowserExtractedHeaderSourceArchive {
 
 export interface CppCuteBrowserHeaderSourceExtraction {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_SOURCE_EXTRACTION_SCHEMA;
-  readonly version: 3;
+  readonly version: 4;
   readonly extractionId: string;
   readonly authority: "exact-plan-host-tool-source-materialization-observation-only";
   readonly buildInputLockId: string;
   readonly buildInputLockResourceSha256: string;
+  readonly headerInputProjectionId: string;
   readonly headerSourcePlanId: string;
   readonly archiveAdmissionId: string;
   readonly bsdtarTool: Readonly<{
@@ -83,6 +84,7 @@ export interface CppCuteBrowserHeaderSourceExtraction {
   readonly claims: Readonly<{
     exactCurrentHeaderSourcePlanArchiveBytesVerified: true;
     exactBuildInputLockBound: true;
+    exactHeaderInputProjectionBound: true;
     exactHeaderSourcePlanBound: true;
     sourceSubtreeMaterializationsObserved: true;
     exactSelectedSourceSubtreesComplete: boolean;

@@ -17,7 +17,7 @@ export const CPP_CUTE_BROWSER_HEADER_SOURCE_ARCHIVE_ADMISSION_SCHEMA =
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-SOURCE-ARCHIVE-ADMISSION";
 const ADMISSION_HASH_DOMAIN =
-  "browsergrad.compiler.cpp-cute.browser-header-source-archive-admission.v1";
+  "browsergrad.compiler.cpp-cute.browser-header-source-archive-admission.v2";
 const SOURCE_ID = /^[a-z][a-z0-9-]*$/u;
 const HEADER_SOURCE_ARCHIVE_IDS = Object.freeze([
   "cuda-cccl-linux-x86-64",
@@ -97,18 +97,19 @@ export async function admitCppCuteBrowserHeaderSourcePlanArchives(input) {
   const planResourceSha256 = sha256(planBytes);
   const admissionHash = sha256(canonicalJsonBytes({
     domain: ADMISSION_HASH_DOMAIN,
+    headerInputProjectionId: plan.body.headerInputProjectionId,
     headerSourcePlanId: plan.planId,
-    headerSourcePlanSha256: planResourceSha256,
     expectedArchiveSetSha256: inspection.expectedArchiveSetSha256,
     archives: observations,
   }));
   const admission = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_SOURCE_ARCHIVE_ADMISSION_SCHEMA,
-    version: 1,
+    version: 2,
     admissionId: `bg.cpp.browser-header-source-archive-admission.sha256.${admissionHash}`,
     authority: "exact-current-header-source-plan-archive-admission-only",
     buildInputLockId: plan.body.buildInputLockId,
     buildInputLockResourceSha256: plan.body.buildInputLockResourceSha256,
+    headerInputProjectionId: plan.body.headerInputProjectionId,
     headerSourcePlanId: plan.planId,
     headerSourcePlanSha256: planResourceSha256,
     headerSourcePlanByteLength: planBytes.byteLength,
@@ -119,6 +120,7 @@ export async function admitCppCuteBrowserHeaderSourcePlanArchives(input) {
     claims: Object.freeze({
       exactCurrentHeaderSourcePlanArchiveBytesVerified: true,
       exactBuildInputLockBound: true,
+      exactHeaderInputProjectionBound: true,
       exactHeaderSourcePlanBound: true,
       localArchivePathsRetainedOpaquely: true,
       networkAccessed: false,

@@ -12,28 +12,28 @@ import {
   decodeCppCuteBrowserBuildInputLock,
 } from "./cpp_cute_browser_build_lock.js";
 import {
-  CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_V1_RESOURCE,
-  type CppCuteBrowserHeaderDistributionReproducibilityOutputV1,
-} from "./resources/cpp_cute_browser_header_distribution_reproducibility_v1.js";
+  CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_V2_RESOURCE,
+  type CppCuteBrowserHeaderDistributionReproducibilityOutputV2,
+} from "./resources/cpp_cute_browser_header_distribution_reproducibility_v2.js";
 
 export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_SHA256 =
-  "8dafa7484a7ca7a5c12e6cb2128cfbbc22d2692a96ebc1581c81e48953ad8620";
-export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_BYTE_LENGTH = 4_042;
+  "7a39e78d7aa3f1f0ff68e4b7b095425c75aa5e3947b208cdc6c5c30b46524838";
+export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_BYTE_LENGTH = 4_181;
 export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION =
-  "7476fd4819af82ad5b1283b82083831ab77c5d86";
+  "29a172ffa93ca4c3b63ae9f60e806a6b9d8b27c1";
 export const CPP_CUTE_BROWSER_HEADER_INPUT_PROJECTION_ID =
   "bg.cpp.browser-header-input-projection.sha256.48490ddb7b2fe655ec36824e276b90122e2f548a77b768f5978029a31129c5b7";
 
 const OUTPUT_VERIFICATION_HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.distribution-output-file-verification.v1";
 const REPRODUCIBILITY_HASH_DOMAIN =
-  "browsergrad.compiler.cpp-cute.browser-header-distribution-reproducibility.v1";
+  "browsergrad.compiler.cpp-cute.browser-header-distribution-reproducibility.v2";
 const SHA256 = /^[0-9a-f]{64}$/u;
 const WIRE_U64 = /^(?:0|[1-9][0-9]*)$/u;
 const SAFE_OUTPUT_PATH = /^(?:[A-Za-z0-9._+@=-]+\/)*[A-Za-z0-9._+@=-]+$/u;
 const TEXT_ENCODER = new TextEncoder();
 const BUILTIN_RESOURCE_BYTES = canonicalJsonBytes(
-  CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_V1_RESOURCE,
+  CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_V2_RESOURCE,
 );
 const VERIFIED_RESOURCES = new WeakSet<object>();
 
@@ -60,9 +60,9 @@ export interface VerifiedCppCuteBrowserHeaderDistributionReproducibility {
   readonly pipelineId: string;
   readonly outputVerificationId: string;
   readonly reproducibilityId: string;
-  readonly outputs: readonly CppCuteBrowserHeaderDistributionReproducibilityOutputV1[];
+  readonly outputs: readonly CppCuteBrowserHeaderDistributionReproducibilityOutputV2[];
   readonly outputCount: 17;
-  readonly outputByteLength: "71114813";
+  readonly outputByteLength: "71114743";
   readonly exactHeaderDistributionOutputSetReproducible: true;
   readonly fullDistributedOutputSetReproducible: false;
   readonly externalDistributedFileLicenseMapReviewed: false;
@@ -136,7 +136,7 @@ export async function verifyCppCuteBrowserHeaderDistributionReproducibilityResou
     mismatch("$bytes.sha256", "evidence digest differs from its package identity");
   }
 
-  const resource = CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_V1_RESOURCE;
+  const resource = CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_V2_RESOURCE;
   const buildLock = await decodeCppCuteBrowserBuildInputLock(
     cppCuteBrowserBuildInputLockResourceBytes(),
   );
@@ -146,6 +146,12 @@ export async function verifyCppCuteBrowserHeaderDistributionReproducibilityResou
     mismatch(
       "$.headerInputProjectionId",
       "current package build lock changes the exact header-distribution inputs",
+    );
+  }
+  if (resource.headerInputProjectionId !== headerInputProjectionId) {
+    mismatch(
+      "$.headerInputProjectionId",
+      "evidence projection differs from the current header-distribution inputs",
     );
   }
   if (resource.verifierSourceRevision !==
@@ -217,7 +223,7 @@ export function requireVerifiedCppCuteBrowserHeaderDistributionReproducibility(
 }
 
 function assertOutputProjection(
-  outputs: readonly CppCuteBrowserHeaderDistributionReproducibilityOutputV1[],
+  outputs: readonly CppCuteBrowserHeaderDistributionReproducibilityOutputV2[],
 ): void {
   if (outputs.length !== 17) {
     mismatch("$.outputs", "exactly 17 outputs are required");
@@ -238,7 +244,7 @@ function assertOutputProjection(
     }
     total += BigInt(output.byteLength);
   }
-  if (total !== 71_114_813n) {
+  if (total !== 71_114_743n) {
     mismatch("$.totals.byteLength", "output byte total differs from the exact observation");
   }
 }

@@ -31,7 +31,7 @@ export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REVIEW_INPUT_SCHEMA =
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-DISTRIBUTION-REVIEW-INPUT";
 const REVIEW_HASH_DOMAIN =
-  "browsergrad.compiler.cpp-cute.header-distribution-review-input.v1";
+  "browsergrad.compiler.cpp-cute.header-distribution-review-input.v2";
 const MAX_REVIEW_INPUT_BYTES = 32 * 1024 * 1024;
 const REVIEW_INPUTS = new WeakMap();
 
@@ -84,11 +84,12 @@ export async function materializeCppCuteBrowserHeaderDistributionReviewInput(inp
   }
   const report = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REVIEW_INPUT_SCHEMA,
-    version: 1,
+    version: 2,
     reviewInputId: manifest.reviewInputId,
     authority: "materialized-exact-header-distribution-review-input-only",
-    buildInputLockId: manifest.buildInputLockId,
-    buildInputLockResourceSha256: manifest.buildInputLockResourceSha256,
+    buildInputLockId: object.extraction.buildInputLockId,
+    buildInputLockResourceSha256: object.extraction.buildInputLockResourceSha256,
+    headerInputProjectionId: manifest.headerInputProjectionId,
     headerSourcePlanId: manifest.headerSourcePlanId,
     extractionId: manifest.extractionId,
     inventoryId: manifest.inventoryId,
@@ -139,10 +140,13 @@ function assertIdentityChain(object) {
   const lockSha256 = extraction.buildInputLockResourceSha256;
   if (inventory.headerSourceExtractionId !== extraction.extractionId ||
       inventory.buildInputLockId !== lockId || inventory.buildInputLockResourceSha256 !== lockSha256 ||
+      inventory.headerInputProjectionId !== extraction.headerInputProjectionId ||
       materialization.inventoryId !== inventory.inventoryId ||
       materialization.buildInputLockId !== lockId ||
       materialization.buildInputLockResourceSha256 !== lockSha256 ||
+      materialization.headerInputProjectionId !== extraction.headerInputProjectionId ||
       notices.buildInputLockId !== lockId || notices.buildInputLockResourceSha256 !== lockSha256 ||
+      notices.headerInputProjectionId !== extraction.headerInputProjectionId ||
       cudaRedistributionIndex.headerSourcePlanId !== extraction.headerSourcePlanId) {
     invalid("$.input", "review-input authorities do not form one exact current identity chain");
   }
@@ -277,8 +281,7 @@ function composeReviewInput(object) {
     });
   });
   const body = Object.freeze({
-    buildInputLockId: extraction.buildInputLockId,
-    buildInputLockResourceSha256: extraction.buildInputLockResourceSha256,
+    headerInputProjectionId: extraction.headerInputProjectionId,
     headerSourcePlanId: extraction.headerSourcePlanId,
     archiveAdmissionId: extraction.archiveAdmissionId,
     extractionId: extraction.extractionId,
@@ -342,7 +345,7 @@ function composeReviewInput(object) {
   const reviewHash = sha256(canonicalJsonBytes({ domain: REVIEW_HASH_DOMAIN, body }));
   return Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REVIEW_INPUT_SCHEMA,
-    version: 1,
+    version: 2,
     reviewInputId: `bg.cpp.header-distribution-review-input.sha256.${reviewHash}`,
     authority: "exact-header-distribution-review-input-only",
     ...body,

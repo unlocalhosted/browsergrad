@@ -124,11 +124,12 @@ export async function materializeCppCuteBrowserHeaderPacks(input) {
   }
   const materialization = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_PACK_MATERIALIZATION_SCHEMA,
-    version: 1,
+    version: 2,
     authority: "deterministic-vfs-pack-materialization-only",
     inventoryId: inventory.inventoryId,
     buildInputLockId: inventory.buildInputLockId,
     buildInputLockResourceSha256: inventory.buildInputLockResourceSha256,
+    headerInputProjectionId: inventory.headerInputProjectionId,
     outputRoot,
     outputs: Object.freeze(outputs),
     totalPackByteLength: String(totalPackBytes),

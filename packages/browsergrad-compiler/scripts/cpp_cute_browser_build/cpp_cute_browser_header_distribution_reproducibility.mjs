@@ -18,7 +18,7 @@ export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_SCHEMA =
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-DISTRIBUTION-REPRODUCIBILITY";
 const REPRODUCIBILITY_HASH_DOMAIN =
-  "browsergrad.compiler.cpp-cute.browser-header-distribution-reproducibility.v1";
+  "browsergrad.compiler.cpp-cute.browser-header-distribution-reproducibility.v2";
 const EXPECTED_PACK_COUNT = 5;
 const EXPECTED_COMPONENT_NOTICE_COUNT = 10;
 const EXPECTED_OUTPUT_COUNT = 17;
@@ -108,12 +108,14 @@ export async function verifyCppCuteBrowserHeaderDistributionReproducibility(inpu
   }));
   const report = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_SCHEMA,
-    version: 1,
+    version: 2,
     reproducibilityId:
       `bg.cpp.browser-header-distribution-reproducibility.sha256.${reproducibilityHash}`,
     authority: "two-root-exact-header-distribution-reproducibility-only",
     scope: "five-header-packs-license-inventory-and-notice-outputs-only",
     buildInputLockId: object.first.buildInputLockId,
+    buildInputLockResourceSha256: object.first.buildInputLockResourceSha256,
+    headerInputProjectionId: object.first.headerInputProjectionId,
     pipelineId: object.first.pipelineId,
     outputVerificationId: firstVerification.verificationId,
     firstOutputRoot: firstRoot,
@@ -206,6 +208,7 @@ function assertPipelineIdentityParity(first, second) {
     "pipelineId",
     "buildInputLockId",
     "buildInputLockResourceSha256",
+    "headerInputProjectionId",
     "headerSourcePlanId",
     "archiveAdmissionId",
     "extractionId",

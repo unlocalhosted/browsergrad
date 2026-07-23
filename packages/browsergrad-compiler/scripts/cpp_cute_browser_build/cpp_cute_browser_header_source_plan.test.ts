@@ -168,6 +168,7 @@ describe("browser header-source plan", () => {
 
     expect(plan.claims).toEqual({
       exactBuildInputLockBound: true,
+      exactHeaderInputProjectionBound: true,
       exactArchiveSelectionPinned: true,
       exactSourceSubtreesPinned: true,
       exactHeaderPackLicensePolicyBound: true,

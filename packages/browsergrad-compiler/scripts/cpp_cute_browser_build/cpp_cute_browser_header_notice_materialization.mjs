@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
 import {
+  cppCuteBrowserHeaderInputProjectionId,
   cppCuteBrowserBuildInputLockResourceBytes,
   decodeCppCuteBrowserBuildInputLock,
   unwrapPreparedCppCuteBrowserBuildInputLock,
@@ -24,11 +25,11 @@ import {
 export const CPP_CUTE_BROWSER_HEADER_NOTICE_MATERIALIZATION_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-header-notice-materialization";
 export const CPP_CUTE_BROWSER_AGGREGATE_NOTICE_FORMAT =
-  "browsergrad.compiler.cpp-cute.distribution-notices.v1";
+  "browsergrad.compiler.cpp-cute.distribution-notices.v2";
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-NOTICE-MATERIALIZATION";
 const MATERIALIZATION_HASH_DOMAIN =
-  "browsergrad.compiler.cpp-cute.browser-header-notice-materialization.v1";
+  "browsergrad.compiler.cpp-cute.browser-header-notice-materialization.v2";
 const AGGREGATE_OUTPUT_PATH = "assets/browsergrad-cpp-cute/THIRD_PARTY_NOTICES.txt";
 const TEXT_ENCODER = new TextEncoder();
 const SAFE_METADATA = /^[\x20-\x7e]+$/u;
@@ -65,7 +66,9 @@ export async function materializeCppCuteBrowserHeaderDistributionNotices(input) 
     cppCuteBrowserBuildInputLockResourceBytes(),
   );
   const body = unwrapPreparedCppCuteBrowserBuildInputLock(buildInputLock).lock.body;
-  assertIdentityChain(object, buildInputLock);
+  const headerInputProjectionId =
+    await cppCuteBrowserHeaderInputProjectionId(buildInputLock);
+  assertIdentityChain(object, buildInputLock, headerInputProjectionId);
   const outputPolicy = exactOutputPolicy(body, object.notices);
   const componentBytes = object.notices.notices.map((notice) => Object.freeze({
     componentId: notice.componentId,
@@ -73,7 +76,7 @@ export async function materializeCppCuteBrowserHeaderDistributionNotices(input) 
     bytes: copyCppCuteBrowserVerifiedHeaderNoticeBytes(object.notices, notice.componentId),
   }));
   const aggregateBytes = composeAggregateNoticeBytes(
-    buildInputLock.lockId,
+    headerInputProjectionId,
     object.notices.notices,
     componentBytes,
   );
@@ -140,7 +143,7 @@ export async function materializeCppCuteBrowserHeaderDistributionNotices(input) 
   });
   const materializationHash = sha256(canonicalJsonBytes({
     domain: MATERIALIZATION_HASH_DOMAIN,
-    buildInputLockId: buildInputLock.lockId,
+    headerInputProjectionId,
     distributionReviewInputId: object.distributionReviewInput.reviewInputId,
     inventoryId: object.materialization.inventoryId,
     outputFileMaterializationId: outputMaterialization.materializationId,
@@ -149,12 +152,13 @@ export async function materializeCppCuteBrowserHeaderDistributionNotices(input) 
   }));
   const report = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_NOTICE_MATERIALIZATION_SCHEMA,
-    version: 1,
+    version: 2,
     noticeMaterializationId:
       `bg.cpp.browser-header-notice-materialization.sha256.${materializationHash}`,
     authority: "exact-private-distribution-notice-materialization-only",
     buildInputLockId: buildInputLock.lockId,
     buildInputLockResourceSha256: buildInputLock.resourceSha256,
+    headerInputProjectionId,
     distributionReviewInputId: object.distributionReviewInput.reviewInputId,
     inventoryId: object.materialization.inventoryId,
     outputFileMaterializationId: outputMaterialization.materializationId,
@@ -200,14 +204,17 @@ export function canonicalCppCuteBrowserHeaderNoticeMaterializationBytes(report) 
   return canonicalJsonBytes(report);
 }
 
-function assertIdentityChain(object, buildInputLock) {
+function assertIdentityChain(object, buildInputLock, headerInputProjectionId) {
   const { distributionReviewInput, materialization, notices } = object;
   if (notices.buildInputLockId !== buildInputLock.lockId ||
       notices.buildInputLockResourceSha256 !== buildInputLock.resourceSha256 ||
       distributionReviewInput.buildInputLockId !== buildInputLock.lockId ||
       distributionReviewInput.buildInputLockResourceSha256 !== buildInputLock.resourceSha256 ||
+      distributionReviewInput.headerInputProjectionId !== headerInputProjectionId ||
       materialization.buildInputLockId !== buildInputLock.lockId ||
       materialization.buildInputLockResourceSha256 !== buildInputLock.resourceSha256 ||
+      materialization.headerInputProjectionId !== headerInputProjectionId ||
+      notices.headerInputProjectionId !== headerInputProjectionId ||
       distributionReviewInput.inventoryId !== materialization.inventoryId) {
     invalid("$.input", "notice authorities do not form one exact current identity chain");
   }
@@ -239,8 +246,8 @@ function exactOutputPolicy(body, notices) {
   return Object.freeze({ componentOutputs: Object.freeze(componentOutputs), aggregate });
 }
 
-function composeAggregateNoticeBytes(buildInputLockId, notices, componentBytes) {
-  metadata(buildInputLockId, "$.buildInputLock.lockId");
+function composeAggregateNoticeBytes(headerInputProjectionId, notices, componentBytes) {
+  metadata(headerInputProjectionId, "$.headerInputProjectionId");
   if (notices.length !== componentBytes.length || notices.length === 0) {
     invalid("$.notices", "aggregate notice inputs differ from the verified component set");
   }
@@ -248,7 +255,7 @@ function composeAggregateNoticeBytes(buildInputLockId, notices, componentBytes) 
   const chunks = [TEXT_ENCODER.encode(
     `BrowserGrad Compiler Distribution Notices\n` +
     `Format: ${CPP_CUTE_BROWSER_AGGREGATE_NOTICE_FORMAT}\n` +
-    `Build-Input-Lock-ID: ${buildInputLockId}\n` +
+    `Header-Input-Projection-ID: ${headerInputProjectionId}\n` +
     `Notice-Count: ${notices.length}\n` +
     `Third-Party-Notice-Count: ${thirdPartyCount}\n` +
     `External-File-License-Review: pending\n` +

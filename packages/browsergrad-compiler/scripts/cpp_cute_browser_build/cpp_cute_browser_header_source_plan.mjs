@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
 import {
+  cppCuteBrowserHeaderInputProjectionId,
   cppCuteBrowserBuildInputLockResourceBytes,
   decodeCppCuteBrowserBuildInputLock,
   unwrapPreparedCppCuteBrowserBuildInputLock,
@@ -19,7 +20,7 @@ export const CPP_CUTE_BROWSER_HEADER_SOURCE_PLAN_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-header-source-plan";
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-SOURCE-PLAN";
-const PLAN_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-source-plan.v3";
+const PLAN_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-source-plan.v4";
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SOURCE_ID = /^[a-z][a-z0-9-]*$/u;
 const LICENSE_COMPONENT_ID = /^[a-z][a-z0-9._-]*$/u;
@@ -291,6 +292,8 @@ export async function prepareCppCuteBrowserHeaderSourcePlan() {
     cppCuteBrowserBuildInputLockResourceBytes(),
   );
   const body = unwrapPreparedCppCuteBrowserBuildInputLock(buildInputLock).lock.body;
+  const headerInputProjectionId =
+    await cppCuteBrowserHeaderInputProjectionId(buildInputLock);
   const gitArchives = currentGitSourceArchives(body.sources, body.notices);
   const archives = bindSelectionLicensePolicies(
     bindConfiguredResourceOutputPolicy([...gitArchives, ...SUPPLEMENTAL_ARCHIVES], body),
@@ -301,6 +304,7 @@ export async function prepareCppCuteBrowserHeaderSourcePlan() {
   const planBody = Object.freeze({
     buildInputLockId: buildInputLock.lockId,
     buildInputLockResourceSha256: buildInputLock.resourceSha256,
+    headerInputProjectionId,
     archives: Object.freeze(archives),
     includeRoots,
     unresolvedBlockers: Object.freeze([
@@ -322,10 +326,18 @@ export async function prepareCppCuteBrowserHeaderSourcePlan() {
       }),
     ]),
   });
-  const planHash = sha256(canonicalJsonBytes({ domain: PLAN_HASH_DOMAIN, body: planBody }));
+  const planHash = sha256(canonicalJsonBytes({
+    domain: PLAN_HASH_DOMAIN,
+    body: {
+      headerInputProjectionId,
+      archives: planBody.archives,
+      includeRoots: planBody.includeRoots,
+      unresolvedBlockers: planBody.unresolvedBlockers,
+    },
+  }));
   const plan = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_SOURCE_PLAN_SCHEMA,
-    version: 3,
+    version: 4,
     planId: `bg.cpp.browser-header-source-plan.sha256.${planHash}`,
     authority: "exact-header-source-selection-policy-only",
     body: planBody,
@@ -365,6 +377,7 @@ export async function prepareCppCuteBrowserHeaderSourcePlan() {
     }),
     claims: Object.freeze({
       exactBuildInputLockBound: true,
+      exactHeaderInputProjectionBound: true,
       exactArchiveSelectionPinned: true,
       exactSourceSubtreesPinned: true,
       exactHeaderPackLicensePolicyBound: true,

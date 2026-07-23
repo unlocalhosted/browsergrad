@@ -3,28 +3,29 @@ import {
   type JsonObject,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
-export interface CppCuteBrowserHeaderDistributionReproducibilityOutputV1 extends JsonObject {
+export interface CppCuteBrowserHeaderDistributionReproducibilityOutputV2 extends JsonObject {
   readonly outputPath: string;
   readonly sha256: string;
   readonly byteLength: string;
 }
 
-export interface CppCuteBrowserHeaderDistributionReproducibilityResourceV1
+export interface CppCuteBrowserHeaderDistributionReproducibilityResourceV2
   extends JsonObject {
   readonly schema: "browsergrad.compiler.cpp-cute.browser-header-distribution-reproducibility";
-  readonly version: 1;
+  readonly version: 2;
   readonly authority: "two-root-exact-header-distribution-reproducibility-observation-only";
   readonly scope: "five-header-packs-license-inventory-and-notice-outputs-only";
   readonly verifierSourceRevision: string;
   readonly buildInputLockId: string;
   readonly buildInputLockResourceSha256: string;
+  readonly headerInputProjectionId: string;
   readonly pipelineId: string;
   readonly outputVerificationId: string;
   readonly reproducibilityId: string;
-  readonly outputs: readonly CppCuteBrowserHeaderDistributionReproducibilityOutputV1[];
+  readonly outputs: readonly CppCuteBrowserHeaderDistributionReproducibilityOutputV2[];
   readonly totals: JsonObject & {
     readonly outputCount: 17;
-    readonly byteLength: "71114813";
+    readonly byteLength: "71114743";
   };
   readonly claims: JsonObject & {
     readonly twoDistinctPrivateOutputRootsVerified: true;
@@ -40,27 +41,29 @@ export interface CppCuteBrowserHeaderDistributionReproducibilityResourceV1
   };
 }
 
-const VALUE: CppCuteBrowserHeaderDistributionReproducibilityResourceV1 = {
+const VALUE: CppCuteBrowserHeaderDistributionReproducibilityResourceV2 = {
   schema: "browsergrad.compiler.cpp-cute.browser-header-distribution-reproducibility",
-  version: 1,
+  version: 2,
   authority: "two-root-exact-header-distribution-reproducibility-observation-only",
   scope: "five-header-packs-license-inventory-and-notice-outputs-only",
-  verifierSourceRevision: "7476fd4819af82ad5b1283b82083831ab77c5d86",
+  verifierSourceRevision: "29a172ffa93ca4c3b63ae9f60e806a6b9d8b27c1",
   buildInputLockId:
-    "bg.cpp.browser-build-input-lock.sha256.489aa5b8657d2b0a4309869dc4c18e2e32f58be03d25a4c7cf1c0c2b981d28a4",
+    "bg.cpp.browser-build-input-lock.sha256.564b1f555f5488df381b0bcf7e9f95e52270607cef5ad24eaf0fe659ed78230a",
   buildInputLockResourceSha256:
-    "3a705905182a763a9cee693e270d5c7a737b264aad41cf5ca0ef913f4ad370ed",
+    "8de08afb654e23cf45cb0b96bcdc580ea15489d4ced147df0101dbc07803d3cb",
+  headerInputProjectionId:
+    "bg.cpp.browser-header-input-projection.sha256.48490ddb7b2fe655ec36824e276b90122e2f548a77b768f5978029a31129c5b7",
   pipelineId:
-    "bg.cpp.browser-header-pack-pipeline.sha256.80a29abc734fcf3183c98fbd3bce5c23005a045f06e6837b80231845fdf09b71",
+    "bg.cpp.browser-header-pack-pipeline.sha256.705235b37a1e0fb3621be0e537bc515dfddffe7da70b7cfea15c4e2341be16b3",
   outputVerificationId:
-    "bg.cpp.distribution-output-file-verification.sha256.1cc298cf70ed624df258a14b0eb687c6a0666a14cdd4e5d208674f6c0f7fb3df",
+    "bg.cpp.distribution-output-file-verification.sha256.5bc2231523c4537b30dac139a40c515b725815eec34d81cd0af79f759b31a441",
   reproducibilityId:
-    "bg.cpp.browser-header-distribution-reproducibility.sha256.43f703672ddbeaf1e6e6d544e3ed50721a2585e947b5d0a1e624293cac80d449",
+    "bg.cpp.browser-header-distribution-reproducibility.sha256.4d4c054fd4c93dbdbdef9581eeac52b037af3425e6a1c7eff8acc585abce1e55",
   outputs: [
     {
       outputPath: "assets/browsergrad-cpp-cute/THIRD_PARTY_NOTICES.txt",
-      sha256: "372372e03447024a930606c7530785b7cf67c2f595140651882ee04adcd0bc07",
-      byteLength: "115316",
+      sha256: "5086675598ef771d8909ddb599786b4307534152af379463777b538546440472",
+      byteLength: "115330",
     },
     {
       outputPath: "assets/browsergrad-cpp-cute/clang-resource.headers.bgvfs",
@@ -84,8 +87,8 @@ const VALUE: CppCuteBrowserHeaderDistributionReproducibilityResourceV1 = {
     },
     {
       outputPath: "assets/browsergrad-cpp-cute/license-inventory.json",
-      sha256: "2f1a493b0fdd5eb73a46fb7c16714e716709b4ab68f968d9de9f7c9ec3c63740",
-      byteLength: "1208487",
+      sha256: "13ace4a0c861dfec04feb42a3526fa3fe491334f2ec9096e01df3c1fc1cdbd20",
+      byteLength: "1208403",
     },
     {
       outputPath: "assets/browsergrad-cpp-cute/linux-sysroot.headers.bgvfs",
@@ -145,7 +148,7 @@ const VALUE: CppCuteBrowserHeaderDistributionReproducibilityResourceV1 = {
   ],
   totals: {
     outputCount: 17,
-    byteLength: "71114813",
+    byteLength: "71114743",
   },
   claims: {
     twoDistinctPrivateOutputRootsVerified: true,
@@ -161,5 +164,5 @@ const VALUE: CppCuteBrowserHeaderDistributionReproducibilityResourceV1 = {
   },
 };
 
-export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_V1_RESOURCE =
-  deepFreezeJson(VALUE) as CppCuteBrowserHeaderDistributionReproducibilityResourceV1;
+export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_V2_RESOURCE =
+  deepFreezeJson(VALUE) as CppCuteBrowserHeaderDistributionReproducibilityResourceV2;

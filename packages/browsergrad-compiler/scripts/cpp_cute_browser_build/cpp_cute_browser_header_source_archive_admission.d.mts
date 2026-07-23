@@ -35,11 +35,12 @@ export interface CppCuteBrowserHeaderSourceArchiveObservation {
 
 export interface CppCuteBrowserHeaderSourceArchiveAdmission {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_SOURCE_ARCHIVE_ADMISSION_SCHEMA;
-  readonly version: 1;
+  readonly version: 2;
   readonly admissionId: string;
   readonly authority: "exact-current-header-source-plan-archive-admission-only";
   readonly buildInputLockId: string;
   readonly buildInputLockResourceSha256: string;
+  readonly headerInputProjectionId: string;
   readonly headerSourcePlanId: string;
   readonly headerSourcePlanSha256: string;
   readonly headerSourcePlanByteLength: number;
@@ -50,6 +51,7 @@ export interface CppCuteBrowserHeaderSourceArchiveAdmission {
   readonly claims: Readonly<{
     exactCurrentHeaderSourcePlanArchiveBytesVerified: true;
     exactBuildInputLockBound: true;
+    exactHeaderInputProjectionBound: true;
     exactHeaderSourcePlanBound: true;
     localArchivePathsRetainedOpaquely: true;
     networkAccessed: false;

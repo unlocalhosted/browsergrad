@@ -14,11 +14,12 @@ export class CppCuteBrowserHeaderDistributionReviewInputError extends Error {
 
 export interface CppCuteBrowserHeaderDistributionReviewInputReport {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REVIEW_INPUT_SCHEMA;
-  readonly version: 1;
+  readonly version: 2;
   readonly reviewInputId: string;
   readonly authority: "materialized-exact-header-distribution-review-input-only";
   readonly buildInputLockId: string;
   readonly buildInputLockResourceSha256: string;
+  readonly headerInputProjectionId: string;
   readonly headerSourcePlanId: string;
   readonly extractionId: string;
   readonly inventoryId: string;

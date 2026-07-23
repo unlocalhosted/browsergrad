@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  cppCuteBrowserHeaderInputProjectionId,
   cppCuteBrowserBuildInputLockResourceBytes,
   decodeCppCuteBrowserBuildInputLock,
 } from "../../dist/cpp_cute_browser_build_lock.js";
@@ -161,6 +162,7 @@ interface FixtureExtraction {
   extractionId: string;
   buildInputLockId: string;
   buildInputLockResourceSha256: string;
+  headerInputProjectionId: string;
   archives: Array<{
     sourceId: string;
     licenseComponentId: string;
@@ -210,6 +212,7 @@ async function fixtureExtraction(): Promise<FixtureExtraction> {
     extractionId: "bg.cpp.browser-header-source-extraction.sha256.fixture",
     buildInputLockId: lock.lockId,
     buildInputLockResourceSha256: lock.resourceSha256,
+    headerInputProjectionId: await cppCuteBrowserHeaderInputProjectionId(lock),
     archives: [
       source("cuda-cccl-linux-x86-64", "cuda-toolkit-12.6.3-headers", ["cuda"]),
       source("cuda-cudart-linux-x86-64", "cuda-toolkit-12.6.3-headers", ["cuda"]),

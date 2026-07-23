@@ -95,12 +95,13 @@ export interface CppCuteBrowserHeaderSourceBlocker {
 
 export interface CppCuteBrowserHeaderSourcePlan {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_SOURCE_PLAN_SCHEMA;
-  readonly version: 3;
+  readonly version: 4;
   readonly planId: string;
   readonly authority: "exact-header-source-selection-policy-only";
   readonly body: Readonly<{
     buildInputLockId: string;
     buildInputLockResourceSha256: string;
+    headerInputProjectionId: string;
     archives: readonly CppCuteBrowserHeaderSourceArchive[];
     includeRoots: readonly CppCuteBrowserHeaderSourceIncludeRoot[];
     unresolvedBlockers: readonly CppCuteBrowserHeaderSourceBlocker[];
@@ -117,6 +118,7 @@ export interface CppCuteBrowserHeaderSourcePlan {
   }>;
   readonly claims: Readonly<{
     exactBuildInputLockBound: true;
+    exactHeaderInputProjectionBound: true;
     exactArchiveSelectionPinned: true;
     exactSourceSubtreesPinned: true;
     exactHeaderPackLicensePolicyBound: true;

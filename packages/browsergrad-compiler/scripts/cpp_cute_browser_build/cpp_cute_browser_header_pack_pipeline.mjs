@@ -34,7 +34,7 @@ export const CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline";
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-PACK-PIPELINE";
-const PIPELINE_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline.v5";
+const PIPELINE_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline.v6";
 const PIPELINES = new WeakSet();
 
 export class CppCuteBrowserHeaderPackPipelineError extends Error {
@@ -131,16 +131,22 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
     extractionId: extraction.extractionId,
     inventoryId: inventory.inventoryId,
     outputs: materialization.outputs,
-    distributionReviewInput,
+    distributionReviewInput: {
+      reviewInputId: distributionReviewInput.reviewInputId,
+      outputPath: distributionReviewInput.outputPath,
+      reviewInputSha256: distributionReviewInput.reviewInputSha256,
+      reviewInputByteLength: distributionReviewInput.reviewInputByteLength,
+    },
     noticeMaterializationId: noticeMaterialization.noticeMaterializationId,
   }));
   const report = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA,
-    version: 5,
+    version: 6,
     pipelineId: `bg.cpp.browser-header-pack-pipeline.sha256.${pipelineHash}`,
     authority: "exact-source-host-tool-vfs-pack-pipeline-observation-only",
     buildInputLockId: extraction.buildInputLockId,
     buildInputLockResourceSha256: extraction.buildInputLockResourceSha256,
+    headerInputProjectionId: extraction.headerInputProjectionId,
     headerSourcePlanId: extraction.headerSourcePlanId,
     archiveAdmissionId: archiveAdmission.admissionId,
     extractionId: extraction.extractionId,

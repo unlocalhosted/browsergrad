@@ -45,13 +45,14 @@ export interface CppCuteBrowserHeaderPackInventoryPack {
 
 export interface CppCuteBrowserHeaderPackInventory {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_PACK_INVENTORY_SCHEMA;
-  readonly version: 1;
+  readonly version: 2;
   readonly inventoryId: string;
   readonly authority:
     | "local-source-tree-inventory-only"
     | "exact-extraction-source-inventory-only";
   readonly buildInputLockId: string;
   readonly buildInputLockResourceSha256: string;
+  readonly headerInputProjectionId: string;
   readonly headerSourceExtractionId?: string;
   readonly packs: readonly CppCuteBrowserHeaderPackInventoryPack[];
   readonly totals: Readonly<{
@@ -63,6 +64,7 @@ export interface CppCuteBrowserHeaderPackInventory {
   readonly claims: Readonly<{
     exactReadableSourceTreesVerified: true;
     buildInputLockBound: true;
+    headerInputProjectionBound: true;
     networkAccessed: false;
     archiveProvenanceVerified: false;
     generatedClangResourceHeadersComplete: boolean;

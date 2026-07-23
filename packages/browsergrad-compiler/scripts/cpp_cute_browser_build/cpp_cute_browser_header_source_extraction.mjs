@@ -31,7 +31,7 @@ export const CPP_CUTE_BROWSER_HEADER_SOURCE_EXTRACTION_SCHEMA =
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-SOURCE-EXTRACTION";
 const EXTRACTION_HASH_DOMAIN =
-  "browsergrad.compiler.cpp-cute.browser-header-source-extraction.v3";
+  "browsergrad.compiler.cpp-cute.browser-header-source-extraction.v4";
 const EVIDENCE_ID = /^[a-z][a-z0-9-]*$/u;
 const SOURCE_EXTRACTIONS = new WeakMap();
 
@@ -267,11 +267,12 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
     }));
     const extraction = Object.freeze({
       schema: CPP_CUTE_BROWSER_HEADER_SOURCE_EXTRACTION_SCHEMA,
-      version: 3,
+      version: 4,
       extractionId: `bg.cpp.browser-header-source-extraction.sha256.${extractionHash}`,
       authority: "exact-plan-host-tool-source-materialization-observation-only",
       buildInputLockId: plan.body.buildInputLockId,
       buildInputLockResourceSha256: plan.body.buildInputLockResourceSha256,
+      headerInputProjectionId: plan.body.headerInputProjectionId,
       headerSourcePlanId: plan.planId,
       archiveAdmissionId: object.archiveAdmission.admissionId,
       bsdtarTool: Object.freeze({
@@ -317,6 +318,7 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
       claims: Object.freeze({
         exactCurrentHeaderSourcePlanArchiveBytesVerified: true,
         exactBuildInputLockBound: true,
+        exactHeaderInputProjectionBound: true,
         exactHeaderSourcePlanBound: true,
         sourceSubtreeMaterializationsObserved: true,
         exactSelectedSourceSubtreesComplete:
@@ -568,6 +570,8 @@ export function parseCppCuteBrowserHeaderSourceExtractionArguments(argv) {
 function bindAdmissionToPlan(admission, plan) {
   if (admission.headerSourcePlanId !== plan.planId ||
       admission.buildInputLockId !== plan.body.buildInputLockId ||
+      admission.buildInputLockResourceSha256 !== plan.body.buildInputLockResourceSha256 ||
+      admission.headerInputProjectionId !== plan.body.headerInputProjectionId ||
       admission.archives.length !== plan.body.archives.length) {
     invalid("$.input.archiveAdmission", "archive admission differs from the current source plan");
   }

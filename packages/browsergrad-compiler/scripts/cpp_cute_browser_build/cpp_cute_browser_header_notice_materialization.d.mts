@@ -20,11 +20,12 @@ export class CppCuteBrowserHeaderNoticeMaterializationError extends Error {
 
 export interface CppCuteBrowserHeaderNoticeMaterializationReport {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_NOTICE_MATERIALIZATION_SCHEMA;
-  readonly version: 1;
+  readonly version: 2;
   readonly noticeMaterializationId: string;
   readonly authority: "exact-private-distribution-notice-materialization-only";
   readonly buildInputLockId: string;
   readonly buildInputLockResourceSha256: string;
+  readonly headerInputProjectionId: string;
   readonly distributionReviewInputId: string;
   readonly inventoryId: string;
   readonly outputFileMaterializationId: string;

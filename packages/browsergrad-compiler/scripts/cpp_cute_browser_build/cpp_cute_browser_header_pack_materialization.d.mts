@@ -30,11 +30,12 @@ export interface CppCuteBrowserHeaderPackMaterializationOutput {
 
 export interface CppCuteBrowserHeaderPackMaterialization {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_PACK_MATERIALIZATION_SCHEMA;
-  readonly version: 1;
+  readonly version: 2;
   readonly authority: "deterministic-vfs-pack-materialization-only";
   readonly inventoryId: string;
   readonly buildInputLockId: string;
   readonly buildInputLockResourceSha256: string;
+  readonly headerInputProjectionId: string;
   readonly outputRoot: string;
   readonly outputs: readonly CppCuteBrowserHeaderPackMaterializationOutput[];
   readonly totalPackByteLength: string;

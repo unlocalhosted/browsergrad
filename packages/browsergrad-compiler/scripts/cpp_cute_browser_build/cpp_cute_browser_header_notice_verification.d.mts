@@ -12,10 +12,11 @@ export interface CppCuteBrowserHeaderNoticeVerificationInput {
 
 export interface CppCuteBrowserHeaderNoticeVerification {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_NOTICE_VERIFICATION_SCHEMA;
-  readonly version: 1;
+  readonly version: 2;
   readonly authority: "approved-header-notice-byte-verification-only";
   readonly buildInputLockId: string;
   readonly buildInputLockResourceSha256: string;
+  readonly headerInputProjectionId: string;
   readonly notices: readonly Readonly<{
     componentId: string;
     licenseExpression: string;

@@ -767,19 +767,22 @@ closed and deterministic rather than an ambient patch. The resulting 5,788
 files occupy 69,680,000 pack bytes and cover the complete configured Clang
 resource output, libc++, CUDA, CUTLASS, and the Linux sysroot. The same
 pipeline admits the exact 49,142-byte CUDA 12.6.3 redistribution index and
-writes a canonical 1,208,487-byte `license-inventory.json`. Its 5,788 unique
+writes a canonical 1,208,403-byte `license-inventory.json`. Its 5,788 unique
 file-map entries bind every
 distributed virtual path and content identity to the materialized pack,
 license component, and relevant package notice while also binding the complete
 ten-resource notice set, nine extracted upstream evidence files totaling
 313,228 bytes, and the selected CUDA index records. The pipeline now copies the
 ten verifier-retained package notice snapshots into their exact declared
-component-license paths and constructs a deterministic 115,316-byte aggregate
+component-license paths and constructs a deterministic 115,330-byte aggregate
 notice containing ten components, nine of them third party. The eleven new
-notice files total 226,326 bytes, are created without clobber at mode `0400`,
+notice files total 226,340 bytes, are created without clobber at mode `0400`,
 are independently reread, and complete an exact 17-file private output tree
-with the five packs and review input. A clean two-root run from commit
-`7476fd48` reproduced the complete 71,114,813-byte output subset. These are real
+with the five packs and review input. The current clean two-root run reproduced
+the complete 71,114,743-byte output subset. Stable distribution metadata binds
+the narrow header-input projection rather than the extractor-sensitive full
+build-lock identity; the live authority chain still reauthenticates the complete
+current lock before producing any output. These are real
 source-derived, independently inspected non-release pack observations. They do
 establish the complete configured header universe under one package-reviewed
 builder identity and the complete engineering input for external header-file
@@ -792,23 +795,25 @@ The two-root reproducibility command now runs that exact pipeline twice from
 one common archive/index/tool closure under four distinct non-overlapping source
 and pack roots. It then concurrently rehashes every immutable output, checks
 the complete file/directory trees before and after hashing, and confirms all 17
-paths, 71,114,813 bytes, and identities match. The current clean two-root
-command completed in about one minute with reproducibility ID
-`bg.cpp.browser-header-distribution-reproducibility.sha256.43f703672ddbeaf1e6e6d544e3ed50721a2585e947b5d0a1e624293cac80d449`
+paths, 71,114,743 bytes, and identities match. The current clean two-root
+command completed in about 28 seconds with reproducibility ID
+`bg.cpp.browser-header-distribution-reproducibility.sha256.4d4c054fd4c93dbdbdef9581eeac52b037af3425e6a1c7eff8acc585abce1e55`
 and output-verification ID
-`bg.cpp.distribution-output-file-verification.sha256.1cc298cf70ed624df258a14b0eb687c6a0666a14cdd4e5d208674f6c0f7fb3df`.
+`bg.cpp.distribution-output-file-verification.sha256.5bc2231523c4537b30dac139a40c515b725815eec34d81cd0af79f759b31a441`.
 This proves exact reproducibility only for the five header packs, license
 inventory, ten component notices, and aggregate notice. The Wasm/factory,
 Worker, remaining deterministic outputs, detached provenance, external legal
 review, and approved package asset set are not part of this subset, so full
 distribution reproducibility and release remain false.
 
-The package now pins the path-independent 4,042-byte header reproducibility
+The package now pins the path-independent 4,181-byte header reproducibility
 record at SHA-256
-`8dafa7484a7ca7a5c12e6cb2128cfbbc22d2692a96ebc1581c81e48953ad8620`.
+`7a39e78d7aa3f1f0ff68e4b7b095425c75aa5e3947b208cdc6c5c30b46524838`.
 Admission accepts only those exact bytes, verifies the current build-input lock
-and its resource identity, validates the sorted 17-output projection and byte
-total, and independently rederives both the output-verification and
+and the exact header-input projection
+`bg.cpp.browser-header-input-projection.sha256.48490ddb7b2fe655ec36824e276b90122e2f548a77b768f5978029a31129c5b7`,
+validates the sorted 17-output projection and byte total, and independently
+rederives both the output-verification and
 reproducibility identities before minting an opaque subset authority. This
 closes the gap between local live-run evidence and package-consumable technical
 evidence without turning reproducible header bytes into legal approval, signed
@@ -816,7 +821,7 @@ provenance, full-distribution reproducibility, Worker execution, or release
 authority.
 
 The clean composed header observation is
-`bg.cpp.browser-header-pack-pipeline.sha256.80a29abc734fcf3183c98fbd3bce5c23005a045f06e6837b80231845fdf09b71`.
+`bg.cpp.browser-header-pack-pipeline.sha256.705235b37a1e0fb3621be0e537bc515dfddffe7da70b7cfea15c4e2341be16b3`.
 The five output SHA-256 identities are `037acb8a...` (configured Clang
 resource), `1917ba19...` (CUDA), `4f1c39b7...` (CUTLASS), `1f2c5a1e...`
 (libc++), and `d04a460d...` (Linux sysroot); the implementation ledger retains

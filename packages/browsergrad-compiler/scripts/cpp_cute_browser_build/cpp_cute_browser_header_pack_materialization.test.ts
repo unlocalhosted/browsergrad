@@ -41,7 +41,7 @@ describe("browser header-pack materialization", () => {
 
     expect(result).toMatchObject({
       schema: "browsergrad.compiler.cpp-cute.browser-header-pack-materialization",
-      version: 1,
+      version: 2,
       authority: "deterministic-vfs-pack-materialization-only",
       inventoryId: inventory.inventoryId,
       outputRoot,

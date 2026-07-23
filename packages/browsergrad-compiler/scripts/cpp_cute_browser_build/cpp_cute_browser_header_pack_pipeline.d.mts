@@ -35,11 +35,12 @@ export interface CppCuteBrowserHeaderPackPipelineInput {
 
 export interface CppCuteBrowserHeaderPackPipeline {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA;
-  readonly version: 5;
+  readonly version: 6;
   readonly pipelineId: string;
   readonly authority: "exact-source-host-tool-vfs-pack-pipeline-observation-only";
   readonly buildInputLockId: string;
   readonly buildInputLockResourceSha256: string;
+  readonly headerInputProjectionId: string;
   readonly headerSourcePlanId: string;
   readonly archiveAdmissionId: string;
   readonly extractionId: string;

@@ -15,11 +15,13 @@ export class CppCuteBrowserHeaderDistributionReproducibilityError extends Error 
 
 export interface CppCuteBrowserHeaderDistributionReproducibilityReport {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_SCHEMA;
-  readonly version: 1;
+  readonly version: 2;
   readonly reproducibilityId: string;
   readonly authority: "two-root-exact-header-distribution-reproducibility-only";
   readonly scope: "five-header-packs-license-inventory-and-notice-outputs-only";
   readonly buildInputLockId: string;
+  readonly buildInputLockResourceSha256: string;
+  readonly headerInputProjectionId: string;
   readonly pipelineId: string;
   readonly outputVerificationId: string;
   readonly firstOutputRoot: string;

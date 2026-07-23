@@ -76,6 +76,7 @@ describe("browser header-pack source inventory", () => {
     expect(one.claims).toEqual({
       exactReadableSourceTreesVerified: true,
       buildInputLockBound: true,
+      headerInputProjectionBound: true,
       networkAccessed: false,
       archiveProvenanceVerified: false,
       generatedClangResourceHeadersComplete: false,

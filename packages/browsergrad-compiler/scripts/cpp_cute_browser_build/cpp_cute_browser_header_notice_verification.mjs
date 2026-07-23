@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
 import {
+  cppCuteBrowserHeaderInputProjectionId,
   cppCuteBrowserBuildInputLockResourceBytes,
   decodeCppCuteBrowserBuildInputLock,
   unwrapPreparedCppCuteBrowserBuildInputLock,
@@ -48,6 +49,8 @@ export async function verifyCppCuteBrowserHeaderPackNotices(input = {}) {
     cppCuteBrowserBuildInputLockResourceBytes(),
   );
   const body = unwrapPreparedCppCuteBrowserBuildInputLock(buildInputLock).lock.body;
+  const headerInputProjectionId =
+    await cppCuteBrowserHeaderInputProjectionId(buildInputLock);
   const approved = [...body.notices.approvedComponents]
     .sort((left, right) => compareUtf8(left.componentId, right.componentId));
   const unresolved = [...body.notices.unresolvedComponents]
@@ -88,10 +91,11 @@ export async function verifyCppCuteBrowserHeaderPackNotices(input = {}) {
   }
   const evidence = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_NOTICE_VERIFICATION_SCHEMA,
-    version: 1,
+    version: 2,
     authority: "approved-header-notice-byte-verification-only",
     buildInputLockId: buildInputLock.lockId,
     buildInputLockResourceSha256: buildInputLock.resourceSha256,
+    headerInputProjectionId,
     notices: Object.freeze(notices),
     unresolvedNotices: Object.freeze(unresolved.map((notice) => Object.freeze({
       componentId: notice.componentId,

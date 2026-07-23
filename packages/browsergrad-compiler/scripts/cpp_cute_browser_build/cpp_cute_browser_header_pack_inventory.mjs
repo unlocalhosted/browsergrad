@@ -10,6 +10,7 @@ import {
   deriveCppCuteBrowserVfsContentSetSha256,
 } from "../../dist/cpp_cute_browser_vfs_pack.js";
 import {
+  cppCuteBrowserHeaderInputProjectionId,
   cppCuteBrowserBuildInputLockResourceBytes,
   decodeCppCuteBrowserBuildInputLock,
   unwrapPreparedCppCuteBrowserBuildInputLock,
@@ -37,7 +38,7 @@ export const CPP_CUTE_BROWSER_HEADER_PACK_INVENTORY_SCHEMA =
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-PACK-INVENTORY";
 const INVENTORY_HASH_DOMAIN =
-  "browsergrad.compiler.cpp-cute.browser-header-pack-source-inventory.v1";
+  "browsergrad.compiler.cpp-cute.browser-header-pack-source-inventory.v2";
 const PORTABLE_SEGMENT = /^[A-Za-z0-9._+@=-]+$/u;
 const IDENTIFIER = /^[a-z][a-z0-9._-]*$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -117,6 +118,8 @@ export async function inventoryCppCuteBrowserHeaderPackSources(input) {
     cppCuteBrowserBuildInputLockResourceBytes(),
   );
   const lockBody = unwrapPreparedCppCuteBrowserBuildInputLock(buildInputLock).lock.body;
+  const headerInputProjectionId =
+    await cppCuteBrowserHeaderInputProjectionId(buildInputLock);
   const packPolicies = bindPackPoliciesToBuildLock(lockBody);
   for (const [index, pack] of parsedPacks.entries()) {
     const policy = packPolicies[index];
@@ -196,6 +199,7 @@ export async function inventoryCppCuteBrowserHeaderPackSources(input) {
   return finalizeInventory({
     authority: "local-source-tree-inventory-only",
     buildInputLock,
+    headerInputProjectionId,
     packs,
     sourceCount,
     fileCount: budget.files,
@@ -218,8 +222,11 @@ export async function inventoryCppCuteBrowserExtractedHeaderSources(extraction) 
   const buildInputLock = await decodeCppCuteBrowserBuildInputLock(
     cppCuteBrowserBuildInputLockResourceBytes(),
   );
+  const headerInputProjectionId =
+    await cppCuteBrowserHeaderInputProjectionId(buildInputLock);
   if (extraction.buildInputLockId !== buildInputLock.lockId ||
-      extraction.buildInputLockResourceSha256 !== buildInputLock.resourceSha256) {
+      extraction.buildInputLockResourceSha256 !== buildInputLock.resourceSha256 ||
+      extraction.headerInputProjectionId !== headerInputProjectionId) {
     invalid("$.extraction", "header-source extraction differs from the current build lock");
   }
   const lockBody = unwrapPreparedCppCuteBrowserBuildInputLock(buildInputLock).lock.body;
@@ -498,6 +505,7 @@ export async function inventoryCppCuteBrowserExtractedHeaderSources(extraction) 
   return finalizeInventory({
     authority: "exact-extraction-source-inventory-only",
     buildInputLock,
+    headerInputProjectionId,
     headerSourceExtractionId: extraction.extractionId,
     packs,
     sourceCount,
@@ -510,8 +518,7 @@ export async function inventoryCppCuteBrowserExtractedHeaderSources(extraction) 
 function finalizeInventory(input) {
   const inventoryHash = sha256(canonicalJsonBytes({
     domain: INVENTORY_HASH_DOMAIN,
-    buildInputLockId: input.buildInputLock.lockId,
-    buildInputLockResourceSha256: input.buildInputLock.resourceSha256,
+    headerInputProjectionId: input.headerInputProjectionId,
     ...(input.headerSourceExtractionId === undefined
       ? {}
       : { headerSourceExtractionId: input.headerSourceExtractionId }),
@@ -519,11 +526,12 @@ function finalizeInventory(input) {
   }));
   const manifest = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_PACK_INVENTORY_SCHEMA,
-    version: 1,
+    version: 2,
     inventoryId: `bg.cpp.browser-header-pack-source-inventory.sha256.${inventoryHash}`,
     authority: input.authority,
     buildInputLockId: input.buildInputLock.lockId,
     buildInputLockResourceSha256: input.buildInputLock.resourceSha256,
+    headerInputProjectionId: input.headerInputProjectionId,
     ...(input.headerSourceExtractionId === undefined
       ? {}
       : { headerSourceExtractionId: input.headerSourceExtractionId }),
@@ -537,6 +545,7 @@ function finalizeInventory(input) {
     claims: Object.freeze({
       exactReadableSourceTreesVerified: true,
       buildInputLockBound: true,
+      headerInputProjectionBound: true,
       networkAccessed: false,
       archiveProvenanceVerified: false,
       generatedClangResourceHeadersComplete: input.headerSourceExtractionId !== undefined,

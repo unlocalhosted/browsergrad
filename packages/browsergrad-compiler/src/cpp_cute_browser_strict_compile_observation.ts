@@ -29,6 +29,37 @@ export const CPP_CUTE_BROWSER_STRICT_COMPILE_SOURCE_REVISION =
   "559a0586a172b536179a8c69b8848e5293bf99d4";
 export const CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256 =
   "eb7df701054a82f59486c011e9a861e1565525c688e402fc1d3fe1724f2530f6";
+const STRICT_OBSERVATION_HEADER_REPRODUCIBILITY_ID =
+  "bg.cpp.browser-header-distribution-reproducibility.sha256.43f703672ddbeaf1e6e6d544e3ed50721a2585e947b5d0a1e624293cac80d449";
+const STRICT_OBSERVATION_HEADER_OUTPUT_VERIFICATION_ID =
+  "bg.cpp.distribution-output-file-verification.sha256.1cc298cf70ed624df258a14b0eb687c6a0666a14cdd4e5d208674f6c0f7fb3df";
+const STRICT_OBSERVATION_HEADER_PACKS = Object.freeze([
+  Object.freeze({
+    outputPath: "assets/browsergrad-cpp-cute/clang-resource.headers.bgvfs",
+    sha256: "037acb8aaae9a437ed8275ca608dd92c31a142aa8c882b7ac238e80b3343805e",
+    byteLength: "7704705",
+  }),
+  Object.freeze({
+    outputPath: "assets/browsergrad-cpp-cute/cuda-12.6.3.headers.bgvfs",
+    sha256: "1917ba19e65d1e3be9dfe23b80c693ba8de5ce8e44538a7d16715cd61ece2cbd",
+    byteLength: "18954596",
+  }),
+  Object.freeze({
+    outputPath: "assets/browsergrad-cpp-cute/cutlass-3.7.0.headers.bgvfs",
+    sha256: "4f1c39b73f2fa7252628a253f7bb5b1411bdfdada872c5ff733b1b9008d89555",
+    byteLength: "21403975",
+  }),
+  Object.freeze({
+    outputPath: "assets/browsergrad-cpp-cute/libcxx-22.1.8.headers.bgvfs",
+    sha256: "1f2c5a1e86b04c29b6af33cc3fba0487b9bdcb87affaa44fceb32bec424e7dba",
+    byteLength: "12689654",
+  }),
+  Object.freeze({
+    outputPath: "assets/browsergrad-cpp-cute/linux-sysroot.headers.bgvfs",
+    sha256: "d04a460dc605703b8e8a104cc5c043e6a7020ca7201991470c615273d43e7ae4",
+    byteLength: "8927070",
+  }),
+]);
 
 const BUILTIN_RESOURCE_BYTES = canonicalJsonBytes(
   CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE,
@@ -163,9 +194,10 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
     mismatch("$.inputs.wasmSha256", "observation does not bind the reproducible package Wasm");
   }
   if (resource.inputs.headerDistributionReproducibilityId !==
-        headers.reproducibilityId ||
+        STRICT_OBSERVATION_HEADER_REPRODUCIBILITY_ID ||
       resource.inputs.headerDistributionOutputVerificationId !==
-        headers.outputVerificationId ||
+        STRICT_OBSERVATION_HEADER_OUTPUT_VERIFICATION_ID ||
+      !sameStrictObservationHeaderPacks(headers.outputs) ||
       !resource.inputs.packagePinnedHeaderPacksMatched ||
       resource.inputs.packCount !== 5 ||
       resource.inputs.installedFileCount !== 5_788) {
@@ -226,6 +258,24 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
   }) as VerifiedCppCuteBrowserStrictCompileObservation;
   VERIFIED_OBSERVATIONS.add(authority);
   return authority;
+}
+
+function sameStrictObservationHeaderPacks(
+  outputs: readonly Readonly<{
+    outputPath: string;
+    sha256: string;
+    byteLength: string;
+  }>[],
+): boolean {
+  const packs = outputs.filter((output) => output.outputPath.endsWith(".headers.bgvfs"));
+  return packs.length === STRICT_OBSERVATION_HEADER_PACKS.length &&
+    packs.every((output, index) => {
+      const expected = STRICT_OBSERVATION_HEADER_PACKS[index];
+      return expected !== undefined &&
+        output.outputPath === expected.outputPath &&
+        output.sha256 === expected.sha256 &&
+        output.byteLength === expected.byteLength;
+    });
 }
 
 export function requireVerifiedCppCuteBrowserStrictCompileObservation(

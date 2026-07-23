@@ -49,7 +49,7 @@ describe("browser header-pack approved notice bytes", () => {
     const evidence = await verifyCppCuteBrowserHeaderPackNotices();
     expect(evidence).toMatchObject({
       schema: "browsergrad.compiler.cpp-cute.browser-header-notice-verification",
-      version: 1,
+      version: 2,
       authority: "approved-header-notice-byte-verification-only",
       claims: {
         exactApprovedDistributionNoticeBytesVerified: true,
