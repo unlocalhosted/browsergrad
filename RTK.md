@@ -105,6 +105,21 @@ minutes. Uncached clean and two-build reproducibility modes remain deliberately
 separate release-evidence authorities; their provisioning cost is not an edit
 loop and must not be placed on routine source iteration.
 
+If both clean build jobs succeeded but the comparison job was skipped or
+failed outside those builds, reuse the immutable uploaded trees through the
+detached verifier instead of rebuilding LLVM:
+
+```sh
+gh workflow run verify-clang-wasm-reproducibility.yml \
+  --ref main \
+  -f source_run_id=EXISTING_BUILD_RUN_ID
+```
+
+The detached verifier admits the exact source workflow and both successful
+build jobs, rechecks them against the current build lock, compares the two
+artifact trees, and requires strict raw-Wasm ABI conformance before uploading
+new review evidence. It performs no compiler build.
+
 When exact Clang-Wasm and five materialized pack files already exist, use the
 real-browser lane without rebuilding either input:
 
