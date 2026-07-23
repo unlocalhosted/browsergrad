@@ -14,6 +14,11 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Adds a dependency-safe framework/platform support view. Runtime now composes
+  provider-bound requirement resolutions, exact program lowering decisions,
+  and generated framework-operation sources without importing a framework
+  package. JIT exposes all 36 executable registry records to JavaScript from
+  the same JSON consumed by its Python validators.
 - Adds the semantic-core `/capability` protocol and a generated runtime
   registry for the current semantic capability and three registered backends.
   Runtime program-support views require actual program- or artifact-scoped

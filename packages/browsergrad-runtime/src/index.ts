@@ -72,6 +72,21 @@ export {
   type ProgramLoweringDecisionRecord,
 } from "./program-capabilities.js";
 
+export {
+  FRAMEWORK_PLATFORM_DECISION_FIELDS,
+  FRAMEWORK_PLATFORM_SUPPORT_VIEW_SCHEMA,
+  FRAMEWORK_PLATFORM_SUPPORT_VIEW_SCHEMA_VERSION,
+  createFrameworkPlatformSupportView,
+  type FrameworkPlatformDecisionField,
+  type FrameworkPlatformOperation,
+  type FrameworkPlatformOperationDecisions,
+  type FrameworkPlatformOperationInput,
+  type FrameworkPlatformSupportSource,
+  type FrameworkPlatformSupportSourceInput,
+  type FrameworkPlatformSupportView,
+  type FrameworkPlatformSupportViewInput,
+} from "./framework-platform-support.js";
+
 // Lab manifest + semver gate. For platforms that ship versioned content
 // units and want to refuse mismatched runtime pins at boot.
 export {

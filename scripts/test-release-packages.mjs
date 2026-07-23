@@ -119,6 +119,7 @@ try {
   for (const exportName of [
     "BrowsergradError",
     "assignmentRequirementDefinitions",
+    "createFrameworkPlatformSupportView",
     "createProgramCapabilitySupportView",
     "createAssignmentRequirementResolutionEnvironment",
     "createSession",
@@ -880,6 +881,11 @@ try {
   assert(typeof jitRoot.installJit === "function", "JIT packed root missing installJit");
   assert(typeof jitRoot.JitInstallError === "function", "JIT packed root missing JitInstallError");
   assert(
+    typeof jitRoot.frameworkOperationSupport === "function"
+      && typeof jitRoot.frameworkPlatformSupportSource === "function",
+    "JIT packed root missing generated framework support exports",
+  );
+  assert(
     jitSource.MOUNT_ROOT === "/lib/browsergrad_jit_src"
       && Array.isArray(jitSource.SOURCE_FILES)
       && jitSource.SOURCE_FILES.some(({ path }) => path === "browsergrad_jit/__init__.py"),
@@ -906,6 +912,20 @@ try {
     "fresh npm JIT-only consumer must not auto-install optional peers",
   );
   verifyInstalledJitConsumer(npmJitOnlyConsumer, false, workspaceJitPkg.version);
+  const npmFrameworkPlatformConsumer = installPackedNpmConsumer(
+    "framework-platform-support",
+    [
+      "browsergrad-runtime",
+      "browsergrad-semantic-core",
+      "browsergrad-jit",
+    ],
+    { pyodide: `file:${pyodidePeer}` },
+  );
+  verifyInstalledFrameworkPlatformConsumer(
+    npmFrameworkPlatformConsumer,
+    workspaceRuntimePkg.version,
+    workspaceJitPkg.version,
+  );
   const integratedJitConsumer = installPackedConsumer(
     "jit-kernels-semantic-core",
     ["browsergrad-semantic-core", "browsergrad-kernels", "browsergrad-jit"],
@@ -1477,7 +1497,12 @@ if (prepared.semantic.operation.operationId !== artifacts.operationId) throw new
 `
     : "";
   const source = `
-import { installJit, JitInstallError } from "@unlocalhosted/browsergrad-jit";
+import {
+  installJit,
+  JitInstallError,
+  frameworkOperationSupport,
+  frameworkPlatformSupportSource,
+} from "@unlocalhosted/browsergrad-jit";
 import { MOUNT_ROOT, SOURCE_FILES } from "@unlocalhosted/browsergrad-jit/source";
 import { createNodePyodideTarget } from "@unlocalhosted/browsergrad-jit/node-adapter";
 import jitPackage from "@unlocalhosted/browsergrad-jit/package.json" with { type: "json" };
@@ -1485,6 +1510,7 @@ ${integrationImports}
 
 if (jitPackage.version !== ${JSON.stringify(expectedVersion)}) throw new Error(\`unexpected packed JIT version: \${jitPackage.version}\`);
 if (typeof installJit !== "function" || !(new JitInstallError("test") instanceof Error)) throw new Error("packed JIT root exports invalid");
+if (frameworkOperationSupport().operations.length !== 36 || frameworkPlatformSupportSource().operations.length !== 36) throw new Error("packed JIT generated framework support invalid");
 if (MOUNT_ROOT !== "/lib/browsergrad_jit_src" || !SOURCE_FILES.some(({ path }) => path === "browsergrad_jit/__init__.py")) throw new Error("packed JIT source export invalid");
 
 const observation = { writeCount: 0, executionCount: 0, lastCode: "" };
@@ -1516,6 +1542,65 @@ ${integrationChecks}
     "--skipLibCheck",
     join(consumer, "consumer.ts"),
   ], root);
+}
+
+function verifyInstalledFrameworkPlatformConsumer(
+  consumer,
+  expectedRuntimeVersion,
+  expectedJitVersion,
+) {
+  const source = `
+import {
+  createAssignmentRequirementResolutionEnvironment,
+  createFrameworkPlatformSupportView,
+} from "@unlocalhosted/browsergrad-runtime";
+import {
+  JIT_FRAMEWORK_VERSION,
+  frameworkPlatformSupportSource,
+} from "@unlocalhosted/browsergrad-jit";
+import runtimePackage from "@unlocalhosted/browsergrad-runtime/package.json" with { type: "json" };
+import jitPackage from "@unlocalhosted/browsergrad-jit/package.json" with { type: "json" };
+
+if (runtimePackage.version !== ${JSON.stringify(expectedRuntimeVersion)}) throw new Error("unexpected packed runtime version");
+if (jitPackage.version !== ${JSON.stringify(expectedJitVersion)} || JIT_FRAMEWORK_VERSION !== jitPackage.version) throw new Error("unexpected packed JIT framework version");
+const requirements = createAssignmentRequirementResolutionEnvironment({
+  environmentId: "browser.release-consumer",
+  providers: [{
+    requirementId: "pyodide",
+    providerId: "worker.pyodide",
+    mode: "browser",
+  }],
+});
+const view = createFrameworkPlatformSupportView({
+  viewId: "browsergrad.support.release-platform",
+  requirements,
+  program: {
+    viewId: "browsergrad.support.release-program",
+    subject: {
+      kind: "program",
+      programId: "browsergrad.program.release-platform",
+    },
+    decisions: [{
+      capabilityId: "browsergrad.layout.index-map",
+      backendId: "browsergrad.compiler.semantic-reference",
+      executionTier: "semantic-reference",
+      state: "supported",
+      preservationLevel: "observable-equivalent",
+    }],
+  },
+  frameworks: [frameworkPlatformSupportSource()],
+});
+if (
+  view.environmentId !== "browser.release-consumer"
+  || view.programSupport.decisions[0]?.state !== "supported"
+  || view.frameworks[0]?.frameworkId !== "browsergrad.jit"
+  || view.frameworks[0]?.operations.length !== 36
+) throw new Error("packed cross-package framework platform view invalid");
+`;
+  writeFileSync(join(consumer, "consumer.mjs"), source);
+  writeFileSync(join(consumer, "consumer.ts"), source);
+  run("node", ["consumer.mjs"], consumer);
+  typecheckConsumer(consumer);
 }
 
 function typecheckConsumer(consumer) {

@@ -32,6 +32,21 @@
 export { installJit } from "./install.js";
 export type { JitTarget, InstallOptions } from "./types.js";
 export { JitInstallError } from "./types.js";
+export {
+  FRAMEWORK_OPERATION_DECISION_FIELDS,
+  JIT_FRAMEWORK_ID,
+  JIT_FRAMEWORK_OPERATION_SUPPORT_SCHEMA,
+  JIT_FRAMEWORK_OPERATION_SUPPORT_VERSION,
+  JIT_FRAMEWORK_VERSION,
+  frameworkOperationSupport,
+  frameworkPlatformSupportSource,
+  type FrameworkOperationDecisionField,
+  type FrameworkOperationDecisions,
+  type FrameworkOperationSupportRecord,
+  type FrameworkOperationSupportTable,
+  type JitFrameworkPlatformOperation,
+  type JitFrameworkPlatformSupportSource,
+} from "./framework-operation-support.js";
 
 // The Python source itself is exported at the `./source` subpath
 // for tools that want to install jit through their own Pyodide bootstrap.

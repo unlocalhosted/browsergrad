@@ -398,6 +398,64 @@ preservation level; conditional decisions retain their guards; refusals and
 unknown decisions require a reason and cannot claim preservation. Execution
 evidence remains a separate terminal record.
 
+## Framework platform support
+
+Use `createFrameworkPlatformSupportView()` when a platform needs one immutable
+payload without flattening requirement, program, and framework facts:
+
+```ts
+import {
+  createAssignmentRequirementResolutionEnvironment,
+  createFrameworkPlatformSupportView,
+} from "@unlocalhosted/browsergrad-runtime";
+import {
+  frameworkPlatformSupportSource,
+} from "@unlocalhosted/browsergrad-jit";
+
+const requirements = createAssignmentRequirementResolutionEnvironment({
+  environmentId: "browser.local",
+  providers: [
+    {
+      requirementId: "webgpu",
+      providerId: "navigator.gpu",
+      mode: "browser",
+    },
+  ],
+});
+
+const view = createFrameworkPlatformSupportView({
+  viewId: "browsergrad.support.platform.transpose",
+  requirements,
+  program: {
+    viewId: "browsergrad.support.program.transpose",
+    subject: {
+      kind: "program",
+      programId: "browsergrad.program.transpose",
+    },
+    decisions: [
+      {
+        capabilityId: "browsergrad.layout.index-map",
+        backendId: "browsergrad.kernels.webgpu",
+        executionTier: "webgpu-core",
+        state: "conditional",
+        preservationLevel: "observable-equivalent",
+        requiredFeatures: ["webgpu"],
+        runtimeGuardIds: ["browsergrad.guard.device-features"],
+      },
+    ],
+  },
+  frameworks: [frameworkPlatformSupportSource()],
+});
+```
+
+The view keeps the complete provider-bound environment, the exact
+program/artifact subject and lowering decisions, and each framework's
+operation contracts in separate fields. It validates the ten decision
+categories, bounds source and operation counts, rejects duplicates/open
+records, and never converts contract strings into a generic `supported`
+boolean. Runtime does not import or depend on JIT; any framework can provide
+the same structural source.
+
 Use `runAssignmentJavascriptProfile()` when the platform has a full JS-routed
 profile and wants BrowserGrad to own preflight, route validation, mount
 collection, declared-oracle preflight, oracle/substrate wiring, and rubric

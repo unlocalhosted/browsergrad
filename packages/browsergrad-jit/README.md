@@ -255,6 +255,23 @@ data. Backend entries name eligibility profiles only. Check runtime/device
 availability and execution evidence separately. Operations absent from this
 table have no admitted typed framework-operation contract.
 
+JavaScript platforms can consume the same registry without launching Pyodide:
+
+```ts
+import {
+  frameworkOperationSupport,
+  frameworkPlatformSupportSource,
+} from "@unlocalhosted/browsergrad-jit";
+
+const table = frameworkOperationSupport();
+const source = frameworkPlatformSupportSource();
+```
+
+Both functions return detached records. The platform source maps the exact
+contract/opcode/legacy identities into runtime's framework-neutral input shape;
+it does not infer device availability, program lowering, or execution
+evidence.
+
 ### Gradient control
 ```python
 with bg.no_grad():

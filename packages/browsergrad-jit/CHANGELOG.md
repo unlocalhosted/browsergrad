@@ -7,6 +7,14 @@ contract in the README](README.md#compatibility-contract).
 
 ## [Unreleased]
 
+### Added
+
+- JavaScript `frameworkOperationSupport()` and
+  `frameworkPlatformSupportSource()` projections generated from the same
+  36-record registry consumed by the Python executable validators. Calls
+  return detached records, preserve all ten exact decision categories, and
+  expose no runtime/device availability or execution-evidence boolean.
+
 ### Changed
 
 - `bg.kernels.attention_forward` now emits typed `ATTENTION_FORWARD` IR for a

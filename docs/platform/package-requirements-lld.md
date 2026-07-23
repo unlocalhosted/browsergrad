@@ -13,7 +13,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
 describe requirement strength. They are used deliberately rather than as
 general emphasis.
 
-## Implementation Checkpoint — Active 2026-07-22
+## Implementation Checkpoint — Active 2026-07-23
 
 Gates 0 through 2 and Gates 4 through 5 are verified; Gate 3 remains active;
 Gate 6 is in progress; Gate 7 has not started. Gate 4 is verified for its initial
@@ -706,8 +706,18 @@ decisions for that subject. Positive decisions require a registered
 preservation level; conditional decisions retain exact feature, limit, or
 runtime-guard requirements; refusals cannot claim preservation. Static
 definitions and environment requirement resolutions therefore cannot become
-program-support claims. Generated cross-framework/platform views and terminal
-execution evidence remain separate work.
+program-support claims.
+
+ADR-0050 composes those separate facts for platform consumers without
+flattening them. JIT's JavaScript root projects all 36 records from the same
+generated framework-operation JSON consumed by its Python executable
+validators. Runtime's framework-neutral platform view canonically reconstructs
+one provider-bound requirement environment and one program-support input,
+then bounds, validates, sorts, and freezes one or more framework sources.
+Requirement availability, program lowering state, framework decision strings,
+and terminal execution evidence remain separate fields and protocols. Runtime
+does not import JIT, and JIT does not import runtime. A generated Grad source
+and terminal execution evidence remain separate work.
 
 Browser asset manifest v1.4 now binds one build-signature predicate, exact
 trust-store digest, and canonical builder allowlist into the profile-pinned
@@ -2757,8 +2767,11 @@ environment is now derivable from these records. ADR-0048 makes run-plan,
 report, handoff, external-runner, matrix, and JavaScript profile APIs accept
 the resolution environment directly and retain each profile's relevant
 provider/evidence records. The compatibility shape remains admitted only for
-existing callers. Artifact/program-scoped lowering records still remain
-required for Gate 6 exit.
+existing callers. ADR-0049 adds artifact/program-scoped lowering records, and
+ADR-0050 adds a framework-neutral platform view plus a JIT JavaScript source
+generated from the executable 36-operation registry. Grad still needs an
+equivalent generated source before both framework surfaces appear in that
+view.
 
 ### Adapter ledger
 
