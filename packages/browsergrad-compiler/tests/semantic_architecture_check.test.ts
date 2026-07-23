@@ -9,6 +9,7 @@ import {
   checkFrozenCompilerPointerScalarMemorySource,
   checkFrozenGradCompatibilitySources,
   checkFrozenRuntimeAssignmentRequirementsSource,
+  checkRuntimeAssignmentResolutionConsumerSources,
   checkFrozenCuteSourceNormalizerFiles,
   checkFrozenCuteStaticLayoutSource,
   checkFrozenTensorGpuPlanSource,
@@ -25,6 +26,7 @@ import {
   validateAssignmentRequirementRegistrySource,
   validatePlatformVocabularySnapshot,
   validateSemanticFreezeManifest,
+  validateSemanticArchitectureDeclarationParity,
   validateSharedSemanticFixtureContracts,
 } from "../../../scripts/semantic-architecture-check.mjs";
 
@@ -53,6 +55,34 @@ function freeze(kind: string): Record<string, unknown> {
 describe("semantic architecture guardrails", () => {
   it("accepts the repository baseline", () => {
     expect(runSemanticArchitectureCheck(repoRoot)).toEqual([]);
+  });
+
+  it("rejects architecture implementation/declaration drift", () => {
+    const implementation = readFileSync(
+      join(repoRoot, "scripts/semantic-architecture-check.mjs"),
+      "utf8",
+    );
+    const declaration = readFileSync(
+      join(repoRoot, "scripts/semantic-architecture-check.d.mts"),
+      "utf8",
+    );
+    expect(validateSemanticArchitectureDeclarationParity(
+      ts,
+      implementation,
+      declaration,
+    )).toEqual([]);
+    expect(validateSemanticArchitectureDeclarationParity(
+      ts,
+      implementation,
+      declaration.replace(
+        "  torchCompatLimitedSource: string,\n",
+        "",
+      ),
+    )).toContainEqual(
+      expect.stringContaining(
+        "declaration signature checkFrozenGradCompatibilitySources changed",
+      ),
+    );
   });
 
   it("rejects shared semantic fixture content, coverage, and routing drift", () => {
@@ -252,6 +282,56 @@ describe("semantic architecture guardrails", () => {
     expect(
       validateAssignmentRequirementRegistrySource(registrySource, duplicated),
     ).toContainEqual(expect.stringContaining("duplicate assignment requirement"));
+  });
+
+  it("rejects runtime readiness consumers that drop resolution records", () => {
+    const runtimeFreeze = freeze("runtime-assignment-requirements");
+    const typesFile = join(
+      repoRoot,
+      "packages/browsergrad-runtime/src/assignment-types.ts",
+    );
+    const capabilityFile = join(
+      repoRoot,
+      "packages/browsergrad-runtime/src/assignment-capabilities.ts",
+    );
+    const typesSource = readFileSync(typesFile, "utf8");
+    expect(checkFrozenRuntimeAssignmentRequirementsSource(
+      ts,
+      readFileSync(capabilityFile, "utf8"),
+      typesSource.replace(
+        "readonly requirementResolutions?: readonly AssignmentRequirementResolution[];",
+        "readonly requirementResolutions?: readonly string[];",
+      ),
+      runtimeFreeze,
+    )).toContainEqual(
+      expect.stringContaining(
+        "requirementResolutions must remain one optional readonly",
+      ),
+    );
+
+    const consumers = Object.fromEntries(
+      (runtimeFreeze.resolutionConsumers as Array<{
+        file: string;
+      }>).map(({ file }) => [
+        file,
+        readFileSync(join(repoRoot, file), "utf8"),
+      ]),
+    );
+    consumers["packages/browsergrad-runtime/src/assignment-run-plan.ts"] =
+      consumers["packages/browsergrad-runtime/src/assignment-run-plan.ts"]!
+        .replace(
+          "environment: AssignmentReadinessEnvironment",
+          "environment: AssignmentCapabilityEnvironment",
+        );
+    expect(checkRuntimeAssignmentResolutionConsumerSources(
+      ts,
+      consumers,
+      runtimeFreeze,
+    )).toContainEqual(
+      expect.stringContaining(
+        "createAssignmentRunPlan must consume AssignmentReadinessEnvironment directly",
+      ),
+    );
   });
 
   it("rejects Grad dtype/view source drift", () => {

@@ -124,6 +124,7 @@ export {
   type AssignmentCapabilityMode,
   type AssignmentCapabilityGateEvaluation,
   type AssignmentCapabilityEvaluation,
+  type AssignmentReadinessEnvironment,
   type AssignmentRequirementProviderRecord,
   type AssignmentRequirementResolutionEnvironment,
   type AssignmentRequirementResolutionEnvironmentInput,

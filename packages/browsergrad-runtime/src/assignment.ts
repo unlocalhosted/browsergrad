@@ -15,6 +15,7 @@ export {
   assignmentRequirementDefinitions,
   createAssignmentRequirementResolutionEnvironment,
   evaluateAssignmentRequirementResolutions,
+  type AssignmentReadinessEnvironment,
   type AssignmentRequirementProviderRecord,
   type AssignmentRequirementResolutionEnvironment,
   type AssignmentRequirementResolutionEnvironmentInput,

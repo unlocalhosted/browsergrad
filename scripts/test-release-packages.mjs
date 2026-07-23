@@ -1248,6 +1248,7 @@ import {
   assignmentCapabilityEnvironmentFromRequirementResolutions,
   assignmentRequirementDefinitions,
   createAssignmentRequirementResolutionEnvironment,
+  createAssignmentRunPlan,
   createSession,
   isSemverCompatible,
   parseManifest,
@@ -1266,6 +1267,23 @@ const requirementEnvironment = createAssignmentRequirementResolutionEnvironment(
 });
 const capabilities = assignmentCapabilityEnvironmentFromRequirementResolutions(requirementEnvironment);
 if (assignmentRequirementDefinitions().length !== 53 || capabilities.capabilities.join(",") !== "pyodide") throw new Error("packed runtime requirement resolution invalid");
+const plan = createAssignmentRunPlan({
+  id: "release-requirement-consumer",
+  version: "1.0.0",
+  requires_browsergrad: "^0.1.0",
+  runtime_packages: [],
+  files: { root: "/assignment", rubric_path: "rubric.py" },
+  timeouts: {},
+  allowed_tests: [],
+  oracles: [],
+  gates: [{
+    name: "runtime",
+    kind: "capability",
+    options: { requires: ["pyodide"] },
+  }],
+  datasets: [],
+}, requirementEnvironment);
+if (!plan.ok || plan.requirementResolutions?.[0]?.requirementId !== "pyodide" || plan.requirementResolutions[0].status !== "available") throw new Error("packed runtime direct requirement consumer invalid");
 if (!isSemverCompatible("^0.1.0", runtimePackage.version)) throw new Error("packed runtime semver export invalid");
 const parsed = parseManifest({
   id: "release-consumer",

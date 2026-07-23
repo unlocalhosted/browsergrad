@@ -14,6 +14,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   availability requires one explicit provider/mode/evidence record, and a
   compatibility bridge derives legacy capability inputs only from available
   resolutions.
+- Run-plan, preflight, benchmark-matrix, and JavaScript profile-runner
+  entrypoints now accept provider-bound environments directly. Plans, reports,
+  platform handoffs, external-runner requests, and matrix rows retain the
+  relevant canonical resolution records for downstream readiness UI.
 
 ## [0.1.2] — 2026-07-15
 

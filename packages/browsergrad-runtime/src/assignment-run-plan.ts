@@ -6,8 +6,11 @@ import {
 } from "./assignment-capabilities.js";
 import { createAssignmentDatasetCachePlan, createAssignmentMountPlan } from "./assignment-mount.js";
 import { joinAssignmentPath, profileOracleJsModules } from "./assignment-profile.js";
+import {
+  resolveAssignmentReadinessEnvironment,
+  type AssignmentReadinessEnvironment,
+} from "./assignment-requirements.js";
 import type {
-  AssignmentCapabilityEnvironment,
   AssignmentExternalRunnerRequest,
   AssignmentPreflightReport,
   AssignmentProfile,
@@ -20,9 +23,18 @@ import type {
 
 export function createAssignmentRunPlan(
   profile: AssignmentProfile,
-  environment: AssignmentCapabilityEnvironment,
+  environment: AssignmentReadinessEnvironment,
 ): AssignmentRunPlan {
-  const capabilityEvaluation = evaluateAssignmentCapabilities(profile, environment);
+  const resolvedEnvironment = resolveAssignmentReadinessEnvironment(environment);
+  const capabilityEvaluation = evaluateAssignmentCapabilities(
+    profile,
+    resolvedEnvironment.capabilityEnvironment,
+  );
+  const requiredCapabilities = requiredAssignmentCapabilities(profile);
+  const requirementResolutions =
+    resolvedEnvironment.requirementEnvironment?.resolutions.filter(
+      (resolution) => requiredCapabilities.includes(resolution.requirementId),
+    );
   return {
     id: profile.id,
     profileVersion: profile.version,
@@ -59,6 +71,9 @@ export function createAssignmentRunPlan(
     },
     datasets: profile.datasets,
     capabilityEvaluation,
+    ...(requirementResolutions === undefined
+      ? {}
+      : { requirementResolutions: Object.freeze(requirementResolutions) }),
     behavioralGates: profile.gates.filter((gate) => gate.kind !== "capability"),
   };
 }
@@ -70,7 +85,7 @@ export function createAssignmentRunPlan(
 
 export function createAssignmentPreflightReport(
   profile: AssignmentProfile,
-  environment: AssignmentCapabilityEnvironment,
+  environment: AssignmentReadinessEnvironment,
 ): AssignmentPreflightReport {
   const plan = createAssignmentRunPlan(profile, environment);
   const rubricKind = assignmentRubricKind(plan);
@@ -83,6 +98,9 @@ export function createAssignmentPreflightReport(
     readiness,
     runnerRoute,
     requiredCapabilities: requiredAssignmentCapabilities(profile),
+    ...(plan.requirementResolutions === undefined
+      ? {}
+      : { requirementResolutions: plan.requirementResolutions }),
     mountPlan,
     datasetCachePlan: createAssignmentDatasetCachePlan(mountPlan),
     ...(runnerRoute.target === "external"
@@ -259,6 +277,9 @@ export function createAssignmentExternalRunnerRequest(
     selectedCapabilities: readiness.selectedCapabilities,
     externalCapabilities: readiness.externalCapabilities,
     simulatedCapabilities: readiness.simulatedCapabilities,
+    ...(plan.requirementResolutions === undefined
+      ? {}
+      : { requirementResolutions: plan.requirementResolutions }),
     environment: createAssignmentExternalRunnerEnvironment(
       plan,
       route,

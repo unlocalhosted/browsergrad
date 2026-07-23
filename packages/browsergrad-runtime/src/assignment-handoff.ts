@@ -1,9 +1,9 @@
 import { evaluateAssignmentMountContents, verifyAssignmentMountContentHashes } from "./assignment-mount.js";
 import { createAssignmentPreflightReport } from "./assignment-run-plan.js";
+import type { AssignmentReadinessEnvironment } from "./assignment-requirements.js";
 import type {
   AssignmentBenchmarkPreflightMatrix,
   AssignmentBenchmarkPreflightRow,
-  AssignmentCapabilityEnvironment,
   AssignmentMountContentEvaluation,
   AssignmentMountContents,
   AssignmentMountHashVerification,
@@ -18,7 +18,7 @@ import type {
 
 export function createAssignmentBenchmarkPreflightMatrix(
   profiles: readonly AssignmentProfile[],
-  environment: AssignmentCapabilityEnvironment,
+  environment: AssignmentReadinessEnvironment,
   contents: AssignmentMountContents = { files: {} },
 ): AssignmentBenchmarkPreflightMatrix {
   const rows = profiles.map((profile) =>
@@ -69,6 +69,9 @@ export function createAssignmentPlatformHandoff(
       (dataset) => dataset.strategy,
     ),
     externalRunnerRequired: Boolean(report.externalRunnerRequest),
+    ...(report.requirementResolutions === undefined
+      ? {}
+      : { requirementResolutions: report.requirementResolutions }),
     messages: assignmentPlatformMessages(report, content, nextAction),
   };
 }
@@ -148,7 +151,7 @@ export function createAssignmentPlatformIssueDraft(
 
 export async function createVerifiedAssignmentBenchmarkPreflightMatrix(
   profiles: readonly AssignmentProfile[],
-  environment: AssignmentCapabilityEnvironment,
+  environment: AssignmentReadinessEnvironment,
   contents: AssignmentMountContents,
 ): Promise<AssignmentVerifiedBenchmarkPreflightMatrix> {
   const rows = await Promise.all(
@@ -313,6 +316,9 @@ function createAssignmentBenchmarkPreflightRow(
       (dataset) => dataset.strategy,
     ),
     externalRunnerRequired: Boolean(report.externalRunnerRequest),
+    ...(report.requirementResolutions === undefined
+      ? {}
+      : { requirementResolutions: report.requirementResolutions }),
     gates: report.plan.capabilityEvaluation.gates.map((gate) => ({
       name: gate.name,
       ok: gate.ok,

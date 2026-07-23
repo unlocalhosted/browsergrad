@@ -8,8 +8,8 @@ import {
   createAssignmentRubricExecRequest,
 } from "./assignment-run-plan.js";
 import { createVerifiedAssignmentPlatformHandoff } from "./assignment-handoff.js";
+import type { AssignmentReadinessEnvironment } from "./assignment-requirements.js";
 import type {
-  AssignmentCapabilityEnvironment,
   AssignmentJavascriptProfileRunResult,
   AssignmentJavascriptRubric,
   AssignmentJavascriptRubricContext,
@@ -157,7 +157,7 @@ export async function runAssignmentJavascriptRubric(
 
 export async function runAssignmentJavascriptProfile(
   profile: AssignmentProfile,
-  environment: AssignmentCapabilityEnvironment,
+  environment: AssignmentReadinessEnvironment,
   contents: AssignmentMountContents,
   rubric: AssignmentJavascriptRubric,
   options: AssignmentJavascriptRubricRunOptions = {},
@@ -188,7 +188,7 @@ export async function runAssignmentJavascriptProfile(
 
 export async function runVerifiedAssignmentJavascriptProfile(
   profile: AssignmentProfile,
-  environment: AssignmentCapabilityEnvironment,
+  environment: AssignmentReadinessEnvironment,
   contents: AssignmentMountContents,
   rubric: AssignmentJavascriptRubric,
   options: AssignmentJavascriptRubricRunOptions = {},

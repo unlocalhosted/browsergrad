@@ -36,6 +36,15 @@ export interface AssignmentRequirementResolutionEnvironment {
   readonly resolutions: readonly AssignmentRequirementResolution[];
 }
 
+export type AssignmentReadinessEnvironment =
+  | AssignmentCapabilityEnvironment
+  | AssignmentRequirementResolutionEnvironment;
+
+interface ResolvedAssignmentReadinessEnvironment {
+  readonly capabilityEnvironment: AssignmentCapabilityEnvironment;
+  readonly requirementEnvironment?: AssignmentRequirementResolutionEnvironment;
+}
+
 const DEFINITIONS_BY_ID = new Map(
   ASSIGNMENT_REQUIREMENT_DEFINITIONS.map((definition) => [
     definition.requirementId,
@@ -103,7 +112,34 @@ export function createAssignmentRequirementResolutionEnvironment(
 export function assignmentCapabilityEnvironmentFromRequirementResolutions(
   environment: AssignmentRequirementResolutionEnvironment,
 ): AssignmentCapabilityEnvironment {
-  validateResolutionEnvironment(environment);
+  return capabilityEnvironmentFromCanonicalResolutions(
+    normalizeResolutionEnvironment(environment),
+  );
+}
+
+export function resolveAssignmentReadinessEnvironment(
+  environment: AssignmentReadinessEnvironment,
+): ResolvedAssignmentReadinessEnvironment {
+  if (!isRequirementResolutionEnvironment(environment)) {
+    return { capabilityEnvironment: environment };
+  }
+  const requirementEnvironment = normalizeResolutionEnvironment(environment);
+  return {
+    capabilityEnvironment:
+      capabilityEnvironmentFromCanonicalResolutions(requirementEnvironment),
+    requirementEnvironment,
+  };
+}
+
+function isRequirementResolutionEnvironment(
+  environment: AssignmentReadinessEnvironment,
+): environment is AssignmentRequirementResolutionEnvironment {
+  return "schema" in environment || "resolutions" in environment;
+}
+
+function capabilityEnvironmentFromCanonicalResolutions(
+  environment: AssignmentRequirementResolutionEnvironment,
+): AssignmentCapabilityEnvironment {
   return createAssignmentCapabilityEnvironment({
     browserCapabilities: availableRequirementIds(environment, "browser"),
     simulatedCapabilities: availableRequirementIds(environment, "simulated"),
@@ -132,9 +168,9 @@ function availableRequirementIds(
   );
 }
 
-function validateResolutionEnvironment(
+function normalizeResolutionEnvironment(
   environment: AssignmentRequirementResolutionEnvironment,
-): void {
+): AssignmentRequirementResolutionEnvironment {
   if (
     environment.schema !== ASSIGNMENT_REQUIREMENT_ENVIRONMENT_SCHEMA
     || environment.schemaVersion
@@ -157,6 +193,7 @@ function validateResolutionEnvironment(
     );
   }
   const observed = new Set<string>();
+  const normalized: AssignmentRequirementResolution[] = [];
   for (const resolution of environment.resolutions) {
     const definition = DEFINITIONS_BY_ID.get(resolution.requirementId);
     if (definition === undefined || observed.has(resolution.requirementId)) {
@@ -180,24 +217,35 @@ function validateResolutionEnvironment(
         `assignment requirement resolution does not match its definition: ${resolution.requirementId}`,
       );
     }
-    createAssignmentRequirementResolution(
-      definition,
-      resolution.status === "available"
-        ? {
-            environmentId,
-            status: "available",
-            provider: resolution.provider,
-          }
-        : {
-            environmentId,
-            status: "unavailable",
-            ...(resolution.diagnostic === undefined
-              ? {}
-              : { diagnostic: resolution.diagnostic }),
-          },
+    normalized.push(
+      createAssignmentRequirementResolution(
+        definition,
+        resolution.status === "available"
+          ? {
+              environmentId,
+              status: "available",
+              provider: resolution.provider,
+            }
+          : {
+              environmentId,
+              status: "unavailable",
+              ...(resolution.diagnostic === undefined
+                ? {}
+                : { diagnostic: resolution.diagnostic }),
+            },
+      ),
     );
     observed.add(resolution.requirementId);
   }
+  normalized.sort((left, right) =>
+    left.requirementId.localeCompare(right.requirementId)
+  );
+  return Object.freeze({
+    schema: ASSIGNMENT_REQUIREMENT_ENVIRONMENT_SCHEMA,
+    schemaVersion: ASSIGNMENT_REQUIREMENT_ENVIRONMENT_SCHEMA_VERSION,
+    environmentId,
+    resolutions: Object.freeze(normalized),
+  });
 }
 
 function requireNonEmpty(value: string, field: string): string {

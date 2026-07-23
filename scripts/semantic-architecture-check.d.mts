@@ -26,6 +26,7 @@ export function extractPythonDefinitionTokenDigests(
 export function checkFrozenGradCompatibilitySources(
   tensorSource: string,
   torchCompatSource: string,
+  torchCompatLimitedSource: string,
   freeze: Record<string, unknown>,
 ): string[];
 
@@ -59,11 +60,22 @@ export function extractModuleSpecifiers(
   filename?: string,
 ): string[];
 
+export function validateSemanticArchitectureDeclarationParity(
+  typescript: typeof ts,
+  implementationSource: string,
+  declarationSource: string,
+): string[];
+
 export function buildAssignmentRequirementUsage(
   root: string,
   profileDirectory?: string,
   profileSuffix?: string,
 ): unknown;
+
+export function validateAssignmentRequirementRegistrySource(
+  source: string,
+  vocabulary: unknown,
+): string[];
 
 export function checkFrozenCompilerPointerScalarMemorySource(
   typescript: typeof ts,
@@ -87,6 +99,12 @@ export function checkFrozenRuntimeAssignmentRequirementsSource(
   freeze: Record<string, unknown>,
   capabilityFilename?: string,
   typesFilename?: string,
+): string[];
+
+export function checkRuntimeAssignmentResolutionConsumerSources(
+  typescript: typeof ts,
+  sources: Readonly<Record<string, string>>,
+  freeze: Record<string, unknown>,
 ): string[];
 
 export function validatePlatformVocabularySnapshot(

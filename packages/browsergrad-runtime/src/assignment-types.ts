@@ -1,4 +1,8 @@
 import type {
+  AssignmentRequirementResolution,
+} from "@unlocalhosted/browsergrad-semantic-core/requirement";
+
+import type {
   Artifact,
   Assertion,
   ExecOptions,
@@ -163,6 +167,7 @@ export interface AssignmentPreflightReport {
   readonly readiness: AssignmentRunReadiness;
   readonly runnerRoute: AssignmentRunnerRoute;
   readonly requiredCapabilities: readonly string[];
+  readonly requirementResolutions?: readonly AssignmentRequirementResolution[];
   readonly mountPlan: AssignmentMountPlan;
   readonly datasetCachePlan: AssignmentDatasetCachePlan;
   readonly externalRunnerRequest?: AssignmentExternalRunnerRequest;
@@ -188,6 +193,7 @@ export interface AssignmentBenchmarkPreflightRow {
   readonly skippedOptionalPaths: readonly string[];
   readonly cacheStrategies: readonly AssignmentDatasetCacheStrategy[];
   readonly externalRunnerRequired: boolean;
+  readonly requirementResolutions?: readonly AssignmentRequirementResolution[];
   readonly gates: readonly AssignmentBenchmarkPreflightGateRow[];
 }
 
@@ -238,6 +244,7 @@ export interface AssignmentPlatformHandoff {
   readonly externalCapabilities: readonly string[];
   readonly cacheStrategies: readonly AssignmentDatasetCacheStrategy[];
   readonly externalRunnerRequired: boolean;
+  readonly requirementResolutions?: readonly AssignmentRequirementResolution[];
   readonly messages: readonly string[];
 }
 
@@ -274,6 +281,7 @@ export interface AssignmentRunPlan {
   readonly execution: AssignmentRunPlanExecution;
   readonly datasets: readonly AssignmentDataset[];
   readonly capabilityEvaluation: AssignmentCapabilityEvaluation;
+  readonly requirementResolutions?: readonly AssignmentRequirementResolution[];
   readonly behavioralGates: readonly AssignmentGateSpec[];
 }
 
@@ -311,6 +319,7 @@ export interface AssignmentExternalRunnerRequest {
   readonly selectedCapabilities: readonly string[];
   readonly externalCapabilities: readonly string[];
   readonly simulatedCapabilities: readonly string[];
+  readonly requirementResolutions?: readonly AssignmentRequirementResolution[];
   readonly environment: Readonly<Record<string, string>>;
   readonly files: AssignmentRunPlanFiles;
   readonly execution: AssignmentRunPlanExecution;

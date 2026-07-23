@@ -45,6 +45,19 @@ export function runSemanticArchitectureCheck(root = repoRoot) {
     return failures;
   }
 
+  const architectureImplementation = path.join(
+    root,
+    "scripts/semantic-architecture-check.mjs",
+  );
+  const architectureDeclaration = path.join(
+    root,
+    "scripts/semantic-architecture-check.d.mts",
+  );
+  failures.push(...validateSemanticArchitectureDeclarationParity(
+    ts,
+    fs.readFileSync(architectureImplementation, "utf8"),
+    fs.readFileSync(architectureDeclaration, "utf8"),
+  ));
   validateManifest(root, manifest, failures);
   checkSharedSemanticFixtureContracts(root, failures);
   checkWorkspaceDependencies(root, failures);
@@ -199,6 +212,71 @@ export function extractModuleSpecifiers(ts, source, filename = "source.ts") {
   return moduleSpecifiers(ts, sourceFile);
 }
 
+export function validateSemanticArchitectureDeclarationParity(
+  ts,
+  implementationSource,
+  declarationSource,
+) {
+  const failures = [];
+  const implementation = exportedFunctionSignatures(
+    ts,
+    implementationSource,
+    "semantic-architecture-check.mjs",
+  );
+  const declaration = exportedFunctionSignatures(
+    ts,
+    declarationSource,
+    "semantic-architecture-check.d.mts",
+  );
+  compareStringSets(
+    "semantic architecture declaration exports",
+    [...declaration.keys()],
+    [...implementation.keys()],
+    failures,
+  );
+  for (const [name, expected] of implementation) {
+    const actual = declaration.get(name);
+    if (
+      actual !== undefined
+      && JSON.stringify(actual) !== JSON.stringify(expected)
+    ) {
+      failures.push(
+        `semantic architecture declaration signature ${name} changed; expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+      );
+    }
+  }
+  return failures;
+}
+
+function exportedFunctionSignatures(ts, source, filename) {
+  const sourceFile = ts.createSourceFile(
+    filename,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  return new Map(
+    sourceFile.statements.flatMap((statement) => {
+      if (
+        !ts.isFunctionDeclaration(statement)
+        || statement.name === undefined
+        || statement.modifiers?.some(
+          (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+        ) !== true
+      ) {
+        return [];
+      }
+      return [[
+        statement.name.text,
+        statement.parameters.map((parameter) =>
+          parameter.initializer !== undefined
+          || parameter.questionToken !== undefined
+        ),
+      ]];
+    }),
+  );
+}
+
 export function buildAssignmentRequirementUsage(
   root,
   profileDirectory = "docs/internal",
@@ -351,6 +429,83 @@ export function checkFrozenRuntimeAssignmentRequirementsSource(
   checkClosedStringUnion(ts, typesFile, "AssignmentCapabilityMode", freeze.assignmentModes, failures);
   checkClosedStringUnion(ts, typesFile, "AssignmentRunReadinessStatus", freeze.readinessStatuses, failures);
   checkClosedStringUnion(ts, typesFile, "AssignmentRunnerTarget", freeze.runnerTargets, failures);
+  for (const interfaceName of freeze.resolutionCarrierInterfaces ?? []) {
+    const declarations = typesFile.statements.filter(
+      (statement) =>
+        ts.isInterfaceDeclaration(statement)
+        && statement.name.text === interfaceName,
+    );
+    const declaration = declarations[0];
+    if (declarations.length !== 1 || declaration === undefined) {
+      failures.push(
+        `${interfaceName} must have exactly one interface declaration; got ${declarations.length}`,
+      );
+      continue;
+    }
+    const fields = declaration.members.filter(
+      (member) =>
+        ts.isPropertySignature(member)
+        && member.name.getText(typesFile) === "requirementResolutions",
+    );
+    const field = fields[0];
+    if (
+      fields.length !== 1
+      || field === undefined
+      || !ts.isPropertySignature(field)
+      || field.questionToken === undefined
+      || field.modifiers?.some(
+        (modifier) => modifier.kind === ts.SyntaxKind.ReadonlyKeyword,
+      ) !== true
+      || normalizeTypeText(field.type?.getText(typesFile) ?? "")
+        !== "readonly AssignmentRequirementResolution[]"
+    ) {
+      failures.push(
+        `${interfaceName}.requirementResolutions must remain one optional readonly AssignmentRequirementResolution array`,
+      );
+    }
+  }
+  return failures;
+}
+
+export function checkRuntimeAssignmentResolutionConsumerSources(
+  ts,
+  sources,
+  freeze,
+) {
+  const failures = [];
+  for (const consumer of freeze.resolutionConsumers ?? []) {
+    const source = sources[consumer.file];
+    if (typeof source !== "string") {
+      failures.push(`runtime requirement resolution consumer is missing: ${consumer.file}`);
+      continue;
+    }
+    const sourceFile = ts.createSourceFile(
+      consumer.file,
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    for (const functionName of consumer.functions ?? []) {
+      const declarations = sourceFile.statements.filter(
+        (statement) =>
+          ts.isFunctionDeclaration(statement)
+          && statement.name?.text === functionName,
+      );
+      const declaration = declarations[0];
+      const environment = declaration?.parameters[1];
+      if (
+        declarations.length !== 1
+        || environment === undefined
+        || environment.name.getText(sourceFile) !== "environment"
+        || normalizeTypeText(environment.type?.getText(sourceFile) ?? "")
+          !== "AssignmentReadinessEnvironment"
+      ) {
+        failures.push(
+          `${consumer.file} ${functionName} must consume AssignmentReadinessEnvironment directly`,
+        );
+      }
+    }
+  }
   return failures;
 }
 
@@ -1689,6 +1844,18 @@ function checkRuntimeAssignmentRequirements(root, ts, freeze, failures) {
   const behaviorFixture = resolveManifestFile(root, freeze.behaviorFixtureFile, "behaviorFixtureFile", failures);
   const usageInventoryFile = resolveManifestFile(root, freeze.usageInventoryFile, "usageInventoryFile", failures);
   const profileDirectory = resolveManifestFile(root, freeze.profileDirectory, "profileDirectory", failures);
+  const resolutionConsumerSources = {};
+  for (const consumer of freeze.resolutionConsumers ?? []) {
+    const file = resolveManifestFile(
+      root,
+      consumer.file,
+      "resolutionConsumer",
+      failures,
+    );
+    if (file !== undefined) {
+      resolutionConsumerSources[consumer.file] = fs.readFileSync(file, "utf8");
+    }
+  }
   if ([definitionFile, typesFile, vocabularyFile, registryFile, behaviorFixture, usageInventoryFile, profileDirectory].some((value) => value === undefined)) return;
 
   failures.push(...checkFrozenRuntimeAssignmentRequirementsSource(
@@ -1698,6 +1865,11 @@ function checkRuntimeAssignmentRequirements(root, ts, freeze, failures) {
     freeze,
     definitionFile,
     typesFile,
+  ));
+  failures.push(...checkRuntimeAssignmentResolutionConsumerSources(
+    ts,
+    resolutionConsumerSources,
+    freeze,
   ));
 
   const fixture = readJson(behaviorFixture, failures);

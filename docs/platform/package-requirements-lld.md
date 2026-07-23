@@ -2734,9 +2734,12 @@ legacy definition registry is generated from the platform vocabulary, and its
 new environment record resolves every definition as available or unavailable.
 Availability requires one exact provider, mode, and evidence set; definition
 presence alone cannot satisfy a profile gate. The compatibility capability
-environment is now derivable from these records. Run-plan/report/matrix APIs
-still accept that compatibility shape, so direct resolution consumption plus
-artifact/program-scoped lowering records remain required for Gate 6 exit.
+environment is now derivable from these records. ADR-0048 makes run-plan,
+report, handoff, external-runner, matrix, and JavaScript profile APIs accept
+the resolution environment directly and retain each profile's relevant
+provider/evidence records. The compatibility shape remains admitted only for
+existing callers. Artifact/program-scoped lowering records still remain
+required for Gate 6 exit.
 
 ### Adapter ledger
 

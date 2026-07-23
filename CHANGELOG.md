@@ -19,6 +19,14 @@ Each package follows independent [SemVer](https://semver.org/).
   exact provider, mode, and evidence bindings; known definitions remain
   unavailable unless explicitly resolved, and the legacy capability shape is
   derived only through a compatibility bridge.
+- Migrates runtime planning and platform views to consume those provider-bound
+  environments directly. Relevant resolution records now survive through run
+  plans, preflight reports, handoffs, external-runner requests, benchmark
+  matrices, and JavaScript profile execution.
+- Makes the semantic-architecture script verify its checked TypeScript
+  declaration export/signature parity. Stale helper exports or parameter lists
+  now fail the fast architecture gate instead of surfacing later in strict
+  compiler typecheck.
 - Makes eager Grad `Tensor.expand()` a true storage-sharing zero-stride view.
   It preserves dtype and non-contiguous layout, propagates mutations through
   aliases, avoids output-sized allocation, and retains its unbroadcast VJP.

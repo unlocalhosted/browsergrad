@@ -731,7 +731,37 @@
         ],
         "assignmentModes": ["browser", "external", "simulated"],
         "readinessStatuses": ["blocked", "external-only", "runnable", "simulated"],
-        "runnerTargets": ["blocked", "external", "javascript", "pyodide", "unsupported"]
+        "runnerTargets": ["blocked", "external", "javascript", "pyodide", "unsupported"],
+        "resolutionCarrierInterfaces": [
+          "AssignmentBenchmarkPreflightRow",
+          "AssignmentExternalRunnerRequest",
+          "AssignmentPlatformHandoff",
+          "AssignmentPreflightReport",
+          "AssignmentRunPlan"
+        ],
+        "resolutionConsumers": [
+          {
+            "file": "packages/browsergrad-runtime/src/assignment-run-plan.ts",
+            "functions": [
+              "createAssignmentRunPlan",
+              "createAssignmentPreflightReport"
+            ]
+          },
+          {
+            "file": "packages/browsergrad-runtime/src/assignment-handoff.ts",
+            "functions": [
+              "createAssignmentBenchmarkPreflightMatrix",
+              "createVerifiedAssignmentBenchmarkPreflightMatrix"
+            ]
+          },
+          {
+            "file": "packages/browsergrad-runtime/src/assignment-runners.ts",
+            "functions": [
+              "runAssignmentJavascriptProfile",
+              "runVerifiedAssignmentJavascriptProfile"
+            ]
+          }
+        ]
       }
     }
   ]

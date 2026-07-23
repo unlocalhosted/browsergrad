@@ -177,7 +177,6 @@ import {
   assignmentRubricKind,
   assignmentRunReadiness,
   assignmentRunnerRoute,
-  assignmentCapabilityEnvironmentFromRequirementResolutions,
   createAssignmentRequirementResolutionEnvironment,
   createAssignmentCapabilityCatalog,
   createAssignmentBenchmarkPreflightMatrix,
@@ -216,18 +215,17 @@ const requirementEnvironment =
       { requirementId: "distributed-simulator", providerId: "distributed.simulator", mode: "simulated" },
       { requirementId: "native-cuda-external", providerId: "runner.native", mode: "external" },
     ],
-});
-const environment =
-  assignmentCapabilityEnvironmentFromRequirementResolutions(
-    requirementEnvironment,
-  );
+  });
 const required = requiredAssignmentCapabilities(parsed.profile);
 const preflight = evaluateAssignmentRequirementResolutions(
   parsed.profile,
   requirementEnvironment,
 );
-const plan = createAssignmentRunPlan(parsed.profile, environment);
-const report = createAssignmentPreflightReport(parsed.profile, environment);
+const plan = createAssignmentRunPlan(parsed.profile, requirementEnvironment);
+const report = createAssignmentPreflightReport(
+  parsed.profile,
+  requirementEnvironment,
+);
 const handoff = createAssignmentPlatformHandoff(parsed.profile, report, {
   files: { [report.plan.files.rubricPath]: rubricSource },
 });
@@ -245,12 +243,12 @@ const issueDraft = createAssignmentPlatformIssueDraft(
 );
 const matrix = createAssignmentBenchmarkPreflightMatrix(
   [parsed.profile],
-  environment,
+  requirementEnvironment,
   { files: { [report.plan.files.rubricPath]: rubricSource } },
 );
 const verifiedMatrix = await createVerifiedAssignmentBenchmarkPreflightMatrix(
   [parsed.profile],
-  environment,
+  requirementEnvironment,
   {
     files: { [report.plan.files.rubricPath]: rubricSource },
     datasets: { tiny: tinyFixtureText },
@@ -304,7 +302,7 @@ console.log(run.mount.writtenPaths, run.exec.assertions);
 
 const jsRun = await runVerifiedAssignmentJavascriptProfile(
   parsed.profile,
-  environment,
+  requirementEnvironment,
   {
     files: { [report.plan.files.rubricPath]: rubricSource },
     datasets: { tiny: tinyFixtureText },
@@ -323,9 +321,9 @@ Use `createAssignmentRequirementResolutionEnvironment()` for new platform
 readiness work. It resolves every generated definition exactly once and marks a
 requirement available only when the caller supplies one named provider, mode,
 and optional evidence IDs. Definition or method presence alone never grants
-support. `assignmentCapabilityEnvironmentFromRequirementResolutions()` is the
-temporary bridge for run-plan APIs that still consume the frozen legacy
-capability environment.
+support. Run-plan, preflight, handoff, benchmark-matrix, external-runner, and
+JavaScript profile-runner paths accept this environment directly and retain
+the relevant provider/evidence records in their platform-facing outputs.
 
 `createAssignmentCapabilityEnvironment()` remains the compatibility constructor
 for existing callers. It de-duplicates and sorts browser, simulated, and

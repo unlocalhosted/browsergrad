@@ -6,7 +6,11 @@ import {
   assignmentCapabilityEnvironmentFromRequirementResolutions,
   assignmentRequirementDefinition,
   assignmentRequirementDefinitions,
+  createAssignmentBenchmarkPreflightMatrix,
+  createAssignmentPlatformHandoff,
+  createAssignmentPreflightReport,
   createAssignmentRequirementResolutionEnvironment,
+  createAssignmentRunPlan,
   evaluateAssignmentRequirementResolutions,
   parseAssignmentProfile,
   type AssignmentRequirementResolutionEnvironment,
@@ -140,6 +144,56 @@ describe("assignment requirement resolutions", () => {
         selectedAnyOf: ["native-cuda-external"],
       }],
     });
+  });
+
+  it("feeds provider-bound records directly through plans and platform views", () => {
+    const parsed = parseAssignmentProfile(VALID_PROFILE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const environment = createAssignmentRequirementResolutionEnvironment({
+      environmentId: "browser.local",
+      providers: [{
+        requirementId: "pyodide",
+        providerId: "worker.pyodide",
+        mode: "browser",
+        evidenceIds: ["probe.worker-ready"],
+      }],
+    });
+
+    const plan = createAssignmentRunPlan(parsed.profile, environment);
+    expect(plan.ok).toBe(true);
+    expect(plan.requirementResolutions).toEqual([
+      expect.objectContaining({
+        requirementId: "pyodide",
+        status: "available",
+        provider: {
+          providerId: "worker.pyodide",
+          mode: "browser",
+          evidenceIds: ["probe.worker-ready"],
+        },
+      }),
+    ]);
+    const sourceResolution = environment.resolutions.find(
+      (resolution) => resolution.requirementId === "pyodide",
+    );
+    expect(plan.requirementResolutions?.[0]).not.toBe(sourceResolution);
+    expect(Object.isFrozen(plan.requirementResolutions)).toBe(true);
+
+    const report = createAssignmentPreflightReport(
+      parsed.profile,
+      environment,
+    );
+    expect(report.requirementResolutions).toEqual(plan.requirementResolutions);
+    expect(
+      createAssignmentPlatformHandoff(parsed.profile, report)
+        .requirementResolutions,
+    ).toEqual(plan.requirementResolutions);
+    expect(
+      createAssignmentBenchmarkPreflightMatrix(
+        [parsed.profile],
+        environment,
+      ).rows[0]?.requirementResolutions,
+    ).toEqual(plan.requirementResolutions);
   });
 
   it("rejects unknown, duplicate, and structurally forged resolutions", () => {
