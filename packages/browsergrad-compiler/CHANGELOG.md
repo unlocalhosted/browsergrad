@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Corrects the exact Clang 22 C++/CuTe invocation by removing the unsupported
+  `-fno-experimental-new-constant-interpreter` driver option. The native test
+  now executes the production device/host argument vectors and separately
+  proves that driver-level errors remain counted and observable even when
+  frontend completion fails. The source lock is
+  `bg.cpp.browser-build-input-lock.sha256.1b747a53be87251e85fdedb0d43dd48ba53ae83717436abcb86b46f874d33f0e`.
+  A fresh two-root materialization reverified the unchanged five header-pack
+  bytes and pins the lock-bound 17-output subset as
+  `bg.cpp.browser-header-distribution-reproducibility.sha256.c4295b8226eac800cf37b5fcf92b8064b33167d67c0e6c94096f477d9e3dc4bb`.
+  External license approval, a rebuilt/reproducible Wasm, Worker execution,
+  producer trust, distribution, and release remain separate false authorities.
 - Adds a post-build real-browser C++/CuTe observation lane with exact six-file
   preflight, independent raw-Wasm verification, dedicated Chromium execution,
   strict Artifact V3 mode, and machine-readable blocker evidence. Worker

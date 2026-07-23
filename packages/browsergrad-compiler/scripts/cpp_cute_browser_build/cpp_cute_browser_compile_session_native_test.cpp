@@ -381,10 +381,10 @@ ArtifactV3CompileResult decode_callback(
           std::find(host.begin(), host.end(), "-ferror-limit=100000") !=
               host.end() &&
           std::find(device.begin(), device.end(),
-                    "-fno-experimental-new-constant-interpreter") !=
+                    "-fno-experimental-new-constant-interpreter") ==
               device.end() &&
           std::find(host.begin(), host.end(),
-                    "-fno-experimental-new-constant-interpreter") !=
+                    "-fno-experimental-new-constant-interpreter") ==
               host.end() &&
           std::find(device.begin(), device.end(), "-fconstexpr-steps=10000000") !=
               device.end() &&

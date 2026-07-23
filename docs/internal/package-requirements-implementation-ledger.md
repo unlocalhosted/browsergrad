@@ -6176,6 +6176,40 @@ whether any files may be left partially changed.
   executable contracts and regenerate the sources. Terminal execution
   evidence remains a separate authority.
 
+### 2026-07-23 — Clang 22 production-invocation root cause removed
+
+- The strict browser observation exposed a producer terminal
+  `internal-error`. Replaying its exact device/host argument vectors against
+  native Clang 22.1.8 identified the pre-semantic root cause: the shared
+  compile plan still emitted
+  `-fno-experimental-new-constant-interpreter`, which this driver does not
+  support.
+- The sole compile-plan builder no longer emits that option. The required
+  native lane now executes both production-shaped CUDA semantic passes.
+  Diagnostic capture also owns its error count across the whole
+  `ToolInvocation`, so driver errors remain bounded and observable when the
+  frontend action does not complete instead of collapsing to a zero-error
+  internal failure.
+- The new exact source/build lock is
+  `bg.cpp.browser-build-input-lock.sha256.1b747a53be87251e85fdedb0d43dd48ba53ae83717436abcb86b46f874d33f0e`
+  with resource SHA-256
+  `ec61fb9d270df159c341fb8261ac2fb6f6d31d7e0e10b07a3787be10c8d850bd`.
+  A fresh two-root pipeline rehashed all 17 header-distribution outputs. The
+  five VFS packs remain byte-identical; the lock-bound inventory and aggregate
+  notice received new identities. The package-pinned subset is 4,042 bytes at
+  SHA-256
+  `cb0afdf5bc616ab326b5dc577957ba29d12534206cf3588ecde8bafb3eaed574`
+  with reproducibility ID
+  `bg.cpp.browser-header-distribution-reproducibility.sha256.c4295b8226eac800cf37b5fcf92b8064b33167d67c0e6c94096f477d9e3dc4bb`.
+- Verification: required native/build-plan lane 47 files, 253 passed and 9
+  platform skips; complete compiler suite 96 files and 1,611 tests. The pinned
+  Wasm still represents the preceding source lock. A new isolated Wasm build,
+  raw-ABI review, reproducibility evidence, and strict browser observation are
+  required before claiming one valid browser-local C++/CuTe compile.
+- External file-level license approval, externally rooted producer trust,
+  distribution authorization, lowering/backend execution from a production
+  result, and release remain false.
+
 ## Quick Resume Checklist
 
 1. Read this ledger, then the relevant gate and exit criteria in the normative

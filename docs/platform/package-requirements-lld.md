@@ -789,11 +789,11 @@ The two-root reproducibility command now runs that exact pipeline twice from
 one common archive/index/tool closure under four distinct non-overlapping source
 and pack roots. It then concurrently rehashes every immutable output, checks
 the complete file/directory trees before and after hashing, and confirms all 17
-paths, 68,899,643 bytes, and identities match. Two final direct commands
-completed in 44.45 and 46.84 seconds with stable reproducibility ID
-`bg.cpp.browser-header-distribution-reproducibility.sha256.986bcd7b462b1bac0653f33e61dba69403295fd69df4fdb1780bb27092de9337`
+paths, 68,899,643 bytes, and identities match. The current two-root direct
+command completed in about 38.5 seconds with reproducibility ID
+`bg.cpp.browser-header-distribution-reproducibility.sha256.c4295b8226eac800cf37b5fcf92b8064b33167d67c0e6c94096f477d9e3dc4bb`
 and output-verification ID
-`bg.cpp.distribution-output-file-verification.sha256.6eb7779eee72c9f65589656ac28b02f10caa9d9362a98d1d981f198de13a3937`.
+`bg.cpp.distribution-output-file-verification.sha256.a71037abea902befd009c3a8c643b1a1a98c94a891e7022d02d017d453dc764b`.
 This proves exact reproducibility only for the five header packs, license
 inventory, ten component notices, and aggregate notice. The Wasm/factory,
 Worker, remaining deterministic outputs, detached provenance, external legal
@@ -802,7 +802,7 @@ distribution reproducibility and release remain false.
 
 The package now pins the path-independent 4,042-byte header reproducibility
 record at SHA-256
-`eb85b8fb54d1bad1b932bd4bfb3ffc7aff8d66d6185c9926ddd3c9f6084d918a`.
+`cb0afdf5bc616ab326b5dc577957ba29d12534206cf3588ecde8bafb3eaed574`.
 Admission accepts only those exact bytes, verifies the current build-input lock
 and its resource identity, validates the sorted 17-output projection and byte
 total, and independently rederives both the output-verification and
@@ -813,21 +813,21 @@ provenance, full-distribution reproducibility, Worker execution, or release
 authority.
 
 The exact source plan is
-`bg.cpp.browser-header-source-plan.sha256.613b74fcf41ee5a9d4d8878af219c8e9da8ba6c91f067eb074140325feac457d`;
+`bg.cpp.browser-header-source-plan.sha256.63bcfd903d4029806ea237ddfa9a4545c218cf689c5b6fc7ead6112b9dbce812`;
 the seven-archive admission is
-`bg.cpp.browser-header-source-archive-admission.sha256.9ef05aeebc15a47b926b289250d26c414a1eec21314bb37697ae901a768ec8f3`;
+`bg.cpp.browser-header-source-archive-admission.sha256.49f87fb00914be0ec0d4885c9cad61ad0cdc04cd12a16aebb448956aa840c420`;
 the pinned normalization environment is
 `bg.cpp.pinned-archive-normalization-environment.sha256.d9461759522fbe616b0244ab63267854eb249f546a1b8560c7b7b0cd6b6df818`;
 and the composed observation is
-`bg.cpp.browser-header-pack-pipeline.sha256.35e0d574519cf799844dfb3f72c2b6e6ae00532224ee34ddbcab2ba3a6e03556`.
+`bg.cpp.browser-header-pack-pipeline.sha256.6c33e79fc5704328ab1147dc31b27a119a230c7b790733a335ab6657545e17aa`.
 The header review input is
-`bg.cpp.header-distribution-review-input.sha256.28346afa0239011e988de9cd40818b9eff6bbeeecc6e7e4bf508137697f4dc82`
+`bg.cpp.header-distribution-review-input.sha256.11437c9f0abffdc4d28bb277e05a39bf17a19aa4f8dbc2c243c43f2f0aa27951`
 with exact file SHA-256
-`0c809a69554731e3b78acc8c0717c1c0939883b8df811637120a067e28be97b7`.
+`086751209a7e48427d9ae8fbc7cce7d06f87e5a100c3aa35974cc4974e7972ff`.
 The notice materialization is
-`bg.cpp.browser-header-notice-materialization.sha256.a560867d2614feeb1c460c2192435b5472780c5538ab8d0c11c2cf6207df430a`;
+`bg.cpp.browser-header-notice-materialization.sha256.a440387ec409e064e0e7b7b56c717d9d62baadbf59d57276c02ecf43e754d632`;
 its exact aggregate SHA-256 is
-`9933f791012ac5662cc87a63cdf56d794893e59d49ac8a013c05f29709b4e30b`.
+`f4664fa0b81ee07818b05436207c2435a4888ecb1fcf1a0de7ce7b58f131d964`.
 The five output SHA-256 identities are `fd7fb977...` (configured Clang resource),
 `f795494a...` (CUDA), `4f1c39b7...` (CUTLASS), `f66f1284...` (libc++), and
 `d04a460d...` (Linux sysroot); the implementation ledger retains the complete

@@ -35,14 +35,40 @@ void install_source(const std::string_view source) {
 std::vector<std::string> arguments(const std::string_view pass) {
   return {
       "clang++",
+      "--no-default-config",
       "-x",
       "cuda",
+      "-std=c++17",
       pass == "device" ? "--cuda-device-only" : "--cuda-host-only",
       "--target=x86_64-unknown-linux-gnu",
       "--cuda-gpu-arch=sm_80",
-      "-nocudainc",
+      "-resource-dir",
+      "/toolchain/clang/lib/clang/22",
+      "--cuda-path-ignore-env",
+      "-nostdinc",
+      "-nostdinc++",
+      "-nogpuinc",
       "-nogpulib",
+      "-iquote",
+      "/workspace",
+      "-isystem",
+      "/toolchain/clang/lib/clang/22/include",
+      "-isystem",
+      "/toolchain/cuda/include",
+      "-isystem",
+      "/toolchain/cutlass/include",
+      "-isystem",
+      "/toolchain/cxx/include/c++/v1",
+      "-isystem",
+      "/toolchain/sysroot/usr/include",
+      "-Werror=builtin-macro-redefined",
+      "-Werror=date-time",
+      "-Werror=macro-redefined",
+      "-DCUTE_SM80_ENABLED=1",
       "-fsyntax-only",
+      "-ferror-limit=4096",
+      "-fconstexpr-steps=10000000",
+      "-ftemplate-depth=1024",
       "/workspace/main.cu",
   };
 }
@@ -97,9 +123,23 @@ int main() {
                                       std::string_view("host")}) {
     ClangPassReview review;
     const std::vector<std::string> argv = arguments(pass);
-    BG_CHECK(run_cpp_cute_clang_pass_for_review(
+    const bool succeeded = run_cpp_cute_clang_pass_for_review(
         argv, anchor, {}, ImportedVfsObservationLimits{}, 1024U,
-        1024U * 1024U, review));
+        1024U * 1024U, review);
+    if (!succeeded) {
+      std::fprintf(
+          stderr,
+          "%.*s pass failed: invocation=%d policy=%d clang-errors=%u\n",
+          static_cast<int>(pass.size()), pass.data(),
+          review.invocation_succeeded ? 1 : 0,
+          review.policy_failed ? 1 : 0, review.clang_error_count);
+      for (const ClangDiagnosticObservation& diagnostic :
+           review.diagnostics) {
+        std::fprintf(stderr, "diagnostic: %s\n",
+                     diagnostic.rendered_message.c_str());
+      }
+    }
+    BG_CHECK(succeeded);
     BG_CHECK(review.invocation_succeeded);
     BG_CHECK(review.policy_install_status ==
              CppCutePreprocessorPolicyInstallStatus::kInstalled);
@@ -157,6 +197,33 @@ int main() {
   BG_CHECK(frontend_work_metrics_ready());
   BG_CHECK(frontend_work_metrics_record_for_testing()
                .completed_semantic_passes == 1U);
+
+  reset_frontend_work_metrics();
+  BG_CHECK(begin_frontend_work_invocation(frontend_limits));
+  install_source(source);
+  ClangPassReview invalid_driver_argument;
+  std::vector<std::string> invalid_driver_arguments = host;
+  invalid_driver_arguments.insert(
+      invalid_driver_arguments.end() - 1,
+      "-fdefinitely-unsupported-browsergrad-option");
+  BG_CHECK(!run_cpp_cute_clang_pass_for_review(
+      invalid_driver_arguments, anchor, {}, ImportedVfsObservationLimits{},
+      1024U, 1024U * 1024U, invalid_driver_argument));
+  BG_CHECK(!invalid_driver_argument.invocation_succeeded);
+  BG_CHECK(invalid_driver_argument.policy_install_status ==
+           CppCutePreprocessorPolicyInstallStatus::kInstalled);
+  BG_CHECK(!invalid_driver_argument.policy_failed);
+  BG_CHECK(invalid_driver_argument.clang_error_count != 0U);
+  BG_CHECK(!invalid_driver_argument.diagnostic_capture_failed);
+  BG_CHECK(std::any_of(
+      invalid_driver_argument.diagnostics.begin(),
+      invalid_driver_argument.diagnostics.end(),
+      [](const ClangDiagnosticObservation& diagnostic) {
+        return diagnostic.severity == RawDiagnosticSeverity::kError ||
+               diagnostic.severity == RawDiagnosticSeverity::kFatal;
+      }));
+  BG_CHECK(complete_frontend_work_invocation(1U));
+  BG_CHECK(frontend_work_metrics_ready());
 
   reset_frontend_work_metrics();
   BG_CHECK(begin_frontend_work_invocation(frontend_limits));

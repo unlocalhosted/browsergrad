@@ -130,7 +130,6 @@ void append_frontend_resource_limits(
     std::vector<std::string>& arguments) {
   // Clang's built-in limits bound one evaluation/depth chain. The separately
   // instrumented record enforces aggregate work across both semantic passes.
-  arguments.push_back("-fno-experimental-new-constant-interpreter");
   arguments.push_back("-fconstexpr-steps=" +
                       std::to_string(session.request_semantic_limit(
                           CompileSemanticLimit::kConstexprSteps)));

@@ -554,6 +554,10 @@ class BoundedDiagnosticCapture final : public clang::DiagnosticConsumer {
       observation.raw_diagnostic_id = information.getID();
       observation.stage = diagnostic_stage(observation.raw_diagnostic_id);
       observation.severity = diagnostic_severity(level);
+      if (level == clang::DiagnosticsEngine::Error ||
+          level == clang::DiagnosticsEngine::Fatal) {
+        ++error_count_;
+      }
       observation.rendered_message.assign(rendered.begin(), rendered.end());
       if (custom_registry_ != nullptr && custom_registry_->bound &&
           observation.raw_diagnostic_id ==
@@ -598,6 +602,8 @@ class BoundedDiagnosticCapture final : public clang::DiagnosticConsumer {
     }
   }
 
+  std::uint32_t error_count() const noexcept { return error_count_; }
+
  private:
   std::size_t maximum_count_ = 0U;
   std::size_t maximum_retained_byte_length_ = 0U;
@@ -605,6 +611,7 @@ class BoundedDiagnosticCapture final : public clang::DiagnosticConsumer {
   std::shared_ptr<const CustomDiagnosticRegistry> custom_registry_;
   std::vector<ClangDiagnosticObservation>& observations_;
   bool& failed_;
+  std::uint32_t error_count_ = 0U;
 };
 
 class LayoutTraceAction final : public clang::ASTFrontendAction {
@@ -667,7 +674,6 @@ class LayoutTraceAction final : public clang::ASTFrontendAction {
       review_.policy_failed = policy_state_->failed();
       review_.policy_violation_count = policy_state_->violation_count();
     }
-    review_.clang_error_count = getCompilerInstance().getDiagnostics().getNumErrors();
     clang::ASTFrontendAction::EndSourceFileAction();
   }
 
@@ -721,6 +727,7 @@ bool run_cpp_cute_clang_pass_for_review(
     return false;
   }
   review.invocation_succeeded = invocation.run();
+  review.clang_error_count = diagnostic_capture.error_count();
   if (!review.frontend_work_limit_exceeded &&
       !complete_frontend_work_semantic_pass()) {
     review.frontend_work_limit_exceeded = true;
