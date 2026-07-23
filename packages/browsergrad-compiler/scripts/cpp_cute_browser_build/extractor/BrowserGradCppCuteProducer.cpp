@@ -48,6 +48,27 @@ ProducerIncludeKind producer_include_kind(
   return ProducerIncludeKind::kSourceQuote;
 }
 
+NativeDiagnosticCode producer_vfs_diagnostic(
+    const ImportedVfsObserverFailure failure) noexcept {
+  switch (failure) {
+    case ImportedVfsObserverFailure::kNone:
+      return NativeDiagnosticCode::kProducerVfsFailure;
+    case ImportedVfsObserverFailure::kInvalidLimits:
+      return NativeDiagnosticCode::kProducerVfsInvalidLimits;
+    case ImportedVfsObserverFailure::kInvalidSuccessfulRead:
+      return NativeDiagnosticCode::kProducerVfsInvalidSuccessfulRead;
+    case ImportedVfsObserverFailure::kInconsistentSuccessfulRead:
+      return NativeDiagnosticCode::kProducerVfsInconsistentSuccessfulRead;
+    case ImportedVfsObserverFailure::kOpenedFileLimit:
+      return NativeDiagnosticCode::kProducerVfsOpenedFileLimit;
+    case ImportedVfsObserverFailure::kInvalidIncludeEdge:
+      return NativeDiagnosticCode::kProducerVfsInvalidIncludeEdge;
+    case ImportedVfsObserverFailure::kIncludeEdgeLimit:
+      return NativeDiagnosticCode::kProducerVfsIncludeEdgeLimit;
+  }
+  return NativeDiagnosticCode::kProducerVfsFailure;
+}
+
 ProducerIntegerHierarchy producer_hierarchy(LayoutIntegerHierarchy&& source) {
   ProducerIntegerHierarchy destination;
   destination.tuple = source.tuple;
@@ -204,7 +225,8 @@ ProducerReviewResult run_cpp_cute_producer_review(
         return result;
       }
       if (review.vfs_failed) {
-        report_native_diagnostic(NativeDiagnosticCode::kProducerVfsFailure);
+        report_native_diagnostic(
+            producer_vfs_diagnostic(review.vfs_failure));
         result.status = ProducerReviewStatus::kVfsError;
         return result;
       }

@@ -13,7 +13,7 @@
 namespace browsergrad::cpp_cute {
 namespace {
 
-constexpr std::uint32_t kRuntimeAbiVersion = 0x0001'0003U;
+constexpr std::uint32_t kRuntimeAbiVersion = 0x0001'0004U;
 constexpr std::uint32_t kInputFrameMaximumByteLength = 4U * 1024U * 1024U;
 constexpr std::uint32_t kInputFrameHeaderByteLength = 64U;
 constexpr std::uint32_t kInputFrameAlignment = 8U;
@@ -423,6 +423,30 @@ void report_native_diagnostic(const NativeDiagnosticCode code) noexcept {
     case NativeDiagnosticCode::kAllocatorUnknownFailure:
       write_native_diagnostic(
           "BG-CPP-CUTE-DIAGNOSTIC:allocator-unknown-failure\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsInvalidLimits:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-invalid-limits\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsInvalidSuccessfulRead:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-invalid-successful-read\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsInconsistentSuccessfulRead:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-inconsistent-successful-read\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsOpenedFileLimit:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-opened-file-limit\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsInvalidIncludeEdge:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-invalid-include-edge\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsIncludeEdgeLimit:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-include-edge-limit\n");
       return;
   }
 }

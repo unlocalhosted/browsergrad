@@ -67,6 +67,8 @@ struct ClangPassReview {
       CppCutePreprocessorPolicyInstallStatus::kMissingPreprocessor;
   bool policy_failed = false;
   bool vfs_failed = false;
+  ImportedVfsObserverFailure vfs_failure =
+      ImportedVfsObserverFailure::kNone;
   std::uint32_t policy_violation_count = 0U;
   std::uint32_t clang_error_count = 0U;
   bool diagnostic_capture_failed = false;

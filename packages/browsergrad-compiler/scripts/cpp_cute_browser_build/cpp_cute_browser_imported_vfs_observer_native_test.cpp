@@ -94,6 +94,10 @@ bool same_observation(const ImportedVfsPassObservation& left,
 }
 
 int run_observer_tests() {
+  static_assert(static_cast<std::uint8_t>(
+                    ImportedVfsObserverFailure::kNone) == 0U);
+  static_assert(static_cast<std::uint8_t>(
+                    ImportedVfsObserverFailure::kIncludeEdgeLimit) == 6U);
   static_assert(!std::is_copy_constructible_v<ImportedVfsObserver>);
   static_assert(!std::is_copy_assignable_v<ImportedVfsObserver>);
   static_assert(!std::is_move_constructible_v<ImportedVfsObserver>);
@@ -176,6 +180,8 @@ int run_observer_tests() {
            std::make_error_code(std::errc::value_too_large));
   BG_CHECK(read_limited.terminal_error() ==
            std::make_error_code(std::errc::value_too_large));
+  BG_CHECK(read_limited.failure() ==
+           ImportedVfsObserverFailure::kOpenedFileLimit);
   BG_CHECK(read_limited.snapshot(fresh_observation) ==
            read_limited.terminal_error());
 
@@ -185,6 +191,8 @@ int run_observer_tests() {
   BG_CHECK(!edge_limited.record_resolved_include_edge(quote));
   BG_CHECK(edge_limited.record_resolved_include_edge(angle) ==
            std::make_error_code(std::errc::value_too_large));
+  BG_CHECK(edge_limited.failure() ==
+           ImportedVfsObserverFailure::kIncludeEdgeLimit);
 
   // Invalid records poison only their own pass observer.
   ImportedVfsObserver invalid_path;
@@ -192,13 +200,26 @@ int run_observer_tests() {
            std::make_error_code(std::errc::invalid_argument));
   BG_CHECK(invalid_path.terminal_error() ==
            std::make_error_code(std::errc::invalid_argument));
+  BG_CHECK(invalid_path.failure() ==
+           ImportedVfsObserverFailure::kInvalidSuccessfulRead);
   BG_CHECK(!first.terminal_error());
+  BG_CHECK(first.failure() == ImportedVfsObserverFailure::kNone);
+
+  ImportedVfsObserver inconsistent_read;
+  BG_CHECK(!record_read(inconsistent_read, "/src/main.cu", 1U));
+  BG_CHECK(inconsistent_read.record_successful_read(
+               "/src/main.cu", std::string(64U, 'f'), 1U) ==
+           std::make_error_code(std::errc::state_not_recoverable));
+  BG_CHECK(inconsistent_read.failure() ==
+           ImportedVfsObserverFailure::kInconsistentSuccessfulRead);
 
   ImportedVfsObserver invalid_edge;
   auto malformed = quote;
   malformed.directive_end_byte_offset = malformed.directive_start_byte_offset;
   BG_CHECK(invalid_edge.record_resolved_include_edge(std::move(malformed)) ==
            std::make_error_code(std::errc::invalid_argument));
+  BG_CHECK(invalid_edge.failure() ==
+           ImportedVfsObserverFailure::kInvalidIncludeEdge);
 
   ImportedVfsObserver oversized_limits(ImportedVfsObservationLimits{
       kImportedVfsMaximumObservedFileCount + 1U,
@@ -206,6 +227,8 @@ int run_observer_tests() {
   });
   BG_CHECK(oversized_limits.terminal_error() ==
            std::make_error_code(std::errc::invalid_argument));
+  BG_CHECK(oversized_limits.failure() ==
+           ImportedVfsObserverFailure::kInvalidLimits);
 
   // Separate observers are pass-scoped and never share records or poison.
   ImportedVfsObserver device;

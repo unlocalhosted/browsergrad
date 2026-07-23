@@ -286,7 +286,7 @@ describe("C++/CuTe local Wasm C ABI compiler execution", () => {
     const fixture = runtimeFixture({
       compileReturn: 106,
       readableCompileStatus: 106,
-      lastDiagnosticCode: 13,
+      lastDiagnosticCode: 37,
       stdout: [`${"x".repeat(3_000)}\nlast-line`],
       stderr: ["failure\u0000detail"],
     });
@@ -304,7 +304,7 @@ describe("C++/CuTe local Wasm C ABI compiler execution", () => {
     expect(observed).toBeInstanceOf(CppCuteBrowserWasmCompilerError);
     const message = (observed as Error).message;
     expect(message).toContain(
-      "nativeDiagnosticCode=13,nativeDiagnosticName=artifact-writer-internal",
+      "nativeDiagnosticCode=37,nativeDiagnosticName=producer-vfs-invalid-include-edge",
     );
     expect(message).toContain("bounded module log:");
     expect(message).toContain("last-line");
@@ -316,7 +316,7 @@ describe("C++/CuTe local Wasm C ABI compiler execution", () => {
     const fixture = runtimeFixture({
       compileReturn: 106,
       readableCompileStatus: 106,
-      lastDiagnosticCode: 33,
+      lastDiagnosticCode: 39,
     });
     expect(() => executeCppCuteBrowserWasmCompiler({
       factory: fixture.factory,
@@ -442,7 +442,7 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
   };
 
   const facade = Object.freeze({
-    _bg_cpp_cute_abi_version: () => 65_539,
+    _bg_cpp_cute_abi_version: () => 65_540,
     _bg_cpp_cute_alloc: (byteLength: number) => {
       calls.alloc += 1;
       inputByteLength = byteLength;
@@ -530,7 +530,7 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
     protocol: "browsergrad.compiler.cpp-cute.emscripten-factory-binding@1",
     wasmSha256: WASM_SHA256,
     wasmByteLength: 1024,
-    cAbiVersion: 65_539,
+    cAbiVersion: 65_540,
     allocatorMetricsPointer: ALLOCATOR_RECORD_POINTER,
     frontendWorkMetricsPointer: FRONTEND_WORK_RECORD_POINTER,
     generatedImportCount: 66,

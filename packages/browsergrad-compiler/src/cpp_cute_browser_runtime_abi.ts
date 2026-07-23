@@ -21,14 +21,14 @@ import {
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
-export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 11;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 12;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.6bad7781cb496d7ccf6c5381a4807053618d27adb6d456dfdfef98a829813207";
+  "bg.cpp.browser-runtime-abi.sha256.3642dffb012c3ab5a61271c02675465759860f249ce09017b3cba99d40d36f60";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "68b17d0fa99259b0f5fb5d5d313ad8346aa48f29f76df5f3202b535a03cab5a6";
+  "98873960dd806d88c586498c2ab37a2580bd6fe28edf8b2593a3bda94df57dfe";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "d730c21d86719092991ad4092eefd9612a082e9375c501ffda935f71fc9ea0a8";
+  "26327346b946c4a859ab4568d1a9ca5a287f50bb23df03b3cf3b686f97376d65";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "8d320d2fb15525ef548446a5e3bb993369dc4d4cfcfe9cc0faaf5fd3639a370d";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 =
@@ -295,7 +295,7 @@ function validateBodyInvariants(value: JsonObject): void {
       invalid("$.body.authority", "manifest must not claim Wasm observation, execution, or release authority");
     }
     if (body.wasm.moduleRole !== "compiler-extractor-only-user-programs-never-linked-or-executed" ||
-        body.wasm.cAbiVersion !== 65_539 ||
+        body.wasm.cAbiVersion !== 65_540 ||
         body.wasm.cAbiVersionEncoding !== "major-shift-left-16-bitwise-or-minor" ||
         body.wasm.startSection !== "forbidden" || body.wasm.unlistedCExports !== "forbidden") {
       invalid("$.body.wasm", "module role, ABI version, start, or export closure differs from runtime v1");
@@ -1060,6 +1060,12 @@ function validateBodyInvariants(value: JsonObject): void {
       "allocator-replacement-pointer-collision",
       "allocator-invalid-metrics-pointer",
       "allocator-unknown-failure",
+      "producer-vfs-invalid-limits",
+      "producer-vfs-invalid-successful-read",
+      "producer-vfs-inconsistent-successful-read",
+      "producer-vfs-opened-file-limit",
+      "producer-vfs-invalid-include-edge",
+      "producer-vfs-include-edge-limit",
     ], "$.body.nativeDiagnostics.codes[*].name");
     if (body.lifecycle.initialState !== "idle") invalid("$.body.lifecycle.initialState", "initial state must be idle");
     assertExactStrings(body.lifecycle.states, [

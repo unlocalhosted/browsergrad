@@ -57,6 +57,12 @@ enum class NativeDiagnosticCode : std::uint32_t {
   kAllocatorReplacementPointerCollision = 30U,
   kAllocatorInvalidMetricsPointer = 31U,
   kAllocatorUnknownFailure = 32U,
+  kProducerVfsInvalidLimits = 33U,
+  kProducerVfsInvalidSuccessfulRead = 34U,
+  kProducerVfsInconsistentSuccessfulRead = 35U,
+  kProducerVfsOpenedFileLimit = 36U,
+  kProducerVfsInvalidIncludeEdge = 37U,
+  kProducerVfsIncludeEdgeLimit = 38U,
 };
 
 void report_native_diagnostic(NativeDiagnosticCode code) noexcept;

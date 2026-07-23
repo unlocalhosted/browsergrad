@@ -33,6 +33,16 @@ struct ImportedVfsObservationLimits {
       kImportedVfsMaximumObservedIncludeEdgeCount;
 };
 
+enum class ImportedVfsObserverFailure : std::uint8_t {
+  kNone = 0U,
+  kInvalidLimits = 1U,
+  kInvalidSuccessfulRead = 2U,
+  kInconsistentSuccessfulRead = 3U,
+  kOpenedFileLimit = 4U,
+  kInvalidIncludeEdge = 5U,
+  kIncludeEdgeLimit = 6U,
+};
+
 enum class ImportedVfsIncludeKind : std::uint8_t {
   kSourceQuote = 0,
   kSourceAngle = 1,
@@ -196,6 +206,7 @@ class ImportedVfsObserver final {
         limits_.max_include_edge_count >
             kImportedVfsMaximumObservedIncludeEdgeCount) {
       terminal_error_ = std::make_error_code(std::errc::invalid_argument);
+      failure_ = ImportedVfsObserverFailure::kInvalidLimits;
     }
   }
 
@@ -217,18 +228,24 @@ class ImportedVfsObserver final {
                        return (byte >= '0' && byte <= '9') ||
                               (byte >= 'a' && byte <= 'f');
                      })) {
-      return poison(std::make_error_code(std::errc::invalid_argument));
+      return poison(
+          ImportedVfsObserverFailure::kInvalidSuccessfulRead,
+          std::make_error_code(std::errc::invalid_argument));
     }
     if (const auto found = opened_files_.find(canonical_path);
         found != opened_files_.end()) {
       if (found->second.content_sha256 != content_sha256 ||
           found->second.byte_length != byte_length) {
-        return poison(std::make_error_code(std::errc::state_not_recoverable));
+        return poison(
+            ImportedVfsObserverFailure::kInconsistentSuccessfulRead,
+            std::make_error_code(std::errc::state_not_recoverable));
       }
       return {};
     }
     if (opened_files_.size() >= limits_.max_opened_file_count) {
-      return poison(std::make_error_code(std::errc::value_too_large));
+      return poison(
+          ImportedVfsObserverFailure::kOpenedFileLimit,
+          std::make_error_code(std::errc::value_too_large));
     }
     opened_files_.emplace(
         std::string(canonical_path),
@@ -244,11 +261,15 @@ class ImportedVfsObserver final {
       ImportedVfsIncludeEdgeObservation edge) {
     if (terminal_error_) return terminal_error_;
     if (!valid_include_edge(edge)) {
-      return poison(std::make_error_code(std::errc::invalid_argument));
+      return poison(
+          ImportedVfsObserverFailure::kInvalidIncludeEdge,
+          std::make_error_code(std::errc::invalid_argument));
     }
     if (include_edges_.find(edge) != include_edges_.end()) return {};
     if (include_edges_.size() >= limits_.max_include_edge_count) {
-      return poison(std::make_error_code(std::errc::value_too_large));
+      return poison(
+          ImportedVfsObserverFailure::kIncludeEdgeLimit,
+          std::make_error_code(std::errc::value_too_large));
     }
     include_edges_.insert(std::move(edge));
     return {};
@@ -284,6 +305,7 @@ class ImportedVfsObserver final {
   }
 
   std::error_code terminal_error() const { return terminal_error_; }
+  ImportedVfsObserverFailure failure() const noexcept { return failure_; }
 
  private:
   static bool valid_include_edge(
@@ -311,8 +333,12 @@ class ImportedVfsObserver final {
     return false;
   }
 
-  std::error_code poison(std::error_code error) {
-    if (!terminal_error_) terminal_error_ = error;
+  std::error_code poison(ImportedVfsObserverFailure failure,
+                         std::error_code error) {
+    if (!terminal_error_) {
+      terminal_error_ = error;
+      failure_ = failure;
+    }
     return terminal_error_;
   }
 
@@ -323,6 +349,7 @@ class ImportedVfsObserver final {
            imported_vfs_detail::IncludeEdgeLess>
       include_edges_;
   std::error_code terminal_error_;
+  ImportedVfsObserverFailure failure_ = ImportedVfsObserverFailure::kNone;
 };
 
 llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> imported_closed_vfs();

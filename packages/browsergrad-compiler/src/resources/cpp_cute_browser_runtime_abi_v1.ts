@@ -43,8 +43,8 @@ function supportExport(
  */
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
-  version: { major: 1, minor: 11 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.6bad7781cb496d7ccf6c5381a4807053618d27adb6d456dfdfef98a829813207",
+  version: { major: 1, minor: 12 },
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.3642dffb012c3ab5a61271c02675465759860f249ce09017b3cba99d40d36f60",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -56,7 +56,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
     wasm: {
       moduleRole: "compiler-extractor-only-user-programs-never-linked-or-executed",
       addressBits: 32,
-      cAbiVersion: 65_539,
+      cAbiVersion: 65_540,
       cAbiVersionEncoding: "major-shift-left-16-bitwise-or-minor",
       // Browser-visible WebAssembly capabilities required for instantiation.
       requiredFeatures: [
@@ -908,6 +908,12 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         { code: 30, name: "allocator-replacement-pointer-collision" },
         { code: 31, name: "allocator-invalid-metrics-pointer" },
         { code: 32, name: "allocator-unknown-failure" },
+        { code: 33, name: "producer-vfs-invalid-limits" },
+        { code: 34, name: "producer-vfs-invalid-successful-read" },
+        { code: 35, name: "producer-vfs-inconsistent-successful-read" },
+        { code: 36, name: "producer-vfs-opened-file-limit" },
+        { code: 37, name: "producer-vfs-invalid-include-edge" },
+        { code: 38, name: "producer-vfs-include-edge-limit" },
       ],
     },
     lifecycle: {

@@ -271,7 +271,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
   it("owns frame validation and the bounded module-owned result lifecycle", async () => {
     const header = await extractorSource("BrowserGradCppCuteRuntime.h");
     const source = await extractorSource("BrowserGradCppCuteRuntime.cpp");
-    expect(source).toContain("kRuntimeAbiVersion = 0x0001'0003U");
+    expect(source).toContain("kRuntimeAbiVersion = 0x0001'0004U");
     expect(source).toContain("validate_frame_envelope");
     expect(source).toContain("RuntimeState g_runtime");
     expect(source).toContain("ArtifactV3ResultSink::allocate");

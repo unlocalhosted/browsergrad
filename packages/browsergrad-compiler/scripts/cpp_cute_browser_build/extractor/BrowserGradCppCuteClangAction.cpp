@@ -735,6 +735,7 @@ bool run_cpp_cute_clang_pass_for_review(
   const std::error_code observation_error =
       observer->snapshot(review.vfs_observation);
   review.vfs_failed = static_cast<bool>(observation_error);
+  review.vfs_failure = observer->failure();
   return !observation_error && review.invocation_succeeded;
 }
 
