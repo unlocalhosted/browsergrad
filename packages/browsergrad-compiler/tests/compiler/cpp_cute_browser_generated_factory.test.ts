@@ -28,21 +28,24 @@ it("pins the exact package-owned generated factory without widening its authorit
   expect(CPP_CUTE_BROWSER_GENERATED_FACTORY_BYTE_LENGTH).toBe(27_285);
   expect(CPP_CUTE_BROWSER_GENERATED_FACTORY.constructor.name).toBe("AsyncFunction");
   expect(CPP_CUTE_BROWSER_GENERATED_FACTORY_AUTHORITY).toEqual({
-    source: "reviewed-cached-diagnostic-build-output",
+    source: "reviewed-two-clean-build-reproducible-output",
     packageOwned: true,
     exactSourcePinned: true,
-    diagnosticBuildRunId: "30037750529",
-    diagnosticBuildSourceRevision:
-      "6a9def86c81051b38650359b6f0ff1e33376f407",
-    diagnosticBuildWasmSha256:
-      "318a5063284b368538afbf620906297c0ff7876aca837ea98c6b510baf477775",
-    diagnosticBuildWasmByteLength: 31_651_668,
-    diagnosticBuildProjectionSha256:
-      "167025594d83ee17a932f27b5a0c3f9880869f0f4500437323bce0d2fd7629d0",
-    exactDiagnosticFactoryMatch: true,
+    cleanBuildRunId: "30047077419",
+    cleanBuildSourceRevision:
+      "c41ab6a84750fde6b3059459dece3df837903ae7",
+    reproducibilityVerifierRunId: "30049923259",
+    reproducibilityVerifierSourceRevision:
+      "2d3cd52b4b5a5ea7f8ebc9fe37851539537547f1",
+    reproducibilityResourceSha256:
+      "974bcaae92e88522f2a8ed91874c50269fbe0a84ec00823508495e3f034ac047",
+    cleanBuildWasmSha256:
+      "7950c52270fdac4ea8cae36fbaafbde56cb61720242e10ea5881becf2fe4cfd4",
+    cleanBuildWasmByteLength: 31_653_752,
+    exactReproducibleFactoryMatch: true,
     exactInterfaceConformance: true,
-    cleanBuildVerified: false,
-    reproducibilityVerified: false,
+    cleanBuildVerified: true,
+    reproducibilityVerified: true,
     workerBundleVerified: false,
     workerExecutionObserved: false,
     releaseReady: false,
@@ -65,18 +68,18 @@ it("admits only the exact package-pinned reproducibility evidence", async () => 
     verifierRunId: CPP_CUTE_BROWSER_REPRODUCIBILITY_VERIFIER_RUN_ID,
     verifierSourceRevision: CPP_CUTE_BROWSER_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION,
     factoryModuleSha256:
-      "796a548237420df7f5eca0c0260d3cbe752aeca155d9c7182c6ad0f5491dfb12",
-    factoryModuleByteLength: 27_125,
+      "f64d5239d5c258f44e859834b57e1ea330b7efdf7a405dead3126b53330a5534",
+    factoryModuleByteLength: 27_285,
     wasmSha256:
-      "5fc425bbc051a2f5be588c2acbb164efb5e43f949afb48a373f3ed022c3b8758",
-    wasmByteLength: 31_641_377,
+      "7950c52270fdac4ea8cae36fbaafbde56cb61720242e10ea5881becf2fe4cfd4",
+    wasmByteLength: 31_653_752,
     extractorOutputsReproducible: true,
     fullDistributedOutputSetReproducible: false,
     producerAttested: false,
     workerExecutionObserved: false,
     releaseReady: false,
   });
-  expect(authority.factoryModuleSha256).not.toBe(
+  expect(authority.factoryModuleSha256).toBe(
     CPP_CUTE_BROWSER_GENERATED_FACTORY_SHA256,
   );
   expect(() => requireVerifiedCppCuteBrowserReproducibility(authority)).not.toThrow();
