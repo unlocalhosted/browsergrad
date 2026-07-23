@@ -1,5 +1,6 @@
 #include "extractor/BrowserGradCppCuteImportedVfs.h"
 
+#include <array>
 #include <cstdio>
 #include <type_traits>
 
