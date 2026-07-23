@@ -97,7 +97,7 @@ int run_observer_tests() {
   static_assert(static_cast<std::uint8_t>(
                     ImportedVfsObserverFailure::kNone) == 0U);
   static_assert(static_cast<std::uint8_t>(
-                    ImportedVfsObserverFailure::kIncludeEdgeLimit) == 6U);
+                    ImportedVfsObserverFailure::kInvalidIncludeKind) == 14U);
   static_assert(!std::is_copy_constructible_v<ImportedVfsObserver>);
   static_assert(!std::is_copy_assignable_v<ImportedVfsObserver>);
   static_assert(!std::is_move_constructible_v<ImportedVfsObserver>);
@@ -219,7 +219,67 @@ int run_observer_tests() {
   BG_CHECK(invalid_edge.record_resolved_include_edge(std::move(malformed)) ==
            std::make_error_code(std::errc::invalid_argument));
   BG_CHECK(invalid_edge.failure() ==
-           ImportedVfsObserverFailure::kInvalidIncludeEdge);
+           ImportedVfsObserverFailure::kInvalidIncludeOffsets);
+
+  ImportedVfsObserver invalid_source_range;
+  BG_CHECK(invalid_source_range.record_invalid_include_source_range() ==
+           std::make_error_code(std::errc::invalid_argument));
+  BG_CHECK(invalid_source_range.failure() ==
+           ImportedVfsObserverFailure::kInvalidIncludeSourceRange);
+
+  ImportedVfsObserver invalid_resolved_path;
+  malformed = quote;
+  malformed.resolved_file_path = "/include/../secret";
+  BG_CHECK(invalid_resolved_path.record_resolved_include_edge(
+               std::move(malformed)) ==
+           std::make_error_code(std::errc::invalid_argument));
+  BG_CHECK(invalid_resolved_path.failure() ==
+           ImportedVfsObserverFailure::kInvalidIncludeResolvedPath);
+
+  ImportedVfsObserver invalid_including_path;
+  malformed = quote;
+  malformed.including_file_path = "relative.cu";
+  BG_CHECK(invalid_including_path.record_resolved_include_edge(
+               std::move(malformed)) ==
+           std::make_error_code(std::errc::invalid_argument));
+  BG_CHECK(invalid_including_path.failure() ==
+           ImportedVfsObserverFailure::kInvalidIncludeIncludingPath);
+
+  ImportedVfsObserver invalid_spelling;
+  malformed = quote;
+  malformed.spelling.clear();
+  BG_CHECK(invalid_spelling.record_resolved_include_edge(
+               std::move(malformed)) ==
+           std::make_error_code(std::errc::invalid_argument));
+  BG_CHECK(invalid_spelling.failure() ==
+           ImportedVfsObserverFailure::kInvalidIncludeSpelling);
+
+  ImportedVfsObserver invalid_source_ordinal;
+  malformed = quote;
+  malformed.compiler_option_ordinal = 0U;
+  BG_CHECK(invalid_source_ordinal.record_resolved_include_edge(
+               std::move(malformed)) ==
+           std::make_error_code(std::errc::invalid_argument));
+  BG_CHECK(invalid_source_ordinal.failure() ==
+           ImportedVfsObserverFailure::kInvalidIncludeSourceOrdinal);
+
+  ImportedVfsObserver invalid_forced_shape;
+  malformed = forced;
+  malformed.spelling = "forced.hpp";
+  BG_CHECK(invalid_forced_shape.record_resolved_include_edge(
+               std::move(malformed)) ==
+           std::make_error_code(std::errc::invalid_argument));
+  BG_CHECK(invalid_forced_shape.failure() ==
+           ImportedVfsObserverFailure::kInvalidForcedIncludeShape);
+
+  ImportedVfsObserver invalid_kind;
+  malformed = quote;
+  malformed.kind = static_cast<ImportedVfsIncludeKind>(255U);
+  BG_CHECK(invalid_kind.record_resolved_include_edge(
+               std::move(malformed)) ==
+           std::make_error_code(std::errc::invalid_argument));
+  BG_CHECK(invalid_kind.failure() ==
+           ImportedVfsObserverFailure::kInvalidIncludeKind);
 
   ImportedVfsObserver oversized_limits(ImportedVfsObservationLimits{
       kImportedVfsMaximumObservedFileCount + 1U,

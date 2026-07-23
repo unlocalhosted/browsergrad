@@ -65,6 +65,22 @@ NativeDiagnosticCode producer_vfs_diagnostic(
       return NativeDiagnosticCode::kProducerVfsInvalidIncludeEdge;
     case ImportedVfsObserverFailure::kIncludeEdgeLimit:
       return NativeDiagnosticCode::kProducerVfsIncludeEdgeLimit;
+    case ImportedVfsObserverFailure::kInvalidIncludeSourceRange:
+      return NativeDiagnosticCode::kProducerVfsInvalidIncludeSourceRange;
+    case ImportedVfsObserverFailure::kInvalidIncludeResolvedPath:
+      return NativeDiagnosticCode::kProducerVfsInvalidIncludeResolvedPath;
+    case ImportedVfsObserverFailure::kInvalidIncludeIncludingPath:
+      return NativeDiagnosticCode::kProducerVfsInvalidIncludeIncludingPath;
+    case ImportedVfsObserverFailure::kInvalidIncludeSpelling:
+      return NativeDiagnosticCode::kProducerVfsInvalidIncludeSpelling;
+    case ImportedVfsObserverFailure::kInvalidIncludeOffsets:
+      return NativeDiagnosticCode::kProducerVfsInvalidIncludeOffsets;
+    case ImportedVfsObserverFailure::kInvalidIncludeSourceOrdinal:
+      return NativeDiagnosticCode::kProducerVfsInvalidIncludeSourceOrdinal;
+    case ImportedVfsObserverFailure::kInvalidForcedIncludeShape:
+      return NativeDiagnosticCode::kProducerVfsInvalidForcedIncludeShape;
+    case ImportedVfsObserverFailure::kInvalidIncludeKind:
+      return NativeDiagnosticCode::kProducerVfsInvalidIncludeKind;
   }
   return NativeDiagnosticCode::kProducerVfsFailure;
 }

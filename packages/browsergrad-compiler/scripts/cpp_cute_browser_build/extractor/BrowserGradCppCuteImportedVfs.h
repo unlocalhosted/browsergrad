@@ -41,6 +41,14 @@ enum class ImportedVfsObserverFailure : std::uint8_t {
   kOpenedFileLimit = 4U,
   kInvalidIncludeEdge = 5U,
   kIncludeEdgeLimit = 6U,
+  kInvalidIncludeSourceRange = 7U,
+  kInvalidIncludeResolvedPath = 8U,
+  kInvalidIncludeIncludingPath = 9U,
+  kInvalidIncludeSpelling = 10U,
+  kInvalidIncludeOffsets = 11U,
+  kInvalidIncludeSourceOrdinal = 12U,
+  kInvalidForcedIncludeShape = 13U,
+  kInvalidIncludeKind = 14U,
 };
 
 enum class ImportedVfsIncludeKind : std::uint8_t {
@@ -260,9 +268,11 @@ class ImportedVfsObserver final {
   std::error_code record_resolved_include_edge(
       ImportedVfsIncludeEdgeObservation edge) {
     if (terminal_error_) return terminal_error_;
-    if (!valid_include_edge(edge)) {
+    const ImportedVfsObserverFailure failure =
+        include_edge_failure(edge);
+    if (failure != ImportedVfsObserverFailure::kNone) {
       return poison(
-          ImportedVfsObserverFailure::kInvalidIncludeEdge,
+          failure,
           std::make_error_code(std::errc::invalid_argument));
     }
     if (include_edges_.find(edge) != include_edges_.end()) return {};
@@ -273,6 +283,13 @@ class ImportedVfsObserver final {
     }
     include_edges_.insert(std::move(edge));
     return {};
+  }
+
+  std::error_code record_invalid_include_source_range() {
+    if (terminal_error_) return terminal_error_;
+    return poison(
+        ImportedVfsObserverFailure::kInvalidIncludeSourceRange,
+        std::make_error_code(std::errc::invalid_argument));
   }
 
   // Produces a unique byte-ordered snapshot. Resolved callbacks are staged,
@@ -308,29 +325,43 @@ class ImportedVfsObserver final {
   ImportedVfsObserverFailure failure() const noexcept { return failure_; }
 
  private:
-  static bool valid_include_edge(
+  static ImportedVfsObserverFailure include_edge_failure(
       const ImportedVfsIncludeEdgeObservation& edge) {
     if (!cpp_cute_valid_canonical_virtual_path(edge.resolved_file_path)) {
-      return false;
+      return ImportedVfsObserverFailure::kInvalidIncludeResolvedPath;
     }
     switch (edge.kind) {
       case ImportedVfsIncludeKind::kSourceQuote:
-      case ImportedVfsIncludeKind::kSourceAngle:
-        return cpp_cute_valid_canonical_virtual_path(
-                   edge.including_file_path) &&
-               imported_vfs_detail::valid_include_spelling(edge.spelling) &&
-               edge.directive_start_byte_offset <
-                   edge.directive_end_byte_offset &&
-               edge.compiler_option_ordinal ==
-                   kImportedVfsNoCompilerOptionOrdinal;
-      case ImportedVfsIncludeKind::kCompilerForced:
-        return edge.including_file_path.empty() && edge.spelling.empty() &&
-               edge.directive_start_byte_offset == 0U &&
-               edge.directive_end_byte_offset == 0U &&
-               edge.compiler_option_ordinal !=
-                   kImportedVfsNoCompilerOptionOrdinal;
+      case ImportedVfsIncludeKind::kSourceAngle: {
+        if (!cpp_cute_valid_canonical_virtual_path(
+                edge.including_file_path)) {
+          return ImportedVfsObserverFailure::kInvalidIncludeIncludingPath;
+        }
+        if (!imported_vfs_detail::valid_include_spelling(edge.spelling)) {
+          return ImportedVfsObserverFailure::kInvalidIncludeSpelling;
+        }
+        if (edge.directive_start_byte_offset >=
+            edge.directive_end_byte_offset) {
+          return ImportedVfsObserverFailure::kInvalidIncludeOffsets;
+        }
+        if (edge.compiler_option_ordinal !=
+            kImportedVfsNoCompilerOptionOrdinal) {
+          return ImportedVfsObserverFailure::kInvalidIncludeSourceOrdinal;
+        }
+        return ImportedVfsObserverFailure::kNone;
+      }
+      case ImportedVfsIncludeKind::kCompilerForced: {
+        if (!edge.including_file_path.empty() || !edge.spelling.empty() ||
+            edge.directive_start_byte_offset != 0U ||
+            edge.directive_end_byte_offset != 0U ||
+            edge.compiler_option_ordinal ==
+                kImportedVfsNoCompilerOptionOrdinal) {
+          return ImportedVfsObserverFailure::kInvalidForcedIncludeShape;
+        }
+        return ImportedVfsObserverFailure::kNone;
+      }
     }
-    return false;
+    return ImportedVfsObserverFailure::kInvalidIncludeKind;
   }
 
   std::error_code poison(ImportedVfsObserverFailure failure,

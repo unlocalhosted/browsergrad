@@ -452,7 +452,7 @@ class IncludeObservationCallbacks final : public clang::PPCallbacks {
             source_manager_.getFileID(filename_begin) ||
         source_manager_.getFileID(hash) !=
             source_manager_.getFileID(filename_end)) {
-      static_cast<void>(observer_->record_resolved_include_edge({}));
+      static_cast<void>(observer_->record_invalid_include_source_range());
       return;
     }
     const llvm::StringRef including_file = source_manager_.getFilename(hash);

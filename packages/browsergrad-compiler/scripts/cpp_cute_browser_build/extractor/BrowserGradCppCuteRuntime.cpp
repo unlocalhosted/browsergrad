@@ -13,7 +13,7 @@
 namespace browsergrad::cpp_cute {
 namespace {
 
-constexpr std::uint32_t kRuntimeAbiVersion = 0x0001'0004U;
+constexpr std::uint32_t kRuntimeAbiVersion = 0x0001'0005U;
 constexpr std::uint32_t kInputFrameMaximumByteLength = 4U * 1024U * 1024U;
 constexpr std::uint32_t kInputFrameHeaderByteLength = 64U;
 constexpr std::uint32_t kInputFrameAlignment = 8U;
@@ -447,6 +447,38 @@ void report_native_diagnostic(const NativeDiagnosticCode code) noexcept {
     case NativeDiagnosticCode::kProducerVfsIncludeEdgeLimit:
       write_native_diagnostic(
           "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-include-edge-limit\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsInvalidIncludeSourceRange:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-invalid-include-source-range\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsInvalidIncludeResolvedPath:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-invalid-include-resolved-path\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsInvalidIncludeIncludingPath:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-invalid-include-including-path\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsInvalidIncludeSpelling:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-invalid-include-spelling\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsInvalidIncludeOffsets:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-invalid-include-offsets\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsInvalidIncludeSourceOrdinal:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-invalid-include-source-ordinal\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsInvalidForcedIncludeShape:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-invalid-forced-include-shape\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsInvalidIncludeKind:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-invalid-include-kind\n");
       return;
   }
 }

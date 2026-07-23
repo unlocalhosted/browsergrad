@@ -137,7 +137,7 @@ describe("package-generated Emscripten factory binding", () => {
 
     expect(inspectCppCuteBrowserEmscriptenFactory(prepared)).toMatchObject({
       state: "prepared",
-      cAbiVersion: 65_540,
+      cAbiVersion: 65_541,
       allocatorMetricsPointer: 8,
       frontendWorkMetricsPointer: 16,
       generatedImportCount: 66,

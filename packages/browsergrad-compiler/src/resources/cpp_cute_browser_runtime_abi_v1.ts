@@ -43,8 +43,8 @@ function supportExport(
  */
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
-  version: { major: 1, minor: 12 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.3642dffb012c3ab5a61271c02675465759860f249ce09017b3cba99d40d36f60",
+  version: { major: 1, minor: 13 },
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.0758386fa646d9c70b508ae0573c4c43cb155fdab48a35dfc7470d20b988a39c",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -56,7 +56,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
     wasm: {
       moduleRole: "compiler-extractor-only-user-programs-never-linked-or-executed",
       addressBits: 32,
-      cAbiVersion: 65_540,
+      cAbiVersion: 65_541,
       cAbiVersionEncoding: "major-shift-left-16-bitwise-or-minor",
       // Browser-visible WebAssembly capabilities required for instantiation.
       requiredFeatures: [
@@ -914,6 +914,14 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         { code: 36, name: "producer-vfs-opened-file-limit" },
         { code: 37, name: "producer-vfs-invalid-include-edge" },
         { code: 38, name: "producer-vfs-include-edge-limit" },
+        { code: 39, name: "producer-vfs-invalid-include-source-range" },
+        { code: 40, name: "producer-vfs-invalid-include-resolved-path" },
+        { code: 41, name: "producer-vfs-invalid-include-including-path" },
+        { code: 42, name: "producer-vfs-invalid-include-spelling" },
+        { code: 43, name: "producer-vfs-invalid-include-offsets" },
+        { code: 44, name: "producer-vfs-invalid-include-source-ordinal" },
+        { code: 45, name: "producer-vfs-invalid-forced-include-shape" },
+        { code: 46, name: "producer-vfs-invalid-include-kind" },
       ],
     },
     lifecycle: {

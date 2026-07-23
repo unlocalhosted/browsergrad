@@ -353,7 +353,7 @@ int run_runtime_tests() {
           NativeDiagnosticCode::kAllocatorUnknownFailure) == 32U);
   static_assert(
       static_cast<std::uint32_t>(
-          NativeDiagnosticCode::kProducerVfsIncludeEdgeLimit) == 38U);
+          NativeDiagnosticCode::kProducerVfsInvalidIncludeKind) == 46U);
   g_runtime_test_allocation_hooks = {
       test_allocate,
       test_release,

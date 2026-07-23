@@ -63,6 +63,14 @@ enum class NativeDiagnosticCode : std::uint32_t {
   kProducerVfsOpenedFileLimit = 36U,
   kProducerVfsInvalidIncludeEdge = 37U,
   kProducerVfsIncludeEdgeLimit = 38U,
+  kProducerVfsInvalidIncludeSourceRange = 39U,
+  kProducerVfsInvalidIncludeResolvedPath = 40U,
+  kProducerVfsInvalidIncludeIncludingPath = 41U,
+  kProducerVfsInvalidIncludeSpelling = 42U,
+  kProducerVfsInvalidIncludeOffsets = 43U,
+  kProducerVfsInvalidIncludeSourceOrdinal = 44U,
+  kProducerVfsInvalidForcedIncludeShape = 45U,
+  kProducerVfsInvalidIncludeKind = 46U,
 };
 
 void report_native_diagnostic(NativeDiagnosticCode code) noexcept;
