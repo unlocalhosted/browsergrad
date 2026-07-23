@@ -655,6 +655,21 @@ __global__ void saxpy(const float* x, float* y, float a, int n) {
 `,
         { workgroupSize: [4, 1, 1] },
       );
+      if (compiled.wgsl === undefined || compiled.wgslProgram === undefined) {
+        ctx.assertFail(
+          "cs149-a3-cuda-lite-compiler",
+          "CUDA-lite compiler did not produce the required WebGPU artifacts",
+          {
+            expected: { wgsl: "present", wgslProgram: "present" },
+            actual: {
+              wgsl: compiled.wgsl === undefined ? "missing" : "present",
+              wgslProgram:
+                compiled.wgslProgram === undefined ? "missing" : "present",
+            },
+          },
+        );
+        return;
+      }
       const result = cuda.runCompiledKernelReference(
         compiled,
         {
