@@ -520,7 +520,16 @@ function expectStatus(
 ): void {
   const actual = readStatus(taken);
   if (actual !== expected) {
-    mismatch(path, `expected C ABI status ${expected}, observed ${actual}`);
+    const nativeDiagnostic = readNativeDiagnostic(
+      taken,
+      `${path}.nativeDiagnostic`,
+    );
+    mismatch(
+      path,
+      `expected C ABI status ${expected}, observed ${actual}; ` +
+        `nativeDiagnosticCode=${nativeDiagnostic.code},` +
+        `nativeDiagnosticName=${nativeDiagnostic.name}`,
+    );
   }
 }
 

@@ -691,6 +691,7 @@ void runtime_free(std::uint32_t pointer, std::uint32_t byte_length) {
   const bool artifact_ready = g_runtime.phase == RuntimePhase::kArtifactReady;
   release_input();
   if (!allocator_metrics_healthy()) {
+    report_allocator_metrics_failure();
     g_runtime.phase = RuntimePhase::kFailed;
     g_runtime.status = WireCompileStatus::kInternalError;
     return;
