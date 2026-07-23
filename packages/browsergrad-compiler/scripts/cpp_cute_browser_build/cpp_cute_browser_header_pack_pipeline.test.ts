@@ -32,7 +32,7 @@ describe("exact header-pack pipeline", () => {
       "--pack-output-root=/private/tmp/browsergrad-header-packs",
     ]);
 
-    expect(parsed.archives).toHaveLength(7);
+    expect(parsed.archives).toHaveLength(8);
     expect(parsed.bsdtarPath).toBe("/usr/bin/bsdtar");
     expect(parsed.cudaRedistributionIndexPath).toBe("/private/tmp/redistrib_12.6.3.json");
     expect(parsed.sourceOutputRoot).toBe("/private/tmp/browsergrad-header-sources");
@@ -87,6 +87,7 @@ function archiveArguments(): string[] {
   return [
     "--cuda-cccl-linux-x86-64=/private/tmp/cuda-cccl.tar.xz",
     "--cuda-cudart-linux-x86-64=/private/tmp/cuda-cudart.tar.xz",
+    "--cuda-libcurand-linux-x86-64=/private/tmp/cuda-libcurand.tar.xz",
     "--cuda-nvcc-linux-x86-64=/private/tmp/cuda-nvcc.tar.xz",
     "--cutlass=/private/tmp/cutlass.tar.gz",
     "--llvm-project=/private/tmp/llvm-project.tar.xz",

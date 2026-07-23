@@ -11,7 +11,7 @@ import {
 } from "./cpp_cute_browser_header_source_plan.mjs";
 
 describe("browser header-source plan", () => {
-  it("pins seven exact archives and all five header roles", async () => {
+  it("pins eight exact archives and all five header roles", async () => {
     const plan = await prepareCppCuteBrowserHeaderSourcePlan();
 
     expect(plan.planId).toMatch(/^bg\.cpp\.browser-header-source-plan\.sha256\.[0-9a-f]{64}$/u);
@@ -21,6 +21,7 @@ describe("browser header-source plan", () => {
     expect(plan.body.archives.map((archive) => archive.sourceId)).toEqual([
       "cuda-cccl-linux-x86-64",
       "cuda-cudart-linux-x86-64",
+      "cuda-libcurand-linux-x86-64",
       "cuda-nvcc-linux-x86-64",
       "cutlass",
       "llvm-project",
@@ -33,20 +34,20 @@ describe("browser header-source plan", () => {
       root.generatedInputsComplete,
     ])).toEqual([
       ["clang-resource", 1, false],
-      ["cuda", 3, true],
+      ["cuda", 4, true],
       ["cutlass", 1, true],
       ["cxx-stdlib", 1, true],
       ["linux-sysroot", 2, true],
     ]);
     expect(plan.totals).toEqual({
-      archiveCount: 7,
-      archiveByteLength: "252406685",
+      archiveCount: 8,
+      archiveByteLength: "334136433",
       includeRootCount: 5,
-      selectedSubtreeCount: 8,
+      selectedSubtreeCount: 9,
       supplementalFileCount: 1,
       supplementalFileByteLength: "2399",
-      licenseEvidenceFileCount: 8,
-      licenseEvidenceByteLength: "250207",
+      licenseEvidenceFileCount: 9,
+      licenseEvidenceByteLength: "313228",
     });
     const clangSelection = plan.body.archives
       .find(({ sourceId }) => sourceId === "llvm-project")?.selections
@@ -115,6 +116,20 @@ describe("browser header-source plan", () => {
         archiveSubtree: "cuda_nvcc-linux-x86_64-12.6.85-archive/include",
       }),
     ]);
+    expect(byId.get("cuda-libcurand-linux-x86-64")).toMatchObject({
+      version: "10.3.7.77",
+      archiveSha256: "981339cc86d7b8779e9a3c17e72d8c5e1a8a2d06c24db692eecabed8e746a3c7",
+      archiveByteLength: "81729748",
+      selections: [{
+        includeRootId: "cuda",
+        archiveSubtree: "libcurand-linux-x86_64-10.3.7.77-archive/include",
+      }],
+      licenseEvidence: [{
+        archivePath: "libcurand-linux-x86_64-10.3.7.77-archive/LICENSE",
+        sha256: "e2c71babfd18a8e69542dd7e9ca018f9caa438094001a58e6bc4d8c999bf0d07",
+        byteLength: "63021",
+      }],
+    });
     expect(byId.get("ubuntu-noble-libc6-dev-amd64-cross")).toMatchObject({
       version: "2.39-0ubuntu8cross1",
       archiveSha256: "ceec73b7dbee49022fa52b8ce21961a118902f3ad1ff51e8f83d9dfc0270962d",

@@ -15,6 +15,7 @@ import {
 const SOURCE_IDS = [
   "cuda-cccl-linux-x86-64",
   "cuda-cudart-linux-x86-64",
+  "cuda-libcurand-linux-x86-64",
   "cuda-nvcc-linux-x86-64",
   "cutlass",
   "llvm-project",
@@ -28,7 +29,7 @@ afterEach(async () => {
 });
 
 describe("browser header-source archive admission", () => {
-  it("parses only the exact seven source-plan archive arguments", () => {
+  it("parses only the exact eight source-plan archive arguments", () => {
     const argumentsInReverse = [...SOURCE_IDS].reverse().map((sourceId) =>
       `--${sourceId}=/tmp/${sourceId}.archive`);
     expect(parseCppCuteBrowserHeaderSourceArchiveArguments(argumentsInReverse)).toEqual({

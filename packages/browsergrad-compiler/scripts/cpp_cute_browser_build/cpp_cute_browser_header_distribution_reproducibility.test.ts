@@ -20,7 +20,7 @@ describe("exact header distribution reproducibility", () => {
       "--second-source-output-root=/private/tmp/repro/source-b",
       "--second-pack-output-root=/private/tmp/repro/packs-b",
     ]);
-    expect(parsed.first.archives).toHaveLength(7);
+    expect(parsed.first.archives).toHaveLength(8);
     expect(parsed.first.sourceOutputRoot).toBe("/private/tmp/repro/source-a");
     expect(parsed.second.packOutputRoot).toBe("/private/tmp/repro/packs-b");
     expect(() => parseCppCuteBrowserHeaderDistributionReproducibilityArguments([
@@ -55,6 +55,7 @@ function archiveArguments(): string[] {
   return [
     "--cuda-cccl-linux-x86-64=/private/tmp/cuda-cccl.tar.xz",
     "--cuda-cudart-linux-x86-64=/private/tmp/cuda-cudart.tar.xz",
+    "--cuda-libcurand-linux-x86-64=/private/tmp/cuda-libcurand.tar.xz",
     "--cuda-nvcc-linux-x86-64=/private/tmp/cuda-nvcc.tar.xz",
     "--cutlass=/private/tmp/cutlass.tar.gz",
     "--llvm-project=/private/tmp/llvm-project.tar.xz",

@@ -22,6 +22,7 @@ const SOURCE_ID = /^[a-z][a-z0-9-]*$/u;
 const HEADER_SOURCE_ARCHIVE_IDS = Object.freeze([
   "cuda-cccl-linux-x86-64",
   "cuda-cudart-linux-x86-64",
+  "cuda-libcurand-linux-x86-64",
   "cuda-nvcc-linux-x86-64",
   "cutlass",
   "llvm-project",
@@ -40,7 +41,7 @@ export class CppCuteBrowserHeaderSourceArchiveAdmissionError extends Error {
 }
 
 /**
- * Admits exactly the seven archives selected by the current header-source plan.
+ * Admits exactly the eight archives selected by the current header-source plan.
  * File verification remains in the reusable regular-archive boundary; this
  * wrapper alone binds those observations to package policy.
  */

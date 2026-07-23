@@ -39,8 +39,8 @@ export class CppCuteBrowserHeaderSourceExtractionError extends Error {
 }
 
 /**
- * Copies the seven exact admitted archives into a private staging directory,
- * normalizes their eight selected header subtrees, exact supplemental
+ * Copies the eight exact admitted archives into a private staging directory,
+ * normalizes their nine selected header subtrees, exact supplemental
  * configured-header inputs, and upstream license/copyright review files, then
  * removes all archive copies. The output is a collision-free
  * virtual-path-backed source store, not a host-filesystem-shaped include tree
@@ -507,8 +507,8 @@ export function cppCuteBrowserExtractedHeaderSourceFiles(
 export function parseCppCuteBrowserHeaderSourceExtractionArguments(argv) {
   if (!Array.isArray(argv)) invalid("$arguments", "expected one argument array");
   const arguments_ = argv[0] === "--" ? argv.slice(1) : argv;
-  if (arguments_.length !== 9) {
-    invalid("$arguments", "expected seven source archives, --bsdtar, and --output-root");
+  if (arguments_.length !== 10) {
+    invalid("$arguments", "expected eight source archives, --bsdtar, and --output-root");
   }
   const operational = new Map();
   const archives = [];

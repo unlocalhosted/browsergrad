@@ -66,10 +66,10 @@ describe("extracted header-source inventory", () => {
     const assertionHandlerBytes = Buffer.from("// assertion handler\n", "utf8");
     expect(inventory.totals).toEqual({
       packCount: 5,
-      sourceCount: 8,
-      fileCount: 11,
+      sourceCount: 9,
+      fileCount: 12,
       fileContentByteLength: String(
-        77 +
+        91 +
         templateBytes.byteLength +
         configuredBytes.byteLength +
         moduleTemplateBytes.byteLength +
@@ -78,7 +78,7 @@ describe("extracted header-source inventory", () => {
       ),
     });
     expect(inventory.packs.find(({ includeRootId }) => includeRootId === "cuda"))
-      .toMatchObject({ fileCount: 1, fileContentByteLength: "12" });
+      .toMatchObject({ fileCount: 2, fileContentByteLength: "26" });
     expect(inventory.packs.find(({ includeRootId }) => includeRootId === "clang-resource"))
       .toMatchObject({ fileCount: 1, files: [expect.objectContaining({ virtualPath: "stddef.h" })] });
     expect(inventory.claims.generatedClangResourceHeadersComplete).toBe(true);
@@ -103,6 +103,11 @@ describe("extracted header-source inventory", () => {
       "cuda",
       "cuda.h",
     )).toString("utf8")).toBe("cuda-header\n");
+    expect(Buffer.from(await copyCppCuteBrowserHeaderPackInventorySourceFile(
+      inventory,
+      "cuda",
+      "curand_mtgp32_kernel.h",
+    )).toString("utf8")).toBe("curand-header\n");
 
     extraction.fixtureContents.set(
       key("cuda-cccl-linux-x86-64", "cuda", "cuda.h"),
@@ -180,13 +185,14 @@ async function fixtureExtraction(): Promise<FixtureExtraction> {
     archives: [
       source("cuda-cccl-linux-x86-64", "cuda-toolkit-12.6.3-headers", ["cuda"]),
       source("cuda-cudart-linux-x86-64", "cuda-toolkit-12.6.3-headers", ["cuda"]),
+      source("cuda-libcurand-linux-x86-64", "cuda-toolkit-12.6.3-headers", ["cuda"]),
       source("cuda-nvcc-linux-x86-64", "cuda-toolkit-12.6.3-headers", ["cuda"]),
       source("cutlass", "cutlass", ["cutlass"]),
       source("llvm-project", "clang-and-libcxx", ["clang-resource", "cxx-stdlib"]),
       source("ubuntu-noble-libc6-dev-amd64-cross", "linux-sysroot", ["linux-sysroot"]),
       source("ubuntu-noble-linux-libc-dev-amd64-cross", "linux-sysroot", ["linux-sysroot"]),
     ],
-    totals: { selectedSubtreeCount: 8 },
+    totals: { selectedSubtreeCount: 9 },
     fixtureFiles: new Map(),
     fixtureContents: new Map(),
   };
@@ -197,6 +203,13 @@ async function fixtureExtraction(): Promise<FixtureExtraction> {
   ]) {
     setFile(extraction, sourceId, "cuda", "cuda.h", "cuda-header\n");
   }
+  setFile(
+    extraction,
+    "cuda-libcurand-linux-x86-64",
+    "cuda",
+    "curand_mtgp32_kernel.h",
+    "curand-header\n",
+  );
   setFile(extraction, "cutlass", "cutlass", "cute/tensor.hpp", "cute-header\n");
   setFile(extraction, "llvm-project", "clang-resource", "CMakeLists.txt", "fixture-cmake\n");
   setFile(extraction, "llvm-project", "clang-resource", "stddef.h", "clang-header\n");

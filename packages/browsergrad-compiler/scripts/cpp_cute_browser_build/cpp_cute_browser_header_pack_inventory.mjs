@@ -201,7 +201,7 @@ export async function inventoryCppCuteBrowserHeaderPackSources(input) {
 
 /**
  * Inventories the collision-free virtual source stores produced from the exact
- * seven-archive header plan. Every file is reread through the extraction's
+ * eight-archive header plan. Every file is reread through the extraction's
  * opaque authority, so no host path or case-folding behavior enters VFS paths.
  */
 export async function inventoryCppCuteBrowserExtractedHeaderSources(extraction) {

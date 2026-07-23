@@ -113,8 +113,8 @@ async function currentExpectedIndex() {
   const cudaSources = plan.body.archives.filter(
     (source) => source.sourceKind === "nvidia-cuda-redist-component",
   );
-  if (cudaSources.length !== 3) {
-    invalid("$.headerSourcePlan", "current source plan must contain exactly three CUDA components");
+  if (cudaSources.length !== 4) {
+    invalid("$.headerSourcePlan", "current source plan must contain exactly four CUDA components");
   }
   const firstIndex = cudaSources[0]?.index;
   if (firstIndex === undefined || typeof firstIndex.url !== "string" ||

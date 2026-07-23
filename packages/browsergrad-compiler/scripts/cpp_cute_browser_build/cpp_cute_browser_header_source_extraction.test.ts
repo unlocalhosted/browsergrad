@@ -16,7 +16,7 @@ afterEach(async () => {
 });
 
 describe("exact header-source extraction", () => {
-  it("parses the exact seven-source operational CLI with pnpm separator", () => {
+  it("parses the exact eight-source operational CLI with pnpm separator", () => {
     const parsed = parseCppCuteBrowserHeaderSourceExtractionArguments([
       "--",
       ...archiveArguments(),
@@ -27,6 +27,7 @@ describe("exact header-source extraction", () => {
     expect(parsed.archives.map(({ sourceId }) => sourceId)).toEqual([
       "cuda-cccl-linux-x86-64",
       "cuda-cudart-linux-x86-64",
+      "cuda-libcurand-linux-x86-64",
       "cuda-nvcc-linux-x86-64",
       "cutlass",
       "llvm-project",
@@ -61,6 +62,7 @@ function archiveArguments(): string[] {
   return [
     "--cuda-cccl-linux-x86-64=/private/tmp/cuda-cccl.tar.xz",
     "--cuda-cudart-linux-x86-64=/private/tmp/cuda-cudart.tar.xz",
+    "--cuda-libcurand-linux-x86-64=/private/tmp/cuda-libcurand.tar.xz",
     "--cuda-nvcc-linux-x86-64=/private/tmp/cuda-nvcc.tar.xz",
     "--cutlass=/private/tmp/cutlass.tar.gz",
     "--llvm-project=/private/tmp/llvm-project.tar.xz",

@@ -115,6 +115,43 @@ const SUPPLEMENTAL_ARCHIVES = Object.freeze([
     ]),
   }),
   Object.freeze({
+    sourceId: "cuda-libcurand-linux-x86-64",
+    sourceKind: "nvidia-cuda-redist-component",
+    provider: "NVIDIA",
+    version: "10.3.7.77",
+    acquisitionUrl:
+      "https://developer.download.nvidia.com/compute/cuda/redist/libcurand/linux-x86_64/libcurand-linux-x86_64-10.3.7.77-archive.tar.xz",
+    archiveFormat: "tar.xz",
+    archiveSha256: "981339cc86d7b8779e9a3c17e72d8c5e1a8a2d06c24db692eecabed8e746a3c7",
+    archiveByteLength: "81729748",
+    index: Object.freeze({
+      url: "https://developer.download.nvidia.com/compute/cuda/redist/redistrib_12.6.3.json",
+      sha256: "9c598598457a6463eb92889080c16b2b9dc04150e501b8bfc1536d403ba70aaf",
+      byteLength: "49142",
+      releaseLabel: "12.6.3",
+    }),
+    licenseComponentId: "cuda-toolkit-12.6.3-headers",
+    licensePolicy: "external-exact-file-redistribution-review-required",
+    licenseEvidence: Object.freeze([
+      Object.freeze({
+        evidenceId: "cuda-license",
+        archivePath: "libcurand-linux-x86_64-10.3.7.77-archive/LICENSE",
+        componentId: "cuda-toolkit-12.6.3-headers",
+        evidenceRole: "upstream-license-text",
+        sha256: "e2c71babfd18a8e69542dd7e9ca018f9caa438094001a58e6bc4d8c999bf0d07",
+        byteLength: "63021",
+      }),
+    ]),
+    selections: Object.freeze([
+      Object.freeze({
+        includeRootId: "cuda",
+        archiveSubtree: "libcurand-linux-x86_64-10.3.7.77-archive/include",
+        virtualPrefix: "",
+        contribution: "complete-selected-header-subtree",
+      }),
+    ]),
+  }),
+  Object.freeze({
     sourceId: "cuda-nvcc-linux-x86-64",
     sourceKind: "nvidia-cuda-redist-component",
     provider: "NVIDIA",
@@ -267,7 +304,7 @@ export async function prepareCppCuteBrowserHeaderSourcePlan() {
       }),
       Object.freeze({
         blockerId: "cuda-header-redistribution",
-        requirement: "external-exact-file-review-of-the-three-selected-cuda-header-subtrees",
+        requirement: "external-exact-file-review-of-the-four-selected-cuda-header-subtrees",
       }),
       Object.freeze({
         blockerId: "distributed-file-license-manifest",
@@ -554,7 +591,7 @@ function approvedLicenseEvidence(notices, componentId, evidenceId, archivePath) 
 }
 
 function validateArchiveSet(archives) {
-  if (archives.length !== 7) invalid("$.archives", "header source plan must select exactly seven archives");
+  if (archives.length !== 8) invalid("$.archives", "header source plan must select exactly eight archives");
   for (const [index, archive] of archives.entries()) {
     const path = `$.archives[${index}]`;
     if (!SOURCE_ID.test(archive.sourceId) || !SHA256.test(archive.archiveSha256) ||
