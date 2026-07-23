@@ -219,13 +219,16 @@ describe("semantic architecture guardrails", () => {
     const gradFreeze = freeze("grad-view-bf16");
 
     expect(checkFrozenGradCompatibilitySources(
-      tensorSource.replace('"bfloat16": np.float32, "bf16": np.float32', '"bfloat16": np.float16, "bf16": np.float16'),
+      tensorSource.replace(
+        'if isinstance(spec, str) and spec in ("bfloat16", "bf16"):',
+        'if isinstance(spec, str) and spec == "bf16":',
+      ),
       torchCompatSource,
       gradFreeze,
     )).toContainEqual(expect.stringContaining("tensor.py:_resolve_dtype changed"));
     expect(checkFrozenGradCompatibilitySources(
       tensorSource,
-      torchCompatSource.replace('torch_mod.bfloat16 = "float32"', 'torch_mod.bfloat16 = "bfloat16"'),
+      torchCompatSource.replace('torch_mod.bfloat16 = "bfloat16"', 'torch_mod.bfloat16 = "float32"'),
       gradFreeze,
     )).toContainEqual(expect.stringContaining("Grad torch dtype tokens changed"));
     expect(checkFrozenGradCompatibilitySources(
@@ -252,7 +255,10 @@ describe("semantic architecture guardrails", () => {
 
   it("rejects Grad compatibility inventory and behavior-fixture drift", () => {
     const inventory = JSON.parse(readFileSync(join(repoRoot, "architecture/grad-compatibility-inventory.json"), "utf8")) as {
-      dtypeResolution: { aliases: Record<string, string> };
+      dtypeResolution: {
+        aliases: Record<string, string>;
+        unsupportedDtypes: Record<string, string>;
+      };
       behaviors: Array<Record<string, unknown>>;
     };
     const fixture = JSON.parse(readFileSync(join(repoRoot, "packages/browsergrad-grad/tests-integration/fixtures/grad-view-bf16.v0.json"), "utf8")) as {
@@ -266,9 +272,13 @@ describe("semantic architecture guardrails", () => {
       .toContainEqual(expect.stringContaining("behaviors[0] keys changed"));
 
     const changedAlias = structuredClone(inventory);
-    changedAlias.dtypeResolution.aliases.bf16 = "float16";
+    changedAlias.dtypeResolution.aliases.float16 = "float32";
     expect(validateGradCompatibilityInventory(changedAlias, fixture, gradFreeze))
       .toContainEqual(expect.stringContaining("differs from the frozen source alias map"));
+    const changedUnsupported = structuredClone(inventory);
+    changedUnsupported.dtypeResolution.unsupportedDtypes.bf16 = "float32";
+    expect(validateGradCompatibilityInventory(changedUnsupported, fixture, gradFreeze))
+      .toContainEqual(expect.stringContaining("unsupportedDtypes changed"));
     const changedFixture = structuredClone(fixture);
     changedFixture.cases.splice(3, 1);
     expect(validateGradCompatibilityInventory(inventory, changedFixture, gradFreeze))

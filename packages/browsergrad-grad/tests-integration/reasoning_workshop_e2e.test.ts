@@ -3,9 +3,9 @@
  *
  * All architecture classes (RMSNorm, SwiGLU FeedForward, GroupedQueryAttention,
  * RoPE, Qwen3-like Model) are copy-pasted verbatim from the workshop's
- * qwen3.py. The only change: cfg["dtype"] uses "float32" instead of
- * torch.bfloat16 (browsergrad maps bfloat16→float32 transparently, but
- * dict literals with "float32" are cleaner for testing).
+ * qwen3.py. The only change: cfg["dtype"] uses explicit "float32" because
+ * browsergrad-grad rejects bfloat16 until it owns real bfloat16 storage and
+ * conversion semantics.
  *
  * Training helpers (GRPO loss pattern, top-p filter, clip_grad_norm_) are
  * copy-pasted verbatim from ch04.py and ch06.py.
@@ -45,7 +45,7 @@ QWEN_CONFIG_TINY = {
     "n_layers":        2,
     "qk_norm":         True,
     "rope_base":       10_000.0,
-    "dtype":           "float32",   # explicit float32 (browsergrad maps bf16→f32)
+    "dtype":           "float32",   # explicit supported storage dtype
     "drop_rate":       0.0,
 }
 
@@ -645,27 +645,77 @@ arr = advantages.numpy()
 });
 
 // ───────────────────────────────────────────────────────────
-// torch.bfloat16 transparent fallback
+// torch.bfloat16 explicit refusal
 // ───────────────────────────────────────────────────────────
-describe("torch.bfloat16 → float32 transparent fallback", () => {
+describe("torch.bfloat16 explicit refusal", () => {
   beforeAll(reset);
 
-  it("torch.bfloat16 equals 'float32' string", async () => {
-    const r = await target.run<{ is_f32: boolean }>(`
+  it("keeps torch.bfloat16 distinct from float32", async () => {
+    const r = await target.run<{ token: string; is_f32: boolean }>(`
 ${SETUP}
-{"is_f32": torch.bfloat16 == "float32"}
+{"token": torch.bfloat16, "is_f32": torch.bfloat16 == torch.float32}
 `);
-    expect(r.is_f32).toBe(true);
+    expect(r).toEqual({ token: "bfloat16", is_f32: false });
   });
 
-  it("model with dtype=torch.bfloat16 config instantiates without error", async () => {
-    const r = await target.run<{ n_params_gt_zero: boolean }>(`
+  it("rejects a model requesting unsupported bfloat16 storage", async () => {
+    const r = await target.run<{ error: string }>(`
 ${SETUP}
 cfg_bf16 = dict(QWEN_CONFIG_TINY)
-cfg_bf16["dtype"] = torch.bfloat16   # will be treated as "float32"
-model = Qwen3ModelTiny(cfg_bf16)
-{"n_params_gt_zero": sum(1 for _ in model.parameters()) > 0}
+cfg_bf16["dtype"] = torch.bfloat16
+try:
+    Qwen3ModelTiny(cfg_bf16)
+    error = "no_error"
+except Exception as exc:
+    error = type(exc).__name__ + ": " + str(exc)
+{"error": error}
 `);
-    expect(r.n_params_gt_zero).toBe(true);
+    expect(r.error).toMatch(
+      /^NotImplementedError: browsergrad-grad does not provide bfloat16 storage or conversion/,
+    );
+  });
+
+  it("accepts exact float32 parameters and rejects every other dtype", async () => {
+    const r = await target.run<{
+      linearWeight: string;
+      linearBias: string;
+      embeddingWeight: string;
+      float16Error: string;
+      float64Error: string;
+      integerError: string;
+    }>(`
+${SETUP}
+linear = nn.Linear(3, 2, dtype=torch.float32)
+embedding = nn.Embedding(5, 3, dtype=torch.float32)
+def error(call):
+    try:
+        call()
+        return "no_error"
+    except Exception as exc:
+        return type(exc).__name__ + ": " + str(exc)
+try:
+    nn.Linear(3, 2, dtype=torch.int32)
+    integer_error = "no_error"
+except Exception as exc:
+    integer_error = type(exc).__name__ + ": " + str(exc)
+{
+    "linearWeight": linear.weight.dtype,
+    "linearBias": linear.bias.dtype,
+    "embeddingWeight": embedding.weight.dtype,
+    "float16Error": error(lambda: nn.Linear(3, 2, dtype=torch.float16)),
+    "float64Error": error(lambda: nn.Embedding(5, 3, dtype=torch.float64)),
+    "integerError": integer_error,
+}
+`);
+    expect(r).toEqual({
+      linearWeight: "float32",
+      linearBias: "float32",
+      embeddingWeight: "float32",
+      float16Error:
+        "NotImplementedError: nn.Linear: only float32 parameter storage and computation are supported, got 'float16'",
+      float64Error:
+        "NotImplementedError: nn.Embedding: only float32 parameter storage and computation are supported, got 'float64'",
+      integerError: "TypeError: nn.Linear: parameter dtype must be floating, got 'int32'",
+    });
   });
 });

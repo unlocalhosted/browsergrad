@@ -1191,12 +1191,15 @@ def _resolve_dtype(spec):
     Accepts strings ('float32', 'int64', 'bool', PyTorch aliases like 'long'
     / 'float' / 'double'), numpy dtypes, or numpy dtype objects.
     """
+    if isinstance(spec, str) and spec in ("bfloat16", "bf16"):
+        raise NotImplementedError(
+            "browsergrad-grad does not provide bfloat16 storage or conversion; "
+            "use an explicitly supported dtype such as 'float32'"
+        )
     aliases = {
         "float": np.float32, "float32": np.float32,
         "float64": np.float64, "double": np.float64,
         "float16": np.float16, "half": np.float16, "fp16": np.float16,
-        # bfloat16 is not supported by NumPy — silently fall back to float32
-        "bfloat16": np.float32, "bf16": np.float32,
         "int": np.int32, "int32": np.int32,
         "int64": np.int64, "long": np.int64,
         "int16": np.int16, "short": np.int16,

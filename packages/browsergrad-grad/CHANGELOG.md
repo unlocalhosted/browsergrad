@@ -9,6 +9,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- `bf16`, `bfloat16`, and `torch.bfloat16` no longer silently allocate and
+  compute as float32. The torch token remains distinct, while tensor
+  construction, `Tensor.to`, and parameter construction fail before
+  allocation with an explicit unsupported-storage diagnostic. `nn.Linear`
+  and `nn.Embedding` now enforce exact float32 parameter storage/computation
+  and reject every other dtype instead of ignoring `dtype`.
 - `torch.nn.functional.interpolate` now shares JIT's bounded rank-4
   float16/32/64 nearest/bilinear contract, including floor-derived scaled
   extents, explicit scale recomputation, aligned-corner geometry, owning

@@ -10,13 +10,18 @@ class Linear(Module):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
+        storage_dtype = _parameter_storage_dtype(dtype, "nn.Linear")
         bound = 1.0 / math.sqrt(in_features)
         W_data = np.random.uniform(
             -bound, bound, size=(out_features, in_features)
-        ).astype(np.float32)
-        self.weight = Tensor(W_data, requires_grad=True)
+        ).astype(storage_dtype)
+        self.weight = Tensor(W_data, dtype=storage_dtype, requires_grad=True)
         if bias:
-            self.bias = Tensor(np.zeros(out_features, dtype=np.float32), requires_grad=True)
+            self.bias = Tensor(
+                np.zeros(out_features, dtype=storage_dtype),
+                dtype=storage_dtype,
+                requires_grad=True,
+            )
         else:
             self.bias = None
 

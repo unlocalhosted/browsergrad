@@ -9,8 +9,6 @@
     {
       "id": "grad.dtype.alias-registry.v0",
       "expected": {
-        "bf16": ["float32", 4],
-        "bfloat16": ["float32", 4],
         "bool": ["bool", 1],
         "double": ["float64", 8],
         "float": ["float32", 4],
@@ -46,18 +44,19 @@
       }
     },
     {
-      "id": "grad.dtype.bf16-is-f32.v0",
+      "id": "grad.dtype.bf16-rejected.v1",
       "expected": {
-        "dtype": "float32",
-        "itemsize": 4,
-        "storedValue": 1.00390625
+        "bf16Constructor": "NotImplementedError: browsergrad-grad does not provide bfloat16 storage or conversion; use an explicitly supported dtype such as 'float32'",
+        "bfloat16Constructor": "NotImplementedError: browsergrad-grad does not provide bfloat16 storage or conversion; use an explicitly supported dtype such as 'float32'",
+        "toBfloat16": "NotImplementedError: browsergrad-grad does not provide bfloat16 storage or conversion; use an explicitly supported dtype such as 'float32'"
       }
     },
     {
-      "id": "grad.dtype.torch-bfloat16-token-is-f32.v0",
+      "id": "grad.dtype.torch-bfloat16-token-distinct-unsupported.v1",
       "expected": {
-        "token": "float32",
-        "distinctFromFloat32": false
+        "token": "bfloat16",
+        "distinctFromFloat32": true,
+        "constructor": "NotImplementedError: browsergrad-grad does not provide bfloat16 storage or conversion; use an explicitly supported dtype such as 'float32'"
       }
     },
     {

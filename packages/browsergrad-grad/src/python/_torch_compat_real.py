@@ -87,7 +87,9 @@ def install_real(torch_mod, _bg, _types):
     torch_mod.double  = "float64"
     torch_mod.float16 = "float16"
     torch_mod.half    = "float16"
-    torch_mod.bfloat16 = "float32"  # bf16 not supported in NumPy → fall back to f32
+    # Distinct unsupported token: construction/conversion rejects before
+    # silently substituting float32 storage for bfloat16 semantics.
+    torch_mod.bfloat16 = "bfloat16"
     torch_mod.int64   = "int64"
     torch_mod.long    = "int64"
     torch_mod.int32   = "int32"

@@ -386,8 +386,8 @@ export function validateGradCompatibilityInventory(inventory, fixture, freeze, f
   };
 
   exactKeys(filename, inventory, ["schemaVersion", "inventoryId", "owner", "evidenceTier", "environment", "executionContext", "dtypeResolution", "behaviors"]);
-  if (!isRecord(inventory) || inventory.schemaVersion !== 1 || inventory.inventoryId !== "browsergrad.grad.compatibility.v0" || inventory.owner !== "@unlocalhosted/browsergrad-grad" || inventory.evidenceTier !== "pyodide-numpy-reference") {
-    failures.push(`${filename} must identify the schemaVersion 1 BrowserGrad Grad Pyodide/NumPy compatibility inventory`);
+  if (!isRecord(inventory) || inventory.schemaVersion !== 2 || inventory.inventoryId !== "browsergrad.grad.compatibility.v1" || inventory.owner !== "@unlocalhosted/browsergrad-grad" || inventory.evidenceTier !== "pyodide-numpy-reference") {
+    failures.push(`${filename} must identify the schemaVersion 2 BrowserGrad Grad Pyodide/NumPy compatibility inventory`);
     return failures;
   }
   exactKeys(`${filename}.environment`, inventory.environment, ["pyodide", "numpy"]);
@@ -395,15 +395,18 @@ export function validateGradCompatibilityInventory(inventory, fixture, freeze, f
   if (!isRecord(inventory.executionContext) || inventory.executionContext.residency !== "pyodide-wasm-linear-memory" || inventory.executionContext.backendDecision !== "numpy-reference-only" || inventory.executionContext.transformDecision !== "not-applicable-eager" || inventory.executionContext.exportDecision !== "not-applicable-eager") {
     failures.push(`${filename}.executionContext changed`);
   }
-  exactKeys(`${filename}.dtypeResolution`, inventory.dtypeResolution, ["defaultTensorStorageDtype", "defaultTorchIntegerStorageDtype", "unknownStringPolicy", "nonStringPolicy", "storageByteWidths", "substitutionComputeDtypes", "aliases", "torchTokens"]);
+  exactKeys(`${filename}.dtypeResolution`, inventory.dtypeResolution, ["defaultTensorStorageDtype", "defaultTorchIntegerStorageDtype", "unknownStringPolicy", "nonStringPolicy", "storageByteWidths", "unsupportedDtypes", "aliases", "torchTokens"]);
   if (!isRecord(inventory.dtypeResolution)) return failures;
   if (inventory.dtypeResolution.defaultTensorStorageDtype !== "float32" || inventory.dtypeResolution.defaultTorchIntegerStorageDtype !== "int64" || inventory.dtypeResolution.unknownStringPolicy !== "delegate-to-numpy-dtype" || inventory.dtypeResolution.nonStringPolicy !== "delegate-to-numpy-dtype") {
     failures.push(`${filename}.dtypeResolution policies changed`);
   }
   const expectedStorageByteWidths = { bool: 1, float16: 2, float32: 4, float64: 8, int8: 1, int16: 2, int32: 4, int64: 8, uint8: 1 };
-  const expectedSubstitutionComputeDtypes = { bf16: "float32", bfloat16: "float32" };
+  const expectedUnsupportedDtypes = {
+    bf16: "rejected-no-real-bfloat16-storage-or-conversion",
+    bfloat16: "rejected-no-real-bfloat16-storage-or-conversion",
+  };
   if (JSON.stringify(sortRecord(inventory.dtypeResolution.storageByteWidths ?? {})) !== JSON.stringify(sortRecord(expectedStorageByteWidths))) failures.push(`${filename}.dtypeResolution.storageByteWidths changed`);
-  if (JSON.stringify(sortRecord(inventory.dtypeResolution.substitutionComputeDtypes ?? {})) !== JSON.stringify(sortRecord(expectedSubstitutionComputeDtypes))) failures.push(`${filename}.dtypeResolution.substitutionComputeDtypes changed`);
+  if (JSON.stringify(sortRecord(inventory.dtypeResolution.unsupportedDtypes ?? {})) !== JSON.stringify(sortRecord(expectedUnsupportedDtypes))) failures.push(`${filename}.dtypeResolution.unsupportedDtypes changed`);
   for (const field of ["aliases", "torchTokens"]) {
     const values = inventory.dtypeResolution[field];
     if (!isRecord(values) || Object.keys(values).length === 0 || Object.values(values).some((value) => typeof value !== "string" || value.length === 0)) {
@@ -422,13 +425,13 @@ export function validateGradCompatibilityInventory(inventory, fixture, freeze, f
     return failures;
   }
   const behaviorKeys = ["id", "surface", "class", "observationStatus", "targetConformance", "referenceContract", "dtypeEffect", "condition", "failurePolicy", "aliasing", "contiguity", "materialization", "autograd", "truth", "sourceDefinitions", "fixtureCaseIds"];
-  const classes = new Set(["conversion", "dtype-resolution", "dtype-substitution", "interop", "materialization", "view"]);
+  const classes = new Set(["conversion", "dtype-refusal", "dtype-resolution", "interop", "materialization", "view"]);
   const observationStatuses = new Set(["verified"]);
   const targetConformance = new Set(["browsergrad-defined", "compatibility-debt", "pytorch-compatible"]);
   const referenceContracts = new Set(["browsergrad-grad-explicit", "numpy-array-protocol", "pytorch-shaped-compatibility"]);
-  const dtypeEffects = new Set(["coerces-float32", "preserves", "preserves-float32-otherwise-coerces-float32", "resolved-target", "substitutes-float32-token", "surface-dependent"]);
+  const dtypeEffects = new Set(["distinct-unsupported-token", "none-rejected", "preserves", "preserves-float32-otherwise-coerces-float32", "resolved-target", "surface-dependent"]);
   const conditions = new Set(["all-inputs", "index-kind-dependent", "input-dtype-and-index-kind-dependent", "input-dtype-and-layout-dependent", "input-dtype-dependent", "input-layout-dependent", "no-requested-dtype", "requested-bf16-token", "requested-dtype-dependent", "requested-dtype-differs-from-storage-dtype", "requested-dtype-equals-storage-dtype", "surface-and-input-dependent", "torch-bfloat16-token", "unrecognized-string"]);
-  const failurePolicies = new Set(["delegate-invalid-broadcast-to-numpy", "delegate-invalid-dimension-to-numpy", "delegate-invalid-index-to-numpy", "delegate-invalid-input-to-python-or-numpy", "delegate-invalid-permutation-to-numpy", "delegate-invalid-shape-to-numpy", "no-dedicated-failure-path", "reject-invalid-dtype-after-numpy-delegation", "reject-invalid-expand-shape-before-execution", "unrecognized-dtype-treated-as-device-noop"]);
+  const failurePolicies = new Set(["delegate-invalid-broadcast-to-numpy", "delegate-invalid-dimension-to-numpy", "delegate-invalid-index-to-numpy", "delegate-invalid-input-to-python-or-numpy", "delegate-invalid-permutation-to-numpy", "delegate-invalid-shape-to-numpy", "no-dedicated-failure-path", "reject-invalid-dtype-after-numpy-delegation", "reject-invalid-expand-shape-before-execution", "reject-unsupported-bfloat16-before-allocation", "unrecognized-dtype-treated-as-device-noop"]);
   const aliasing = new Set(["conditional", "must-alias", "must-not-alias", "not-applicable", "same-object"]);
   const contiguity = new Set(["contiguous", "input-dependent", "not-applicable", "preserved"]);
   const materialization = new Set(["always", "conditional", "none", "not-applicable"]);

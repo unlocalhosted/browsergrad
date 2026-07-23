@@ -593,6 +593,16 @@ scales at construction; vmap, ONNX, and tensor-plan routes validate then
 refuse. The legacy direct-WebGPU bridge remains row-wise online softmax and is
 not the Gate 5 block-tiled algorithm or a FlashAttention-v2 claim.
 
+ADR-0037 removes eager Grad's silent `bf16`/`bfloat16` to float32
+substitution. `torch.bfloat16` is now a distinct unsupported token, and direct
+tensor construction, conversion, plus `nn.Linear`/`nn.Embedding` parameter
+construction reject it before allocation. Those parameterized layers now
+accept only their exact float32 storage/computation profile and reject all
+other dtype requests instead of ignoring `dtype`. Real
+bfloat16 remains unsupported until distinct storage, rounding, conversion,
+serialization, and backend contracts exist. Remaining Grad convergence is
+view/materialization and conversion behavior, not bfloat16 relabeling.
+
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
 records bind `Tensor.abs`, `torch.cat`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
@@ -2636,8 +2646,8 @@ it.
 
 Conditional behavior MUST name and test both sides of the condition. For
 example, “reshape is a view” is invalid if aliasing depends on input strides;
-“bf16 is supported” is invalid when the public token resolves to four-byte f32
-storage and f32 computation. Normalized source-definition hashes detect
+“bf16 is supported” is invalid without distinct bfloat16 storage, rounding,
+and conversion semantics. Normalized source-definition hashes detect
 implementation drift, but exclude comments and leading docstrings and are
 never sufficient evidence without the observable fixture. Decorator lines
 directly attached to definitions, signatures, executable statements, and
@@ -2651,14 +2661,17 @@ source behavior, physical dtype, alias relation, autograd decision, or fixture
 result is an adapter-baseline change under ADR-0001, even when the public
 method signature does not change.
 
-The current Grad baseline is
+The current Grad baseline, revised by ADR-0037, is
 `architecture/grad-compatibility-inventory.json`, with executable Pyodide
 evidence in `packages/browsergrad-grad/tests-integration/fixtures/grad-view-bf16.v0.json`.
-It explicitly records NumPy-dependent dtype fallback, the full alias registry,
-Tensor versus torch constructor defaults, conditional reshape/index aliasing,
-copying expand/detach/numpy behavior, live NumPy array-protocol exposure,
-`contiguous()` as a non-materializing compatibility no-op, and cross-dtype
-`to()` graph detachment.
+Schema version 2 records `bf16` and `bfloat16` as explicitly unsupported,
+keeps `torch.bfloat16` distinct from float32, and rejects construction or
+conversion before allocation. It also records the remaining NumPy-dependent
+dtype fallback, the supported alias registry, Tensor versus torch constructor
+defaults, conditional reshape/index aliasing, copying expand/detach/numpy
+behavior, live NumPy array-protocol exposure, `contiguous()` as a
+non-materializing compatibility no-op, and cross-dtype `to()` graph
+detachment.
 
 ### Adapter ledger
 
@@ -2672,7 +2685,7 @@ all five.
 | `cute_static_layout` parser path | Compiler | Existing parser integration and pinned regression fixtures only. | No new spellings, ranks, queries, or call sites. | Pinned real frontend handles its fixtures through layout semantics. | Compiler `1.0.0`. |
 | `TensorGpuPlan` shape-only/f32 assumptions | Kernels | Existing JIT plan serializer and kernels executor/bridge only. | No new operation, dtype, view, offset, or alias semantics may enter this schema. | New view/dtype features enter through shared schemas; plan has no unique semantics. | Kernels `1.0.0`. |
 | JIT `OP_CUSTOM` extension boundary | JIT | Explicit user-authored kernel code only; no embedded legacy framework wrappers remain. | No new core labels or constructor sites; only explicitly user-authored kernel IDs may extend. | Advertised core operations have typed IR, CPU/VJP decisions, and backend decisions; this gate is met, while the intentional extension boundary remains fail-closed. | JIT `1.0.0`. |
-| Eager view materialization and bf16 aliasing | Grad | Existing Tensor/torch compatibility adapters only where accurately documented. | No new API may claim view aliasing or bf16 storage through these paths. | View/alias fixtures agree or reject; bf16 is real storage/conversion or rejected. | Grad `1.0.0`. |
+| Eager view/materialization compatibility | Grad | Existing Tensor/torch compatibility adapters only where accurately documented; bfloat16 substitution has no permitted caller. | No new API may claim view aliasing or bf16 storage through these paths. | View/alias fixtures agree or reject; bfloat16 is already rejected until real storage/conversion exists. | Grad `1.0.0`. |
 | `flashAttentionDirect` name | Kernels | Existing public export and realizer compatibility call only. | New APIs and docs use the accurate row-wise online-softmax name. | Real block-tiled implementation is proven and a normal major-removal window passes. | Kernels `1.0.0`. |
 | Generic runtime backend labels | Runtime | Existing assignment requirement compatibility mapping only. | New readiness features use canonical requirement definitions/resolutions; semantic lowering uses capability decisions only where an explicit link exists. | All readiness UI consumes requirement resolutions and program-specific lowering records. | Runtime `1.0.0`. |
 

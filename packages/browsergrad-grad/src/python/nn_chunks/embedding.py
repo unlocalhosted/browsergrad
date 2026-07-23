@@ -111,11 +111,12 @@ class Embedding(Module):
         super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
+        storage_dtype = _parameter_storage_dtype(dtype, "nn.Embedding")
         bound = 1.0 / math.sqrt(embedding_dim)
         W = np.random.uniform(
             -bound, bound, size=(num_embeddings, embedding_dim)
-        ).astype(np.float32)
-        self.weight = Tensor(W, requires_grad=True)
+        ).astype(storage_dtype)
+        self.weight = Tensor(W, dtype=storage_dtype, requires_grad=True)
 
     def forward(self, indices) -> Tensor:
         if isinstance(indices, Tensor):

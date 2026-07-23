@@ -14,6 +14,11 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Removes Grad's silent `bf16`/`bfloat16` to float32 substitution.
+  `torch.bfloat16` is now a distinct unsupported token, and tensor,
+  conversion, and parameter-construction paths reject it before allocation.
+  `nn.Linear` and `nn.Embedding` now enforce their exact float32 parameter
+  contract instead of ignoring their `dtype` argument.
 - Migrates the legacy `bg.kernels.flash_attention` compatibility constructor
   to typed `ATTENTION_FORWARD` IR and introduces the accurately named
   `bg.kernels.attention_forward` entrypoint. The bounded rank-4 float32 profile

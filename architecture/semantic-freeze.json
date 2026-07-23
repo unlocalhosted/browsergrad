@@ -499,25 +499,25 @@
       "newUseProhibition": "No new API may claim view aliasing or bf16 storage through materializing views or f32 aliases.",
       "retirementGate": "View and alias fixtures agree or reject, and bf16 is real storage/conversion or rejected.",
       "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-grad@1.0.0",
-      "baselineDecision": "docs/adr/0011-migrate-jit-gather-to-typed-index-semantics.md",
+      "baselineDecision": "docs/adr/0037-reject-grad-bfloat16-substitution.md",
       "freeze": {
         "kind": "grad-view-bf16",
         "tensorFile": "packages/browsergrad-grad/src/python/tensor.py",
         "torchCompatFile": "packages/browsergrad-grad/src/python/_torch_compat_real.py",
         "inventoryFile": "architecture/grad-compatibility-inventory.json",
-        "inventorySha256": "e1bb5fa8baa15f4b08a3f0c6b13dd41ecfc1d3a00ec60ea9bc190549cce7613c",
+        "inventorySha256": "504fd92aec92e6624ab1f48cbe619fff5b410454065514c286a656c33365dd6c",
         "behaviorFixtureFile": "packages/browsergrad-grad/tests-integration/fixtures/grad-view-bf16.v0.json",
-        "behaviorFixtureSha256": "1ccec887bd26b0f757907b5fa0a464fbc4ba8f18461df3d70354b9f0bd5a5ec4",
+        "behaviorFixtureSha256": "4deec0c52730f65f36306481f2d0cb9d8baf7924b9c471411b0a28bf7a1dee4c",
         "behaviorTestFile": "packages/browsergrad-grad/tests-integration/gate0_dtype_view_contract.test.ts",
-        "behaviorTestSha256": "245045bb98fd1ede80471da306b0fc67a521d20ae9029835f32321504a36badc",
+        "behaviorTestSha256": "dbaa3f723477bb7c32463891b03ad8aa4e543eff864474eb5185def4ce64b3f8",
         "behaviorIds": [
           "grad.conversion.to-cross-dtype-detaches.v0",
           "grad.conversion.to-same-dtype-identity.v0",
           "grad.conversion.to-unrecognized-string-noop.v0",
           "grad.dtype.alias-registry.v0",
-          "grad.dtype.bf16-is-f32.v0",
+          "grad.dtype.bf16-rejected.v1",
           "grad.dtype.constructor-defaults.v0",
-          "grad.dtype.torch-bfloat16-token-is-f32.v0",
+          "grad.dtype.torch-bfloat16-token-distinct-unsupported.v1",
           "grad.interop.array-protocol-alias.v0",
           "grad.interop.from-numpy.v0",
           "grad.interop.numpy-copy.v0",
@@ -535,10 +535,10 @@
           "grad.conversion.to-same-dtype-identity.v0",
           "grad.conversion.to-unrecognized-string-noop.v0",
           "grad.dtype.alias-registry.v0",
-          "grad.dtype.bf16-is-f32.v0",
+          "grad.dtype.bf16-rejected.v1",
           "grad.dtype.constructor-defaults.v0",
           "grad.dtype.numpy-string-fallback.v0",
-          "grad.dtype.torch-bfloat16-token-is-f32.v0",
+          "grad.dtype.torch-bfloat16-token-distinct-unsupported.v1",
           "grad.interop.array-protocol-alias.v0",
           "grad.interop.from-numpy-f32-alias.v0",
           "grad.interop.from-numpy-f64-materializes.v0",
@@ -562,8 +562,6 @@
           "grad.view.view-direct-alias.v0"
         ],
         "dtypeAliases": {
-          "bf16": "float32",
-          "bfloat16": "float32",
           "bool": "bool",
           "double": "float64",
           "float": "float32",
@@ -582,7 +580,7 @@
           "uint8": "uint8"
         },
         "torchDtypeTokens": {
-          "bfloat16": "float32",
+          "bfloat16": "bfloat16",
           "bool": "bool",
           "double": "float64",
           "float": "float32",
@@ -595,9 +593,13 @@
           "int64": "int64",
           "long": "int64"
         },
+        "unsupportedDtypes": {
+          "bf16": "rejected-no-real-bfloat16-storage-or-conversion",
+          "bfloat16": "rejected-no-real-bfloat16-storage-or-conversion"
+        },
         "definitionTokenDigests": {
           "tensor.py": {
-            "_resolve_dtype": ["03220133f54d871ccf18c526fc6d1d5d7350111222a2a56999566c0842743d73"],
+            "_resolve_dtype": ["435729201c5997d7622cda2fc8e7eaf26fdb82a9739bd8580e74b0f83329ea06"],
             "Tensor.__init__": ["51c5d495144c93fba15d39348b78134371c7f760f462ba5320a3d30c805cced2"],
             "Tensor.__array__": ["85ed8284484b275e85883a2e9f42d64b516828f2075a8c471f35b95dd174cecd"],
             "Tensor.__getitem__": ["4733c93f7e773b16032d2a11cc212adb83b969838b8b101bca97114534b826de"],

@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "inventoryId": "browsergrad.grad.compatibility.v0",
+  "schemaVersion": 2,
+  "inventoryId": "browsergrad.grad.compatibility.v1",
   "owner": "@unlocalhosted/browsergrad-grad",
   "evidenceTier": "pyodide-numpy-reference",
   "environment": {
@@ -29,13 +29,11 @@
       "int64": 8,
       "uint8": 1
     },
-    "substitutionComputeDtypes": {
-      "bf16": "float32",
-      "bfloat16": "float32"
+    "unsupportedDtypes": {
+      "bf16": "rejected-no-real-bfloat16-storage-or-conversion",
+      "bfloat16": "rejected-no-real-bfloat16-storage-or-conversion"
     },
     "aliases": {
-      "bf16": "float32",
-      "bfloat16": "float32",
       "bool": "bool",
       "double": "float64",
       "float": "float32",
@@ -54,7 +52,7 @@
       "uint8": "uint8"
     },
     "torchTokens": {
-      "bfloat16": "float32",
+      "bfloat16": "bfloat16",
       "bool": "bool",
       "double": "float64",
       "float": "float32",
@@ -116,48 +114,48 @@
       ]
     },
     {
-      "id": "grad.dtype.bf16-is-f32.v0",
+      "id": "grad.dtype.bf16-rejected.v1",
       "surface": "Tensor(dtype='bf16'|'bfloat16')",
-      "class": "dtype-substitution",
+      "class": "dtype-refusal",
       "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
-      "referenceContract": "pytorch-shaped-compatibility",
-      "dtypeEffect": "coerces-float32",
+      "targetConformance": "browsergrad-defined",
+      "referenceContract": "browsergrad-grad-explicit",
+      "dtypeEffect": "none-rejected",
       "condition": "requested-bf16-token",
-      "failurePolicy": "no-dedicated-failure-path",
-      "aliasing": "conditional",
-      "contiguity": "input-dependent",
-      "materialization": "conditional",
-      "autograd": "constructor-policy",
-      "truth": "Both bf16 spellings resolve to NumPy float32 storage and float32 computation with four-byte elements; no bf16 values, rounding, storage, or distinct dtype identity exist.",
+      "failurePolicy": "reject-unsupported-bfloat16-before-allocation",
+      "aliasing": "not-applicable",
+      "contiguity": "not-applicable",
+      "materialization": "not-applicable",
+      "autograd": "not-applicable",
+      "truth": "Both bfloat16 spellings fail before allocation because browsergrad-grad does not provide real bfloat16 storage, rounding, conversion, or distinct computation semantics.",
       "sourceDefinitions": [
         "tensor.py:_resolve_dtype",
         "tensor.py:Tensor.__init__"
       ],
       "fixtureCaseIds": [
-        "grad.dtype.bf16-is-f32.v0"
+        "grad.dtype.bf16-rejected.v1"
       ]
     },
     {
-      "id": "grad.dtype.torch-bfloat16-token-is-f32.v0",
+      "id": "grad.dtype.torch-bfloat16-token-distinct-unsupported.v1",
       "surface": "torch.bfloat16",
-      "class": "dtype-substitution",
+      "class": "dtype-refusal",
       "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
-      "referenceContract": "pytorch-shaped-compatibility",
-      "dtypeEffect": "substitutes-float32-token",
+      "targetConformance": "browsergrad-defined",
+      "referenceContract": "browsergrad-grad-explicit",
+      "dtypeEffect": "distinct-unsupported-token",
       "condition": "torch-bfloat16-token",
-      "failurePolicy": "no-dedicated-failure-path",
+      "failurePolicy": "reject-unsupported-bfloat16-before-allocation",
       "aliasing": "not-applicable",
       "contiguity": "not-applicable",
       "materialization": "not-applicable",
       "autograd": "not-applicable",
-      "truth": "The torch compatibility token is the string 'float32', so callers cannot distinguish a requested bfloat16 policy from float32 after token resolution.",
+      "truth": "The torch compatibility token is the distinct string 'bfloat16'; using it for construction or conversion reaches the same explicit unsupported-bfloat16 rejection instead of becoming float32.",
       "sourceDefinitions": [
         "_torch_compat_real.py:torch_mod.bfloat16"
       ],
       "fixtureCaseIds": [
-        "grad.dtype.torch-bfloat16-token-is-f32.v0"
+        "grad.dtype.torch-bfloat16-token-distinct-unsupported.v1"
       ]
     },
     {

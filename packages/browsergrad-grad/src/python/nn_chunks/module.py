@@ -4,9 +4,25 @@
 import math
 import numpy as np
 from typing import Iterator, Optional, Tuple
-from .tensor import Tensor, _build_ctx, cat, stack
+from .tensor import Tensor, _build_ctx, _resolve_dtype, cat, stack
 from . import functional as F
 from . import _device
+
+
+def _parameter_storage_dtype(dtype, operation: str):
+    if dtype is None:
+        return np.dtype(np.float32)
+    resolved = np.dtype(_resolve_dtype(dtype))
+    if not np.issubdtype(resolved, np.floating):
+        raise TypeError(
+            f"{operation}: parameter dtype must be floating, got {resolved.name!r}"
+        )
+    if resolved != np.dtype(np.float32):
+        raise NotImplementedError(
+            f"{operation}: only float32 parameter storage and computation are "
+            f"supported, got {resolved.name!r}"
+        )
+    return resolved
 
 
 class Module:

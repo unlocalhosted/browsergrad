@@ -47,10 +47,17 @@ import torch
 
 cases = {}
 
+def error(call):
+    try:
+        call()
+        return "no_error"
+    except Exception as exc:
+        return type(exc).__name__ + ": " + str(exc)
+
 dtype_aliases = [
-    "bf16", "bfloat16", "bool", "double", "float", "float16", "float32",
-    "float64", "fp16", "half", "int", "int16", "int32", "int64", "int8",
-    "long", "short", "uint8",
+    "bool", "double", "float", "float16", "float32", "float64", "fp16",
+    "half", "int", "int16", "int32", "int64", "int8", "long", "short",
+    "uint8",
 ]
 cases["grad.dtype.alias-registry.v0"] = {
     alias: [grad.Tensor([0], dtype=alias).dtype, int(grad.Tensor([0], dtype=alias).data.dtype.itemsize)]
@@ -68,15 +75,15 @@ cases["grad.dtype.constructor-defaults.v0"] = {
     "torchFloat": torch.tensor([1.0, 2.0]).dtype,
 }
 
-bf16_tensor = grad.Tensor(np.array([1.00390625, 2.0], dtype=np.float32), dtype="bf16")
-cases["grad.dtype.bf16-is-f32.v0"] = {
-    "dtype": bf16_tensor.dtype,
-    "itemsize": int(bf16_tensor.data.dtype.itemsize),
-    "storedValue": float(bf16_tensor.data[0]),
+cases["grad.dtype.bf16-rejected.v1"] = {
+    "bf16Constructor": error(lambda: grad.Tensor([1.0], dtype="bf16")),
+    "bfloat16Constructor": error(lambda: grad.Tensor([1.0], dtype="bfloat16")),
+    "toBfloat16": error(lambda: grad.Tensor([1.0]).to("bfloat16")),
 }
-cases["grad.dtype.torch-bfloat16-token-is-f32.v0"] = {
+cases["grad.dtype.torch-bfloat16-token-distinct-unsupported.v1"] = {
     "token": torch.bfloat16,
     "distinctFromFloat32": bool(torch.bfloat16 != torch.float32),
+    "constructor": error(lambda: torch.tensor([1.0], dtype=torch.bfloat16)),
 }
 
 source_f32 = np.array([1.0, 2.0], dtype=np.float32)
