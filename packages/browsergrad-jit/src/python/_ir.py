@@ -147,6 +147,7 @@ OP_DROPOUT = "DROPOUT"  # arg: {p, training, inplace, seed_key}
 OP_BATCH_NORM_1D = "BATCH_NORM_1D"  # inputs: x[, stats][, weight, bias]
 OP_BATCH_NORM_1D_STATS_UPDATE = "BATCH_NORM_1D_STATS_UPDATE"  # typed state effect
 OP_INTERPOLATE_2D = "INTERPOLATE_2D"  # arg: static spatial resize contract
+OP_ATTENTION_FORWARD = "ATTENTION_FORWARD"  # inputs: query, key, value
 OP_WHERE   = "WHERE"
 OP_INDEX   = "INDEX"    # arg: {dim: int}, inputs: (source, int64 index) ← gather elements
 OP_MASK    = "MASK"     # arg: None                    ← bool-mask indexing
@@ -224,6 +225,7 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_BATCH_NORM_1D,
     OP_BATCH_NORM_1D_STATS_UPDATE,
     OP_INTERPOLATE_2D,
+    OP_ATTENTION_FORWARD,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     # Fusion-emitted (PRD-006)
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
@@ -242,7 +244,7 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 })
-assert len(ALL_OPS) == 99, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
+assert len(ALL_OPS) == 100, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -494,6 +496,7 @@ __all__ = [
     "OP_BATCH_NORM_1D",
     "OP_BATCH_NORM_1D_STATS_UPDATE",
     "OP_INTERPOLATE_2D",
+    "OP_ATTENTION_FORWARD",
     "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
     "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",
     "OP_SCATTER_ADD", "OP_BROADCAST_TO", "OP_EINSUM_VJP", "OP_L1_LOSS_VJP",

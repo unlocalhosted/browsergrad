@@ -33,7 +33,8 @@ Op surface (v0 spike):
   - `matmul(a, b, m, k, n, dtype) -> handle`         — A[M,K] @ B[K,N]
   - `fused_elementwise(inputs, ops, shape, dtype)`   — pre-fused chain
   - `cast(handle, src_dtype, dst_dtype, shape)`      — dtype conversion
-  - `flash_attention(q, k, v, mask, b, h, sq, sk, d, scale, dtype)` — FA-v2 fwd
+  - `flash_attention(q, k, v, mask, b, h, sq, sk, d, scale, dtype)` —
+    legacy row-wise online-softmax attention forward
   - `conv1d(input, weight, bias, ..., dtype)`        — Conv1d forward
   - `conv1d_backward_input(dy, weight, ..., dtype)`  — dInput
   - `conv1d_backward_weight(dy, input, ..., dtype)`  — dWeight

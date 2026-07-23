@@ -41,10 +41,6 @@ def error_name(fn):
         return type(exc).__name__
 
 q = bg.from_numpy(np.ones((1, 1, 2, 4), dtype=np.float32), requires_grad=True)
-k = bg.from_numpy(np.ones((1, 1, 2, 4), dtype=np.float32))
-v = bg.from_numpy(np.ones((1, 1, 2, 4), dtype=np.float32))
-flash = bg.kernels.flash_attention(q, k, v)
-
 user_builder = bg.custom_kernel(
     wgsl="@compute @workgroup_size(1) fn main() {}",
     name="gate0_user",
@@ -56,25 +52,21 @@ user_builder = bg.custom_kernel(
 user = user_builder(q)
 
 class RouteBridge:
-    def flash_attention(self, *args):
-        return "flash-ok"
     def run_user_kernel(self, *args):
         return "user-ok"
 
 bridge = RouteBridge()
-flash_vt = {id(node): f"flash-{i}" for i, node in enumerate(flash._uop.inputs)}
 user_vt = {id(node): f"user-{i}" for i, node in enumerate(user._uop.inputs)}
-nodes = [flash, user]
+nodes = [user]
 {
     "labels": [node._uop.arg["op"] for node in nodes],
     "requiresGrad": [node.requires_grad for node in nodes],
     "cpuErrors": [error_name(node.numpy) for node in nodes],
-    "flashLegacyRoute": _h_custom(flash._uop, flash_vt, None, bridge, None),
     "userLegacyRoute": _h_custom(user._uop, user_vt, None, bridge, None),
-    "functionalDisconnectedGradient": bg.func.grad(lambda value: bg.kernels.flash_attention(value, k, v).sum())(q).numpy().reshape(-1).tolist(),
+    "functionalDisconnectedGradient": bg.func.grad(lambda value: user_builder(value).sum())(q).numpy().reshape(-1).tolist(),
 }
 `);
-    expect(result).toEqual(expected("jit.custom.accelerator-and-user-extension.v0"));
+    expect(result).toEqual(expected("jit.custom.user-extension.v0"));
   });
 
 });

@@ -507,17 +507,20 @@ def op(x):
     expect(validateJitOpaqueOperationInventory(extraOperationIdentity, fixture, jitFreeze))
       .toContainEqual(expect.stringContaining("constructor-site operation coverage changed"));
 
-    const groupedCalls = structuredClone(inventory);
-    groupedCalls.constructorSites[0]!.constructorCount = 2;
-    groupedCalls.constructorSites.pop();
-    const groupedFailures = validateJitOpaqueOperationInventory(groupedCalls, fixture, jitFreeze);
     const frozenConstructorCount = Object.values(
       jitFreeze.constructorCounts as Record<string, number>,
     ).reduce((total, count) => total + count, 0);
-    expect(groupedFailures).toContainEqual(
+
+    const missingConstructorSite = structuredClone(inventory);
+    missingConstructorSite.constructorSites.pop();
+    expect(validateJitOpaqueOperationInventory(missingConstructorSite, fixture, jitFreeze)).toContainEqual(
       expect.stringContaining(`${frozenConstructorCount} exact frozen CUSTOM constructor calls`),
     );
-    expect(groupedFailures).toContainEqual(expect.stringContaining("constructorCount must be exactly 1"));
+
+    const groupedCalls = structuredClone(inventory);
+    groupedCalls.constructorSites[0]!.constructorCount = 2;
+    expect(validateJitOpaqueOperationInventory(groupedCalls, fixture, jitFreeze))
+      .toContainEqual(expect.stringContaining("constructorCount must be exactly 1"));
 
     const collapsedPlanDecision = structuredClone(inventory) as typeof inventory & {
       executionContext: Record<string, unknown>;

@@ -89,6 +89,7 @@ from ._ir import (
     OP_BATCH_NORM_1D_VJP,
     OP_INTERPOLATE_2D,
     OP_INTERPOLATE_2D_VJP,
+    OP_ATTENTION_FORWARD,
     OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
@@ -118,6 +119,7 @@ from ._framework_contracts import (
     validate_batch_norm_1d_vjp_contract,
     validate_interpolate_2d_contract,
     validate_interpolate_2d_vjp_contract,
+    validate_attention_forward_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -550,6 +552,13 @@ def export_inference(
             raise OnnxUnmappableOp(
                 "export_inference: BatchNorm training gradients are outside "
                 "the inference export contract"
+            )
+        if node.op == OP_ATTENTION_FORWARD:
+            validate_attention_forward_contract(node)
+            raise OnnxUnmappableOp(
+                "export_inference: ATTENTION_FORWARD has no admitted canonical "
+                "ONNX decomposition because the exact finite-domain and "
+                "reduction-order contract would be lost"
             )
         if node.op not in (
             OP_EINSUM,

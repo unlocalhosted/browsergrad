@@ -829,6 +829,22 @@ function checkJitFrameworkOperationContracts(root, manifest, failures) {
   allowed.tensorPlan.add(
     "refused-no-canonical-spatial-resample-lowering",
   );
+  allowed.shapeContract.add(
+    "dense-rank4-batched-multihead-attention-forward",
+  );
+  allowed.dtypeContract.add("exact-float32-query-key-value");
+  allowed.cpu.add("supported-numpy-owning-stable-attention-forward");
+  allowed.closureAutograd.add("refused-attention-vjp-not-defined");
+  allowed.symbolicVjp.add("refused-attention-vjp-not-defined");
+  allowed.functionalGrad.add("refused-attention-vjp-not-defined");
+  allowed.vmap.add("refused-no-attention-batching-contract");
+  allowed.onnxExport.add("refused-no-canonical-attention-export");
+  allowed.tensorPlan.add("refused-attention-side-table-not-integrated");
+  allowed.webgpu.add("supported-legacy-row-wise-online-softmax-f32");
+  allowed.residency.add("legacy-webgpu-root-materialized-to-host");
+  allowed.materialization.add(
+    "cpu-owning-copy-or-legacy-webgpu-root-copy",
+  );
   const irSource = fs.readFileSync(
     path.join(root, "packages/browsergrad-jit/src/python/_ir.py"),
     "utf8",

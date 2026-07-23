@@ -7,6 +7,27 @@ const FRAMEWORK_SUPPORT = {
   version: { major: 1, minor: 0 },
   operations: [
     {
+      contractId: "browsergrad.jit.framework.kernels.attention-forward.v1",
+      publicSurface: "bg.kernels.attention_forward",
+      opcode: "ATTENTION_FORWARD",
+      semanticState: "typed",
+      shapeContract: "dense-rank4-batched-multihead-attention-forward",
+      dtypeContract: "exact-float32-query-key-value",
+      decisions: {
+        cpu: "supported-numpy-owning-stable-attention-forward",
+        closureAutograd: "refused-attention-vjp-not-defined",
+        symbolicVjp: "refused-attention-vjp-not-defined",
+        functionalGrad: "refused-attention-vjp-not-defined",
+        vmap: "refused-no-attention-batching-contract",
+        onnxExport: "refused-no-canonical-attention-export",
+        tensorPlan: "refused-attention-side-table-not-integrated",
+        webgpu: "supported-legacy-row-wise-online-softmax-f32",
+        residency: "legacy-webgpu-root-materialized-to-host",
+        materialization: "cpu-owning-copy-or-legacy-webgpu-root-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.flash-attention.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.functional.binary-cross-entropy-with-logits.v1",
       publicSurface: "torch.nn.functional.binary_cross_entropy_with_logits",
       opcode: "BINARY_CROSS_ENTROPY_WITH_LOGITS",
@@ -782,7 +803,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(36);
+    expect(result.first.operations).toHaveLength(37);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

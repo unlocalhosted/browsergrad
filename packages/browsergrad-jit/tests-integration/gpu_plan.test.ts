@@ -62,7 +62,7 @@ gb_plan = bg.gpu_plan_summary(gb)
     expect(result.legacyWebgpuHasConv3d).toBe(false);
   });
 
-  it("refuses CUSTOM ops in the core GPU tensor plan", async () => {
+  it("refuses typed attention until the semantic side table owns it", async () => {
     const target = await getJitTarget();
     const err = await target.run<string>(`
 import browsergrad_jit as bg
@@ -70,7 +70,7 @@ import browsergrad_jit as bg
 q = bg.randn(1, 1, 2, 4)
 k = bg.randn(1, 1, 2, 4)
 v = bg.randn(1, 1, 2, 4)
-out = bg.kernels.flash_attention(q, k, v)
+out = bg.kernels.attention_forward(q, k, v)
 try:
     bg.gpu_plan_summary(out)
     result = "no_error"
@@ -79,8 +79,8 @@ except Exception as e:
 result
 `);
     expect(err).toMatch(/GpuPlanUnsupported/);
-    expect(err).toMatch(/refuses CUSTOM/);
-    expect(err).toMatch(/primitive IR/);
+    expect(err).toMatch(/ATTENTION_FORWARD/);
+    expect(err).toMatch(/Gate 5 attention artifact/);
   });
 
   it("emits one closed semantic PERMUTE request from the post-fusion plan", async () => {

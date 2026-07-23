@@ -47,9 +47,10 @@ from ._ir import (
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
     OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
-    OP_FUSED_ELEMENTWISE, OP_CUSTOM,
+    OP_FUSED_ELEMENTWISE, OP_ATTENTION_FORWARD, OP_CUSTOM,
 )
 from ._errors import JitNotImplementedError, RealizationError
+from ._framework_contracts import validate_attention_forward_contract
 from ._gpu_buffer_table import GpuBufferTable
 from ._gpu_plan import build_gpu_execution_submission
 
@@ -277,37 +278,36 @@ def _h_fused_elementwise(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
     return br.fused_elementwise(inputs, ops, tuple(node.shape), node.dtype)
 
 
+def _h_attention_forward(
+    node: UOp,
+    vt: dict,
+    gbt: GpuBufferTable,
+    br: Any,
+    numpy_bt: Any,
+) -> Any:
+    contract = validate_attention_forward_contract(node)
+    q, k, v = [vt[id(inp)] for inp in node.inputs]
+    return br.flash_attention(
+        q,
+        k,
+        v,
+        None,
+        contract.batch,
+        contract.heads,
+        contract.query_length,
+        contract.key_length,
+        contract.depth,
+        contract.scale,
+        node.dtype,
+    )
+
+
 def _h_custom(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
               numpy_bt: Any) -> Any:
-    """Routes by `arg["op"]` to the corresponding bridge method.
-
-    The opt-in surface for Flash Attention forward in v0:
-        UOp(op=OP_CUSTOM, inputs=(q_uop, k_uop, v_uop) [+ mask_uop],
-            shape=out_shape, dtype="float32",
-            arg={"op": "flash_attention", "b": B, "h": H, "sq": Sq,
-                 "sk": Sk, "d": D, "scale": 1.0/sqrt(D),
-                 "has_mask": True/False})
-    """
+    """Route the intentional user-authored WGSL extension."""
     op_name = node.arg.get("op") if isinstance(node.arg, dict) else None
     inputs = [vt[id(inp)] for inp in node.inputs]
     arg = node.arg
-    if op_name == "flash_attention":
-        has_mask = bool(arg.get("has_mask", False))
-        if has_mask:
-            q, k, v, mask = inputs
-        else:
-            q, k, v = inputs
-            mask = None
-        return br.flash_attention(
-            q, k, v, mask,
-            int(arg["b"]),
-            int(arg["h"]),
-            int(arg["sq"]),
-            int(arg["sk"]),
-            int(arg["d"]),
-            float(arg["scale"]),
-            node.dtype,
-        )
     if op_name == "user":
         # User WGSL kernel (PRD-015). The Python-side registry holds the
         # WGSL source by hash; the bridge looks it up to dispatch.
@@ -338,9 +338,7 @@ def _h_custom(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
         )
     raise JitNotImplementedError(
         f"WebGPU realizer: CUSTOM op {op_name!r} is not supported in "
-        f"v0. Supported: 'flash_attention', 'user'. Legacy name-labeled "
-        f"NumPy callbacks can use bg.realize(); constructor-only op-labeled "
-        f"nodes remain unsupported."
+        f"v0. Only the explicit 'user' kernel extension may remain opaque."
     )
 
 
@@ -361,6 +359,7 @@ _DISPATCH = {
     OP_CONV2D_BACKWARD_WEIGHT: _h_conv2d_backward_weight,
     OP_CONV2D_BACKWARD_BIAS: _h_conv2d_backward_bias,
     OP_FUSED_ELEMENTWISE: _h_fused_elementwise,
+    OP_ATTENTION_FORWARD: _h_attention_forward,
     OP_CUSTOM: _h_custom,
 }
 

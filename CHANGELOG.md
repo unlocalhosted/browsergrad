@@ -14,6 +14,12 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Migrates the legacy `bg.kernels.flash_attention` compatibility constructor
+  to typed `ATTENTION_FORWARD` IR and introduces the accurately named
+  `bg.kernels.attention_forward` entrypoint. The bounded rank-4 float32 profile
+  owns stable CPU semantics and explicit autograd/transform/export/plan
+  refusals; direct WebGPU remains the legacy row-wise online-softmax route and
+  makes no block-tiled or FlashAttention-v2 claim.
 - Removes the constructor-only `bg.kernels.transformer_block` placeholder. It
   produced an opaque node with no executable backend or autograd contract;
   PRD-012c remains an unimplemented typed graph/codegen design.

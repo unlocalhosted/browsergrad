@@ -81,6 +81,7 @@ from ._ir import (
     OP_BATCH_NORM_1D, OP_BATCH_NORM_1D_STATS_UPDATE,
     OP_BATCH_NORM_1D_VJP,
     OP_INTERPOLATE_2D, OP_INTERPOLATE_2D_VJP,
+    OP_ATTENTION_FORWARD,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
     OP_STORE,
@@ -116,6 +117,7 @@ from ._framework_contracts import (
     validate_dropout_contract,
     validate_dropout_vjp_contract,
     validate_interpolate_2d_contract,
+    validate_attention_forward_contract,
     validate_interpolate_2d_vjp_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
@@ -1687,6 +1689,21 @@ _VMAP_RULES[OP_CUSTOM] = _refuse(
     "user-defined ops can have arbitrary semantics; provide a hand-"
     "written vmap rule via _vmap.register_vmap if you need it",
 )
+
+@register_vmap(OP_ATTENTION_FORWARD)
+def _vmap_attention_forward(
+    node: UOp,
+    batched: Dict[int, UOp],
+    B: int,
+) -> UOp:
+    validate_attention_forward_contract(node)
+    raise JitNotImplementedError(
+        "bg.func.vmap: ATTENTION_FORWARD is not vmappable until the shared "
+        "attention contract defines whether the mapped axis extends batch or "
+        "heads. Use torch.nn.functional.scaled_dot_product_attention inside "
+        "a primitive graph or an explicit Python loop."
+    )
+
 
 _VMAP_RULES[OP_BATCH_NORM_1D] = _refuse(
     "OP_BATCH_NORM_1D",

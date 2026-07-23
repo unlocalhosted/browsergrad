@@ -86,6 +86,11 @@ INTERPOLATE_2D_WORK_ELEMENT_MAX = 1 << 28
 INTERPOLATE_2D_WORKSPACE_BYTE_MAX = 1 << 28
 INTERPOLATE_2D_NEAREST_WORK_VISIT_FACTOR = 4
 INTERPOLATE_2D_BILINEAR_WORK_VISIT_FACTOR = 32
+ATTENTION_FORWARD_DIMENSION_MAX = 1 << 20
+ATTENTION_FORWARD_DEPTH_MAX = 64
+ATTENTION_FORWARD_ELEMENT_MAX = 1 << 28
+ATTENTION_FORWARD_WORK_ELEMENT_MAX = 1 << 30
+ATTENTION_FORWARD_WORKSPACE_BYTE_MAX = 1 << 28
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 64 * 1024
@@ -137,6 +142,7 @@ _ENUMS = {
         "preserve-input-with-elementwise-bernoulli-mask",
         "preserve-rank-2-or-3-channel-normalized-input",
         "resize-last-two-spatial-axes-of-rank-4-input",
+        "dense-rank4-batched-multihead-attention-forward",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
@@ -160,6 +166,7 @@ _ENUMS = {
         "pytorch-dimensioned-tensor-promotion",
         "preserve-input-with-floating-stochastic-profile",
         "exact-float32-input-affine-and-state",
+        "exact-float32-query-key-value",
     }),
     "cpu": frozenset({
         "supported-numpy-dtype-preserving",
@@ -184,6 +191,7 @@ _ENUMS = {
         "supported-numpy-owning-keyed-inverted-dropout",
         "supported-numpy-owning-batch-normalization",
         "supported-numpy-owning-nearest-or-bilinear-resample",
+        "supported-numpy-owning-stable-attention-forward",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -218,6 +226,7 @@ _ENUMS = {
         "supported-keyed-mask-replay",
         "supported-batch-stat-or-running-stat-derivatives",
         "supported-transpose-of-nearest-or-bilinear-resample",
+        "refused-attention-vjp-not-defined",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -252,6 +261,7 @@ _ENUMS = {
         "supported-keyed-mask-replay",
         "supported-batch-stat-or-running-stat-derivatives",
         "supported-transpose-of-nearest-or-bilinear-resample",
+        "refused-attention-vjp-not-defined",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
@@ -262,6 +272,7 @@ _ENUMS = {
         "supported-for-both-floating-inputs-via-symbolic-vjp",
         "supported-for-floating-input-and-probability-target-via-symbolic-vjp",
         "not-applicable-discrete-output",
+        "refused-attention-vjp-not-defined",
     }),
     "vmap": frozenset({
         "supported-leading-batch-axis",
@@ -281,6 +292,7 @@ _ENUMS = {
         "supported-deterministic-drop-all-refuses-stochastic-without-randomness-policy",
         "refused-state-and-batch-axis-contract-undefined",
         "supported-leading-batch-axis-preserve-spatial-axes",
+        "refused-no-attention-batching-contract",
     }),
     "onnxExport": frozenset({
         "supported-opset17-clip-export-dtypes",
@@ -312,6 +324,7 @@ _ENUMS = {
         "refused-training-dropout-in-inference-export",
         "refused-no-stable-running-stat-export-profile",
         "supported-opset17-resize-nearest-or-linear-floating",
+        "refused-no-canonical-attention-export",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -332,6 +345,7 @@ _ENUMS = {
         "refused-no-canonical-keyed-rng-lowering",
         "refused-no-canonical-batch-normalization-lowering",
         "refused-no-canonical-spatial-resample-lowering",
+        "refused-attention-side-table-not-integrated",
     }),
     "webgpu": frozenset({
         "profile-nonempty-f32-rank-at-most-4",
@@ -340,9 +354,18 @@ _ENUMS = {
         "refused-no-canonical-tile-layout-profile",
         "refused-no-canonical-selected-axis-replication-profile",
         "refused-no-tensor-plan-kernel",
+        "supported-legacy-row-wise-online-softmax-f32",
     }),
-    "residency": frozenset({"host-materialized", "supported-materializing-and-resident"}),
-    "materialization": frozenset({"cpu-owning-array", "cpu-owning-copy"}),
+    "residency": frozenset({
+        "host-materialized",
+        "supported-materializing-and-resident",
+        "legacy-webgpu-root-materialized-to-host",
+    }),
+    "materialization": frozenset({
+        "cpu-owning-array",
+        "cpu-owning-copy",
+        "cpu-owning-copy-or-legacy-webgpu-root-copy",
+    }),
 }
 
 _REAL_NUMERIC_DTYPES = frozenset({
@@ -918,6 +941,22 @@ class Interpolate2dContract:
     batch_rank: int
     input_elements: int
     output_elements: int
+    work_elements: int
+    workspace_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class AttentionForwardContract:
+    query_shape: Tuple[int, int, int, int]
+    key_shape: Tuple[int, int, int, int]
+    value_shape: Tuple[int, int, int, int]
+    output_shape: Tuple[int, int, int, int]
+    scale: float
+    batch: int
+    heads: int
+    query_length: int
+    key_length: int
+    depth: int
     work_elements: int
     workspace_bytes: int
 
@@ -2711,6 +2750,186 @@ def execute_interpolate_2d_vjp_array(
         dtype=np.dtype(contract.output_dtype),
         copy=True,
     )
+
+
+def _attention_forward_shape(value: Any, role: str) -> Tuple[int, int, int, int]:
+    shape = getattr(value, "shape", None)
+    dtype = getattr(value, "dtype", None)
+    if type(shape) is not tuple or len(shape) != 4:
+        raise ShapeError(
+            f"attention_forward: {role} must have exact rank-4 (B,H,S,D) "
+            f"shape, got {shape!r}"
+        )
+    if dtype != "float32":
+        raise ShapeError(
+            f"attention_forward: {role} must have dtype 'float32', got {dtype!r}"
+        )
+    for axis, extent in enumerate(shape):
+        if type(extent) is not int or extent <= 0:
+            raise ShapeError(
+                f"attention_forward: {role} shape[{axis}] must be a positive "
+                "built-in integer"
+            )
+        if extent > ATTENTION_FORWARD_DIMENSION_MAX:
+            raise ShapeError(
+                f"attention_forward: {role} shape[{axis}] exceeds the "
+                f"{ATTENTION_FORWARD_DIMENSION_MAX}-element ceiling"
+            )
+    return shape
+
+
+def _attention_checked_product(extents: Tuple[int, ...], ceiling: int, role: str) -> int:
+    product = 1
+    for extent in extents:
+        if product > ceiling // extent:
+            raise ShapeError(
+                f"attention_forward: {role} exceeds the {ceiling}-element ceiling"
+            )
+        product *= extent
+    return product
+
+
+def infer_attention_forward_contract(
+    query: Any,
+    key: Any,
+    value: Any,
+) -> AttentionForwardContract:
+    query_shape = _attention_forward_shape(query, "query")
+    key_shape = _attention_forward_shape(key, "key")
+    value_shape = _attention_forward_shape(value, "value")
+    batch, heads, query_length, depth = query_shape
+    key_batch, key_heads, key_length, key_depth = key_shape
+    value_batch, value_heads, value_length, value_depth = value_shape
+    if (key_batch, key_heads) != (batch, heads):
+        raise ShapeError(
+            "attention_forward: query and key batch/head dimensions must match"
+        )
+    if (value_batch, value_heads) != (batch, heads):
+        raise ShapeError(
+            "attention_forward: query and value batch/head dimensions must match"
+        )
+    if key_length != value_length:
+        raise ShapeError(
+            "attention_forward: key and value sequence lengths must match"
+        )
+    if key_depth != depth or value_depth != depth:
+        raise ShapeError(
+            "attention_forward: v1 requires identical query/key/value head depth"
+        )
+    if depth > ATTENTION_FORWARD_DEPTH_MAX:
+        raise ShapeError(
+            f"attention_forward: head depth {depth} exceeds the proved "
+            f"legacy-WebGPU ceiling {ATTENTION_FORWARD_DEPTH_MAX}"
+        )
+
+    query_elements = _attention_checked_product(
+        query_shape, ATTENTION_FORWARD_ELEMENT_MAX, "query"
+    )
+    key_elements = _attention_checked_product(
+        key_shape, ATTENTION_FORWARD_ELEMENT_MAX, "key"
+    )
+    value_elements = _attention_checked_product(
+        value_shape, ATTENTION_FORWARD_ELEMENT_MAX, "value"
+    )
+    output_shape = query_shape
+    output_elements = query_elements
+    score_elements = _attention_checked_product(
+        (batch, heads, query_length, key_length),
+        ATTENTION_FORWARD_WORK_ELEMENT_MAX,
+        "score matrix",
+    )
+    if score_elements > ATTENTION_FORWARD_WORK_ELEMENT_MAX // (2 * depth):
+        work_elements = ATTENTION_FORWARD_WORK_ELEMENT_MAX + 1
+    else:
+        work_elements = score_elements * 2 * depth
+    if work_elements > ATTENTION_FORWARD_WORK_ELEMENT_MAX:
+        raise ShapeError(
+            "attention_forward: projected multiply-add work exceeds the "
+            f"{ATTENTION_FORWARD_WORK_ELEMENT_MAX}-element ceiling"
+        )
+    workspace_elements = (
+        query_elements
+        + key_elements
+        + value_elements
+        + output_elements
+        + score_elements * 2
+    )
+    workspace_bytes = workspace_elements * 4
+    if workspace_bytes > ATTENTION_FORWARD_WORKSPACE_BYTE_MAX:
+        raise ShapeError(
+            f"attention_forward: projected CPU workspace requires "
+            f"{workspace_bytes} bytes, exceeding the "
+            f"{ATTENTION_FORWARD_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+    scale = float(np.float32(1.0 / math.sqrt(depth)))
+    return AttentionForwardContract(
+        query_shape=query_shape,
+        key_shape=key_shape,
+        value_shape=value_shape,
+        output_shape=output_shape,
+        scale=scale,
+        batch=batch,
+        heads=heads,
+        query_length=query_length,
+        key_length=key_length,
+        depth=depth,
+        work_elements=work_elements,
+        workspace_bytes=workspace_bytes,
+    )
+
+
+def execute_attention_forward_arrays(
+    contract: AttentionForwardContract,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    if type(arrays) is not tuple or len(arrays) != 3:
+        raise ShapeError("attention_forward execution requires exactly three arrays")
+    expected_shapes = (
+        contract.query_shape,
+        contract.key_shape,
+        contract.value_shape,
+    )
+    for index, (array, expected_shape) in enumerate(zip(arrays, expected_shapes)):
+        if (
+            type(array) is not np.ndarray
+            or tuple(array.shape) != expected_shape
+            or array.dtype.name != "float32"
+        ):
+            raise ShapeError(
+                f"attention_forward runtime input {index} must be an exact "
+                f"float32 ndarray with shape {expected_shape}"
+            )
+        if not bool(np.isfinite(array).all()):
+            raise ShapeError(
+                f"attention_forward runtime input {index} must contain only "
+                "finite float32 values"
+            )
+    query, key, value = arrays
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        scores = np.matmul(query, np.swapaxes(key, -1, -2))
+        scores = np.asarray(scores * np.float32(contract.scale), dtype=np.float32)
+        if not bool(np.isfinite(scores).all()):
+            raise ShapeError(
+                "attention_forward scaled scores must remain finite float32"
+            )
+        maximum = scores.max(axis=-1, keepdims=True)
+        exponentials = np.exp(scores - maximum)
+        denominator = exponentials.sum(
+            axis=-1, keepdims=True, dtype=np.float32
+        )
+        if (
+            not bool(np.isfinite(exponentials).all())
+            or not bool(np.isfinite(denominator).all())
+            or bool((denominator <= 0.0).any())
+        ):
+            raise ShapeError(
+                "attention_forward softmax state must remain finite and positive"
+            )
+        probabilities = exponentials / denominator
+        output = np.matmul(probabilities, value)
+    if not bool(np.isfinite(output).all()):
+        raise ShapeError("attention_forward output must remain finite float32")
+    return np.array(output, dtype=np.float32, copy=True)
 
 
 def _validate_elementwise_loss_runtime_arrays(
@@ -6894,6 +7113,45 @@ def _validate_batch_norm_1d_vjp(
     return forward_contract, operand
 
 
+def _validate_attention_forward(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> AttentionForwardContract:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    inputs = getattr(node, "inputs", None)
+    if type(inputs) is not tuple or len(inputs) != 3:
+        raise ShapeError(
+            "ATTENTION_FORWARD inputs must be exactly (query, key, value)"
+        )
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict or set(arg) != {"scale", "mask"}:
+        raise ShapeError(
+            "ATTENTION_FORWARD arg fields must be exactly 'scale' and 'mask'"
+        )
+    if arg["mask"] != "none":
+        raise ShapeError(
+            "ATTENTION_FORWARD v1 mask must be exactly 'none'"
+        )
+    normalized = infer_attention_forward_contract(*inputs)
+    if type(arg["scale"]) is not float or arg["scale"] != normalized.scale:
+        raise ShapeError(
+            "ATTENTION_FORWARD scale must equal the canonical float32 "
+            "inverse-square-root head-depth value"
+        )
+    if getattr(node, "shape", None) != normalized.output_shape:
+        raise ShapeError(
+            "ATTENTION_FORWARD declared shape does not match its dense "
+            "rank-4 contract"
+        )
+    if getattr(node, "dtype", None) != "float32":
+        raise ShapeError("ATTENTION_FORWARD declared dtype must be float32")
+    return normalized
+
+
 def _validate_interpolate_2d(
     node: Any,
     contract: FrameworkOperationContract,
@@ -7028,6 +7286,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.functional.cross-entropy.v1": _validate_cross_entropy,
     "browsergrad.jit.framework.functional.dropout.v1": _validate_dropout,
     "browsergrad.jit.framework.module.batch-norm-1d.v1": _validate_batch_norm_1d,
+    "browsergrad.jit.framework.kernels.attention-forward.v1": _validate_attention_forward,
     "browsergrad.jit.framework.functional.interpolate-2d.v1": _validate_interpolate_2d,
     "browsergrad.jit.framework.tensor.masked-fill.v1": _validate_masked_fill,
     "browsergrad.jit.framework.tensor.pad.v1": _validate_pad,
@@ -7366,6 +7625,18 @@ def validate_interpolate_2d_contract(node: Any) -> Interpolate2dContract:
     return normalized
 
 
+def validate_attention_forward_contract(node: Any) -> AttentionForwardContract:
+    record, normalized = validate_framework_operation_contract(node)
+    if (
+        record.contract_id
+        != "browsergrad.jit.framework.kernels.attention-forward.v1"
+    ):
+        raise ShapeError(
+            "ATTENTION_FORWARD resolved to the wrong framework-operation contract"
+        )
+    return normalized
+
+
 def validate_interpolate_2d_vjp_contract(
     node: Any,
 ) -> Interpolate2dContract:
@@ -7581,6 +7852,7 @@ __all__ = [
     "infer_dropout_contract",
     "infer_batch_norm_1d_contract",
     "infer_interpolate_2d_contract",
+    "infer_attention_forward_contract",
     "normalize_dropout_probability",
     "normalize_batch_norm_1d_num_features",
     "normalize_batch_norm_1d_eps",
@@ -7617,6 +7889,7 @@ __all__ = [
     "execute_batch_norm_1d_vjp_array",
     "execute_interpolate_2d_array",
     "execute_interpolate_2d_vjp_array",
+    "execute_attention_forward_arrays",
     "einsum_onnx_equation",
     "stable_sort_indices_array",
     "partial_topk_indices_array",
@@ -7659,6 +7932,7 @@ __all__ = [
     "validate_batch_norm_1d_vjp_contract",
     "validate_interpolate_2d_contract",
     "validate_interpolate_2d_vjp_contract",
+    "validate_attention_forward_contract",
     "validate_gather_scatter_add_contract",
     "validate_tril_contract",
     "validate_triu_contract",

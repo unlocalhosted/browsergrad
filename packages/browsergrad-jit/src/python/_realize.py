@@ -58,6 +58,7 @@ from ._ir import (
     OP_BATCH_NORM_1D,
     OP_BATCH_NORM_1D_STATS_UPDATE,
     OP_INTERPOLATE_2D,
+    OP_ATTENTION_FORWARD,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_BROADCAST_TO, OP_EINSUM_VJP, OP_L1_LOSS_VJP,
@@ -108,6 +109,7 @@ from ._framework_contracts import (
     validate_batch_norm_1d_vjp_contract,
     validate_interpolate_2d_contract,
     validate_interpolate_2d_vjp_contract,
+    validate_attention_forward_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -151,6 +153,7 @@ from ._framework_contracts import (
     BATCH_NORM_1D_STATE_EFFECT_KIND,
     execute_interpolate_2d_array,
     execute_interpolate_2d_vjp_array,
+    execute_attention_forward_arrays,
 )
 
 
@@ -1437,6 +1440,16 @@ def _h_interpolate_2d_vjp(
     )
 
 
+def _h_attention_forward(
+    node: UOp,
+    vt: dict,
+    bt: BufferTable,
+) -> np.ndarray:
+    contract = validate_attention_forward_contract(node)
+    arrays = tuple(vt[id(source)] for source in node.inputs)
+    return execute_attention_forward_arrays(contract, arrays)
+
+
 def _h_where(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     validate_where_contract(node)
     cond = vt[id(node.inputs[0])]
@@ -1784,6 +1797,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_BATCH_NORM_1D: _h_batch_norm_1d,
     OP_BATCH_NORM_1D_STATS_UPDATE: _h_batch_norm_1d_stats_update,
     OP_INTERPOLATE_2D: _h_interpolate_2d,
+    OP_ATTENTION_FORWARD: _h_attention_forward,
     OP_WHERE:   _h_where,
     OP_INDEX:   _h_index,
     OP_MASK:    _h_mask,

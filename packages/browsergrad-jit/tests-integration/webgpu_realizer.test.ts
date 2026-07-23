@@ -2370,7 +2370,7 @@ gb_gpu = bg.realize_tensor_plan_webgpu(gb)
     expect(result.gb_ops).toContain("CONV_TRANSPOSE2D_BACKWARD_BIAS");
   });
 
-  it("realize_tensor_plan_webgpu refuses CUSTOM ops before bridge dispatch", async () => {
+  it("realize_tensor_plan_webgpu refuses typed attention until its Gate 5 side table is integrated", async () => {
     const target = await getJitTarget();
     const result = await target.run<{
       message: string;
@@ -2382,7 +2382,7 @@ import numpy as np
 Q = bg.from_numpy(np.ones((1, 1, 2, 4), dtype=np.float32))
 K = bg.from_numpy(np.ones((1, 1, 2, 4), dtype=np.float32))
 V = bg.from_numpy(np.ones((1, 1, 2, 4), dtype=np.float32))
-out = bg.kernels.flash_attention(Q, K, V)
+out = bg.kernels.attention_forward(Q, K, V)
 try:
     bg.realize_tensor_plan_webgpu(out)
     msg = "no_error"
@@ -2390,7 +2390,8 @@ except bg.JitNotImplementedError as e:
     msg = str(e)
 {"message": msg, "tensor_plan": _mock.tensor_plan_count, "flash": _mock.flash_count}
 `);
-    expect(result.message).toMatch(/refuses CUSTOM/);
+    expect(result.message).toMatch(/ATTENTION_FORWARD/);
+    expect(result.message).toMatch(/Gate 5 attention artifact/);
     expect(result.tensor_plan).toBe(0);
     expect(result.flash).toBe(0);
   });
@@ -2460,12 +2461,13 @@ result
     expect(err).toMatch(/bg\.realize\(\)/);
   });
 
-  it("flash_attention CUSTOM op routes through bridge.flash_attention", async () => {
+  it("typed attention_forward routes through the legacy row-wise bridge", async () => {
     const target = await getJitTarget();
     const result = await target.run<{
       flash_count: number;
       shape: number[];
       max_diff: number;
+      op: string;
     }>(`
 import browsergrad_jit as bg
 import numpy as np
@@ -2481,7 +2483,7 @@ Q = bg.from_numpy(Q_np.copy())
 K = bg.from_numpy(K_np.copy())
 V = bg.from_numpy(V_np.copy())
 
-out = bg.kernels.flash_attention(Q, K, V)
+out = bg.kernels.attention_forward(Q, K, V)
 arr_gpu = bg.realize_webgpu(out)
 
 # NumPy reference for parity.
@@ -2495,17 +2497,19 @@ ref = np.matmul(p, V_np)
     "flash_count": _mock.flash_count,
     "shape": list(arr_gpu.shape),
     "max_diff": float(np.max(np.abs(arr_gpu - ref))),
+    "op": out._uop.op,
 }
 `);
     expect(result.flash_count).toBe(1);
     expect(result.shape).toEqual([2, 4, 8, 16]);
     expect(result.max_diff).toBeLessThan(1e-4);
+    expect(result.op).toBe("ATTENTION_FORWARD");
   });
 
-  it("flash_attention accepts an additive mask", async () => {
+  it("legacy flash_attention alias rejects the retired additive-mask profile", async () => {
     const target = await getJitTarget();
     const result = await target.run<{
-      max_diff: number;
+      message: string;
       flash_count: number;
     }>(`
 import browsergrad_jit as bg
@@ -2529,21 +2533,19 @@ K = bg.from_numpy(K_np.copy())
 V = bg.from_numpy(V_np.copy())
 mask = bg.from_numpy(mask_np.copy())
 
-out = bg.kernels.flash_attention(Q, K, V, mask=mask)
-arr_gpu = bg.realize_webgpu(out)
-
-scores = np.matmul(Q_np, np.swapaxes(K_np, -1, -2)) * scale + mask_np
-m_ = scores.max(axis=-1, keepdims=True)
-e = np.exp(scores - m_)
-p = e / e.sum(axis=-1, keepdims=True)
-ref = np.matmul(p, V_np)
+try:
+    bg.kernels.flash_attention(Q, K, V, mask=mask)
+    message = "no_error"
+except Exception as exc:
+    message = type(exc).__name__ + ": " + str(exc)
 {
-    "max_diff": float(np.max(np.abs(arr_gpu - ref))),
+    "message": message,
     "flash_count": _mock.flash_count,
 }
 `);
-    expect(result.max_diff).toBeLessThan(1e-4);
-    expect(result.flash_count).toBe(1);
+    expect(result.message).toMatch(/^JitNotImplementedError: /);
+    expect(result.message).toMatch(/scaled_dot_product_attention/);
+    expect(result.flash_count).toBe(0);
   });
 
   it("CONV2D primitive routes through bridge.conv2d and matches NumPy", async () => {
@@ -2728,6 +2730,7 @@ import browsergrad_jit as bg
 sorted(bg.webgpu_supported_opcodes())
 `);
     expect(ops).toEqual([
+      "ATTENTION_FORWARD",
       "BUFFER",
       "CAST",
       "CONST",

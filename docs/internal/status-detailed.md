@@ -82,7 +82,11 @@ the intended GPU materialization boundaries.
   CONV3D_BACKWARD_WEIGHT, CONV3D_BACKWARD_BIAS, LAYER_NORM,
   LAYER_NORM_BACKWARD_INPUT, LAYER_NORM_BACKWARD_WEIGHT,
   LAYER_NORM_BACKWARD_BIAS, optimizer update ops, CUSTOM.
-- `bg.kernels.flash_attention(Q, K, V, mask=None)` — opt-in CUSTOM op for FA-v2.
+- `bg.kernels.attention_forward(Q, K, V)` — typed, bounded rank-4 float32
+  attention-forward IR with stable CPU semantics and a legacy row-wise
+  online-softmax direct-WebGPU route. `bg.kernels.flash_attention` is a
+  compatibility alias; it does not claim the Gate 5 block-tiled algorithm or
+  FlashAttention-v2.
 - `nn.functional.conv1d(...)` / `nn.Conv1d(...)`,
   `nn.functional.conv2d(...)` / `nn.Conv2d(...)`,
   `nn.functional.conv_transpose2d(...)` / `nn.ConvTranspose2d(...)`, and
@@ -185,7 +189,8 @@ WGSL kernels — each with a JS reference for conformance:
 - `relu`, `gelu` (elementwise)
 - `layernorm` (along last axis, optional gamma/beta)
 - `attention` (composed 3-kernel)
-- `flash_attention.ts` (FlashAttention forward with online softmax and strict real-WebGPU parity)
+- `flash_attention.ts` (legacy row-wise online-softmax attention forward with
+  strict real-WebGPU parity; not the Gate 5 block-tiled implementation)
 - `fusedElementwiseDirect` — runtime WGSL codegen for arbitrary elementwise chains
 - `WebGpuRealizerBridge.conv1d*` / `conv2d*` — f32 Conv1d/Conv2d forward plus
   input/weight/bias backward kernels over resident GPUBuffer handles,

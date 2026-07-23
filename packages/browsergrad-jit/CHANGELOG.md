@@ -9,6 +9,14 @@ contract in the README](README.md#compatibility-contract).
 
 ### Changed
 
+- `bg.kernels.attention_forward` now emits typed `ATTENTION_FORWARD` IR for a
+  bounded dense rank-4 float32 profile with matching Q/K/V dimensions,
+  canonical inverse-square-root scaling, stable owning CPU realization, and
+  finite runtime validation. `bg.kernels.flash_attention` is a compatibility
+  alias to that typed node; masks, custom scales, autograd, vmap, ONNX, and the
+  portable tensor plan fail explicitly. The legacy direct WebGPU route remains
+  row-wise online softmax and does not claim the independently proved Gate 5
+  block-tiled algorithm or FlashAttention-v2.
 - Removed `bg.kernels.transformer_block`, whose constructor produced an opaque
   node with no CPU, autograd, portable-plan, or legacy-WebGPU execution path.
   PRD-012c remains a draft for typed graph-pattern recognition and megakernel

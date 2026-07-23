@@ -208,49 +208,63 @@ amp.is_available = _amp_mod.is_available
 _sys.modules["browsergrad_jit.amp"] = amp
 
 
-# bg.kernels — public surface for opt-in CUSTOM kernels (PRD-011.5).
-# Today only flash_attention; PRD-012a auto-recognises the same pattern.
-import math as _math
+# bg.kernels — typed inference attention plus the explicit user-WGSL seam.
+def attention_forward(q, k, v):
+    """Typed dense rank-4 f32 attention forward.
+
+    This v1 JIT profile matches the non-causal shared Gate 5 logical contract.
+    It owns a bounded stable NumPy reference and the legacy row-wise WebGPU
+    compatibility route. It does not claim block-tiled execution or a VJP.
+    """
+    if any(type(value) is not TensorProxy for value in (q, k, v)):
+        raise TypeError(
+            "bg.kernels.attention_forward requires Tensor inputs for query, "
+            "key, and value"
+        )
+    session = q._get_session()
+    if k._get_session() is not session or v._get_session() is not session:
+        raise ShapeError(
+            "bg.kernels.attention_forward inputs must belong to one session"
+        )
+    if q.requires_grad or k.requires_grad or v.requires_grad:
+        raise NoBackwardError(
+            "bg.kernels.attention_forward has no admitted VJP in the Gate 5 "
+            "v1 contract; use torch.nn.functional.scaled_dot_product_attention "
+            "when autograd is required"
+        )
+    contract = _framework_contracts_mod.infer_attention_forward_contract(q, k, v)
+    from ._ir import UOp, OP_ATTENTION_FORWARD
+    uop = UOp(
+        op=OP_ATTENTION_FORWARD,
+        inputs=(q._uop, k._uop, v._uop),
+        shape=contract.output_shape,
+        dtype="float32",
+        arg={"scale": contract.scale, "mask": "none"},
+    )
+    _framework_contracts_mod.validate_attention_forward_contract(uop)
+    return TensorProxy(uop, session=session, requires_grad=False)
 
 
 def flash_attention(q, k, v, mask=None, scale=None):
-    """Build a CUSTOM(flash_attention) UOp; realize via bg.realize_webgpu.
+    """Compatibility alias for typed attention_forward.
 
-    Inputs are TensorProxy. Shapes:
-        Q: (B, H, Sq, D)
-        K: (B, H, Sk, D)
-        V: (B, H, Sk, D)
-        mask (optional): (B or 1, H or 1, Sq, Sk) — additive logits mask
-                         (use -inf for blocked positions, 0 for allowed)
-    Returns a TensorProxy of shape (B, H, Sq, D).
-
-    NOTE: backward is not implemented. The result has requires_grad=False
-    and no autograd context, so it silently disconnects the input chain;
-    NoBackwardError is not currently raised. Use only for forward/inference
-    paths in v0.
+    The historical additive-mask/custom-scale profile belonged only to the
+    inaccurately named row-wise compatibility kernel. Use the functional
+    scaled_dot_product_attention surface for those semantics.
     """
-    if scale is None:
-        scale = 1.0 / _math.sqrt(q.shape[-1])
-    B, H, Sq, D = q.shape
-    _, _, Sk, _ = k.shape
-    out_shape = (B, H, Sq, D)
-    inputs_uops = [q._uop, k._uop, v._uop]
-    has_mask = mask is not None
-    if has_mask:
-        inputs_uops.append(mask._uop)
-    from ._ir import UOp, OP_CUSTOM
-    arg = {
-        "op": "flash_attention",
-        "b": int(B), "h": int(H), "sq": int(Sq), "sk": int(Sk), "d": int(D),
-        "scale": float(scale),
-        "has_mask": bool(has_mask),
-    }
-    uop = UOp(op=OP_CUSTOM, inputs=tuple(inputs_uops),
-              shape=out_shape, dtype=q.dtype, arg=arg)
-    return TensorProxy(uop, session=q._get_session(), requires_grad=False)
+    if mask is not None or scale is not None:
+        raise JitNotImplementedError(
+            "bg.kernels.flash_attention now aliases the exact typed "
+            "attention_forward v1 profile and accepts neither additive masks "
+            "nor custom scale. Use "
+            "torch.nn.functional.scaled_dot_product_attention for those "
+            "semantics."
+        )
+    return attention_forward(q, k, v)
 
 
 kernels = _types.ModuleType("browsergrad_jit.kernels")
+kernels.attention_forward = attention_forward
 kernels.flash_attention = flash_attention
 _sys.modules["browsergrad_jit.kernels"] = kernels
 

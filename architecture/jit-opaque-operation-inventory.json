@@ -42,14 +42,6 @@
       "constructorCount": 1,
       "labelBinding": "static-op-in-arg-record",
       "operationIds": ["jit.custom.user.v0"]
-    },
-    {
-      "id": "embedded.flash-attention",
-      "file": "packages/browsergrad-jit/src/python/index.ts",
-      "definition": "flash_attention",
-      "constructorCount": 1,
-      "labelBinding": "static-op-in-arg-record",
-      "operationIds": ["jit.custom.flash-attention.v0"]
     }
   ],
   "decisionSourceDefinitions": [
@@ -67,7 +59,6 @@
     "packages/browsergrad-jit/src/python/_vmap.py:_refuse"
   ],
   "operations": [
-    {"id":"jit.custom.flash-attention.v0","label":"flash_attention","labelField":"op","constructorSite":"embedded.flash-attention","policy":"legacy-webgpu-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"legacy-webgpu-bridge-required","effectClass":"accelerator-kernel","replayContract":"forward-only-root-materialization","inputArity":"3-or-4","shapeRule":"preserve-query-shape","declaredDtypeRule":"preserve-query-dtype","realizedDtypeRule":"bridge-materialized-as-declared","webgpuRoute":"flash-attention","currentFailure":"CPU and portable tensor plan refuse; input relationships are only partially validated","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze","legacy-webgpu-flash"]},
     {"id":"jit.custom.user.v0","label":"user","labelField":"op","constructorSite":"custom-kernel.builder","policy":"legacy-webgpu-forward-only","constructorReachability":"registered-decorator-builder-invoked","effectCondition":"legacy-webgpu-bridge-and-live-kernel-registry-entry-required","effectClass":"user-authored-kernel","replayContract":"forward-only-root-materialization","inputArity":"decorator-num-inputs","shapeRule":"decorator-output-shape-function","declaredDtypeRule":"decorator-output-dtype","realizedDtypeRule":"bridge-materialized-as-declared","webgpuRoute":"user-kernel","currentFailure":"CPU and portable tensor plan refuse; autograd is explicitly disconnected","targetConformance":"intentional-extension","evidence":["gate0-contract","source-freeze","legacy-webgpu-user"]}
   ],
   "evidenceDefinitions": [
@@ -75,11 +66,6 @@
       "id": "gate0-contract",
       "kind": "executable-pyodide-contract",
       "path": "packages/browsergrad-jit/tests-integration/gate0_opaque_operation_contract.test.ts"
-    },
-    {
-      "id": "legacy-webgpu-flash",
-      "kind": "executable-pyodide-contract",
-      "path": "packages/browsergrad-jit/tests-integration/webgpu_realizer.test.ts"
     },
     {
       "id": "legacy-webgpu-user",
