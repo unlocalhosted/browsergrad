@@ -1,7 +1,7 @@
 # BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
 - **Status:** normative platform architecture; implementation status is not implied
-- **Last reviewed:** 2026-07-23
+- **Last reviewed:** 2026-07-24
 - **Implementation ledger:**
   [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
 - **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
@@ -13,7 +13,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
 describe requirement strength. They are used deliberately rather than as
 general emphasis.
 
-## Implementation Checkpoint — Active 2026-07-23
+## Implementation Checkpoint — Active 2026-07-24
 
 Gates 0 through 2 and Gates 4 through 6 are verified; Gate 3 remains active;
 Gate 7 has not started. Gate 4 is verified for its initial
@@ -22,9 +22,9 @@ GEMM. The strict native producer, pinned no-shell Clang-Wasm executor,
 isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
 are implemented on `main`. The current source additionally owns exact
 frontend-work instrumentation, the local Wasm C-ABI runner, and a canonical
-Worker result-control encoder. It now pins the current clean-built 27,125-byte
-generated factory inside one exact 571,098-byte package-owned compiler Worker
-module and a separate exact 151,555-byte package-owned raw-Wasm verifier Worker;
+Worker result-control encoder. It now pins the current 27,285-byte generated
+factory inside one exact 582,465-byte package-owned compiler Worker module and
+a separate exact 157,378-byte package-owned raw-Wasm verifier Worker;
 both have zero static or dynamic imports. The production controller captures
 browser effects at module evaluation, runs the exact verifier before preparing
 the compiler invocation, transfers only its bounded canonical derivative
@@ -739,14 +739,14 @@ controlled key, and externally issued statement over the exact current build
 subject remain required before the current distributed producer can be claimed
 as trusted.
 
-The header-pack harness now binds seven exact source archives to the build lock:
-LLVM 22.1.8, CUTLASS 3.7.0, CUDA 12.6.3 CCCL/cudart/nvcc, and Ubuntu Noble
-glibc/Linux UAPI cross-development packages. It streams and verifies all
-252,406,685 archive bytes and package-pins the current Darwin arm64
+The header-pack harness now binds eight exact source archives to the build lock:
+LLVM 22.1.8, CUTLASS 3.7.0, CUDA 12.6.3 CCCL/cudart/nvcc, NVIDIA `libcurand`
+10.3.7.77, and Ubuntu Noble glibc/Linux UAPI cross-development packages. It
+streams and verifies all 334,136,433 archive bytes and package-pins the current Darwin arm64
 normalization closure: exact `/usr/bin/bsdtar` bytes/version, exact Node 25.9.0
 executable bytes, Zstandard 1.5.7, empty runtime flags, and absent
 `NODE_OPTIONS`. It uses that bounded Node decoder for Debian `data.tar.zst` and
-normalizes only the eight selected header subtrees plus eight exact upstream
+normalizes only the nine selected header subtrees plus nine exact upstream
 license/copyright review files through a strict streamed tar parser. The parser
 rejects traversal, links, special files, duplicate virtual paths, malformed
 PAX metadata, invalid checksums/padding, and budget overflow. Extracted files
@@ -754,29 +754,27 @@ use a content-addressed flat host store, so a case-insensitive macOS filesystem
 cannot collapse distinct Linux virtual paths such as `xt_CONNMARK.h` and
 `xt_connmark.h`.
 
-One same-process opaque pipeline rereads all 5,769 selected files and their
-67,092,008 content bytes, detects conflicting overlays, and materializes the
-five canonical BrowserGrad VFS packs. The locked WebAssembly-only Clang stage
-activates none of LLVM 22.1.8's ARM/AArch64/RISC-V TableGen resource-header
-rules. The pipeline verifies the exact 25,049-byte upstream CMake manifest,
-records an empty generated-file set, and omits that build-only manifest from
-the distributed pack. The resulting 5,768 files occupy 67,470,214 pack bytes
-and cover the complete configured Clang resource output, libc++, CUDA, CUTLASS,
-and the Linux sysroot. The same pipeline admits the exact 49,142-byte CUDA
-12.6.3 redistribution index and writes a canonical 1,203,103-byte
-`license-inventory.json`. Its 5,768 unique file-map entries bind every
+One same-process opaque pipeline rereads every selected source, detects
+conflicting overlays, and materializes the five canonical BrowserGrad VFS
+packs. The configured Clang resource pack includes one exact
+upstream-identity-bound CUDA runtime-wrapper derivative; the transformation is
+closed and deterministic rather than an ambient patch. The resulting 5,788
+files occupy 69,680,000 pack bytes and cover the complete configured Clang
+resource output, libc++, CUDA, CUTLASS, and the Linux sysroot. The same
+pipeline admits the exact 49,142-byte CUDA 12.6.3 redistribution index and
+writes a canonical 1,208,487-byte `license-inventory.json`. Its 5,788 unique
+file-map entries bind every
 distributed virtual path and content identity to the materialized pack,
 license component, and relevant package notice while also binding the complete
-ten-resource notice set, eight extracted upstream evidence files totaling
-250,207 bytes, and the selected CUDA index records. The pipeline now copies the
+ten-resource notice set, nine extracted upstream evidence files totaling
+313,228 bytes, and the selected CUDA index records. The pipeline now copies the
 ten verifier-retained package notice snapshots into their exact declared
 component-license paths and constructs a deterministic 115,316-byte aggregate
 notice containing ten components, nine of them third party. The eleven new
 notice files total 226,326 bytes, are created without clobber at mode `0400`,
 are independently reread, and complete an exact 17-file private output tree
-with the five packs and review input. Three final direct runs produced stable
-review-input, notice-materialization, aggregate, and path-independent pipeline
-identities in 23.1 to 25.4 seconds. These are real
+with the five packs and review input. A clean two-root run from commit
+`7476fd48` reproduced the complete 71,114,813-byte output subset. These are real
 source-derived, independently inspected non-release pack observations. They do
 establish the complete configured header universe under one package-reviewed
 builder identity and the complete engineering input for external header-file
@@ -789,11 +787,11 @@ The two-root reproducibility command now runs that exact pipeline twice from
 one common archive/index/tool closure under four distinct non-overlapping source
 and pack roots. It then concurrently rehashes every immutable output, checks
 the complete file/directory trees before and after hashing, and confirms all 17
-paths, 68,899,643 bytes, and identities match. The current two-root direct
-command completed in about 38.5 seconds with reproducibility ID
-`bg.cpp.browser-header-distribution-reproducibility.sha256.c4295b8226eac800cf37b5fcf92b8064b33167d67c0e6c94096f477d9e3dc4bb`
+paths, 71,114,813 bytes, and identities match. The current clean two-root
+command completed in about one minute with reproducibility ID
+`bg.cpp.browser-header-distribution-reproducibility.sha256.43f703672ddbeaf1e6e6d544e3ed50721a2585e947b5d0a1e624293cac80d449`
 and output-verification ID
-`bg.cpp.distribution-output-file-verification.sha256.a71037abea902befd009c3a8c643b1a1a98c94a891e7022d02d017d453dc764b`.
+`bg.cpp.distribution-output-file-verification.sha256.1cc298cf70ed624df258a14b0eb687c6a0666a14cdd4e5d208674f6c0f7fb3df`.
 This proves exact reproducibility only for the five header packs, license
 inventory, ten component notices, and aggregate notice. The Wasm/factory,
 Worker, remaining deterministic outputs, detached provenance, external legal
@@ -802,7 +800,7 @@ distribution reproducibility and release remain false.
 
 The package now pins the path-independent 4,042-byte header reproducibility
 record at SHA-256
-`cb0afdf5bc616ab326b5dc577957ba29d12534206cf3588ecde8bafb3eaed574`.
+`8dafa7484a7ca7a5c12e6cb2128cfbbc22d2692a96ebc1581c81e48953ad8620`.
 Admission accepts only those exact bytes, verifies the current build-input lock
 and its resource identity, validates the sorted 17-output projection and byte
 total, and independently rederives both the output-verification and
@@ -812,26 +810,12 @@ evidence without turning reproducible header bytes into legal approval, signed
 provenance, full-distribution reproducibility, Worker execution, or release
 authority.
 
-The exact source plan is
-`bg.cpp.browser-header-source-plan.sha256.63bcfd903d4029806ea237ddfa9a4545c218cf689c5b6fc7ead6112b9dbce812`;
-the seven-archive admission is
-`bg.cpp.browser-header-source-archive-admission.sha256.49f87fb00914be0ec0d4885c9cad61ad0cdc04cd12a16aebb448956aa840c420`;
-the pinned normalization environment is
-`bg.cpp.pinned-archive-normalization-environment.sha256.d9461759522fbe616b0244ab63267854eb249f546a1b8560c7b7b0cd6b6df818`;
-and the composed observation is
-`bg.cpp.browser-header-pack-pipeline.sha256.6c33e79fc5704328ab1147dc31b27a119a230c7b790733a335ab6657545e17aa`.
-The header review input is
-`bg.cpp.header-distribution-review-input.sha256.11437c9f0abffdc4d28bb277e05a39bf17a19aa4f8dbc2c243c43f2f0aa27951`
-with exact file SHA-256
-`086751209a7e48427d9ae8fbc7cce7d06f87e5a100c3aa35974cc4974e7972ff`.
-The notice materialization is
-`bg.cpp.browser-header-notice-materialization.sha256.a440387ec409e064e0e7b7b56c717d9d62baadbf59d57276c02ecf43e754d632`;
-its exact aggregate SHA-256 is
-`f4664fa0b81ee07818b05436207c2435a4888ecb1fcf1a0de7ce7b58f131d964`.
-The five output SHA-256 identities are `fd7fb977...` (configured Clang resource),
-`f795494a...` (CUDA), `4f1c39b7...` (CUTLASS), `f66f1284...` (libc++), and
-`d04a460d...` (Linux sysroot); the implementation ledger retains the complete
-hashes and byte counts.
+The clean composed header observation is
+`bg.cpp.browser-header-pack-pipeline.sha256.80a29abc734fcf3183c98fbd3bce5c23005a045f06e6837b80231845fdf09b71`.
+The five output SHA-256 identities are `037acb8a...` (configured Clang
+resource), `1917ba19...` (CUDA), `4f1c39b7...` (CUTLASS), `1f2c5a1e...`
+(libc++), and `d04a460d...` (Linux sysroot); the implementation ledger retains
+the complete hashes and byte counts.
 
 The original cold diagnostic run `29658164083` spent 97 minutes 5 seconds in
 isolated execution before failing closed at link. That result exposed two
@@ -1069,12 +1053,12 @@ Cross-runtime CI run `29674595640` confirms the source and harness on Node 20,
 specification instead of assuming one platform declaration.
 
 An active or failed run is not build, ABI, reproducibility, Worker, browser, or
-release evidence. The Worker-local runtime now executes the pinned generated
-factory and C ABI, verifies exact frontend-work/VFS/runtime observations, and
-emits canonical control plus artifact bytes. The package-owned Worker graph is
-pinned at SHA-256
-`500356a0cb2b6ac1df23124b7bcbe4043c302409f5195d1e847e935804c62bea`
-and 575,477 bytes. Worker controller protocol v2 preserves one bounded,
+release evidence. The Worker-local runtime executes the generated factory and
+C ABI, verifies exact frontend-work/VFS/runtime observations, and emits
+canonical control plus artifact bytes. The package-owned Worker graph is pinned
+at SHA-256
+`18476bc79b05054e5064be45d051cbe9d84f7bb1861e40e20ba90b7d0e532155`
+and 582,465 bytes. Worker controller protocol v2 preserves one bounded,
 sanitized deepest failure detail. Failed C-ABI invocations snapshot exact
 frontend-work, allocator, and VFS state before cleanup without minting Worker
 execution or lowering authority.
@@ -1084,10 +1068,15 @@ capability. Allocator-integrity state retains the first poison reason for the
 module lifetime. These codes do not change the C ABI, contain no caller source,
 path, or rendered diagnostic text, and cannot authorize an artifact or mask
 the fail-closed status.
-The production host path now consumes those bytes through the captured platform
-and package invocation. It remains evidence-blocked from lowering until a valid
-real Worker compile authenticates the exact terminal frame, Artifact V3,
-frontend-work record, and VFS observations.
+The clean diagnostic host path now consumes those bytes through the captured
+platform and package invocation. Chromium compiled unchanged C++17/CuTe source
+in 22.369 seconds and authenticated accepted Artifact V3
+`bg.artifact.cpp-cute-frontend.sha256.4489656ea0da6faef2a37164fd73e36e201e15f4fba640fa88395a46deb81991`.
+That observation proves real browser Worker execution and a shared rank-2
+layout semantic candidate, but its exact Wasm remains explicitly untrusted
+diagnostic output. Lowering therefore remains blocked on the current
+two-clean-build producer pin plus the independent producer-trust transition;
+license approval, backend execution, and release stay false.
 Use the linked implementation ledger
 for exact chronology, failures, and evidence. This checkpoint is informational: the
 remainder of this document continues to define the normative target and does
