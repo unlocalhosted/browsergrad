@@ -44,7 +44,7 @@ def error_name(fn):
 
 x = bg.from_numpy(np.zeros((2, 2), dtype=np.float32), requires_grad=True)
 target = bg.from_numpy(np.array([0, 1], dtype=np.int64))
-y = F.nll_loss(x, target, reduction="none")
+y = F.cross_entropy(x, target, reduction="none")
 cpu_values = y.numpy().tolist()
 y.sum().backward()
 custom_plan = bg.gpu_plan_summary(y, allow_custom=True)
@@ -58,7 +58,7 @@ class PlanOnlyGpuBuffers:
     "cpuValues": cpu_values,
     "cpuGradient": x.grad.numpy().tolist(),
     "symbolicVjpRegistered": _vjp.get_rule("CUSTOM") is not None,
-    "functionalGradError": error_name(lambda: bg.func.grad(lambda value: F.nll_loss(value, target, reduction="none").sum())(x)),
+    "functionalGradError": error_name(lambda: bg.func.grad(lambda value: F.cross_entropy(value, target, reduction="none").sum())(x)),
     "vmapError": error_name(lambda: _vmap._VMAP_RULES["CUSTOM"](y._uop, {}, 2)),
     "onnxError": error_name(lambda: bg.onnx.export_inference(y, input_buffers=(x,))),
     "tensorPlanError": error_name(lambda: bg.gpu_plan_summary(y)),
@@ -273,7 +273,6 @@ a = leaf([[1.0, 2.0], [3.0, 1.0]]); check("cross_entropy", F.cross_entropy(a, co
 np.random.seed(17)
 a = leaf([[1.0, 1.0], [1.0, 1.0]]); check("dropout", F.dropout(a, p=0.5, training=True), a)
 a = leaf([[[[2.0]]]]); check("interpolate", F.interpolate(a, size=(2, 2), mode="nearest"), a)
-a = leaf([[-0.2, -1.6], [-0.3, -1.2]]); check("nll_loss", F.nll_loss(a, constant([0, 1], np.int64)), a)
 {
     "environment": {"pyodide": pyodide.__version__, "numpy": np.__version__},
     "observedLabels": sorted(observed.keys()),

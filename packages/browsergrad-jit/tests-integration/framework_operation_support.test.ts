@@ -91,6 +91,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.kl-div.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.functional.nll-loss.v1",
+      publicSurface: "torch.nn.functional.nll_loss",
+      opcode: "NLL_LOSS",
+      semanticState: "typed",
+      shapeContract: "class-axis-index-loss-with-batched-reduction",
+      dtypeContract: "preserve-floating-input-require-int64-target-and-optional-matching-weight",
+      decisions: {
+        cpu: "supported-numpy-owning-bounded-nll-reduction",
+        closureAutograd: "supported-selected-class-negative-weight-gradient",
+        symbolicVjp: "supported-selected-class-negative-weight-gradient",
+        functionalGrad: "supported-for-floating-input-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-class-axis-shift-and-captured-weight",
+        onnxExport: "supported-opset17-negative-log-likelihood-loss-unmapped-profile",
+        tensorPlan: "refused-no-canonical-loss-reduction-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-array",
+      },
+      retiredOpaqueOperationId: "jit.custom.nll-loss.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.functional.smooth-l1-loss.v1",
       publicSurface: "torch.nn.functional.smooth_l1_loss",
       opcode: "SMOOTH_L1_LOSS",
@@ -677,7 +698,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(31);
+    expect(result.first.operations).toHaveLength(32);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

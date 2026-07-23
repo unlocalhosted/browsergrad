@@ -4,8 +4,9 @@
  * The cache fires on `nn.Module.__call__` when:
  *   - Every positional arg is a TensorProxy.
  *   - No arg has `requires_grad=True`.
- *   - The signature (id(module), training, shape+dtype-tuple) matches
+ *   - The signature (id(module), training, session+shape+dtype-tuple) matches
  *     a prior call.
+ *   - The module tree has no mutable buffers.
  *
  * Asserts:
  *   - Hits return numerically identical output.
@@ -239,5 +240,71 @@ _ = m(x); _ = m(x); _ = m(x)
 bg.jit.trace_cache_stats()
 `);
     expect(result.entries).toBe(0);
+  });
+
+  it("isolates equal-shaped traces by session-owned buffer namespace", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<Record<string, unknown>>(`
+import browsergrad_jit as bg
+import numpy as np
+
+m = bg.nn.ReLU()
+first_session = bg.new_session()
+second_session = bg.new_session()
+first = bg.from_numpy(
+    np.asarray([-1.0, 2.0], dtype=np.float32),
+    session=first_session,
+)
+second = bg.from_numpy(
+    np.asarray([3.0, -4.0], dtype=np.float32),
+    session=second_session,
+)
+first_value = m(first).numpy().tolist()
+second_value = m(second).numpy().tolist()
+second_repeat = m(second).numpy().tolist()
+{
+    "first": first_value,
+    "second": second_value,
+    "secondRepeat": second_repeat,
+    "stats": bg.jit.trace_cache_stats(),
+}
+`);
+    expect(result.first).toEqual([0, 2]);
+    expect(result.second).toEqual([3, 0]);
+    expect(result.secondRepeat).toEqual([3, 0]);
+    expect(result.stats).toMatchObject({ entries: 2, misses: 2, hits: 1 });
+  });
+
+  it("bypasses local and descendant mutable buffers", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<Record<string, unknown>>(`
+import browsergrad_jit as bg
+import numpy as np
+
+class BufferedScale(bg.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("scale", np.asarray([2.0], dtype=np.float32))
+
+    def forward(self, value):
+        scale = bg.from_numpy(
+            self.scale.copy(),
+            session=value._get_session(),
+        )
+        return value * scale
+
+inner = BufferedScale()
+outer = bg.nn.Sequential(inner)
+value = bg.from_numpy(np.asarray([3.0], dtype=np.float32))
+first = outer(value).item()
+inner.scale[:] = 5.0
+second = outer(value).item()
+{
+    "values": [float(first), float(second)],
+    "stats": bg.jit.trace_cache_stats(),
+}
+`);
+    expect(result.values).toEqual([6, 15]);
+    expect(result.stats).toMatchObject({ entries: 0, misses: 0, hits: 0 });
   });
 });

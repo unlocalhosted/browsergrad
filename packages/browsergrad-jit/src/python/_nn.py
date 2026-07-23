@@ -22,7 +22,7 @@ from ._tensor_proxy import (
     zeros,
     randn,
 )
-from ._ir import UOp, OP_CUSTOM
+from ._ir import UOp, OP_BUFFER, OP_CUSTOM
 from ._errors import ShapeError
 from . import _functional as F
 
@@ -121,9 +121,15 @@ class Module:
         # We only consult the cache for positional-arg calls (the common
         # case for the `Module(x)` pattern). Kwargs disable the cache
         # because the signature would need to include kwarg identity and
-        # ordering — adds complexity without observed wins.
+        # ordering. Mutable buffers also disable it, including buffers owned
+        # by descendants: bypassing forward would otherwise hide state
+        # updates or reuse a graph built from an obsolete buffer snapshot.
         from . import _trace_cache
-        if not kwargs and _trace_cache.is_enabled():
+        cacheable = (
+            not kwargs
+            and next(self.buffers(recurse=True), None) is None
+        )
+        if cacheable and _trace_cache.is_enabled():
             cached = _trace_cache.maybe_cached_forward(
                 module_id=id(self),
                 training=bool(self.training),
@@ -132,7 +138,7 @@ class Module:
             if cached is not None:
                 return cached
         out = self.forward(*args, **kwargs)
-        if not kwargs:
+        if cacheable:
             _trace_cache.record(
                 module_id=id(self),
                 training=bool(self.training),
@@ -803,11 +809,65 @@ class CrossEntropyLoss(Module):
 
 
 class NLLLoss(Module):
-    def __init__(self, reduction: str = "mean") -> None:
+    def __init__(
+        self,
+        weight: Optional[TensorProxy] = None,
+        size_average: Optional[bool] = None,
+        ignore_index: int = -100,
+        reduce: Optional[bool] = None,
+        reduction: str = "mean",
+    ) -> None:
         super().__init__()
-        self.reduction = reduction
-    def forward(self, log_probs: TensorProxy, targets: TensorProxy) -> TensorProxy:
-        return F.nll_loss(log_probs, targets, reduction=self.reduction)
+        if weight is None:
+            object.__setattr__(self, "weight", None)
+        else:
+            if not isinstance(weight, TensorProxy):
+                raise TypeError(
+                    "NLLLoss: weight must be a TensorProxy or None, got "
+                    f"{type(weight).__name__}"
+                )
+            if weight.requires_grad:
+                raise ValueError(
+                    "NLLLoss: weight is non-differentiable and must not require grad"
+                )
+            validation_target = UOp(
+                op=OP_BUFFER,
+                inputs=(),
+                shape=(),
+                dtype="int64",
+                arg="nll-loss-weight-validation-target",
+            )
+            F.infer_nll_loss_contract(
+                (weight._uop, validation_target, weight._uop),
+                "mean",
+                ignore_index,
+                True,
+                0,
+            )
+            self.register_buffer("weight", weight.numpy())
+        self.ignore_index = ignore_index
+        self.reduction = F._normalize_legacy_loss_reduction(
+            "NLLLoss",
+            reduction,
+            size_average,
+            reduce,
+        )
+    def forward(self, input: TensorProxy, target: TensorProxy) -> TensorProxy:
+        weight = (
+            None
+            if self.weight is None
+            else from_numpy(
+                np.array(self.weight, copy=True),
+                session=input._get_session(),
+            )
+        )
+        return F.nll_loss(
+            input,
+            target,
+            weight=weight,
+            ignore_index=self.ignore_index,
+            reduction=self.reduction,
+        )
 
 
 class BCEWithLogitsLoss(Module):

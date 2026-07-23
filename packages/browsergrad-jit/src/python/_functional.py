@@ -25,6 +25,7 @@ from ._ir import (
     OP_BINARY_CROSS_ENTROPY,
     OP_BINARY_CROSS_ENTROPY_WITH_LOGITS,
     OP_KL_DIV,
+    OP_NLL_LOSS,
 )
 from ._tensor_proxy import (
     TensorProxy, _BackwardCtx, _should_track, _to_proxy, from_numpy, where,
@@ -36,11 +37,13 @@ from ._framework_contracts import (
     execute_binary_cross_entropy_vjp_array,
     execute_binary_cross_entropy_with_logits_vjp_array,
     execute_kl_div_vjp_array,
+    execute_nll_loss_vjp_array,
     infer_l1_loss_contract,
     infer_smooth_l1_loss_contract,
     infer_binary_cross_entropy_contract,
     infer_binary_cross_entropy_with_logits_contract,
     infer_kl_div_contract,
+    infer_nll_loss_contract,
     normalize_pad_request,
 )
 
@@ -260,51 +263,106 @@ def mse_loss(input: TensorProxy, target: TensorProxy,
     raise ValueError(f"mse_loss: unknown reduction {reduction!r}")
 
 
-def nll_loss(log_probs: TensorProxy, targets: TensorProxy,
-             reduction: str = "mean") -> TensorProxy:
-    """Negative log likelihood: matches torch.nn.functional.nll_loss.
-
-    `log_probs`: shape (N, C). `targets`: shape (N,)."""
-    if log_probs.ndim != 2:
-        raise ShapeError(
-            f"nll_loss: log_probs must be 2-D, got shape {log_probs.shape}"
+def _normalize_legacy_loss_reduction(
+    operation: str,
+    reduction: Any,
+    size_average: Any,
+    reduce: Any,
+) -> Any:
+    if size_average is None and reduce is None:
+        return reduction
+    if size_average is not None and type(size_average) is not bool:
+        raise ValueError(
+            f"{operation}: size_average must be an exact bool or None"
         )
-    N, C = log_probs.shape
-    sess = log_probs._get_session()
+    if reduce is not None and type(reduce) is not bool:
+        raise ValueError(f"{operation}: reduce must be an exact bool or None")
+    effective_size_average = True if size_average is None else size_average
+    effective_reduce = True if reduce is None else reduce
+    if not effective_reduce:
+        return "none"
+    return "mean" if effective_size_average else "sum"
 
-    def _nll_forward(lp_arr: np.ndarray, t_arr: np.ndarray) -> np.ndarray:
-        picked = -lp_arr[np.arange(N), t_arr.astype(np.int64)]
-        if reduction == "mean":
-            return np.asarray(picked.mean(), dtype=lp_arr.dtype)
-        if reduction == "sum":
-            return np.asarray(picked.sum(), dtype=lp_arr.dtype)
-        return picked.astype(lp_arr.dtype, copy=False)
 
-    out_shape: Tuple[int, ...] = () if reduction in ("mean", "sum") else (N,)
+def nll_loss(
+    input: TensorProxy,
+    target: TensorProxy,
+    weight: Optional[TensorProxy] = None,
+    size_average: Optional[bool] = None,
+    ignore_index: int = -100,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorProxy:
+    """Typed negative log likelihood with PyTorch class-axis semantics."""
+    if not isinstance(input, TensorProxy):
+        raise TypeError(
+            f"nll_loss: input must be a TensorProxy, got {type(input).__name__}"
+        )
+    if not isinstance(target, TensorProxy):
+        raise TypeError(
+            f"nll_loss: target must be a TensorProxy, got {type(target).__name__}"
+        )
+    session = input._get_session()
+    if target._get_session() is not session:
+        raise ShapeError("nll_loss: input and target must belong to the same session")
+    if weight is not None:
+        if not isinstance(weight, TensorProxy):
+            raise TypeError(
+                "nll_loss: weight must be a TensorProxy or None, got "
+                f"{type(weight).__name__}"
+            )
+        if weight._get_session() is not session:
+            raise ShapeError(
+                "nll_loss: input, target, and weight must belong to the same session"
+            )
+        if weight.requires_grad:
+            raise ValueError(
+                "nll_loss: weight is non-differentiable and must not require grad"
+            )
+    normalized_reduction = _normalize_legacy_loss_reduction(
+        "nll_loss",
+        reduction,
+        size_average,
+        reduce,
+    )
+    proxies = (input, target) if weight is None else (input, target, weight)
+    inputs = tuple(proxy._uop for proxy in proxies)
+    contract = infer_nll_loss_contract(
+        inputs,
+        normalized_reduction,
+        ignore_index,
+        weight is not None,
+        0,
+    )
+    arg = {
+        "reduction": contract.reduction,
+        "batch_rank": contract.batch_rank,
+        "ignore_index": contract.ignore_index,
+        "has_weight": contract.has_weight,
+    }
     uop = UOp(
-        op=OP_CUSTOM,
-        inputs=(log_probs._uop, targets._uop),
-        shape=out_shape,
-        dtype=log_probs.dtype,
-        arg={"fn": _nll_forward, "captures": (), "name": "nll_loss"},
+        op=OP_NLL_LOSS,
+        inputs=inputs,
+        shape=contract.output_shape,
+        dtype=contract.output_dtype,
+        arg=arg,
     )
 
-    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
-        lp_arr, t_arr = ins
-        grad_lp = np.zeros_like(lp_arr)
-        rows = np.arange(N)
-        cols = t_arr.astype(np.int64)
-        if reduction == "mean":
-            grad_lp[rows, cols] = -dy / N
-        elif reduction == "sum":
-            grad_lp[rows, cols] = -dy
-        else:  # none
-            grad_lp[rows, cols] = -dy
-        return (grad_lp.astype(lp_arr.dtype, copy=False), None)
+    def _bw(
+        dy: np.ndarray,
+        arrays: Tuple[np.ndarray, ...],
+    ) -> Tuple[Optional[np.ndarray], ...]:
+        gradient = execute_nll_loss_vjp_array(contract, dy, arrays)
+        return (gradient,) + (None,) * (len(arrays) - 1)
 
-    requires = _should_track(log_probs)
-    ctx = _BackwardCtx(fn=_bw, input_proxies=(log_probs, targets)) if requires else None
-    return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
+    requires = _should_track(input)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=proxies) if requires else None
+    return TensorProxy(
+        uop,
+        session=session,
+        requires_grad=requires,
+        ctx=ctx,
+    )
 
 
 def l1_loss(

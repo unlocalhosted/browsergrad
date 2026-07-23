@@ -264,27 +264,347 @@ def dropout(x: Tensor, p: float = 0.5, training: bool = True) -> Tensor:
     return _build_ctx(out, (x,), lambda g: (g.data * mask,))
 
 
-def nll_loss(log_probs: Tensor, targets) -> Tensor:
-    """Negative log-likelihood: -mean(log_probs[range(N), targets]).
+def _normalize_legacy_loss_reduction(
+    operation,
+    reduction,
+    size_average,
+    reduce,
+):
+    if size_average is None and reduce is None:
+        return reduction
+    if size_average is not None and type(size_average) is not bool:
+        raise ValueError(
+            f"{operation}: size_average must be an exact bool or None"
+        )
+    if reduce is not None and type(reduce) is not bool:
+        raise ValueError(f"{operation}: reduce must be an exact bool or None")
+    effective_size_average = True if size_average is None else size_average
+    effective_reduce = True if reduce is None else reduce
+    if not effective_reduce:
+        return "none"
+    return "mean" if effective_size_average else "sum"
 
-    Expects `log_probs` to be the output of log_softmax already.
-    Prefer `cross_entropy_loss` directly on logits — it's more stable.
-    """
-    if isinstance(targets, Tensor):
-        targets_np = targets.data.astype(np.int64)
+
+def _nll_loss_contract(input, target, weight, reduction, ignore_index):
+    if not isinstance(input, Tensor):
+        raise TypeError(
+            f"nll_loss: input must be a Tensor, got {type(input).__name__}"
+        )
+    if not isinstance(target, Tensor):
+        raise TypeError(
+            f"nll_loss: target must be a Tensor, got {type(target).__name__}"
+        )
+    if type(input.data) is not np.ndarray:
+        raise TypeError("nll_loss: input data must be an exact ndarray")
+    if type(target.data) is not np.ndarray:
+        raise TypeError("nll_loss: target data must be an exact ndarray")
+    if type(reduction) is not str:
+        raise ValueError(
+            "nll_loss: reduction must be a string, got "
+            f"{type(reduction).__name__}"
+        )
+    if reduction not in ("none", "sum", "mean"):
+        raise ValueError(
+            "nll_loss: reduction must be 'none', 'sum', or 'mean', got "
+            f"{reduction!r}"
+        )
+    integer_types = (
+        int,
+        np.int8,
+        np.int16,
+        np.int32,
+        np.int64,
+        np.uint8,
+        np.uint16,
+        np.uint32,
+        np.uint64,
+    )
+    if type(ignore_index) not in integer_types or type(ignore_index) is bool:
+        raise ValueError("nll_loss: ignore_index must be an exact integer")
+    normalized_ignore_index = int(ignore_index)
+    if (
+        normalized_ignore_index < -(1 << 63)
+        or normalized_ignore_index > (1 << 63) - 1
+    ):
+        raise ValueError("nll_loss: ignore_index must fit signed int64")
+
+    input_shape = tuple(input.data.shape)
+    target_shape = tuple(target.data.shape)
+    if len(input_shape) < 1:
+        raise ValueError(
+            "nll_loss: batch_rank 0 leaves no user input dimension "
+            f"in shape {input_shape}"
+        )
+    shapes = [input_shape, target_shape]
+    arrays = [input.data, target.data]
+    if weight is not None:
+        if not isinstance(weight, Tensor):
+            raise TypeError(
+                f"nll_loss: weight must be a Tensor or None, got "
+                f"{type(weight).__name__}"
+            )
+        if weight.requires_grad:
+            raise ValueError(
+                "nll_loss: weight is non-differentiable and must not require grad"
+            )
+        if type(weight.data) is not np.ndarray:
+            raise TypeError("nll_loss: weight data must be an exact ndarray")
+        shapes.append(tuple(weight.data.shape))
+        arrays.append(weight.data)
+    for index, shape in enumerate(shapes):
+        if len(shape) > _L1_LOSS_RANK_MAX:
+            raise ValueError(
+                f"nll_loss input {index} rank {len(shape)} exceeds the "
+                f"{_L1_LOSS_RANK_MAX}-rank ceiling"
+            )
+        for axis, extent in enumerate(shape):
+            if extent > _L1_LOSS_OUTPUT_EXTENT_MAX:
+                raise ValueError(
+                    f"nll_loss input {index} extent {extent} on axis {axis} "
+                    f"exceeds the {_L1_LOSS_OUTPUT_EXTENT_MAX}-element "
+                    "per-axis ceiling"
+                )
+
+    input_dtype = input.data.dtype.name
+    if input_dtype not in _L1_LOSS_FLOATING_DTYPES:
+        raise ValueError(
+            f"nll_loss input dtype {input_dtype!r} is not supported; expected "
+            "float16, float32, or float64"
+        )
+    if target.data.dtype.name != "int64":
+        raise ValueError(
+            f"nll_loss target dtype {target.data.dtype.name!r} is not "
+            "supported; expected int64"
+        )
+    class_axis = 0 if len(input_shape) == 1 else 1
+    class_count = input_shape[class_axis]
+    expected_target_shape = (
+        input_shape[:class_axis] + input_shape[class_axis + 1:]
+    )
+    if target_shape != expected_target_shape:
+        raise ValueError(
+            f"nll_loss: target shape {target_shape} must equal input shape "
+            f"{input_shape} with class axis {class_axis} removed "
+            f"({expected_target_shape})"
+        )
+    weight_shape = None
+    if weight is not None:
+        weight_shape = tuple(weight.data.shape)
+        if weight_shape != (class_count,):
+            raise ValueError(
+                f"nll_loss: weight shape {weight_shape} must equal class "
+                f"count ({class_count},)"
+            )
+        if weight.data.dtype.name != input_dtype:
+            raise ValueError(
+                f"nll_loss: weight dtype {weight.data.dtype.name!r} must "
+                f"equal input dtype {input_dtype!r}"
+            )
+
+    input_elements = _l1_loss_checked_product(
+        input_shape, _L1_LOSS_WORK_ELEMENT_MAX
+    )
+    target_elements = _l1_loss_checked_product(
+        target_shape, _L1_LOSS_WORK_ELEMENT_MAX
+    )
+    weight_elements = (
+        _l1_loss_checked_product(weight_shape, _L1_LOSS_WORK_ELEMENT_MAX)
+        if weight_shape is not None
+        else 0
+    )
+    capacity_elements = max(
+        _l1_loss_checked_product(
+            tuple(max(1, extent) for extent in shape),
+            _L1_LOSS_WORK_ELEMENT_MAX,
+        )
+        for shape in shapes
+    )
+    if (
+        capacity_elements
+        > _L1_LOSS_WORK_ELEMENT_MAX // _NLL_LOSS_WORK_VISIT_FACTOR
+    ):
+        work_elements = _L1_LOSS_WORK_ELEMENT_MAX + 1
     else:
-        targets_np = np.asarray(targets, dtype=np.int64)
-    if log_probs.data.ndim != 2:
-        raise ValueError(f"nll_loss: log_probs must be 2D (N, C), got {log_probs.data.ndim}D")
-    N, C = log_probs.data.shape
-    if (targets_np < 0).any() or (targets_np >= C).any():
-        raise ValueError(f"nll_loss: targets out of range [0, {C})")
-    loss_data = float(-log_probs.data[np.arange(N), targets_np].mean())
-    out = Tensor(np.float32(loss_data))
-    one_hot = np.zeros_like(log_probs.data)
-    one_hot[np.arange(N), targets_np] = 1.0
-    grad_log_probs = -one_hot / N
-    return _build_ctx(out, (log_probs,), lambda g: (g.data * grad_log_probs,))
+        work_elements = capacity_elements * _NLL_LOSS_WORK_VISIT_FACTOR
+    if work_elements > _L1_LOSS_WORK_ELEMENT_MAX:
+        raise ValueError(
+            "nll_loss: projected work exceeds the "
+            f"{_L1_LOSS_WORK_ELEMENT_MAX}-element-visit ceiling"
+        )
+    output_shape = target_shape if reduction == "none" else ()
+    output_elements = _l1_loss_checked_product(
+        output_shape, _L1_LOSS_OUTPUT_BYTE_MAX
+    )
+    output_bytes = output_elements * input.data.dtype.itemsize
+    if output_bytes > _L1_LOSS_OUTPUT_BYTE_MAX:
+        raise ValueError(
+            f"nll_loss: output requires {output_bytes} bytes, exceeding the "
+            f"{_L1_LOSS_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    compute_dtype = "float32" if input_dtype == "float16" else input_dtype
+    compute_bytes = np.dtype(compute_dtype).itemsize
+    cast_bytes = 0
+    if input_dtype != compute_dtype:
+        cast_bytes += input_elements * compute_bytes
+        cast_bytes += weight_elements * compute_bytes
+    workspace_bytes = (
+        output_bytes
+        + cast_bytes
+        + target_elements * (2 * compute_bytes + 8 + 1)
+        + input_elements * compute_bytes
+    )
+    if workspace_bytes > _L1_LOSS_WORKSPACE_BYTE_MAX:
+        raise ValueError(
+            "nll_loss: projected output/cast/gather/gradient workspace "
+            f"requires {workspace_bytes} bytes, exceeding the "
+            f"{_L1_LOSS_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+    return {
+        "input_shape": input_shape,
+        "target_shape": target_shape,
+        "output_shape": output_shape,
+        "input_dtype": input_dtype,
+        "compute_dtype": compute_dtype,
+        "class_axis": class_axis,
+        "class_count": class_count,
+        "ignore_index": normalized_ignore_index,
+        "reduction": reduction,
+        "has_weight": weight is not None,
+    }
+
+
+def nll_loss(
+    input: Tensor,
+    target: Tensor,
+    weight=None,
+    size_average=None,
+    ignore_index=-100,
+    reduce=None,
+    reduction="mean",
+) -> Tensor:
+    """Typed negative log likelihood with PyTorch class-axis semantics."""
+    normalized_reduction = _normalize_legacy_loss_reduction(
+        "nll_loss",
+        reduction,
+        size_average,
+        reduce,
+    )
+    contract = _nll_loss_contract(
+        input,
+        target,
+        weight,
+        normalized_reduction,
+        ignore_index,
+    )
+    dtype = np.dtype(contract["compute_dtype"])
+    targets = target.data
+    valid = targets != contract["ignore_index"]
+    if bool(valid.any()):
+        minimum = int(np.min(targets, where=valid, initial=0))
+        maximum = int(np.max(targets, where=valid, initial=0))
+        if minimum < 0 or maximum >= contract["class_count"]:
+            raise ValueError(
+                "nll_loss: target values must be in "
+                f"[0, {contract['class_count']}) or equal ignore_index "
+                f"{contract['ignore_index']}"
+            )
+    safe_targets = np.where(valid, targets, 0)
+    if contract["has_weight"]:
+        weights = weight.data.astype(dtype, copy=False)
+        if contract["class_count"] == 0:
+            selected_weight = np.zeros(contract["target_shape"], dtype=dtype)
+        else:
+            selected_weight = weights[safe_targets]
+        selected_weight = np.where(valid, selected_weight, 0.0)
+    else:
+        selected_weight = valid.astype(dtype, copy=False)
+
+    input_array = input.data.astype(dtype, copy=False)
+    if contract["class_count"] == 0:
+        per_target = np.zeros(contract["target_shape"], dtype=dtype)
+    else:
+        class_last = np.moveaxis(input_array, contract["class_axis"], -1)
+        per_target = np.take_along_axis(
+            class_last,
+            safe_targets[..., None],
+            axis=-1,
+        )[..., 0]
+        np.negative(per_target, out=per_target)
+        if contract["has_weight"]:
+            np.multiply(per_target, selected_weight, out=per_target)
+        np.copyto(per_target, 0.0, where=~valid)
+
+    if contract["reduction"] == "none":
+        result = per_target
+    else:
+        numerator = per_target.sum(dtype=dtype)
+        if contract["reduction"] == "sum":
+            result = numerator
+        else:
+            denominator = (
+                selected_weight.sum(dtype=dtype)
+                if contract["has_weight"]
+                else valid.sum()
+            )
+            with np.errstate(divide="ignore", invalid="ignore"):
+                result = np.divide(numerator, denominator)
+    out = Tensor(
+        np.array(result, dtype=np.dtype(contract["input_dtype"]), copy=True),
+        dtype=contract["input_dtype"],
+    )
+
+    saved_valid = np.array(valid, dtype=np.bool_, copy=True)
+    saved_targets = np.array(safe_targets, dtype=np.int64, copy=True)
+    saved_weight = np.array(selected_weight, dtype=dtype, copy=True)
+
+    def backward(g):
+        gradient = np.zeros(contract["input_shape"], dtype=dtype)
+        if contract["class_count"] == 0 or not bool(saved_valid.any()):
+            return (
+                gradient.astype(
+                    np.dtype(contract["input_dtype"]),
+                    copy=False,
+                ),
+            )
+        upstream = g.data.astype(dtype, copy=False)
+        if contract["reduction"] != "none":
+            upstream = np.broadcast_to(upstream, contract["target_shape"])
+            if contract["reduction"] == "mean":
+                denominator = (
+                    saved_weight.sum(dtype=dtype)
+                    if contract["has_weight"]
+                    else saved_valid.sum()
+                )
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    upstream = np.divide(upstream, denominator)
+        selected_gradient = np.empty(contract["target_shape"], dtype=dtype)
+        np.negative(upstream, out=selected_gradient)
+        if contract["has_weight"]:
+            np.multiply(
+                selected_gradient,
+                saved_weight,
+                out=selected_gradient,
+            )
+        np.copyto(selected_gradient, 0.0, where=~saved_valid)
+        class_last_gradient = np.moveaxis(
+            gradient,
+            contract["class_axis"],
+            -1,
+        )
+        np.put_along_axis(
+            class_last_gradient,
+            saved_targets[..., None],
+            selected_gradient[..., None],
+            axis=-1,
+        )
+        return (
+            gradient.astype(
+                np.dtype(contract["input_dtype"]),
+                copy=gradient.dtype.name != contract["input_dtype"],
+            ),
+        )
+
+    return _build_ctx(out, (input,), backward)
 
 
 def _reduce_loss(per_elem: np.ndarray, grad_per_elem: np.ndarray, input_t: Tensor,
@@ -326,6 +646,7 @@ _BINARY_CROSS_ENTROPY_LOG_FLOOR = -100.0
 _BINARY_CROSS_ENTROPY_GRAD_EPSILON = 1e-12
 _BINARY_CROSS_ENTROPY_WITH_LOGITS_WORK_VISIT_FACTOR = 36
 _KL_DIV_WORK_VISIT_FACTOR = 48
+_NLL_LOSS_WORK_VISIT_FACTOR = 32
 _SMOOTH_L1_BETA_TYPES = (
     int,
     float,

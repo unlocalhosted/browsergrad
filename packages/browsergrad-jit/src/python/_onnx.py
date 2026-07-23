@@ -80,6 +80,7 @@ from ._ir import (
     OP_SMOOTH_L1_LOSS, OP_BINARY_CROSS_ENTROPY,
     OP_BINARY_CROSS_ENTROPY_WITH_LOGITS,
     OP_KL_DIV,
+    OP_NLL_LOSS,
     OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
@@ -101,6 +102,7 @@ from ._framework_contracts import (
     validate_binary_cross_entropy_contract,
     validate_binary_cross_entropy_with_logits_contract,
     validate_kl_div_contract,
+    validate_nll_loss_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -516,6 +518,7 @@ def export_inference(
             OP_BINARY_CROSS_ENTROPY,
             OP_BINARY_CROSS_ENTROPY_WITH_LOGITS,
             OP_KL_DIV,
+            OP_NLL_LOSS,
         ) and node.dtype not in _LEGACY_GRAPH_DTYPES:
             raise OnnxUnmappableOp(
                 f"export_inference: {node.op} dtype {node.dtype!r} is not "
@@ -1121,6 +1124,68 @@ def export_inference(
                     f"{nm}_output_cast",
                     "Cast",
                     [_emit_attr_int("to", _dtype_or_die(node.dtype))],
+                ))
+        elif node.op == OP_NLL_LOSS:
+            contract = validate_nll_loss_contract(node)
+            if contract.batch_rank != 0:
+                raise OnnxUnmappableOp(
+                    "export_inference: NLL_LOSS after vmap is not exportable "
+                    "because ONNX fixes the class axis at 1"
+                )
+            attributes = [
+                _emit_attr_string("reduction", contract.reduction),
+                _emit_attr_int("ignore_index", contract.ignore_index),
+            ]
+            if len(contract.input_shape) == 1:
+                suffix = next_node_id - 1
+                axes_name = f"nll_loss_batch_axis_{suffix}"
+                initializers.append(_emit_tensor_proto(
+                    axes_name,
+                    DT_INT64,
+                    (1,),
+                    _i64_initializer_for_shape((0,)),
+                ))
+                input_name = f"nll_loss_input_batched_{suffix}"
+                target_name = f"nll_loss_target_batched_{suffix}"
+                nodes.append(_emit_node(
+                    [input_names[0], axes_name],
+                    [input_name],
+                    f"{nm}_unsqueeze_input",
+                    "Unsqueeze",
+                ))
+                nodes.append(_emit_node(
+                    [input_names[1], axes_name],
+                    [target_name],
+                    f"{nm}_unsqueeze_target",
+                    "Unsqueeze",
+                ))
+                nll_inputs = [input_name, target_name] + input_names[2:]
+                nll_output = (
+                    f"nll_loss_batched_output_{suffix}"
+                    if contract.reduction == "none"
+                    else out_name
+                )
+                nodes.append(_emit_node(
+                    nll_inputs,
+                    [nll_output],
+                    nm,
+                    "NegativeLogLikelihoodLoss",
+                    attributes,
+                ))
+                if contract.reduction == "none":
+                    nodes.append(_emit_node(
+                        [nll_output, axes_name],
+                        [out_name],
+                        f"{nm}_squeeze_output",
+                        "Squeeze",
+                    ))
+            else:
+                nodes.append(_emit_node(
+                    input_names,
+                    [out_name],
+                    nm,
+                    "NegativeLogLikelihoodLoss",
+                    attributes,
                 ))
         elif node.op == OP_CONCAT:
             axis, _, legacy_empty = validate_cat_contract(node)

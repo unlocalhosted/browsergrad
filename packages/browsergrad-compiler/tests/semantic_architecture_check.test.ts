@@ -493,9 +493,16 @@ def op(x):
       .toContainEqual(expect.stringContaining("labelField disagrees"));
 
     const extraOperationIdentity = structuredClone(inventory);
-    const nllSite = extraOperationIdentity.constructorSites.find((site) => site.id === "functional.nll-loss");
-    if (nllSite === undefined || !Array.isArray(nllSite.operationIds)) throw new Error("missing NLL constructor fixture");
-    nllSite.operationIds.push("jit.custom.unreviewed-loss.v0");
+    const crossEntropySite = extraOperationIdentity.constructorSites.find(
+      (site) => site.id === "functional.cross-entropy",
+    );
+    if (
+      crossEntropySite === undefined
+      || !Array.isArray(crossEntropySite.operationIds)
+    ) {
+      throw new Error("missing cross-entropy constructor fixture");
+    }
+    crossEntropySite.operationIds.push("jit.custom.unreviewed-loss.v0");
     expect(validateJitOpaqueOperationInventory(extraOperationIdentity, fixture, jitFreeze))
       .toContainEqual(expect.stringContaining("constructor-site operation coverage changed"));
 

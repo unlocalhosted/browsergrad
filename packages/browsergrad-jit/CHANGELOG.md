@@ -135,13 +135,24 @@ contract in the README](README.md#compatibility-contract).
   results, both-input closure and symbolic VJP, nested per-example vmap, exact
   opset-17 decompositions, strict deprecated-argument refusal, and explicit
   tensor-plan/WebGPU refusal until canonical loss lowering exists.
+- `torch.nn.functional.nll_loss` now emits typed variadic `NLL_LOSS` with
+  unbatched and spatial class-axis semantics, exact int64 range-checked
+  targets, optional source-dtype class weights, ignored-target and weighted
+  denominator behavior, bounded work/workspace, owning source-dtype results,
+  selected-class closure/symbolic VJP, captured/mapped-weight vmap, direct
+  opset-17 `NegativeLogLikelihoodLoss` export for the unmapped profile, and
+  explicit mapped-export/tensor-plan/WebGPU refusals.
+- Inference trace-cache signatures now include the owning session identity,
+  and module trees with mutable buffers bypass caching. Equal-shaped tensors
+  from different buffer namespaces and changed module buffers can no longer
+  reuse an invalid or stale graph.
 
 ### Added
 
 - Added the bounded v1 executable framework-operation registry and detached
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
-  current table contains `ABS`, `BINARY_CROSS_ENTROPY`, `BINARY_CROSS_ENTROPY_WITH_LOGITS`, `CLAMP`, `CONCAT`, `COS`, `CUMSUM`, `BROADCAST_TO`, `EINSUM`, `KL_DIV`, `L1_LOSS`, `SMOOTH_L1_LOSS`, `FLIP`,
+  current table contains `ABS`, `BINARY_CROSS_ENTROPY`, `BINARY_CROSS_ENTROPY_WITH_LOGITS`, `CLAMP`, `CONCAT`, `COS`, `CUMSUM`, `BROADCAST_TO`, `EINSUM`, `KL_DIV`, `L1_LOSS`, `NLL_LOSS`, `SMOOTH_L1_LOSS`, `FLIP`,
   `INDEX`, `PAD`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`,
   `SCATTER`, `SORT_INDICES`, `SORT_VALUES`, `STACK`, `TOPK_INDICES`, `TOPK_VALUES`,
   `TRIL`, `TRIU`, `VAR`, and masked-fill `WHERE`.

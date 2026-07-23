@@ -70,6 +70,7 @@ from ._ir import (
     OP_BINARY_CROSS_ENTROPY, OP_BINARY_CROSS_ENTROPY_VJP,
     OP_BINARY_CROSS_ENTROPY_WITH_LOGITS, OP_BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP,
     OP_KL_DIV, OP_KL_DIV_VJP,
+    OP_NLL_LOSS, OP_NLL_LOSS_VJP,
     OP_CONST, OP_BROADCAST_TO, OP_WHERE, OP_INDEX, OP_SCATTER_ADD,
     OP_ISNAN,
 )
@@ -89,6 +90,7 @@ from ._framework_contracts import (
     validate_binary_cross_entropy_contract,
     validate_binary_cross_entropy_with_logits_contract,
     validate_kl_div_contract,
+    validate_nll_loss_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -1468,6 +1470,35 @@ def _vjp_kl_div(
             },
         ))
     return tuple(gradients)
+
+
+@register_vjp(OP_NLL_LOSS)
+def _vjp_nll_loss(
+    output: UOp,
+    inputs: Tuple[UOp, ...],
+    dy: UOp,
+) -> Tuple[Optional[UOp], ...]:
+    contract = validate_nll_loss_contract(output)
+    if inputs != output.inputs:
+        raise ShapeError("NLL_LOSS VJP inputs must equal the forward operands")
+    if dy.shape != output.shape or dy.dtype != output.dtype:
+        raise ShapeError(
+            "NLL_LOSS VJP upstream gradient must match the forward output"
+        )
+    gradient = _vjp_uop(
+        OP_NLL_LOSS_VJP,
+        (dy,) + inputs,
+        inputs[0].shape,
+        inputs[0].dtype,
+        output,
+        arg={
+            "reduction": contract.reduction,
+            "batch_rank": contract.batch_rank,
+            "ignore_index": contract.ignore_index,
+            "has_weight": contract.has_weight,
+        },
+    )
+    return (gradient,) + (None,) * (len(inputs) - 1)
 
 
 def _broadcast_batch_shape(

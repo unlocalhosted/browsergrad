@@ -16,10 +16,36 @@ class MSELoss(Module):
 
 class NLLLoss(Module):
     """Module form of nll_loss. Matches torch.nn.NLLLoss."""
-    def forward(self, log_probs: Tensor, targets) -> Tensor:
-        return F.nll_loss(log_probs, targets)
+    def __init__(
+        self,
+        weight=None,
+        size_average=None,
+        ignore_index=-100,
+        reduce=None,
+        reduction="mean",
+    ):
+        super().__init__()
+        self.register_buffer("weight", weight)
+        self.ignore_index = ignore_index
+        self.reduction = F._normalize_legacy_loss_reduction(
+            "NLLLoss",
+            reduction,
+            size_average,
+            reduce,
+        )
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        return F.nll_loss(
+            input,
+            target,
+            weight=self.weight,
+            ignore_index=self.ignore_index,
+            reduction=self.reduction,
+        )
     def __repr__(self):
-        return "NLLLoss()"
+        return (
+            f"NLLLoss(ignore_index={self.ignore_index}, "
+            f"reduction={self.reduction!r})"
+        )
 
 
 class BCEWithLogitsLoss(Module):

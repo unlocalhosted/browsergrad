@@ -117,6 +117,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `batchmean`, and bounded work/workspace contract. They snapshot and preserve
   both source-dtype gradients, reject deprecated reduction aliases explicitly,
   and back `nn.KLDivLoss` plus the installed PyTorch functional alias.
+- `functional.nll_loss` now shares JIT's strict unbatched/spatial class-axis,
+  int64 target, optional matching class-weight, ignore-index, weighted
+  denominator, dtype, ownership, work, and workspace contract. It snapshots
+  validity, safe indices, and selected weights for source-dtype backward,
+  supports all three reductions plus exact deprecated reduction precedence,
+  and backs the full `nn.NLLLoss` constructor and installed PyTorch alias.
 
 ## [0.5.2] — 2026-07-15
 

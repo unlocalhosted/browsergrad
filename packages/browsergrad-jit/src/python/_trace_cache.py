@@ -8,7 +8,8 @@ Why this exists (PRD-008 critique #4):
   A forward pass on a 12-layer transformer at (B=8, seq=128) builds
   ~300 UOps per step. UOp construction is ~3μs each in Pyodide → ~1 ms
   of pure Python overhead per training step. A trace cache keyed on
-  `(fn_identity, shape_signature, dtype_signature, training_flag)`
+  `(fn_identity, session_identity, shape_signature, dtype_signature,
+  training_flag)`
   reuses the IR graph across calls. First call: full trace + cache write.
   Subsequent calls with matching signature: O(input-tensor-count) leaf
   rebinding, no UOp construction.
@@ -29,6 +30,8 @@ Constraints (documented as conditions in the user-facing docstring):
   * Forward must be deterministic (no `.item()`, `.numpy()`, `if tensor`,
     or other realization triggers in user code).
   * Same `training` mode across calls (different mode = different sig).
+  * Modules with local or descendant buffers bypass the cache because buffers
+    are mutable state and v0 has no versioned buffer identity.
   * No data-dependent control flow (`if x.shape[0] > 32`); the cache key
     only looks at static shape, not runtime values.
 
@@ -61,8 +64,11 @@ from ._ir import UOp
 _ENABLED: bool = True
 _HITS: int = 0
 _MISSES: int = 0
-# Cache state. Keyed by (module-id, training_flag, shape_dtype_signature).
-# The signature is a tuple of (shape, dtype) per positional input.
+# Cache state. Keyed by (module-id, training_flag,
+# session_shape_dtype_signature). UOps and buffer IDs are session-owned, so
+# equal shapes and dtypes from another session must never hit the same trace.
+# The signature is a tuple of (session identity, shape, dtype) per positional
+# input.
 _CACHE: Dict[Tuple[int, bool, tuple], "_CompiledTrace"] = {}
 
 
@@ -130,7 +136,7 @@ class _CompiledTrace:
 
 
 def _signature(args: Tuple[Any, ...]) -> Optional[tuple]:
-    """Compute a (shape, dtype) signature from positional args.
+    """Compute a (session identity, shape, dtype) signature from arguments.
 
     Returns None if any argument:
       * Isn't a TensorProxy (we don't cache calls with kwargs / scalars /
@@ -145,7 +151,7 @@ def _signature(args: Tuple[Any, ...]) -> Optional[tuple]:
             return None
         if a.requires_grad:
             return None
-        sig.append((a.shape, a.dtype))
+        sig.append((id(a._get_session()), a.shape, a.dtype))
     return tuple(sig)
 
 

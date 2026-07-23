@@ -156,7 +156,8 @@ Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
 `torch.nn.functional.l1_loss`, `torch.nn.functional.smooth_l1_loss`, and
 `torch.nn.functional.binary_cross_entropy`, plus
 `torch.nn.functional.binary_cross_entropy_with_logits` and
-`torch.nn.functional.kl_div`, from the frozen opaque callback inventory.
+`torch.nn.functional.kl_div` and `torch.nn.functional.nll_loss`, from the
+frozen opaque callback inventory.
 Expand emits the existing typed `BROADCAST_TO`
 primitive. One shared contract validates exact arity, closed shape arguments,
 output-shape identity, dtype preservation, rank direction, and broadcast
@@ -183,8 +184,8 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 9 constructor calls and 9 operations under ADR-0002
-and ADR-0004 through ADR-0028. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 8 constructor calls and 8 operations under ADR-0002
+and ADR-0004 through ADR-0029. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -508,6 +509,26 @@ Tensor-plan and WebGPU validate and refuse pending canonical loss reduction.
 Deprecated reduction aliases remain explicit signature failures. This is
 thirty migrated operation records, not Gate 6 completion.
 
+Negative-log-likelihood now emits typed variadic
+`NLL_LOSS(input, target[, weight])` with an exact class axis, int64 class
+indices, optional source-dtype class weights, signed-int64 `ignore_index`, and
+canonical `none`/`sum`/`mean` reduction. The unbatched `(C)` profile requires a
+scalar target; `(N,C,...)` removes only the class axis from target and
+per-element output shape. Runtime range checks reject every non-ignored target
+outside `[0,C)` before indexed access. Weighted mean divides by the selected
+weight sum, unweighted mean by the valid target count, and empty/all-ignored
+mean remains NaN while its input cotangent is zero. CPU returns owning
+source-dtype output with float32 half compute. Closure and typed
+`NLL_LOSS_VJP` write only selected-class input cotangents; target and weight
+are explicitly non-differentiable, and Grad snapshots validity, safe indices,
+and selected weights. Vmap shifts the class axis past transform-owned leading
+dimensions and supports captured or mapped weights. Unmapped ONNX opset 17
+emits `NegativeLogLikelihoodLoss`, normalizing rank-one input with
+`Unsqueeze`/`Squeeze`; mapped export, tensor-plan, and WebGPU execution refuse
+explicitly. Rank, extents, output, work, and conservative workspace are
+bounded before numerical work, including zero-hidden capacity. This is
+thirty-one migrated operation records, not Gate 6 completion.
+
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
 records bind `Tensor.abs`, `torch.cat`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
@@ -517,6 +538,7 @@ records bind `Tensor.abs`, `torch.cat`, `Tensor.clamp`, `Tensor.cos`, `Tensor.ex
 `torch.nn.functional.binary_cross_entropy`,
 `torch.nn.functional.binary_cross_entropy_with_logits`,
 `torch.nn.functional.kl_div`,
+`torch.nn.functional.nll_loss`,
 `torch.nn.functional.smooth_l1_loss`,
 `torch.sort.indices`, `torch.sort.values`, `torch.stack`,
 `torch.topk.indices`, `torch.topk.values`,
@@ -531,7 +553,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 9 still-opaque and thirty typed retirements. ADR-0003 records
+opaque IDs into 8 still-opaque and thirty-one typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.

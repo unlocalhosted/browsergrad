@@ -66,6 +66,7 @@ BINARY_CROSS_ENTROPY_LOG_FLOOR = -100.0
 BINARY_CROSS_ENTROPY_GRAD_EPSILON = 1e-12
 BINARY_CROSS_ENTROPY_WITH_LOGITS_WORK_VISIT_FACTOR = 36
 KL_DIV_WORK_VISIT_FACTOR = 48
+NLL_LOSS_WORK_VISIT_FACTOR = 32
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 32 * 1024
@@ -112,6 +113,7 @@ _ENUMS = {
         "same-rank-unique-index-overwrite-scatter",
         "canonical-general-einstein-contraction",
         "same-shape-elementwise-loss-with-batched-reduction",
+        "class-axis-index-loss-with-batched-reduction",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
@@ -129,6 +131,7 @@ _ENUMS = {
         "preserve-target-require-int64-index-matching-source",
         "dimensioned-tensor-promotion-with-fp32-half-accumulator",
         "promote-floating-inputs-with-fp32-half-accumulator",
+        "preserve-floating-input-require-int64-target-and-optional-matching-weight",
         "promote-integral-default-or-explicit-scan-dtype",
         "pytorch-dimensioned-tensor-promotion",
     }),
@@ -150,6 +153,7 @@ _ENUMS = {
         "supported-numpy-owning-bounded-bce-reduction",
         "supported-numpy-owning-stable-bce-with-logits-reduction",
         "supported-numpy-owning-kl-div-reduction",
+        "supported-numpy-owning-bounded-nll-reduction",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -179,6 +183,7 @@ _ENUMS = {
         "supported-clamped-bce-derivatives-for-both-inputs",
         "supported-stable-bce-with-logits-derivatives-for-both-inputs",
         "supported-native-kl-div-derivatives-for-both-inputs",
+        "supported-selected-class-negative-weight-gradient",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -208,6 +213,7 @@ _ENUMS = {
         "supported-clamped-bce-derivatives-for-both-inputs",
         "supported-stable-bce-with-logits-derivatives-for-both-inputs",
         "supported-native-kl-div-derivatives-for-both-inputs",
+        "supported-selected-class-negative-weight-gradient",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
@@ -230,6 +236,7 @@ _ENUMS = {
         "supported-leading-batch-axis-with-scatter-captured-broadcast",
         "supported-leading-batch-axis-with-einsum-captured-broadcast",
         "supported-leading-batch-axis-with-per-example-reduction",
+        "supported-leading-batch-axis-with-class-axis-shift-and-captured-weight",
         "supported-leading-batch-axis-preserving-pad",
     }),
     "onnxExport": frozenset({
@@ -257,6 +264,7 @@ _ENUMS = {
         "refused-runtime-probability-domain-cannot-fail-closed",
         "supported-opset17-stable-bce-with-logits-float16-float32-float64",
         "supported-opset17-kl-div-float16-float32-float64",
+        "supported-opset17-negative-log-likelihood-loss-unmapped-profile",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -750,6 +758,25 @@ class KlDivContract:
     batch_denominator: int
 
 
+@dataclass(frozen=True, slots=True)
+class NllLossContract:
+    input_shape: Tuple[int, ...]
+    target_shape: Tuple[int, ...]
+    weight_shape: Tuple[int, ...] | None
+    output_shape: Tuple[int, ...]
+    output_dtype: str
+    reduction: str
+    batch_rank: int
+    class_axis: int
+    class_count: int
+    ignore_index: int
+    has_weight: bool
+    input_elements: int
+    target_elements: int
+    work_elements: int
+    workspace_bytes: int
+
+
 def _elementwise_loss_checked_product(extents: Tuple[int, ...], ceiling: int) -> int:
     product = 1
     for extent in extents:
@@ -1049,6 +1076,193 @@ def infer_kl_div_contract(
         **values,
         log_target=log_target,
         batch_denominator=batch_denominator,
+    )
+
+
+def _normalize_nll_ignore_index(ignore_index: Any) -> int:
+    if type(ignore_index) not in _PAD_INTEGER_TYPES or type(ignore_index) is bool:
+        raise ShapeError("nll_loss: ignore_index must be an exact integer")
+    normalized = int(ignore_index)
+    if normalized < -(1 << 63) or normalized > (1 << 63) - 1:
+        raise ShapeError("nll_loss: ignore_index must fit signed int64")
+    return normalized
+
+
+def infer_nll_loss_contract(
+    inputs: tuple[Any, ...],
+    reduction: Any,
+    ignore_index: Any,
+    has_weight: Any,
+    batch_rank: Any = 0,
+) -> NllLossContract:
+    if type(has_weight) is not bool:
+        raise ShapeError("nll_loss: has_weight must be an exact bool")
+    expected_arity = 3 if has_weight else 2
+    if type(inputs) is not tuple or len(inputs) != expected_arity:
+        raise ShapeError(
+            f"nll_loss requires exactly {expected_arity} tensor inputs for "
+            f"has_weight={has_weight}"
+        )
+    if type(reduction) is not str:
+        raise ShapeError(
+            "nll_loss: reduction must be a string, got "
+            f"{type(reduction).__name__}"
+        )
+    if reduction not in ("none", "sum", "mean"):
+        raise ShapeError(
+            "nll_loss: reduction must be 'none', 'sum', or 'mean', got "
+            f"{reduction!r}"
+        )
+    if type(batch_rank) is not int:
+        raise ShapeError("nll_loss: batch_rank must be a normalized integer")
+    normalized_ignore_index = _normalize_nll_ignore_index(ignore_index)
+
+    shapes: list[Tuple[int, ...]] = []
+    dtypes: list[str] = []
+    for index, source in enumerate(inputs):
+        shape = getattr(source, "shape", None)
+        if type(shape) is not tuple:
+            raise ShapeError(f"nll_loss input {index} shape must be a tuple")
+        if len(shape) > L1_LOSS_RANK_MAX:
+            raise ShapeError(
+                f"nll_loss input {index} rank {len(shape)} exceeds the "
+                f"{L1_LOSS_RANK_MAX}-rank ceiling"
+            )
+        for axis, extent in enumerate(shape):
+            if type(extent) is not int or extent < 0:
+                raise ShapeError(
+                    f"nll_loss input {index} shape[{axis}] must be a "
+                    "non-negative integer"
+                )
+            if extent > L1_LOSS_OUTPUT_EXTENT_MAX:
+                raise ShapeError(
+                    f"nll_loss input {index} extent {extent} on axis {axis} "
+                    f"exceeds the {L1_LOSS_OUTPUT_EXTENT_MAX}-element "
+                    "per-axis ceiling"
+                )
+        shapes.append(shape)
+        dtypes.append(getattr(source, "dtype", None))
+
+    input_shape, target_shape = shapes[:2]
+    input_dtype, target_dtype = dtypes[:2]
+    if input_dtype not in _FLOATING_DTYPES:
+        raise ShapeError(
+            f"nll_loss input dtype {input_dtype!r} is not supported; expected "
+            "float16, float32, or float64"
+        )
+    if target_dtype != "int64":
+        raise ShapeError(
+            f"nll_loss target dtype {target_dtype!r} is not supported; "
+            "expected int64"
+        )
+    if batch_rank < 0 or batch_rank >= len(input_shape):
+        raise ShapeError(
+            f"nll_loss: batch_rank {batch_rank} leaves no user input "
+            f"dimension in shape {input_shape}"
+        )
+    user_rank = len(input_shape) - batch_rank
+    class_axis = batch_rank if user_rank == 1 else batch_rank + 1
+    class_count = input_shape[class_axis]
+    expected_target_shape = (
+        input_shape[:class_axis] + input_shape[class_axis + 1:]
+    )
+    if target_shape != expected_target_shape:
+        raise ShapeError(
+            f"nll_loss: target shape {target_shape} must equal input shape "
+            f"{input_shape} with class axis {class_axis} removed "
+            f"({expected_target_shape})"
+        )
+
+    weight_shape: Tuple[int, ...] | None = None
+    if has_weight:
+        weight_shape = shapes[2]
+        expected_weight_shape = input_shape[:batch_rank] + (class_count,)
+        if weight_shape != expected_weight_shape:
+            raise ShapeError(
+                f"nll_loss: weight shape {weight_shape} must equal mapped "
+                f"batch prefix plus class count {expected_weight_shape}"
+            )
+        if dtypes[2] != input_dtype:
+            raise ShapeError(
+                f"nll_loss: weight dtype {dtypes[2]!r} must equal input "
+                f"dtype {input_dtype!r}"
+            )
+
+    output_shape = target_shape if reduction == "none" else input_shape[:batch_rank]
+    input_elements = _elementwise_loss_checked_product(
+        input_shape, L1_LOSS_WORK_ELEMENT_MAX
+    )
+    target_elements = _elementwise_loss_checked_product(
+        target_shape, L1_LOSS_WORK_ELEMENT_MAX
+    )
+    weight_elements = (
+        _elementwise_loss_checked_product(
+            weight_shape, L1_LOSS_WORK_ELEMENT_MAX
+        )
+        if weight_shape is not None
+        else 0
+    )
+    capacity_elements = max(
+        _elementwise_loss_checked_product(
+            tuple(max(1, extent) for extent in shape),
+            L1_LOSS_WORK_ELEMENT_MAX,
+        )
+        for shape in shapes
+    )
+    if capacity_elements > L1_LOSS_WORK_ELEMENT_MAX // NLL_LOSS_WORK_VISIT_FACTOR:
+        work_elements = L1_LOSS_WORK_ELEMENT_MAX + 1
+    else:
+        work_elements = capacity_elements * NLL_LOSS_WORK_VISIT_FACTOR
+    if work_elements > L1_LOSS_WORK_ELEMENT_MAX:
+        raise ShapeError(
+            "nll_loss: projected work exceeds the "
+            f"{L1_LOSS_WORK_ELEMENT_MAX}-element-visit ceiling"
+        )
+
+    output_elements = _elementwise_loss_checked_product(
+        output_shape, L1_LOSS_OUTPUT_BYTE_MAX
+    )
+    output_bytes = output_elements * _VARIADIC_DTYPE_BYTES[input_dtype]
+    if output_bytes > L1_LOSS_OUTPUT_BYTE_MAX:
+        raise ShapeError(
+            f"nll_loss: output requires {output_bytes} bytes, exceeding the "
+            f"{L1_LOSS_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    compute_dtype = "float32" if input_dtype == "float16" else input_dtype
+    compute_bytes = _VARIADIC_DTYPE_BYTES[compute_dtype]
+    cast_bytes = 0
+    if input_dtype != compute_dtype:
+        cast_bytes += input_elements * compute_bytes
+        cast_bytes += weight_elements * compute_bytes
+    workspace_bytes = (
+        output_bytes
+        + cast_bytes
+        + target_elements * (2 * compute_bytes + 8 + 1)
+        + input_elements * compute_bytes
+    )
+    if workspace_bytes > L1_LOSS_WORKSPACE_BYTE_MAX:
+        raise ShapeError(
+            "nll_loss: projected output/cast/gather/gradient workspace "
+            f"requires {workspace_bytes} bytes, exceeding the "
+            f"{L1_LOSS_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+
+    return NllLossContract(
+        input_shape=input_shape,
+        target_shape=target_shape,
+        weight_shape=weight_shape,
+        output_shape=output_shape,
+        output_dtype=input_dtype,
+        reduction=reduction,
+        batch_rank=batch_rank,
+        class_axis=class_axis,
+        class_count=class_count,
+        ignore_index=normalized_ignore_index,
+        has_weight=has_weight,
+        input_elements=input_elements,
+        target_elements=target_elements,
+        work_elements=work_elements,
+        workspace_bytes=workspace_bytes,
     )
 
 
@@ -1502,6 +1716,200 @@ def execute_kl_div_vjp_array(
     if gradient.dtype.name == target_dtype:
         return gradient
     return gradient.astype(np.dtype(target_dtype), copy=True)
+
+
+def _validate_nll_loss_runtime_arrays(
+    contract: NllLossContract,
+    arrays: tuple[np.ndarray, ...],
+) -> None:
+    expected_arity = 3 if contract.has_weight else 2
+    if type(arrays) is not tuple or len(arrays) != expected_arity:
+        raise ShapeError(
+            f"nll_loss execution requires exactly {expected_arity} arrays"
+        )
+    expected = (
+        (contract.input_shape, contract.output_dtype),
+        (contract.target_shape, "int64"),
+    )
+    if contract.has_weight:
+        expected += ((contract.weight_shape, contract.output_dtype),)
+    for index, (array, (shape, dtype)) in enumerate(zip(arrays, expected)):
+        if type(array) is not np.ndarray:
+            raise ShapeError(
+                f"nll_loss runtime input {index} must be an exact ndarray"
+            )
+        if tuple(array.shape) != shape:
+            raise ShapeError(
+                f"nll_loss runtime input {index} shape {tuple(array.shape)} "
+                f"does not match {shape}"
+            )
+        if array.dtype.name != dtype:
+            raise ShapeError(
+                f"nll_loss runtime input {index} dtype {array.dtype.name!r} "
+                f"does not match {dtype!r}"
+            )
+
+
+def _nll_loss_selection(
+    contract: NllLossContract,
+    arrays: tuple[np.ndarray, ...],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    targets = arrays[1]
+    valid = targets != contract.ignore_index
+    if bool(valid.any()):
+        minimum = int(np.min(targets, where=valid, initial=0))
+        maximum = int(np.max(targets, where=valid, initial=0))
+        if minimum < 0 or maximum >= contract.class_count:
+            raise ShapeError(
+                "nll_loss: target values must be in "
+                f"[0, {contract.class_count}) or equal ignore_index "
+                f"{contract.ignore_index}"
+            )
+    safe_targets = np.where(valid, targets, 0)
+    compute_dtype = (
+        "float32" if contract.output_dtype == "float16" else contract.output_dtype
+    )
+    dtype = np.dtype(compute_dtype)
+    if contract.has_weight:
+        weight = arrays[2].astype(dtype, copy=False)
+        singleton_count = len(contract.target_shape) - contract.batch_rank
+        weight_view = weight.reshape(
+            contract.input_shape[:contract.batch_rank]
+            + (1,) * singleton_count
+            + (contract.class_count,)
+        )
+        if contract.class_count == 0:
+            selected_weight = np.zeros(contract.target_shape, dtype=dtype)
+        else:
+            selected_weight = np.take_along_axis(
+                weight_view,
+                safe_targets[..., None],
+                axis=-1,
+            )[..., 0]
+        selected_weight = np.where(valid, selected_weight, 0.0)
+    else:
+        selected_weight = valid.astype(dtype, copy=False)
+    return valid, safe_targets, selected_weight
+
+
+def _nll_loss_reduction_axes(
+    contract: NllLossContract,
+) -> tuple[int, ...]:
+    return tuple(range(contract.batch_rank, len(contract.target_shape)))
+
+
+def _nll_loss_denominator(
+    contract: NllLossContract,
+    valid: np.ndarray,
+    selected_weight: np.ndarray,
+) -> np.ndarray:
+    reduction_axes = _nll_loss_reduction_axes(contract)
+    source = selected_weight if contract.has_weight else valid
+    if reduction_axes:
+        return source.sum(axis=reduction_axes)
+    return np.asarray(source)
+
+
+def execute_nll_loss_arrays(
+    contract: NllLossContract,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_nll_loss_runtime_arrays(contract, arrays)
+    valid, safe_targets, selected_weight = _nll_loss_selection(contract, arrays)
+    compute_dtype = (
+        "float32" if contract.output_dtype == "float16" else contract.output_dtype
+    )
+    dtype = np.dtype(compute_dtype)
+    input_array = arrays[0].astype(dtype, copy=False)
+    if contract.class_count == 0:
+        per_target = np.zeros(contract.target_shape, dtype=dtype)
+    else:
+        class_last = np.moveaxis(input_array, contract.class_axis, -1)
+        per_target = np.take_along_axis(
+            class_last,
+            safe_targets[..., None],
+            axis=-1,
+        )[..., 0]
+        np.negative(per_target, out=per_target)
+        if contract.has_weight:
+            np.multiply(per_target, selected_weight, out=per_target)
+        np.copyto(per_target, 0.0, where=~valid)
+    reduction_axes = _nll_loss_reduction_axes(contract)
+    if contract.reduction == "none":
+        result = per_target
+    elif reduction_axes:
+        numerator = per_target.sum(axis=reduction_axes, dtype=dtype)
+        if contract.reduction == "sum":
+            result = numerator
+        else:
+            denominator = _nll_loss_denominator(
+                contract, valid, selected_weight
+            )
+            with np.errstate(divide="ignore", invalid="ignore"):
+                result = np.divide(numerator, denominator)
+    elif contract.reduction == "sum":
+        result = per_target
+    else:
+        denominator = _nll_loss_denominator(contract, valid, selected_weight)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            result = np.divide(per_target, denominator)
+    return np.array(result, dtype=np.dtype(contract.output_dtype), copy=True)
+
+
+def execute_nll_loss_vjp_array(
+    contract: NllLossContract,
+    dy: np.ndarray,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_nll_loss_runtime_arrays(contract, arrays)
+    if type(dy) is not np.ndarray:
+        raise ShapeError("nll_loss VJP cotangent must be an exact ndarray")
+    if tuple(dy.shape) != contract.output_shape or dy.dtype.name != contract.output_dtype:
+        raise ShapeError(
+            f"nll_loss VJP cotangent must have shape {contract.output_shape} "
+            f"and dtype {contract.output_dtype!r}"
+        )
+    compute_dtype = (
+        "float32" if contract.output_dtype == "float16" else contract.output_dtype
+    )
+    dtype = np.dtype(compute_dtype)
+    gradient = np.zeros(contract.input_shape, dtype=dtype)
+    valid, safe_targets, selected_weight = _nll_loss_selection(contract, arrays)
+    if contract.class_count == 0 or not bool(valid.any()):
+        return gradient.astype(np.dtype(contract.output_dtype), copy=False)
+
+    upstream = dy.astype(dtype, copy=False)
+    if contract.reduction != "none":
+        target_user_rank = len(contract.target_shape) - contract.batch_rank
+        upstream = upstream.reshape(
+            contract.output_shape + (1,) * target_user_rank
+        )
+        upstream = np.broadcast_to(upstream, contract.target_shape)
+        if contract.reduction == "mean":
+            denominator = _nll_loss_denominator(
+                contract, valid, selected_weight
+            )
+            denominator = np.asarray(denominator, dtype=dtype).reshape(
+                contract.output_shape + (1,) * target_user_rank
+            )
+            with np.errstate(divide="ignore", invalid="ignore"):
+                upstream = np.divide(upstream, denominator)
+
+    selected_gradient = np.empty(contract.target_shape, dtype=dtype)
+    np.negative(upstream, out=selected_gradient)
+    if contract.has_weight:
+        np.multiply(selected_gradient, selected_weight, out=selected_gradient)
+    np.copyto(selected_gradient, 0.0, where=~valid)
+    class_last_gradient = np.moveaxis(gradient, contract.class_axis, -1)
+    np.put_along_axis(
+        class_last_gradient,
+        safe_targets[..., None],
+        selected_gradient[..., None],
+        axis=-1,
+    )
+    if gradient.dtype.name == contract.output_dtype:
+        return gradient
+    return gradient.astype(np.dtype(contract.output_dtype), copy=True)
 
 
 _EINSUM_LABEL_ORDER = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -3855,6 +4263,92 @@ def _validate_kl_div_vjp(node: Any) -> Tuple[KlDivContract, int]:
     return normalized, operand
 
 
+def _validate_nll_loss(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> NllLossContract:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    arg = getattr(node, "arg", None)
+    required = {"reduction", "batch_rank", "ignore_index", "has_weight"}
+    if type(arg) is not dict or set(arg) != required:
+        raise ShapeError(
+            "NLL_LOSS arg fields must be exactly 'reduction', 'batch_rank', "
+            "'ignore_index', and 'has_weight'"
+        )
+    normalized = infer_nll_loss_contract(
+        getattr(node, "inputs", None),
+        arg["reduction"],
+        arg["ignore_index"],
+        arg["has_weight"],
+        arg["batch_rank"],
+    )
+    if getattr(node, "shape", None) != normalized.output_shape:
+        raise ShapeError(
+            f"NLL_LOSS declared shape {getattr(node, 'shape', None)!r} does "
+            f"not match derived shape {normalized.output_shape!r}"
+        )
+    if getattr(node, "dtype", None) != normalized.output_dtype:
+        raise ShapeError(
+            f"NLL_LOSS declared dtype {getattr(node, 'dtype', None)!r} does "
+            f"not match input dtype {normalized.output_dtype!r}"
+        )
+    return normalized
+
+
+def _validate_nll_loss_vjp(node: Any) -> NllLossContract:
+    if getattr(node, "op", None) != "NLL_LOSS_VJP":
+        raise ShapeError(
+            "NLL_LOSS_VJP validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("NLL_LOSS_VJP arg must be a plain dict")
+    required = {"reduction", "batch_rank", "ignore_index", "has_weight"}
+    fields = set(arg)
+    if not required.issubset(fields) or not fields.issubset(required | {"vjp_of"}):
+        raise ShapeError(
+            "NLL_LOSS_VJP arg fields must be exactly 'reduction', "
+            "'batch_rank', 'ignore_index', and 'has_weight' plus optional "
+            "'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("NLL_LOSS_VJP arg.vjp_of must reference a UOp")
+    inputs = getattr(node, "inputs", None)
+    expected_arity = 4 if arg["has_weight"] is True else 3
+    if type(inputs) is not tuple or len(inputs) != expected_arity:
+        raise ShapeError(
+            f"NLL_LOSS_VJP must have exactly {expected_arity} inputs for "
+            f"has_weight={arg['has_weight']!r}"
+        )
+    normalized = infer_nll_loss_contract(
+        inputs[1:],
+        arg["reduction"],
+        arg["ignore_index"],
+        arg["has_weight"],
+        arg["batch_rank"],
+    )
+    dy = inputs[0]
+    if (
+        getattr(dy, "shape", None) != normalized.output_shape
+        or getattr(dy, "dtype", None) != normalized.output_dtype
+    ):
+        raise ShapeError(
+            f"NLL_LOSS_VJP dy must have shape {normalized.output_shape!r} "
+            f"and dtype {normalized.output_dtype!r}"
+        )
+    source = inputs[1]
+    if getattr(node, "shape", None) != getattr(source, "shape", None):
+        raise ShapeError("NLL_LOSS_VJP must preserve the input shape")
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError("NLL_LOSS_VJP must preserve the input dtype")
+    return normalized
+
+
 def _validate_repeat(
     node: Any,
     contract: FrameworkOperationContract,
@@ -4110,6 +4604,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.functional.binary-cross-entropy.v1": _validate_binary_cross_entropy,
     "browsergrad.jit.framework.functional.binary-cross-entropy-with-logits.v1": _validate_binary_cross_entropy_with_logits,
     "browsergrad.jit.framework.functional.kl-div.v1": _validate_kl_div,
+    "browsergrad.jit.framework.functional.nll-loss.v1": _validate_nll_loss,
     "browsergrad.jit.framework.tensor.masked-fill.v1": _validate_masked_fill,
     "browsergrad.jit.framework.tensor.pad.v1": _validate_pad,
     "browsergrad.jit.framework.tensor.prod.v1": _validate_prod,
@@ -4145,6 +4640,7 @@ _INTERNAL_VALIDATORS: Mapping[str, Callable[[Any], Any]] = MappingProxyType({
     "BINARY_CROSS_ENTROPY_VJP": _validate_binary_cross_entropy_vjp,
     "BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP": _validate_binary_cross_entropy_with_logits_vjp,
     "KL_DIV_VJP": _validate_kl_div_vjp,
+    "NLL_LOSS_VJP": _validate_nll_loss_vjp,
 })
 
 
@@ -4361,6 +4857,19 @@ def validate_kl_div_vjp_contract(node: Any) -> Tuple[KlDivContract, int]:
     return validate_internal_operation_contract(node)
 
 
+def validate_nll_loss_contract(node: Any) -> NllLossContract:
+    record, normalized = validate_framework_operation_contract(node)
+    if record.contract_id != "browsergrad.jit.framework.functional.nll-loss.v1":
+        raise ShapeError(
+            "NLL_LOSS resolved to the wrong framework-operation contract"
+        )
+    return normalized
+
+
+def validate_nll_loss_vjp_contract(node: Any) -> NllLossContract:
+    return validate_internal_operation_contract(node)
+
+
 def validate_tril_contract(node: Any) -> int:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.tril.v1":
@@ -4516,6 +5025,7 @@ __all__ = [
     "BINARY_CROSS_ENTROPY_GRAD_EPSILON",
     "BINARY_CROSS_ENTROPY_WITH_LOGITS_WORK_VISIT_FACTOR",
     "KL_DIV_WORK_VISIT_FACTOR",
+    "NLL_LOSS_WORK_VISIT_FACTOR",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "EinsumContract",
@@ -4524,6 +5034,7 @@ __all__ = [
     "BinaryCrossEntropyContract",
     "BinaryCrossEntropyWithLogitsContract",
     "KlDivContract",
+    "NllLossContract",
     "framework_operation_support",
     "has_framework_operation_contract",
     "has_internal_operation_contract",
@@ -4539,6 +5050,7 @@ __all__ = [
     "infer_binary_cross_entropy_contract",
     "infer_binary_cross_entropy_with_logits_contract",
     "infer_kl_div_contract",
+    "infer_nll_loss_contract",
     "normalize_smooth_l1_beta",
     "normalize_pad_request",
     "normalize_pad_value",
@@ -4558,6 +5070,8 @@ __all__ = [
     "execute_binary_cross_entropy_with_logits_vjp_array",
     "execute_kl_div_arrays",
     "execute_kl_div_vjp_array",
+    "execute_nll_loss_arrays",
+    "execute_nll_loss_vjp_array",
     "einsum_onnx_equation",
     "stable_sort_indices_array",
     "partial_topk_indices_array",
@@ -4589,6 +5103,8 @@ __all__ = [
     "validate_binary_cross_entropy_with_logits_vjp_contract",
     "validate_kl_div_contract",
     "validate_kl_div_vjp_contract",
+    "validate_nll_loss_contract",
+    "validate_nll_loss_vjp_contract",
     "validate_gather_scatter_add_contract",
     "validate_tril_contract",
     "validate_triu_contract",
