@@ -15,6 +15,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  cppCuteBrowserBuildInputLockResourceBytes,
+  decodeCppCuteBrowserBuildInputLock,
+} from "../../dist/cpp_cute_browser_build_lock.js";
+import {
   CppCuteBrowserSourceArchiveAdmissionError,
   admitCppCuteBrowserCurrentSourceArchives,
   canonicalCppCuteBrowserCurrentSourceArchiveAdmissionBytes,
@@ -114,11 +118,13 @@ describe("browser source-archive admission", () => {
   });
 
   it("projects exactly the two package-lock source archives", async () => {
-    const current = await cppCuteBrowserCurrentSourceArchiveExpectations();
+    const [current, buildInputLock] = await Promise.all([
+      cppCuteBrowserCurrentSourceArchiveExpectations(),
+      decodeCppCuteBrowserBuildInputLock(cppCuteBrowserBuildInputLockResourceBytes()),
+    ]);
 
     expect(current).toMatchObject({
-      buildInputLockId:
-        "bg.cpp.browser-build-input-lock.sha256.489aa5b8657d2b0a4309869dc4c18e2e32f58be03d25a4c7cf1c0c2b981d28a4",
+      buildInputLockId: buildInputLock.lockId,
       sources: [
         {
           sourceId: "cutlass",

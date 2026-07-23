@@ -104,7 +104,9 @@ const WASM_DEFINITION_NAMES = Object.freeze([
 ]);
 const NATIVE_TARGETS = Object.freeze(["clang-tblgen", "llvm-tblgen"]);
 const WASM_TARGETS = Object.freeze(["browsergrad-cpp-cute-extractor"]);
-const EXTRACTOR_SOURCE_PATHS = Object.freeze([
+export const CPP_CUTE_BROWSER_EXTRACTOR_SOURCE_PATHS = Object.freeze([
+  "BrowserGradCppCuteArtifactJson.cpp",
+  "BrowserGradCppCuteArtifactJson.h",
   "BrowserGradCppCuteArtifactV3.cpp",
   "BrowserGradCppCuteArtifactV3.h",
   "BrowserGradCppCuteArtifactWriter.cpp",
@@ -140,6 +142,8 @@ const EXTRACTOR_SOURCE_PATHS = Object.freeze([
   "BrowserGradCppCuteRuntime.h",
   "BrowserGradCppCuteSha256.cpp",
   "BrowserGradCppCuteSha256.h",
+  "BrowserGradCppCuteViewCopyArtifact.cpp",
+  "BrowserGradCppCuteViewCopyArtifact.h",
   "BrowserGradCppCuteVirtualPath.cpp",
   "BrowserGradCppCuteVirtualPath.h",
   "CMakeLists.txt",
@@ -497,7 +501,7 @@ function parseExtractorSource(value) {
     invalid(`${path}.sourceSetSha256`, "expected lowercase SHA-256 hex");
   }
   const files = requiredArray(source.files, `${path}.files`);
-  if (files.length !== EXTRACTOR_SOURCE_PATHS.length) {
+  if (files.length !== CPP_CUTE_BROWSER_EXTRACTOR_SOURCE_PATHS.length) {
     invalid(`${path}.files`, "extractor source set has missing or extra files");
   }
   return {
@@ -507,8 +511,11 @@ function parseExtractorSource(value) {
       const filePath = `${path}.files[${index}]`;
       const file = requiredObject(entry, filePath);
       const selectedPath = requiredString(file.path, `${filePath}.path`, 256);
-      if (selectedPath !== EXTRACTOR_SOURCE_PATHS[index]) {
-        invalid(`${filePath}.path`, `expected ${EXTRACTOR_SOURCE_PATHS[index]}`);
+      if (selectedPath !== CPP_CUTE_BROWSER_EXTRACTOR_SOURCE_PATHS[index]) {
+        invalid(
+          `${filePath}.path`,
+          `expected ${CPP_CUTE_BROWSER_EXTRACTOR_SOURCE_PATHS[index]}`,
+        );
       }
       const sha256 = requiredString(file.sha256, `${filePath}.sha256`, 64);
       if (!SHA256_HEX.test(sha256)) {

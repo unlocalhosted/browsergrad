@@ -157,6 +157,8 @@ describe("C++/CuTe opaque Clang-WASM build plan", () => {
       path,
       absolutePath,
     }))).toEqual([
+      "BrowserGradCppCuteArtifactJson.cpp",
+      "BrowserGradCppCuteArtifactJson.h",
       "BrowserGradCppCuteArtifactV3.cpp",
       "BrowserGradCppCuteArtifactV3.h",
       "BrowserGradCppCuteArtifactWriter.cpp",
@@ -192,6 +194,8 @@ describe("C++/CuTe opaque Clang-WASM build plan", () => {
       "BrowserGradCppCuteRuntime.h",
       "BrowserGradCppCuteSha256.cpp",
       "BrowserGradCppCuteSha256.h",
+      "BrowserGradCppCuteViewCopyArtifact.cpp",
+      "BrowserGradCppCuteViewCopyArtifact.h",
       "BrowserGradCppCuteVirtualPath.cpp",
       "BrowserGradCppCuteVirtualPath.h",
       "CMakeLists.txt",

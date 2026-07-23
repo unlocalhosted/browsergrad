@@ -43,6 +43,7 @@ import {
   CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
   CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
 } from "../../src/cpp_cute_frontend_types.js";
+import { prepareVerifiedCppCuteViewCopySemantics } from "../../src/cpp_cute_view_copy_semantics.js";
 import {
   createCppCuteBrowserProfileInput,
   createCppCuteProfileInput,
@@ -59,8 +60,20 @@ const nativeSource = join(scriptRoot, "cpp_cute_browser_compile_session_native_t
 const encoder = new TextEncoder();
 const mainPath = "/workspace/src/main.cu";
 const headerPath = "/workspace/src/project.hpp";
-const mainBytes = encoder.encode('#include "project.hpp"\nauto layout = make_layout(Int<2>{});\n');
-const headerBytes = encoder.encode("constexpr int project_value = 2;\n");
+const layoutMainBytes = encoder.encode(
+  '#include "project.hpp"\nauto layout = make_layout(Int<2>{});\n',
+);
+const viewCopyMainBytes = encoder.encode(
+  '#include "project.hpp"\n'
+  + "__device__ void copy_views(const float* source, float* destination) {\n"
+  + "  auto source_tensor = cute::make_tensor(source, SourceLayout{});\n"
+  + "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});\n"
+  + "  cute::copy(source_tensor, destination_tensor);\n"
+  + "}\n",
+);
+const headerBytes = encoder.encode(
+  "#include <cute/tensor.hpp>\nconstexpr int project_value = 2;\n",
+);
 
 interface GoldenFixture {
   readonly profile: CppCuteFrontendProfileV2;
@@ -72,7 +85,10 @@ interface GoldenFixture {
   readonly preparedRequest: PreparedCppCuteFrontendRequest;
 }
 
-async function goldenFixture(): Promise<GoldenFixture> {
+async function goldenFixture(
+  entryKind: "layout" | "view-copy" = "layout",
+): Promise<GoldenFixture> {
+  const mainBytes = entryKind === "layout" ? layoutMainBytes : viewCopyMainBytes;
   const profileInput = structuredClone(createCppCuteBrowserProfileInput()) as unknown as Record<string, unknown>;
   const language = profileInput["language"] as Record<string, unknown>;
   const options = language["options"] as unknown[];
@@ -87,19 +103,27 @@ async function goldenFixture(): Promise<GoldenFixture> {
     sourceFile("project-header", headerPath, "workspace-source", headerBytes),
   ]);
   files.sort((left, right) => compareCanonicalStrings(left.virtualPath, right.virtualPath));
-  const tokenBegin = new TextDecoder().decode(mainBytes).indexOf("layout");
+  const token = entryKind === "layout" ? "layout" : "copy_views";
+  const tokenBegin = new TextDecoder().decode(mainBytes).indexOf(token);
   const anchor = {
     virtualPath: mainPath,
     beginByte: encodeWireU64(BigInt(tokenBegin)),
-    endByte: encodeWireU64(BigInt(tokenBegin + "layout".length)),
-    tokenSha256: await sha256Hex(mainBytes.subarray(tokenBegin, tokenBegin + "layout".length)),
+    endByte: encodeWireU64(BigInt(tokenBegin + token.length)),
+    tokenSha256: await sha256Hex(mainBytes.subarray(tokenBegin, tokenBegin + token.length)),
   };
-  const entryBody = {
-    requestId: `bg.cpp.entry-request.sha256.${"0".repeat(64)}`,
-    kind: "layout" as const,
-    declarationKind: "variable" as const,
-    anchor,
-  };
+  const entryBody = entryKind === "layout"
+    ? {
+        requestId: `bg.cpp.entry-request.sha256.${"0".repeat(64)}`,
+        kind: "layout" as const,
+        declarationKind: "variable" as const,
+        anchor,
+      }
+    : {
+        requestId: `bg.cpp.entry-request.sha256.${"0".repeat(64)}`,
+        kind: "view-copy" as const,
+        declarationKind: "function" as const,
+        anchor,
+      };
   const entry: CppCuteFrontendEntryRequestV1 = {
     ...entryBody,
     requestId: await deriveCppCuteFrontendEntryRequestId(entryBody),
@@ -189,7 +213,10 @@ function frame(
     limits: {
       maxFrameByteLength: 4 * 1024 * 1024,
       maxSourceSnapshotCount: snapshots.length,
-      maxSourceSnapshotByteLength: mainBytes.byteLength + headerBytes.byteLength,
+      maxSourceSnapshotByteLength: snapshots.reduce(
+        (total, snapshot) => total + snapshot.bytes.byteLength,
+        0,
+      ),
     },
   }).frameBytes;
 }
@@ -287,7 +314,9 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
       join(extractorRoot, "BrowserGradCppCuteCompileSession.cpp"),
       join(extractorRoot, "BrowserGradCppCuteCompilePlan.cpp"),
       join(extractorRoot, "BrowserGradCppCuteArtifactV3.cpp"),
+      join(extractorRoot, "BrowserGradCppCuteArtifactJson.cpp"),
       join(extractorRoot, "BrowserGradCppCuteArtifactWriter.cpp"),
+      join(extractorRoot, "BrowserGradCppCuteViewCopyArtifact.cpp"),
       join(extractorRoot, "BrowserGradCppCuteDiagnostics.cpp"),
       join(extractorRoot, "BrowserGradCppCuteInvocation.cpp"),
       join(extractorRoot, "BrowserGradCppCuteCommandLine.cpp"),
@@ -391,6 +420,91 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
           expect(existsSync(hostileArtifactPath)).toBe(false);
         }
       }
+    }
+
+    const viewCopyFixture = await goldenFixture("view-copy");
+    const viewCopyFramePath = join(workingDirectory, "view-copy.frame");
+    const viewCopyArtifactPath = join(workingDirectory, "view-copy.artifact.json");
+    writeFileSync(
+      viewCopyFramePath,
+      frame(viewCopyFixture.profile, viewCopyFixture.request, viewCopyFixture.snapshots),
+    );
+    const viewCopyExecution = spawnSync(executable, [
+      viewCopyFramePath,
+      viewCopyArtifactPath,
+      "success",
+      "ready",
+      viewCopyFixture.profileHash,
+      viewCopyFixture.compilationContractHash,
+      viewCopyFixture.requestHash,
+    ], {
+      encoding: "utf8",
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        ASAN_OPTIONS: "detect_leaks=1:halt_on_error=1",
+        UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1",
+      },
+    });
+    expect(viewCopyExecution.error).toBeUndefined();
+    expect(viewCopyExecution.status,
+      `view-copy: signal=${viewCopyExecution.signal ?? "none"}\n`
+      + `${viewCopyExecution.stdout}\n${viewCopyExecution.stderr}`,
+    ).toBe(0);
+    const viewCopyResource = await decodeCppCuteFrontendArtifact(
+      readFileSync(viewCopyArtifactPath),
+    );
+    const viewCopyBinding = await prepareCppCuteFrontendRequestBinding(
+      viewCopyFixture.preparedRequest,
+      viewCopyResource,
+    );
+    expect(viewCopyBinding.outcome).toBe("accepted");
+    const verifiedViewCopy = unwrapVerifiedCppCuteFrontendArtifactResource(
+      viewCopyResource,
+    );
+    const viewCopyEnvelope = unwrapVerifiedCppCuteFrontendArtifact(
+      verifiedViewCopy,
+    ).envelope;
+    const viewCopyEntry = viewCopyEnvelope.payload.entries[0];
+    expect(viewCopyEntry?.kind).toBe("view-copy");
+    if (viewCopyEntry?.kind !== "view-copy") {
+      throw new Error("native view-copy artifact lost its selected entry");
+    }
+    const semantics = await prepareVerifiedCppCuteViewCopySemantics(
+      verifiedViewCopy,
+      { entryId: viewCopyEntry.entryId },
+    );
+    expect(semantics.sourceLayoutFact.rank).toBe(2);
+    expect(semantics.destinationLayoutFact.rank).toBe(2);
+    expect(semantics.sourceSpanElements).toBe(6n);
+    expect(semantics.destinationSpanElements).toBe(6n);
+    for (const producerMode of [
+      "view-copy-surface-drift",
+      "view-copy-mutable-source",
+      "view-copy-unopened-origin",
+    ] as const) {
+      const hostileArtifactPath = join(
+        workingDirectory,
+        `${producerMode}.artifact.json`,
+      );
+      const hostile = spawnSync(executable, [
+        viewCopyFramePath,
+        hostileArtifactPath,
+        producerMode,
+        "ready",
+        viewCopyFixture.profileHash,
+        viewCopyFixture.compilationContractHash,
+        viewCopyFixture.requestHash,
+      ], {
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+      expect(hostile.error).toBeUndefined();
+      expect(hostile.status,
+        `${producerMode}: signal=${hostile.signal ?? "none"}\n`
+        + `${hostile.stdout}\n${hostile.stderr}`,
+      ).toBe(0);
+      expect(existsSync(hostileArtifactPath)).toBe(false);
     }
   } finally {
     rmSync(workingDirectory, { recursive: true, force: true });

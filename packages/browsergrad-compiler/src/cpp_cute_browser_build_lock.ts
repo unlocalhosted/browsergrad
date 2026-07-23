@@ -293,7 +293,7 @@ export async function deriveCppCuteBrowserHeaderInputProjectionId(
   const resourceDefinitions = clangWasmStage.definitions.filter(
     (definition) => HEADER_RESOURCE_DEFINITION_NAMES.has(definition.name),
   );
-  const resourceDefinitionNames = new Set(
+  const resourceDefinitionNames = new Set<string>(
     resourceDefinitions.map((definition) => definition.name),
   );
   if (resourceDefinitions.length !== HEADER_RESOURCE_DEFINITION_NAMES.size ||

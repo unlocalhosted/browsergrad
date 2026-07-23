@@ -1,13 +1,13 @@
 #pragma once
 
-#include "BrowserGradCppCuteCompilePlan.h"
-#include "BrowserGradCppCuteCompileSession.h"
-#include "BrowserGradCppCuteDiagnostics.h"
-
 #include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
+
+#include "BrowserGradCppCuteCompilePlan.h"
+#include "BrowserGradCppCuteCompileSession.h"
+#include "BrowserGradCppCuteDiagnostics.h"
 
 namespace browsergrad::cpp_cute {
 
@@ -60,6 +60,74 @@ struct ProducerLayoutObservation {
   ProducerIntegerHierarchy stride;
 };
 
+struct ProducerViewCopyParameterObservation {
+  bool resolved_pointer = false;
+  bool resolved_float_pointee = false;
+  bool pointee_const = false;
+  std::uint32_t ordinal = 0U;
+  std::string canonical_usr;
+  std::string canonical_name;
+  std::string canonical_type;
+  std::uint32_t declaration_begin_byte = 0U;
+  std::uint32_t declaration_end_byte = 0U;
+  std::uint32_t identity_begin_byte = 0U;
+  std::uint32_t identity_end_byte = 0U;
+};
+
+struct ProducerViewCopyTensorObservation {
+  bool resolved_tensor_type = false;
+  bool resolved_static_affine_layout = false;
+  bool initializer_parameter_bound = false;
+  bool engine_pointee_const = false;
+  std::uint32_t engine_parameter_ordinal = 0U;
+  std::string canonical_usr;
+  std::string canonical_name;
+  std::string canonical_type;
+  std::string tensor_template_path;
+  std::string initializer_callee_usr;
+  std::string initializer_callee_name;
+  std::string initializer_callee_path;
+  std::string layout_canonical_type;
+  std::string layout_template_path;
+  std::uint32_t declaration_begin_byte = 0U;
+  std::uint32_t declaration_end_byte = 0U;
+  std::uint32_t identity_begin_byte = 0U;
+  std::uint32_t identity_end_byte = 0U;
+  std::uint32_t rank = 0U;
+  std::uint32_t leaf_rank = 0U;
+  std::int64_t size = 0;
+  std::int64_t cosize = 0;
+  ProducerIntegerHierarchy shape;
+  ProducerIntegerHierarchy stride;
+};
+
+struct ProducerViewCopyObservation {
+  bool selected = false;
+  bool ambiguous = false;
+  bool resolved_function = false;
+  bool resolved_copy = false;
+  bool cuda_host = false;
+  bool cuda_device = false;
+  bool cuda_global = false;
+  bool force_inline = false;
+  std::string canonical_usr;
+  std::string canonical_name;
+  std::string canonical_type;
+  std::string copy_callee_usr;
+  std::string copy_callee_name;
+  std::string copy_callee_path;
+  std::uint32_t declaration_begin_byte = 0U;
+  std::uint32_t declaration_end_byte = 0U;
+  std::uint32_t identity_begin_byte = 0U;
+  std::uint32_t identity_end_byte = 0U;
+  std::uint32_t copy_begin_byte = 0U;
+  std::uint32_t copy_end_byte = 0U;
+  std::uint32_t source_tensor_ordinal = 0U;
+  std::uint32_t destination_tensor_ordinal = 0U;
+  std::vector<ProducerViewCopyParameterObservation> parameters;
+  std::vector<ProducerViewCopyTensorObservation> tensors;
+};
+
 struct ProducerOpenedFileObservation {
   std::string virtual_path;
   std::string content_sha256;
@@ -92,6 +160,7 @@ struct ProducerPassObservation {
   std::vector<ProducerOpenedFileObservation> opened_files;
   std::vector<ProducerIncludeEdgeObservation> include_edges;
   ProducerLayoutObservation layout;
+  ProducerViewCopyObservation view_copy;
 };
 
 struct ProducerReviewResult {

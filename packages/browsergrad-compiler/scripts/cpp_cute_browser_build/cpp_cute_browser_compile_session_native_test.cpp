@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
@@ -18,25 +19,34 @@ bool g_metrics_healthy = true;
 bool g_frontend_collecting = false;
 bool g_frontend_failed = false;
 std::uint64_t g_frontend_completed_passes = 0U;
-}
+}  // namespace
 
 #define BG_CPP_CUTE_RUNTIME_TESTING 1
-#include "extractor/BrowserGradCppCuteRuntime.cpp"
-
-#include "extractor/BrowserGradCppCuteCompileSession.h"
-#include "extractor/BrowserGradCppCuteCompilePlan.h"
 #include "extractor/BrowserGradCppCuteArtifactV3.h"
+#include "extractor/BrowserGradCppCuteCompilePlan.h"
+#include "extractor/BrowserGradCppCuteCompileSession.h"
 #include "extractor/BrowserGradCppCuteProducer.h"
+#include "extractor/BrowserGradCppCuteRuntime.cpp"
 
 namespace browsergrad::cpp_cute {
 std::string g_producer_mode = "success";
 
+constexpr std::string_view kViewCopyMainSource =
+    "#include \"project.hpp\"\n"
+    "__device__ void copy_views(const float* source, float* destination) {\n"
+    "  auto source_tensor = cute::make_tensor(source, SourceLayout{});\n"
+    "  auto destination_tensor = cute::make_tensor(destination, "
+    "DestinationLayout{});\n"
+    "  cute::copy(source_tensor, destination_tensor);\n"
+    "}\n";
+constexpr std::string_view kCuteTensorHeaderPath =
+    "/toolchain/cutlass/include/cute/tensor.hpp";
+
 bool allocator_metrics_healthy() { return g_metrics_healthy; }
 
 AllocatorMetricsFailureReason allocator_metrics_failure_reason() noexcept {
-  return g_metrics_healthy
-             ? AllocatorMetricsFailureReason::kNone
-             : AllocatorMetricsFailureReason::kUntrackedFree;
+  return g_metrics_healthy ? AllocatorMetricsFailureReason::kNone
+                           : AllocatorMetricsFailureReason::kUntrackedFree;
 }
 
 bool begin_frontend_work_invocation(FrontendWorkLimitsV1 limits) noexcept {
@@ -89,8 +99,7 @@ void reset_frontend_work_metrics() noexcept {
 
 bool frontend_work_metrics_ready() noexcept {
   return !g_frontend_collecting && !g_frontend_failed &&
-         g_frontend_completed_passes >= 1U &&
-         g_frontend_completed_passes <= 2U;
+         g_frontend_completed_passes >= 1U && g_frontend_completed_passes <= 2U;
 }
 
 ProducerReviewResult run_cpp_cute_producer_review(
@@ -109,8 +118,8 @@ ProducerReviewResult run_cpp_cute_producer_review(
   std::uint32_t identity_begin = 0U;
   std::uint32_t identity_end = 0U;
   const auto parsed_begin = std::from_chars(
-      entry.begin_byte.data(), entry.begin_byte.data() + entry.begin_byte.size(),
-      identity_begin);
+      entry.begin_byte.data(),
+      entry.begin_byte.data() + entry.begin_byte.size(), identity_begin);
   const auto parsed_end = std::from_chars(
       entry.end_byte.data(), entry.end_byte.data() + entry.end_byte.size(),
       identity_end);
@@ -121,6 +130,39 @@ ProducerReviewResult run_cpp_cute_producer_review(
     result.status = ProducerReviewStatus::kInternalError;
     return result;
   }
+  const auto range = [](const std::string_view token,
+                        const std::size_t start = 0U) {
+    const std::size_t begin = kViewCopyMainSource.find(token, start);
+    return std::array<std::uint32_t, 2U>{
+        begin == std::string_view::npos
+            ? std::numeric_limits<std::uint32_t>::max()
+            : static_cast<std::uint32_t>(begin),
+        begin == std::string_view::npos
+            ? std::numeric_limits<std::uint32_t>::max()
+            : static_cast<std::uint32_t>(begin + token.size())};
+  };
+  const auto function_declaration_begin = range("__device__ void copy_views");
+  const auto function_identity = range("copy_views");
+  const auto source_parameter = range("const float* source");
+  const auto source_parameter_identity = range("source", source_parameter[0U]);
+  const auto destination_parameter = range("float* destination");
+  const auto destination_parameter_identity =
+      range("destination", destination_parameter[0U]);
+  const auto source_tensor =
+      range("auto source_tensor = cute::make_tensor(source, SourceLayout{});");
+  const auto source_tensor_identity = range("source_tensor", source_tensor[0U]);
+  const auto destination_tensor = range(
+      "auto destination_tensor = cute::make_tensor(destination, "
+      "DestinationLayout{});");
+  const auto destination_tensor_identity =
+      range("destination_tensor", destination_tensor[0U]);
+  const auto copy_expression =
+      range("cute::copy(source_tensor, destination_tensor);");
+  const auto function_end = range("}\n", copy_expression[0U]);
+  const bool view_copy_ranges_ready =
+      function_declaration_begin[0U] !=
+          std::numeric_limits<std::uint32_t>::max() &&
+      function_end[1U] != std::numeric_limits<std::uint32_t>::max();
   for (ProducerPassObservation& pass : result.passes) {
     pass.invocation_succeeded = true;
     pass.policy_installed = true;
@@ -149,13 +191,27 @@ ProducerReviewResult run_cpp_cute_producer_review(
         22U,
         0U,
     });
+    if (entry.kind == "view-copy") {
+      pass.opened_file_paths.emplace_back(kCuteTensorHeaderPath);
+      pass.opened_files.push_back(
+          {std::string(kCuteTensorHeaderPath), std::string(64U, 'b'), 1U});
+      pass.include_edges.push_back({
+          ProducerIncludeKind::kSourceAngle,
+          "/workspace/src/project.hpp",
+          std::string(kCuteTensorHeaderPath),
+          "cute/tensor.hpp",
+          0U,
+          26U,
+          0U,
+      });
+    }
     for (std::size_t index = 0U; index < session.compiler_option_count();
          ++index) {
       const CompilerOptionView option = session.compiler_option(index);
       if (option.kind != CompilerOptionKind::kForcedInclude) continue;
       pass.opened_file_paths.emplace_back(option.virtual_path);
-      pass.opened_files.push_back({std::string(option.virtual_path),
-                                   std::string(64U, 'a'), 1U});
+      pass.opened_files.push_back(
+          {std::string(option.virtual_path), std::string(64U, 'a'), 1U});
       pass.include_edges.push_back({
           ProducerIncludeKind::kCompilerForced,
           {},
@@ -166,23 +222,115 @@ ProducerReviewResult run_cpp_cute_producer_review(
           option.ordinal,
       });
     }
-    pass.layout = {
-        true,
-        true,
-        true,
-        "c:@layout",
-        "layout",
-        "cute::Layout<cute::C<2>, cute::C<1>>",
-        "make_layout",
-        identity_begin,
-        identity_end,
-        1U,
-        1U,
-        2,
-        2,
-        ProducerIntegerHierarchy{false, 2, {}},
-        ProducerIntegerHierarchy{false, 1, {}},
-    };
+    if (entry.kind == "layout") {
+      pass.layout = {
+          true,
+          true,
+          true,
+          "c:@layout",
+          "layout",
+          "cute::Layout<cute::C<2>, cute::C<1>>",
+          "make_layout",
+          identity_begin,
+          identity_end,
+          1U,
+          1U,
+          2,
+          2,
+          ProducerIntegerHierarchy{false, 2, {}},
+          ProducerIntegerHierarchy{false, 1, {}},
+      };
+    } else if (entry.kind == "view-copy" && view_copy_ranges_ready &&
+               identity_begin == function_identity[0U] &&
+               identity_end == function_identity[1U]) {
+      const ProducerIntegerHierarchy shape = {
+          true,
+          0,
+          {{false, 3, {}}, {false, 2, {}}},
+      };
+      pass.view_copy.selected = true;
+      pass.view_copy.resolved_function = true;
+      pass.view_copy.resolved_copy = true;
+      pass.view_copy.cuda_device = true;
+      pass.view_copy.canonical_usr = "c:@F@copy_views#*1f#*f#";
+      pass.view_copy.canonical_name = "copy_views";
+      pass.view_copy.canonical_type = "void (const float *, float *)";
+      pass.view_copy.copy_callee_usr = "c:@N@cute@FT@>2#T#Tcopy#";
+      pass.view_copy.copy_callee_name = "cute::copy";
+      pass.view_copy.copy_callee_path = kCuteTensorHeaderPath;
+      pass.view_copy.declaration_begin_byte = function_declaration_begin[0U];
+      pass.view_copy.declaration_end_byte = function_end[0U] + 1U;
+      pass.view_copy.identity_begin_byte = function_identity[0U];
+      pass.view_copy.identity_end_byte = function_identity[1U];
+      pass.view_copy.copy_begin_byte = copy_expression[0U];
+      pass.view_copy.copy_end_byte = copy_expression[1U];
+      pass.view_copy.source_tensor_ordinal = 0U;
+      pass.view_copy.destination_tensor_ordinal = 1U;
+      pass.view_copy.parameters = {
+          {true, true, true, 0U, "c:@F@copy_views#*1f#*f#@source", "source",
+           "const float *", source_parameter[0U], source_parameter[1U],
+           source_parameter_identity[0U], source_parameter_identity[1U]},
+          {true, true, false, 1U, "c:@F@copy_views#*1f#*f#@destination",
+           "destination", "float *", destination_parameter[0U],
+           destination_parameter[1U], destination_parameter_identity[0U],
+           destination_parameter_identity[1U]},
+      };
+      pass.view_copy.tensors = {
+          {true,
+           true,
+           true,
+           true,
+           0U,
+           "c:@F@copy_views#*1f#*f#@source_tensor",
+           "source_tensor",
+           "cute::Tensor<const float *, SourceLayout>",
+           std::string(kCuteTensorHeaderPath),
+           "c:@N@cute@FT@>2#T#Tmake_tensor#",
+           "cute::make_tensor",
+           std::string(kCuteTensorHeaderPath),
+           "cute::Layout<cute::Shape<cute::Int<3>, cute::Int<2>>, "
+           "cute::Stride<cute::Int<1>, cute::Int<3>>>",
+           std::string(kCuteTensorHeaderPath),
+           source_tensor[0U],
+           source_tensor[1U],
+           source_tensor_identity[0U],
+           source_tensor_identity[1U],
+           2U,
+           2U,
+           6,
+           6,
+           shape,
+           {true, 0, {{false, 1, {}}, {false, 3, {}}}}},
+          {true,
+           true,
+           true,
+           false,
+           1U,
+           "c:@F@copy_views#*1f#*f#@destination_tensor",
+           "destination_tensor",
+           "cute::Tensor<float *, DestinationLayout>",
+           std::string(kCuteTensorHeaderPath),
+           "c:@N@cute@FT@>2#T#Tmake_tensor#",
+           "cute::make_tensor",
+           std::string(kCuteTensorHeaderPath),
+           "cute::Layout<cute::Shape<cute::Int<3>, cute::Int<2>>, "
+           "cute::Stride<cute::Int<2>, cute::Int<1>>>",
+           std::string(kCuteTensorHeaderPath),
+           destination_tensor[0U],
+           destination_tensor[1U],
+           destination_tensor_identity[0U],
+           destination_tensor_identity[1U],
+           2U,
+           2U,
+           6,
+           6,
+           shape,
+           {true, 0, {{false, 2, {}}, {false, 1, {}}}}},
+      };
+    } else {
+      result.status = ProducerReviewStatus::kInternalError;
+      return result;
+    }
   }
   if (g_producer_mode == "layout-drift") {
     result.passes[1].layout.canonical_usr = "c:@other_layout";
@@ -190,7 +338,8 @@ ProducerReviewResult run_cpp_cute_producer_review(
     result.passes[1].opened_files[0].content_sha256 = std::string(64U, 'f');
   } else if (g_producer_mode == "invalid-utf8") {
     result.passes[0].layout.canonical_name = std::string("layout\x80", 7U);
-    result.passes[1].layout.canonical_name = result.passes[0].layout.canonical_name;
+    result.passes[1].layout.canonical_name =
+        result.passes[0].layout.canonical_name;
   } else if (g_producer_mode == "semantic-failure") {
     result.status =
         ProducerReviewStatus::kReviewCompleteWithBlockingDiagnostics;
@@ -205,6 +354,17 @@ ProducerReviewResult run_cpp_cute_producer_review(
     result.blocking_diagnostic_pass_count = 1U;
     result.shared_surface_converged = false;
     result.passes[1].layout.canonical_usr = "c:@other_layout";
+  } else if (g_producer_mode == "view-copy-surface-drift") {
+    result.passes[1].view_copy.canonical_usr = "c:@F@other_copy#*1f#*f#";
+  } else if (g_producer_mode == "view-copy-mutable-source") {
+    for (ProducerPassObservation& pass : result.passes) {
+      pass.view_copy.parameters[0U].pointee_const = false;
+    }
+  } else if (g_producer_mode == "view-copy-unopened-origin") {
+    for (ProducerPassObservation& pass : result.passes) {
+      pass.view_copy.copy_callee_path =
+          "/toolchain/cutlass/include/cute/unopened.hpp";
+    }
   }
   if (result.completed_pass_count == 2U &&
       (!begin_frontend_work_semantic_pass() ||
@@ -225,13 +385,13 @@ static_assert(!std::is_copy_assignable_v<DecodedCompileSession>);
 static_assert(!std::is_move_constructible_v<DecodedCompileSession>);
 static_assert(!std::is_move_assignable_v<DecodedCompileSession>);
 
-#define BG_CHECK(condition)                                                   \
-  do {                                                                        \
-    if (!(condition)) {                                                       \
+#define BG_CHECK(condition)                                                 \
+  do {                                                                      \
+    if (!(condition)) {                                                     \
       std::fprintf(stderr, "compile-session check failed at line %d: %s\n", \
-                   __LINE__, #condition);                                     \
-      return 1;                                                               \
-    }                                                                         \
+                   __LINE__, #condition);                                   \
+      return 1;                                                             \
+    }                                                                       \
   } while (false)
 
 void* g_input_allocation = nullptr;
@@ -318,14 +478,17 @@ ArtifactV3CompileResult decode_callback(
   if (decoded.status != CompileSessionDecodeStatus::kReady &&
       (decoded.failure.region == CompileSessionRegion::kRequest ||
        decoded.failure.region == CompileSessionRegion::kProfile)) {
-    const bool request = decoded.failure.region == CompileSessionRegion::kRequest;
-    const std::uint8_t* bytes = request ? regions.request_bytes() : regions.profile_bytes();
-    const std::uint32_t length = request ? regions.request_byte_length()
-                                         : regions.profile_byte_length();
+    const bool request =
+        decoded.failure.region == CompileSessionRegion::kRequest;
+    const std::uint8_t* bytes =
+        request ? regions.request_bytes() : regions.profile_bytes();
+    const std::uint32_t length =
+        request ? regions.request_byte_length() : regions.profile_byte_length();
     const std::uint32_t begin = decoded.failure.byte_offset > 80U
-                                    ? decoded.failure.byte_offset - 80U : 0U;
-    const std::uint32_t end = std::min<std::uint32_t>(
-        length, decoded.failure.byte_offset + 120U);
+                                    ? decoded.failure.byte_offset - 80U
+                                    : 0U;
+    const std::uint32_t end =
+        std::min<std::uint32_t>(length, decoded.failure.byte_offset + 120U);
     std::fprintf(stderr, "%s context: %.*s\n", request ? "request" : "profile",
                  end - begin, reinterpret_cast<const char*>(bytes + begin));
   }
@@ -344,28 +507,32 @@ ArtifactV3CompileResult decode_callback(
         CompilerOptionKind::kWarningPolicy,
     };
     bool exact_order = decoded.session->compiler_option_count() == 6U;
-    for (std::size_t index = 0; index < decoded.session->compiler_option_count();
-         ++index) {
+    for (std::size_t index = 0;
+         index < decoded.session->compiler_option_count(); ++index) {
       const CompilerOptionView option = decoded.session->compiler_option(index);
       exact_order = exact_order && option.ordinal == index &&
                     option.kind == expected_kinds[index];
     }
-    g_ready_shape = exact_order &&
-                    decoded.session->compiler_resource_directory_virtual_path() ==
-                        "/toolchain/clang/lib/clang/22" &&
-                    decoded.session->cuda_toolkit_root_virtual_path() ==
-                        "/toolchain/cuda" &&
-                    decoded.session->compiler_option(0).name_or_id == "CUTE_SM80_ENABLED" &&
-                    decoded.session->compiler_option(1).include_root_id == "clang-resource" &&
-                    decoded.session->compiler_option(2).name_or_id == "syntax-only" &&
-                    decoded.session->compiler_option(3).name_or_id == "error-limit" &&
-                    decoded.session->compiler_option(3).value_or_disposition == "100000" &&
-                    decoded.session->compiler_option(4).name_or_id == "NDEBUG" &&
-                    decoded.session->compiler_option(5).name_or_id == "clang.unused-variable" &&
-                    decoded.session->semantic_pass_count() == 2U &&
-                    decoded.session->include_root_count() == 6U &&
-                    decoded.session->source_file_count() == 2U &&
-                    decoded.session->entry_request().kind == "layout";
+    g_ready_shape =
+        exact_order &&
+        decoded.session->compiler_resource_directory_virtual_path() ==
+            "/toolchain/clang/lib/clang/22" &&
+        decoded.session->cuda_toolkit_root_virtual_path() ==
+            "/toolchain/cuda" &&
+        decoded.session->compiler_option(0).name_or_id == "CUTE_SM80_ENABLED" &&
+        decoded.session->compiler_option(1).include_root_id ==
+            "clang-resource" &&
+        decoded.session->compiler_option(2).name_or_id == "syntax-only" &&
+        decoded.session->compiler_option(3).name_or_id == "error-limit" &&
+        decoded.session->compiler_option(3).value_or_disposition == "100000" &&
+        decoded.session->compiler_option(4).name_or_id == "NDEBUG" &&
+        decoded.session->compiler_option(5).name_or_id ==
+            "clang.unused-variable" &&
+        decoded.session->semantic_pass_count() == 2U &&
+        decoded.session->include_root_count() == 6U &&
+        decoded.session->source_file_count() == 2U &&
+        (decoded.session->entry_request().kind == "layout" ||
+         decoded.session->entry_request().kind == "view-copy");
     PrepareCppCuteCompilePlanResult plan =
         prepare_cpp_cute_compile_plan(*decoded.session);
     if (plan.status == CompilePlanStatus::kReady && plan.plan) {
@@ -374,20 +541,21 @@ ArtifactV3CompileResult decode_callback(
       g_compile_plan_ready =
           plan.plan->compilation_contract_hash() == g_contract_hash &&
           plan.plan->maximum_output_byte_length() == 8U * 1024U * 1024U &&
-          plan.plan->maximum_diagnostic_count() == 100000U &&
-          !device.empty() && !host.empty() &&
-          device.front() == "clang++" && host.front() == "clang++" &&
+          plan.plan->maximum_diagnostic_count() == 100000U && !device.empty() &&
+          !host.empty() && device.front() == "clang++" &&
+          host.front() == "clang++" &&
           std::find(device.begin(), device.end(), "/workspace/src/main.cu") !=
               device.end() &&
           std::find(host.begin(), host.end(), "/workspace/src/main.cu") !=
               host.end() &&
           std::find(device.begin(), device.end(), "--cuda-device-only") !=
               device.end() &&
-          std::find(host.begin(), host.end(), "--cuda-host-only") != host.end() &&
+          std::find(host.begin(), host.end(), "--cuda-host-only") !=
+              host.end() &&
           std::find(device.begin(), device.end(),
                     "--cuda-path=/toolchain/cuda") != device.end() &&
-          std::find(host.begin(), host.end(),
-                    "--cuda-path=/toolchain/cuda") != host.end() &&
+          std::find(host.begin(), host.end(), "--cuda-path=/toolchain/cuda") !=
+              host.end() &&
           std::find(device.begin(), device.end(), "-ferror-limit=100000") !=
               device.end() &&
           std::find(host.begin(), host.end(), "-ferror-limit=100000") !=
@@ -398,8 +566,8 @@ ArtifactV3CompileResult decode_callback(
           std::find(host.begin(), host.end(),
                     "-fno-experimental-new-constant-interpreter") ==
               host.end() &&
-          std::find(device.begin(), device.end(), "-fconstexpr-steps=10000000") !=
-              device.end() &&
+          std::find(device.begin(), device.end(),
+                    "-fconstexpr-steps=10000000") != device.end() &&
           std::find(host.begin(), host.end(), "-fconstexpr-steps=10000000") !=
               host.end() &&
           std::find(device.begin(), device.end(), "-ftemplate-depth=1024") !=
@@ -420,14 +588,13 @@ CompileSessionDecodeStatus status_from_name(std::string_view name) {
 }
 
 int run(const char* frame_path, const char* artifact_path,
-        const std::string_view producer_mode,
-        std::string_view expected_status,
+        const std::string_view producer_mode, std::string_view expected_status,
         const char* expected_profile_hash, const char* expected_contract_hash,
         const char* expected_request_hash) {
   std::ifstream input(frame_path, std::ios::binary);
   BG_CHECK(input.good());
-  const std::vector<std::uint8_t> frame(
-      (std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+  const std::vector<std::uint8_t> frame((std::istreambuf_iterator<char>(input)),
+                                        std::istreambuf_iterator<char>());
   BG_CHECK(!frame.empty());
   BG_CHECK(frame.size() <= std::numeric_limits<std::uint32_t>::max());
 
@@ -438,8 +605,8 @@ int run(const char* frame_path, const char* artifact_path,
   };
   browsergrad::cpp_cute::g_producer_mode = producer_mode;
   runtime_reset();
-  const std::uint32_t pointer = runtime_allocate(
-      static_cast<std::uint32_t>(frame.size()));
+  const std::uint32_t pointer =
+      runtime_allocate(static_cast<std::uint32_t>(frame.size()));
   BG_CHECK(pointer == kInputWirePointer);
   BG_CHECK(g_input_allocation_length == frame.size());
   std::memcpy(g_input_allocation, frame.data(), frame.size());
@@ -454,11 +621,12 @@ int run(const char* frame_path, const char* artifact_path,
   }
   BG_CHECK(g_decode_status == status_from_name(expected_status));
   const bool artifact_expected = producer_mode == "success" ||
-      producer_mode == "semantic-failure" ||
-      producer_mode == "surface-divergence";
+                                 producer_mode == "semantic-failure" ||
+                                 producer_mode == "surface-divergence";
   if (g_decode_status == CompileSessionDecodeStatus::kReady &&
       artifact_expected) {
-    BG_CHECK(runtime_result == static_cast<std::int32_t>(WireCompileStatus::kArtifactReady));
+    BG_CHECK(runtime_result ==
+             static_cast<std::int32_t>(WireCompileStatus::kArtifactReady));
     BG_CHECK(runtime_result_pointer() == kResultWirePointer);
     BG_CHECK(runtime_result_length() == g_result_allocation_length);
     BG_CHECK(g_result_allocation != nullptr);
@@ -482,8 +650,8 @@ int run(const char* frame_path, const char* artifact_path,
     BG_CHECK(runtime_result_length() == 0U);
     BG_CHECK(g_result_allocation == nullptr);
   } else {
-    BG_CHECK(runtime_result == static_cast<std::int32_t>(
-        wire_status_for(g_decode_status)));
+    BG_CHECK(runtime_result ==
+             static_cast<std::int32_t>(wire_status_for(g_decode_status)));
     BG_CHECK(!g_ready_shape);
   }
   runtime_reset();
@@ -498,7 +666,8 @@ int run(const char* frame_path, const char* artifact_path,
 int main(int argc, char** argv) {
   if (argc != 8) {
     std::fprintf(stderr,
-                 "usage: native-test FRAME ARTIFACT PRODUCER_MODE STATUS PROFILE_HASH CONTRACT_HASH REQUEST_HASH\n");
+                 "usage: native-test FRAME ARTIFACT PRODUCER_MODE STATUS "
+                 "PROFILE_HASH CONTRACT_HASH REQUEST_HASH\n");
     return 2;
   }
   return run(argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7]);

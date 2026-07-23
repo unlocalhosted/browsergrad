@@ -1,15 +1,11 @@
 #include "BrowserGradCppCuteArtifactWriter.h"
 
-#include "BrowserGradCppCuteCanonicalJson.h"
-#include "BrowserGradCppCuteSha256.h"
-
 #include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <initializer_list>
 #include <limits>
 #include <map>
 #include <new>
@@ -18,11 +14,23 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <variant>
 #include <vector>
+
+#include "BrowserGradCppCuteArtifactJson.h"
+#include "BrowserGradCppCuteCanonicalJson.h"
+#include "BrowserGradCppCuteViewCopyArtifact.h"
 
 namespace browsergrad::cpp_cute {
 namespace {
+
+using artifact_json::array;
+using artifact_json::ArtifactResourceLimit;
+using artifact_json::canonical_json;
+using artifact_json::hash_json;
+using artifact_json::InvalidObservation;
+using artifact_json::Json;
+using artifact_json::object;
+using artifact_json::stable_id;
 
 constexpr std::size_t kMaximumArtifactStringByteLength = 16U * 1024U;
 constexpr std::size_t kMaximumObservedFileCount = 4096U;
@@ -33,195 +41,6 @@ constexpr std::uint32_t kMaximumJsonDepth = 128U;
 constexpr std::uint32_t kMaximumJsonNodes = 1000000U;
 constexpr std::uint32_t kMaximumJsonArrayLength = 65536U;
 constexpr std::uint32_t kMaximumJsonObjectPropertyCount = 512U;
-
-class InvalidObservation final : public std::runtime_error {
- public:
-  InvalidObservation() : std::runtime_error("invalid producer observation") {}
-};
-
-class ArtifactResourceLimit final : public std::runtime_error {
- public:
-  ArtifactResourceLimit() : std::runtime_error("artifact resource limit") {}
-};
-
-struct Json final {
-  using Array = std::vector<Json>;
-  using Object = std::map<std::string, Json, std::less<>>;
-  using Value =
-      std::variant<std::nullptr_t, bool, std::int64_t, std::string, Array,
-                   Object>;
-
-  Json() noexcept : value(nullptr) {}
-  Json(std::nullptr_t) noexcept : value(nullptr) {}
-  Json(bool input) noexcept : value(input) {}
-  Json(std::int64_t input) noexcept : value(input) {}
-  Json(std::uint32_t input) noexcept
-      : value(static_cast<std::int64_t>(input)) {}
-  Json(std::string input) : value(std::move(input)) {}
-  Json(std::string_view input) : value(std::string(input)) {}
-  Json(const char* input) : value(std::string(input)) {}
-  Json(Array input) : value(std::move(input)) {}
-  Json(Object input) : value(std::move(input)) {}
-
-  Value value;
-};
-
-Json object(std::initializer_list<std::pair<std::string, Json>> properties) {
-  Json::Object result;
-  for (const auto& property : properties) {
-    if (!result.emplace(property.first, property.second).second) {
-      throw InvalidObservation();
-    }
-  }
-  return Json(std::move(result));
-}
-
-Json array(std::initializer_list<Json> elements) {
-  return Json(Json::Array(elements));
-}
-
-struct SerializationState final {
-  std::size_t maximum_byte_length = 0U;
-  std::uint32_t node_count = 0U;
-};
-
-void append_checked(std::string& output, const std::string_view bytes,
-                    const std::size_t maximum) {
-  if (bytes.size() > maximum - output.size()) throw ArtifactResourceLimit();
-  output.append(bytes);
-}
-
-void append_checked(std::string& output, const char byte,
-                    const std::size_t maximum) {
-  if (output.size() == maximum) throw ArtifactResourceLimit();
-  output.push_back(byte);
-}
-
-void serialize_json_string(const std::string_view input, std::string& output,
-                           const std::size_t maximum) {
-  append_checked(output, '"', maximum);
-  constexpr std::array<char, 16U> kHex = {
-      '0', '1', '2', '3', '4', '5', '6', '7',
-      '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
-  for (const unsigned char byte : input) {
-    switch (byte) {
-      case '"': append_checked(output, "\\\"", maximum); break;
-      case '\\': append_checked(output, "\\\\", maximum); break;
-      case '\b': append_checked(output, "\\b", maximum); break;
-      case '\f': append_checked(output, "\\f", maximum); break;
-      case '\n': append_checked(output, "\\n", maximum); break;
-      case '\r': append_checked(output, "\\r", maximum); break;
-      case '\t': append_checked(output, "\\t", maximum); break;
-      default:
-        if (byte < 0x20U) {
-          std::array<char, 6U> encoded = {'\\', 'u', '0', '0',
-                                          kHex[byte >> 4U],
-                                          kHex[byte & 0x0fU]};
-          append_checked(output,
-                         std::string_view(encoded.data(), encoded.size()),
-                         maximum);
-        } else {
-          append_checked(output, static_cast<char>(byte), maximum);
-        }
-    }
-  }
-  append_checked(output, '"', maximum);
-}
-
-void serialize_json(const Json& input, std::string& output,
-                    SerializationState& state, const std::uint32_t depth) {
-  if (depth > kMaximumJsonDepth || state.node_count == kMaximumJsonNodes) {
-    throw ArtifactResourceLimit();
-  }
-  ++state.node_count;
-  if (std::holds_alternative<std::nullptr_t>(input.value)) {
-    append_checked(output, "null", state.maximum_byte_length);
-    return;
-  }
-  if (const auto* value = std::get_if<bool>(&input.value)) {
-    append_checked(output, *value ? "true" : "false",
-                   state.maximum_byte_length);
-    return;
-  }
-  if (const auto* value = std::get_if<std::int64_t>(&input.value)) {
-    std::array<char, 32U> encoded{};
-    const auto converted =
-        std::to_chars(encoded.data(), encoded.data() + encoded.size(), *value);
-    if (converted.ec != std::errc{}) throw InvalidObservation();
-    append_checked(output,
-                   std::string_view(encoded.data(), converted.ptr),
-                   state.maximum_byte_length);
-    return;
-  }
-  if (const auto* value = std::get_if<std::string>(&input.value)) {
-    serialize_json_string(*value, output, state.maximum_byte_length);
-    return;
-  }
-  if (const auto* values = std::get_if<Json::Array>(&input.value)) {
-    if (values->size() > kMaximumJsonArrayLength) {
-      throw ArtifactResourceLimit();
-    }
-    append_checked(output, '[', state.maximum_byte_length);
-    for (std::size_t index = 0U; index < values->size(); ++index) {
-      if (index != 0U) append_checked(output, ',', state.maximum_byte_length);
-      serialize_json((*values)[index], output, state, depth + 1U);
-    }
-    append_checked(output, ']', state.maximum_byte_length);
-    return;
-  }
-  const auto& values = std::get<Json::Object>(input.value);
-  if (values.size() > kMaximumJsonObjectPropertyCount) {
-    throw ArtifactResourceLimit();
-  }
-  append_checked(output, '{', state.maximum_byte_length);
-  std::size_t index = 0U;
-  for (const auto& [key, value] : values) {
-    if (index != 0U) append_checked(output, ',', state.maximum_byte_length);
-    serialize_json_string(key, output, state.maximum_byte_length);
-    append_checked(output, ':', state.maximum_byte_length);
-    serialize_json(value, output, state, depth + 1U);
-    ++index;
-  }
-  append_checked(output, '}', state.maximum_byte_length);
-}
-
-std::string canonical_json(const Json& input,
-                           const std::size_t maximum_byte_length) {
-  if (maximum_byte_length == 0U) throw ArtifactResourceLimit();
-  std::string output;
-  output.reserve(std::min<std::size_t>(maximum_byte_length, 64U * 1024U));
-  SerializationState state{maximum_byte_length, 0U};
-  serialize_json(input, output, state, 1U);
-  return output;
-}
-
-std::string sha256_hex(const std::string_view bytes) {
-  Sha256 hash;
-  Sha256Digest digest{};
-  if (!hash.update(reinterpret_cast<const std::uint8_t*>(bytes.data()),
-                   bytes.size()) ||
-      !hash.finalize(digest)) {
-    throw InvalidObservation();
-  }
-  const Sha256LowercaseHex encoded = sha256_lowercase_hex(digest);
-  return std::string(encoded.data(), 64U);
-}
-
-std::string hash_json(const Json& input,
-                      const std::size_t maximum_byte_length) {
-  return sha256_hex(canonical_json(input, maximum_byte_length));
-}
-
-std::string stable_id(const std::string_view kind, const Json& value,
-                      const std::size_t maximum_byte_length) {
-  if (kind.empty()) throw InvalidObservation();
-  const std::string digest = hash_json(
-      object({{"domain", std::string("browsergrad.compiler.cpp-cute.") +
-                              std::string(kind) + "-id.v1"},
-              {"value", value}}),
-      maximum_byte_length);
-  return std::string("bg.cpp.") + std::string(kind) + ".sha256." + digest;
-}
 
 bool bounded_text(const std::string_view value, const std::size_t maximum,
                   const bool allow_empty = false) noexcept {
@@ -245,7 +64,8 @@ std::string decimal_u64(const std::uint64_t value) {
 }
 
 bool parse_u64(const std::string_view value, std::uint64_t& output) noexcept {
-  if (value.empty() || (value.size() > 1U && value.front() == '0')) return false;
+  if (value.empty() || (value.size() > 1U && value.front() == '0'))
+    return false;
   const auto parsed =
       std::from_chars(value.data(), value.data() + value.size(), output);
   return parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size();
@@ -265,8 +85,8 @@ Json owner_json(const IncludeRootView& root) {
   }
   if (root.owner_kind == "dependency" &&
       bounded_text(root.dependency_id, 256U)) {
-    return object({{"dependencyId", root.dependency_id},
-                   {"kind", "dependency"}});
+    return object(
+        {{"dependencyId", root.dependency_id}, {"kind", "dependency"}});
   }
   throw InvalidObservation();
 }
@@ -295,34 +115,32 @@ std::vector<RootRecord> build_roots(const DecodedCompileSession& session) {
       throw InvalidObservation();
     }
     Json owner = owner_json(root);
-    roots.push_back({root,
-                     object({{"includeRootId", root.include_root_id},
-                             {"manifestSha256", root.manifest_sha256},
-                             {"mode", root.mode},
-                             {"ordinal", root.ordinal},
-                             {"owner", std::move(owner)},
-                             {"virtualPath", root.virtual_path}})});
+    roots.push_back({root, object({{"includeRootId", root.include_root_id},
+                                   {"manifestSha256", root.manifest_sha256},
+                                   {"mode", root.mode},
+                                   {"ordinal", root.ordinal},
+                                   {"owner", std::move(owner)},
+                                   {"virtualPath", root.virtual_path}})});
   }
   return roots;
 }
 
 const RootRecord& root_by_id(const std::vector<RootRecord>& roots,
                              const std::string_view id) {
-  const auto found = std::find_if(roots.begin(), roots.end(),
-                                  [id](const RootRecord& root) {
-                                    return root.view.include_root_id == id;
-                                  });
+  const auto found = std::find_if(
+      roots.begin(), roots.end(),
+      [id](const RootRecord& root) { return root.view.include_root_id == id; });
   if (found == roots.end()) throw InvalidObservation();
   return *found;
 }
 
 const RootRecord& root_for_path(const std::vector<RootRecord>& roots,
-                               const std::string_view path) {
+                                const std::string_view path) {
   const RootRecord* selected = nullptr;
   for (const RootRecord& root : roots) {
     if (!path_is_below(path, root.view.virtual_path)) continue;
-    if (selected == nullptr || root.view.virtual_path.size() >
-                                   selected->view.virtual_path.size()) {
+    if (selected == nullptr ||
+        root.view.virtual_path.size() > selected->view.virtual_path.size()) {
       selected = &root;
     } else if (root.view.virtual_path.size() ==
                    selected->view.virtual_path.size() &&
@@ -339,8 +157,7 @@ struct OpenedIdentity final {
   std::uint64_t byte_length = 0U;
 };
 
-using OpenedIdentityMap =
-    std::map<std::string, OpenedIdentity, std::less<>>;
+using OpenedIdentityMap = std::map<std::string, OpenedIdentity, std::less<>>;
 
 OpenedIdentityMap merge_opened_files(const ProducerReviewResult& producer) {
   OpenedIdentityMap opened;
@@ -356,9 +173,9 @@ OpenedIdentityMap merge_opened_files(const ProducerReviewResult& producer) {
           !pass_paths.emplace(file.virtual_path).second) {
         throw InvalidObservation();
       }
-      const auto [iterator, inserted] = opened.emplace(
-          file.virtual_path,
-          OpenedIdentity{file.content_sha256, file.byte_length});
+      const auto [iterator, inserted] =
+          opened.emplace(file.virtual_path,
+                         OpenedIdentity{file.content_sha256, file.byte_length});
       if (!inserted &&
           (iterator->second.content_sha256 != file.content_sha256 ||
            iterator->second.byte_length != file.byte_length)) {
@@ -392,8 +209,9 @@ struct FileRecord final {
 using SourceViewMap = std::map<std::string, SourceFileView, std::less<>>;
 
 SourceViewMap source_views(const DecodedCompileSession& session) {
-  if (session.source_file_count() == 0U || session.source_file_count() >
-      session.request_semantic_limit(CompileSemanticLimit::kSourceFiles)) {
+  if (session.source_file_count() == 0U ||
+      session.source_file_count() >
+          session.request_semantic_limit(CompileSemanticLimit::kSourceFiles)) {
     throw InvalidObservation();
   }
   SourceViewMap result;
@@ -452,48 +270,45 @@ std::vector<FileRecord> build_files(const DecodedCompileSession& session,
            {"virtualPath", view.virtual_path}});
       files.push_back({std::string(view.file_id), path,
                        std::move(include_root_id), view.has_include_root,
-                       expected_length,
-                       std::move(value)});
+                       expected_length, std::move(value)});
       continue;
     }
 
     const RootRecord& root = root_for_path(roots, path);
     if (root.view.owner_kind == "source") throw InvalidObservation();
-    const std::string role = root.view.owner_kind ==
-                                     "compiler-resource-directory"
-                                 ? "compiler-header"
-                                 : "dependency-header";
+    const std::string role =
+        root.view.owner_kind == "compiler-resource-directory"
+            ? "compiler-header"
+            : "dependency-header";
     Json owner = owner_json(root.view);
-    Json identity_value = object(
-        {{"byteLength", decimal_u64(identity.byte_length)},
-         {"contentSha256", identity.content_sha256},
-         {"includeRootId", root.view.include_root_id},
-         {"owner", owner},
-         {"role", role},
-         {"virtualPath", path}});
+    Json identity_value =
+        object({{"byteLength", decimal_u64(identity.byte_length)},
+                {"contentSha256", identity.content_sha256},
+                {"includeRootId", root.view.include_root_id},
+                {"owner", owner},
+                {"role", role},
+                {"virtualPath", path}});
     const std::string file_id = stable_id(
         "file", identity_value, ArtifactV3ResultSink::kAbiMaximumByteLength);
-    Json value = object(
-        {{"byteLength", decimal_u64(identity.byte_length)},
-         {"contentSha256", identity.content_sha256},
-         {"fileId", file_id},
-         {"includeRootId", root.view.include_root_id},
-         {"owner", std::move(owner)},
-         {"role", role},
-         {"virtualPath", path}});
-    files.push_back({file_id, path, std::string(root.view.include_root_id), true,
-                     identity.byte_length, std::move(value)});
+    Json value = object({{"byteLength", decimal_u64(identity.byte_length)},
+                         {"contentSha256", identity.content_sha256},
+                         {"fileId", file_id},
+                         {"includeRootId", root.view.include_root_id},
+                         {"owner", std::move(owner)},
+                         {"role", role},
+                         {"virtualPath", path}});
+    files.push_back({file_id, path, std::string(root.view.include_root_id),
+                     true, identity.byte_length, std::move(value)});
   }
   std::sort(files.begin(), files.end(),
             [](const FileRecord& left, const FileRecord& right) {
               return left.file_id < right.file_id;
             });
-  if (std::adjacent_find(
-          files.begin(), files.end(),
-          [](const FileRecord& left, const FileRecord& right) {
-            return left.file_id == right.file_id ||
-                   left.virtual_path == right.virtual_path;
-          }) != files.end()) {
+  if (std::adjacent_find(files.begin(), files.end(),
+                         [](const FileRecord& left, const FileRecord& right) {
+                           return left.file_id == right.file_id ||
+                                  left.virtual_path == right.virtual_path;
+                         }) != files.end()) {
     throw InvalidObservation();
   }
   return files;
@@ -501,10 +316,9 @@ std::vector<FileRecord> build_files(const DecodedCompileSession& session,
 
 const FileRecord& file_by_path(const std::vector<FileRecord>& files,
                                const std::string_view path) {
-  const auto found = std::find_if(files.begin(), files.end(),
-                                  [path](const FileRecord& file) {
-                                    return file.virtual_path == path;
-                                  });
+  const auto found = std::find_if(
+      files.begin(), files.end(),
+      [path](const FileRecord& file) { return file.virtual_path == path; });
   if (found == files.end()) throw InvalidObservation();
   return *found;
 }
@@ -525,14 +339,13 @@ struct SpanRecord final {
 SpanRecord span_record(const std::string_view file_id,
                        const std::uint64_t begin, const std::uint64_t end) {
   Json range = file_range(file_id, begin, end);
-  const std::string span_id = stable_id(
-      "span", object({{"expansion", range}, {"spelling", range}}),
-      ArtifactV3ResultSink::kAbiMaximumByteLength);
-  return {span_id,
-          object({{"expansion", range},
-                  {"macroExpansionId", nullptr},
-                  {"spanId", span_id},
-                  {"spelling", std::move(range)}})};
+  const std::string span_id =
+      stable_id("span", object({{"expansion", range}, {"spelling", range}}),
+                ArtifactV3ResultSink::kAbiMaximumByteLength);
+  return {span_id, object({{"expansion", range},
+                           {"macroExpansionId", nullptr},
+                           {"spanId", span_id},
+                           {"spelling", std::move(range)}})};
 }
 
 struct EdgeRecord final {
@@ -556,51 +369,46 @@ EdgeRecord edge_record(const ProducerIncludeEdgeObservation& edge,
         edge.directive_end_byte_offset != 0U) {
       throw InvalidObservation();
     }
-    Json identity = object(
-        {{"compilerOptionOrdinal", edge.compiler_option_ordinal},
-         {"fileId", file.file_id},
-         {"includeRootId", file.include_root_id},
-         {"kind", "compiler-forced"}});
+    Json identity =
+        object({{"compilerOptionOrdinal", edge.compiler_option_ordinal},
+                {"fileId", file.file_id},
+                {"includeRootId", file.include_root_id},
+                {"kind", "compiler-forced"}});
     const std::string edge_id = stable_id(
-        "include-edge", identity,
-        ArtifactV3ResultSink::kAbiMaximumByteLength);
+        "include-edge", identity, ArtifactV3ResultSink::kAbiMaximumByteLength);
     return {edge_id,
-            std::string("forced:") +
-                decimal_u64(edge.compiler_option_ordinal),
+            std::string("forced:") + decimal_u64(edge.compiler_option_ordinal),
             object({{"compilerOptionOrdinal", edge.compiler_option_ordinal},
                     {"fileId", file.file_id},
                     {"includeEdgeId", edge_id},
                     {"includeRootId", file.include_root_id},
                     {"kind", "compiler-forced"}}),
-            {}, false};
+            {},
+            false};
   }
-  const FileRecord& including =
-      file_by_path(files, edge.including_file_path);
+  const FileRecord& including = file_by_path(files, edge.including_file_path);
   const FileRecord& resolved = file_by_path(files, edge.resolved_file_path);
   if (!resolved.has_include_root || !bounded_text(edge.spelling, 4096U) ||
       edge.directive_start_byte_offset >= edge.directive_end_byte_offset ||
       edge.directive_end_byte_offset > including.byte_length) {
     throw InvalidObservation();
   }
-  SpanRecord span = span_record(including.file_id,
-                                edge.directive_start_byte_offset,
-                                edge.directive_end_byte_offset);
-  const char* mode = edge.kind == ProducerIncludeKind::kSourceQuote
-                         ? "quote"
-                         : "angle";
+  SpanRecord span =
+      span_record(including.file_id, edge.directive_start_byte_offset,
+                  edge.directive_end_byte_offset);
+  const char* mode =
+      edge.kind == ProducerIncludeKind::kSourceQuote ? "quote" : "angle";
   Json identity = object(
       {{"directiveSpanId", span.span_id},
        {"includingFileId", including.file_id},
        {"kind", "source-directive"},
        {"mode", mode},
-       {"resolution",
-        object({{"fileId", resolved.file_id},
-                {"includeRootId", resolved.include_root_id},
-                {"kind", "resolved"}})},
+       {"resolution", object({{"fileId", resolved.file_id},
+                              {"includeRootId", resolved.include_root_id},
+                              {"kind", "resolved"}})},
        {"spelling", edge.spelling}});
   const std::string edge_id = stable_id(
-      "include-edge", identity,
-      ArtifactV3ResultSink::kAbiMaximumByteLength);
+      "include-edge", identity, ArtifactV3ResultSink::kAbiMaximumByteLength);
   return {edge_id,
           std::string("source:") + edge.including_file_path + ":" +
               decimal_u64(edge.directive_start_byte_offset) + ":" +
@@ -619,14 +427,12 @@ EdgeRecord edge_record(const ProducerIncludeEdgeObservation& edge,
 }
 
 std::pair<std::vector<EdgeRecord>, PassEdgeIds> build_edges(
-    const ProducerReviewResult& producer,
-    const DecodedCompileSession& session,
+    const ProducerReviewResult& producer, const DecodedCompileSession& session,
     const std::vector<FileRecord>& files) {
   std::map<std::string, EdgeRecord, std::less<>> by_id;
   std::map<std::string, std::string, std::less<>> logical_ids;
   PassEdgeIds pass_ids;
-  for (std::size_t pass_index = 0U;
-       pass_index < producer.completed_pass_count;
+  for (std::size_t pass_index = 0U; pass_index < producer.completed_pass_count;
        ++pass_index) {
     const ProducerPassObservation& pass = producer.passes[pass_index];
     if (pass.include_edges.size() > kMaximumObservedIncludeEdgeCount) {
@@ -636,8 +442,8 @@ std::pair<std::vector<EdgeRecord>, PassEdgeIds> build_edges(
     for (const ProducerIncludeEdgeObservation& observation :
          pass.include_edges) {
       EdgeRecord record = edge_record(observation, files);
-      const auto logical = logical_ids.emplace(record.logical_key,
-                                               record.edge_id);
+      const auto logical =
+          logical_ids.emplace(record.logical_key, record.edge_id);
       if (!logical.second && logical.first->second != record.edge_id) {
         throw InvalidObservation();
       }
@@ -648,17 +454,18 @@ std::pair<std::vector<EdgeRecord>, PassEdgeIds> build_edges(
   }
 
   std::set<std::uint32_t> forced_ordinals;
-  for (std::size_t index = 0U; index < session.compiler_option_count(); ++index) {
+  for (std::size_t index = 0U; index < session.compiler_option_count();
+       ++index) {
     const CompilerOptionView option = session.compiler_option(index);
     if (option.kind != CompilerOptionKind::kForcedInclude) continue;
     forced_ordinals.emplace(option.ordinal);
     const FileRecord& file = file_by_path(files, option.virtual_path);
-    if (!file.has_include_root || file.include_root_id != option.include_root_id) {
+    if (!file.has_include_root ||
+        file.include_root_id != option.include_root_id) {
       throw InvalidObservation();
     }
   }
-  for (std::size_t pass_index = 0U;
-       pass_index < producer.completed_pass_count;
+  for (std::size_t pass_index = 0U; pass_index < producer.completed_pass_count;
        ++pass_index) {
     std::set<std::uint32_t> observed;
     for (const ProducerIncludeEdgeObservation& edge :
@@ -711,6 +518,42 @@ bool same_layout(const ProducerLayoutObservation& left,
          left.size == right.size && left.cosize == right.cosize &&
          same_hierarchy(left.shape, right.shape) &&
          same_hierarchy(left.stride, right.stride);
+}
+
+bool empty_hierarchy(const ProducerIntegerHierarchy& hierarchy) noexcept {
+  return !hierarchy.tuple && hierarchy.value == 0 && hierarchy.elements.empty();
+}
+
+bool empty_layout(const ProducerLayoutObservation& layout) noexcept {
+  return !layout.selected && !layout.resolved_layout_type &&
+         !layout.resolved_static_affine_layout &&
+         layout.canonical_usr.empty() && layout.canonical_name.empty() &&
+         layout.canonical_type.empty() && layout.initializer_callee.empty() &&
+         layout.identity_begin_byte == 0U && layout.identity_end_byte == 0U &&
+         layout.rank == 0U && layout.leaf_rank == 0U && layout.size == 0 &&
+         layout.cosize == 0 && empty_hierarchy(layout.shape) &&
+         empty_hierarchy(layout.stride);
+}
+
+bool empty_view_copy(const ProducerViewCopyObservation& observation) noexcept {
+  return !observation.selected && !observation.ambiguous &&
+         !observation.resolved_function && !observation.resolved_copy &&
+         !observation.cuda_host && !observation.cuda_device &&
+         !observation.cuda_global && !observation.force_inline &&
+         observation.canonical_usr.empty() &&
+         observation.canonical_name.empty() &&
+         observation.canonical_type.empty() &&
+         observation.copy_callee_usr.empty() &&
+         observation.copy_callee_name.empty() &&
+         observation.copy_callee_path.empty() &&
+         observation.declaration_begin_byte == 0U &&
+         observation.declaration_end_byte == 0U &&
+         observation.identity_begin_byte == 0U &&
+         observation.identity_end_byte == 0U &&
+         observation.copy_begin_byte == 0U && observation.copy_end_byte == 0U &&
+         observation.source_tensor_ordinal == 0U &&
+         observation.destination_tensor_ordinal == 0U &&
+         observation.parameters.empty() && observation.tensors.empty();
 }
 
 struct HierarchySummary final {
@@ -766,11 +609,12 @@ void validate_layout(const ProducerLayoutObservation& layout,
   }
   HierarchySummary summary;
   validate_hierarchy_pair(layout.shape, layout.stride, summary, 1U);
-  const std::uint32_t top_rank = layout.shape.tuple
-                                     ? static_cast<std::uint32_t>(
-                                           layout.shape.elements.size())
-                                     : 1U;
-  if (layout.rank != top_rank || layout.leaf_rank != summary.shape_leaves.size()) {
+  const std::uint32_t top_rank =
+      layout.shape.tuple
+          ? static_cast<std::uint32_t>(layout.shape.elements.size())
+          : 1U;
+  if (layout.rank != top_rank ||
+      layout.leaf_rank != summary.shape_leaves.size()) {
     throw InvalidObservation();
   }
   std::int64_t computed_size = 1;
@@ -801,19 +645,18 @@ void validate_layout(const ProducerLayoutObservation& layout,
 
 Json hierarchy_json(const ProducerIntegerHierarchy& hierarchy) {
   if (!hierarchy.tuple) {
-    return object({{"kind", "scalar"},
-                   {"value", object({{"kind", "integer"},
-                                      {"value", decimal_u64(
-                                                    static_cast<std::uint64_t>(
-                                                        hierarchy.value))}})}});
+    return object(
+        {{"kind", "scalar"},
+         {"value", object({{"kind", "integer"},
+                           {"value", decimal_u64(static_cast<std::uint64_t>(
+                                         hierarchy.value))}})}});
   }
   Json::Array elements;
   elements.reserve(hierarchy.elements.size());
   for (const ProducerIntegerHierarchy& element : hierarchy.elements) {
     elements.push_back(hierarchy_json(element));
   }
-  return object({{"elements", Json(std::move(elements))},
-                 {"kind", "tuple"}});
+  return object({{"elements", Json(std::move(elements))}, {"kind", "tuple"}});
 }
 
 Json qualifiers() {
@@ -865,23 +708,20 @@ Json file_set_projection(const std::string_view kind,
     const Json::Object& record = std::get<Json::Object>(file.json.value);
     const std::string& role = std::get<std::string>(record.at("role").value);
     if ((kind == "source") != (role == "main-source")) continue;
-    selected.push_back(object(
-        {{"byteLength", record.at("byteLength")},
-         {"contentSha256", record.at("contentSha256")},
-         {"includeRootId", record.at("includeRootId")},
-         {"owner", record.at("owner")},
-         {"role", record.at("role")},
-         {"virtualPath", record.at("virtualPath")}}));
+    selected.push_back(object({{"byteLength", record.at("byteLength")},
+                               {"contentSha256", record.at("contentSha256")},
+                               {"includeRootId", record.at("includeRootId")},
+                               {"owner", record.at("owner")},
+                               {"role", record.at("role")},
+                               {"virtualPath", record.at("virtualPath")}}));
   }
-  return object(
-      {{"domain", std::string("browsergrad.compiler.cpp-cute.") +
-                       std::string(kind) + "-set.v2"},
-       {"files", Json(std::move(selected))}});
+  return object({{"domain", std::string("browsergrad.compiler.cpp-cute.") +
+                                std::string(kind) + "-set.v2"},
+                 {"files", Json(std::move(selected))}});
 }
 
-std::vector<std::string> pass_opened_ids(
-    const ProducerPassObservation& pass,
-    const std::vector<FileRecord>& files) {
+std::vector<std::string> pass_opened_ids(const ProducerPassObservation& pass,
+                                         const std::vector<FileRecord>& files) {
   std::vector<std::string> ids;
   ids.reserve(pass.opened_files.size());
   for (const ProducerOpenedFileObservation& opened : pass.opened_files) {
@@ -901,12 +741,12 @@ Json strings_json(const std::vector<std::string>& values) {
   return Json(std::move(result));
 }
 
-Json semantic_pass_input_projection(
-    const SemanticPassView& pass, const std::vector<RootRecord>& roots,
-    const std::vector<FileRecord>& files,
-    const std::vector<EdgeRecord>& edges,
-    const std::vector<std::string>& opened_ids,
-    const std::vector<std::string>& edge_ids) {
+Json semantic_pass_input_projection(const SemanticPassView& pass,
+                                    const std::vector<RootRecord>& roots,
+                                    const std::vector<FileRecord>& files,
+                                    const std::vector<EdgeRecord>& edges,
+                                    const std::vector<std::string>& opened_ids,
+                                    const std::vector<std::string>& edge_ids) {
   const std::set<std::string, std::less<>> opened(opened_ids.begin(),
                                                   opened_ids.end());
   const std::set<std::string, std::less<>> included_edges(edge_ids.begin(),
@@ -917,7 +757,8 @@ Json semantic_pass_input_projection(
   }
   Json::Array selected_edges;
   for (const EdgeRecord& edge : edges) {
-    if (included_edges.contains(edge.edge_id)) selected_edges.push_back(edge.json);
+    if (included_edges.contains(edge.edge_id))
+      selected_edges.push_back(edge.json);
   }
   return object(
       {{"domain",
@@ -940,15 +781,14 @@ Json source_entity_id_projection(const ProducerLayoutObservation& layout,
                                  const FileRecord& main_file,
                                  const std::uint64_t begin,
                                  const std::uint64_t end) {
-  Json canonical_range =
-      object({{"contentSha256",
-               std::get<std::string>(
-                   std::get<Json::Object>(main_file.json.value)
-                       .at("contentSha256")
-                       .value)},
-              {"endByte", decimal_u64(end)},
-              {"startByte", decimal_u64(begin)},
-              {"virtualPath", main_file.virtual_path}});
+  Json canonical_range = object(
+      {{"contentSha256",
+        std::get<std::string>(std::get<Json::Object>(main_file.json.value)
+                                  .at("contentSha256")
+                                  .value)},
+       {"endByte", decimal_u64(end)},
+       {"startByte", decimal_u64(begin)},
+       {"virtualPath", main_file.virtual_path}});
   return object(
       {{"canonicalIdentity", layout.canonical_usr},
        {"domain", "browsergrad.compiler.cpp-cute.source-entity-id.v1"},
@@ -959,23 +799,23 @@ Json source_entity_id_projection(const ProducerLayoutObservation& layout,
                                  {"spelling", canonical_range}})}})}});
 }
 
-Json build_accepted_payload(const ProducerReviewResult& producer,
-                            const DecodedCompileSession& session,
-                            const std::size_t maximum_byte_length) {
-  const EntryRequestView entry = session.entry_request();
-  if (entry.kind != "layout" || entry.declaration_kind != "variable" ||
-      entry.virtual_path != session.main_virtual_path() ||
-      !same_layout(producer.passes[0].layout, producer.passes[1].layout)) {
-    throw InvalidObservation();
-  }
-  const ProducerLayoutObservation& layout = producer.passes[0].layout;
-  validate_layout(layout, entry);
+struct AcceptedInputClosure final {
+  std::vector<RootRecord> roots;
+  std::vector<FileRecord> files;
+  std::vector<EdgeRecord> edges;
+  PassEdgeIds pass_edge_ids;
+  std::string closure_sha256;
+  Json inputs;
+};
 
-  const std::vector<RootRecord> roots = build_roots(session);
+AcceptedInputClosure build_accepted_input_closure(
+    const ProducerReviewResult& producer, const DecodedCompileSession& session,
+    const std::size_t maximum_byte_length) {
+  std::vector<RootRecord> roots = build_roots(session);
   const OpenedIdentityMap opened = merge_opened_files(producer);
-  const std::vector<FileRecord> files =
-      build_files(session, roots, opened);
-  const FileRecord& main_file = file_by_path(files, session.main_virtual_path());
+  std::vector<FileRecord> files = build_files(session, roots, opened);
+  const FileRecord& main_file =
+      file_by_path(files, session.main_virtual_path());
   const Json::Object& main_json = std::get<Json::Object>(main_file.json.value);
   if (std::get<std::string>(main_json.at("role").value) != "main-source") {
     throw InvalidObservation();
@@ -988,8 +828,209 @@ Json build_accepted_payload(const ProducerReviewResult& producer,
       throw InvalidObservation();
     }
   }
-
   auto [edges, pass_edge_ids] = build_edges(producer, session, files);
+  const std::string source_set_sha256 =
+      hash_json(file_set_projection("source", files), maximum_byte_length);
+  const std::string header_set_sha256 =
+      hash_json(file_set_projection("header", files), maximum_byte_length);
+  const Json projection =
+      object({{"domain", "browsergrad.compiler.cpp-cute.input-closure.v2"},
+              {"files", Json(json_array_of_files(files))},
+              {"headerSetSha256", header_set_sha256},
+              {"includeEdges", Json(json_array_of_edges(edges))},
+              {"includeRoots", Json(json_array_of_roots(roots))},
+              {"mainFileId", main_file.file_id},
+              {"sourceSetSha256", source_set_sha256}});
+  const std::string closure_sha256 = hash_json(projection, maximum_byte_length);
+  Json inputs = object({{"closureSha256", closure_sha256},
+                        {"files", Json(json_array_of_files(files))},
+                        {"headerSetSha256", header_set_sha256},
+                        {"includeEdges", Json(json_array_of_edges(edges))},
+                        {"includeRoots", Json(json_array_of_roots(roots))},
+                        {"mainFileId", main_file.file_id},
+                        {"sourceSetSha256", source_set_sha256}});
+  return {std::move(roots),         std::move(files), std::move(edges),
+          std::move(pass_edge_ids), closure_sha256,   std::move(inputs)};
+}
+
+Json build_view_copy_accepted_payload(const ProducerReviewResult& producer,
+                                      const DecodedCompileSession& session,
+                                      const std::size_t maximum_byte_length) {
+  const EntryRequestView entry = session.entry_request();
+  if (entry.kind != "view-copy" || entry.declaration_kind != "function" ||
+      entry.virtual_path != session.main_virtual_path() ||
+      !empty_layout(producer.passes[0].layout) ||
+      !empty_layout(producer.passes[1].layout) ||
+      !equivalent_view_copy_observation(producer.passes[0].view_copy,
+                                        producer.passes[1].view_copy)) {
+    throw InvalidObservation();
+  }
+  const ProducerViewCopyObservation& view = producer.passes[0].view_copy;
+  std::uint64_t request_begin = 0U;
+  std::uint64_t request_end = 0U;
+  if (!parse_u64(entry.begin_byte, request_begin) ||
+      !parse_u64(entry.end_byte, request_end) ||
+      request_begin != view.identity_begin_byte ||
+      request_end != view.identity_end_byte) {
+    throw InvalidObservation();
+  }
+
+  const AcceptedInputClosure closure =
+      build_accepted_input_closure(producer, session, maximum_byte_length);
+  const std::vector<RootRecord>& roots = closure.roots;
+  const std::vector<FileRecord>& files = closure.files;
+  const std::vector<EdgeRecord>& edges = closure.edges;
+  const PassEdgeIds& pass_edge_ids = closure.pass_edge_ids;
+  const FileRecord& main_file =
+      file_by_path(files, session.main_virtual_path());
+  const Json::Object& main_json = std::get<Json::Object>(main_file.json.value);
+  static_cast<void>(file_by_path(files, view.copy_callee_path));
+  for (const ProducerViewCopyTensorObservation& tensor : view.tensors) {
+    static_cast<void>(file_by_path(files, tensor.tensor_template_path));
+    static_cast<void>(file_by_path(files, tensor.layout_template_path));
+    static_cast<void>(file_by_path(files, tensor.initializer_callee_path));
+  }
+  std::map<std::string, SpanRecord, std::less<>> spans;
+  const auto add_span = [&spans, &main_file](const std::uint64_t begin,
+                                             const std::uint64_t end) {
+    if (begin >= end || end > main_file.byte_length) {
+      throw InvalidObservation();
+    }
+    SpanRecord record = span_record(main_file.file_id, begin, end);
+    const std::string id = record.span_id;
+    spans.emplace(id, std::move(record));
+    return id;
+  };
+  const std::array<std::string, 2U> function_span_storage = {
+      add_span(view.declaration_begin_byte, view.declaration_end_byte),
+      add_span(view.identity_begin_byte, view.identity_end_byte)};
+  const ViewCopyDeclarationSpans function_spans = {function_span_storage[0U],
+                                                   function_span_storage[1U]};
+  std::array<ViewCopyDeclarationSpans, 2U> parameter_spans;
+  std::array<ViewCopyDeclarationSpans, 2U> tensor_spans;
+  std::array<std::array<std::string, 2U>, 2U> parameter_span_storage;
+  std::array<std::array<std::string, 2U>, 2U> tensor_span_storage;
+  for (std::size_t index = 0U; index < 2U; ++index) {
+    const ProducerViewCopyParameterObservation& parameter =
+        view.parameters.at(index);
+    parameter_span_storage[index] = {
+        add_span(parameter.declaration_begin_byte,
+                 parameter.declaration_end_byte),
+        add_span(parameter.identity_begin_byte, parameter.identity_end_byte)};
+    parameter_spans[index] = {parameter_span_storage[index][0U],
+                              parameter_span_storage[index][1U]};
+    const ProducerViewCopyTensorObservation& tensor = view.tensors.at(index);
+    tensor_span_storage[index] = {
+        add_span(tensor.declaration_begin_byte, tensor.declaration_end_byte),
+        add_span(tensor.identity_begin_byte, tensor.identity_end_byte)};
+    tensor_spans[index] = {tensor_span_storage[index][0U],
+                           tensor_span_storage[index][1U]};
+  }
+  const std::string copy_span_id =
+      add_span(view.copy_begin_byte, view.copy_end_byte);
+  for (const EdgeRecord& edge : edges) {
+    if (edge.has_directive_span) {
+      spans.emplace(edge.directive_span.span_id, edge.directive_span);
+    }
+  }
+
+  const ViewCopyArtifactGraph graph = build_view_copy_artifact_graph(
+      view, {main_file.virtual_path,
+             std::get<std::string>(main_json.at("contentSha256").value),
+             main_file.byte_length, maximum_byte_length, function_spans,
+             parameter_spans, tensor_spans, copy_span_id});
+  Json::Array span_values;
+  span_values.reserve(spans.size());
+  for (const auto& [id, span] : spans) {
+    static_cast<void>(id);
+    span_values.push_back(span.json);
+  }
+
+  Json::Array semantic_passes;
+  semantic_passes.reserve(2U);
+  for (std::size_t index = 0U; index < 2U; ++index) {
+    const SemanticPassView pass = session.semantic_pass(index);
+    const std::vector<std::string> opened_ids =
+        pass_opened_ids(producer.passes[index], files);
+    const std::vector<std::string>& edge_ids = pass_edge_ids.ids[index];
+    const std::string observed_hash =
+        hash_json(semantic_pass_input_projection(pass, roots, files, edges,
+                                                 opened_ids, edge_ids),
+                  maximum_byte_length);
+    semantic_passes.push_back(
+        object({{"auxiliaryTargetTriple", pass.auxiliary_target_triple},
+                {"deviceArchitecture", pass.device_architecture},
+                {"diagnosticIds", Json::Array{}},
+                {"domain", pass.domain},
+                {"factIds", index == 0U ? strings_json(graph.fact_ids)
+                                        : Json(Json::Array{})},
+                {"includeEdgeIds", strings_json(edge_ids)},
+                {"invocationMode", pass.invocation_mode},
+                {"observedInputClosureSha256", observed_hash},
+                {"openedFileIds", strings_json(opened_ids)},
+                {"ordinal", pass.ordinal},
+                {"passId", pass.pass_id},
+                {"role", pass.role},
+                {"selectedSourceRootEntityIds",
+                 array({graph.selected_source_entity_id})},
+                {"sharedSurfaceSha256", graph.shared_surface_sha256},
+                {"status", "succeeded"},
+                {"targetTriple", pass.target_triple}}));
+  }
+
+  return object(
+      {{"compilationContractHash", session.compilation_contract_hash()},
+       {"constants", Json::Array{}},
+       {"declarations", Json(graph.declarations)},
+       {"diagnostics", Json::Array{}},
+       {"entries", array({graph.entry})},
+       {"extraction", object({{"appliedTransforms", Json::Array{}},
+                              {"compilationContractHash",
+                               session.compilation_contract_hash()},
+                              {"inputClosureSha256", closure.closure_sha256}})},
+       {"facts", Json(graph.facts)},
+       {"functionBodies", Json(graph.function_bodies)},
+       {"initializerExpressions", Json::Array{}},
+       {"inputs", closure.inputs},
+       {"macroExpansions", Json::Array{}},
+       {"outcome", object({{"kind", "accepted"},
+                           {"selectedEntryIds", array({graph.entry_id})}})},
+       {"overloadResolutions", Json::Array{}},
+       {"semanticGraphOwnerPassId", "cuda-device-sema"},
+       {"semanticPasses", Json(std::move(semantic_passes))},
+       {"sourceAbi", graph.source_abi},
+       {"sourceEntities", Json(graph.source_entities)},
+       {"spans", Json(std::move(span_values))},
+       {"templateInstantiations", Json::Array{}},
+       {"types", Json(graph.types)}});
+}
+
+Json build_accepted_payload(const ProducerReviewResult& producer,
+                            const DecodedCompileSession& session,
+                            const std::size_t maximum_byte_length) {
+  const EntryRequestView entry = session.entry_request();
+  if (entry.kind == "view-copy") {
+    return build_view_copy_accepted_payload(producer, session,
+                                            maximum_byte_length);
+  }
+  if (entry.kind != "layout" || entry.declaration_kind != "variable" ||
+      entry.virtual_path != session.main_virtual_path() ||
+      !empty_view_copy(producer.passes[0].view_copy) ||
+      !empty_view_copy(producer.passes[1].view_copy) ||
+      !same_layout(producer.passes[0].layout, producer.passes[1].layout)) {
+    throw InvalidObservation();
+  }
+  const ProducerLayoutObservation& layout = producer.passes[0].layout;
+  validate_layout(layout, entry);
+
+  const AcceptedInputClosure closure =
+      build_accepted_input_closure(producer, session, maximum_byte_length);
+  const std::vector<RootRecord>& roots = closure.roots;
+  const std::vector<FileRecord>& files = closure.files;
+  const std::vector<EdgeRecord>& edges = closure.edges;
+  const PassEdgeIds& pass_edge_ids = closure.pass_edge_ids;
+  const FileRecord& main_file =
+      file_by_path(files, session.main_virtual_path());
   std::uint64_t identity_begin = 0U;
   std::uint64_t identity_end = 0U;
   if (!parse_u64(entry.begin_byte, identity_begin) ||
@@ -1014,29 +1055,6 @@ Json build_accepted_payload(const ProducerReviewResult& producer,
     span_values.push_back(span.json);
   }
 
-  const std::string source_set_sha256 =
-      hash_json(file_set_projection("source", files), maximum_byte_length);
-  const std::string header_set_sha256 =
-      hash_json(file_set_projection("header", files), maximum_byte_length);
-  const Json closure_projection = object(
-      {{"domain", "browsergrad.compiler.cpp-cute.input-closure.v2"},
-       {"files", Json(json_array_of_files(files))},
-       {"headerSetSha256", header_set_sha256},
-       {"includeEdges", Json(json_array_of_edges(edges))},
-       {"includeRoots", Json(json_array_of_roots(roots))},
-       {"mainFileId", main_file.file_id},
-       {"sourceSetSha256", source_set_sha256}});
-  const std::string closure_sha256 =
-      hash_json(closure_projection, maximum_byte_length);
-  const Json inputs = object(
-      {{"closureSha256", closure_sha256},
-       {"files", Json(json_array_of_files(files))},
-       {"headerSetSha256", header_set_sha256},
-       {"includeEdges", Json(json_array_of_edges(edges))},
-       {"includeRoots", Json(json_array_of_roots(roots))},
-       {"mainFileId", main_file.file_id},
-       {"sourceSetSha256", source_set_sha256}});
-
   const std::string source_entity_id =
       std::string("bg.cpp.source-entity.sha256.") +
       hash_json(source_entity_id_projection(layout, main_file, identity_begin,
@@ -1045,99 +1063,100 @@ Json build_accepted_payload(const ProducerReviewResult& producer,
   const Json variable_origin = source_origin(identity_span.span_id);
   const Json template_origin =
       template_substitution_origin(identity_span.span_id);
-  const std::string template_declaration_id = stable_id(
-      "declaration",
-      object({{"canonicalName", "cute::Layout"},
-              {"canonicalUsr", "c:@N@cute@ST@Layout"},
-              {"kind", "template"},
-              {"origin", template_origin}}),
-      maximum_byte_length);
-  const std::string layout_type_id = stable_id(
-      "type", object({{"canonicalName", layout.canonical_type},
-                       {"kind", "template-specialization"},
-                       {"origin", template_origin},
-                       {"templateDeclarationId", template_declaration_id}}),
-      maximum_byte_length);
-  const std::string variable_declaration_id = stable_id(
-      "declaration",
-      object({{"canonicalName", layout.canonical_name},
-              {"canonicalUsr", layout.canonical_usr},
-              {"kind", "variable"},
-              {"origin", variable_origin},
-              {"typeId", layout_type_id}}),
-      maximum_byte_length);
-  const std::string fact_id = stable_id(
-      "fact", object({{"kind", "affine-layout"},
-                       {"origin", variable_origin},
-                       {"resultDeclarationId", variable_declaration_id},
-                       {"shape", hierarchy_json(layout.shape)},
-                       {"stride", hierarchy_json(layout.stride)}}),
-      maximum_byte_length);
+  const std::string template_declaration_id =
+      stable_id("declaration",
+                object({{"canonicalName", "cute::Layout"},
+                        {"canonicalUsr", "c:@N@cute@ST@Layout"},
+                        {"kind", "template"},
+                        {"origin", template_origin}}),
+                maximum_byte_length);
+  const std::string layout_type_id =
+      stable_id("type",
+                object({{"canonicalName", layout.canonical_type},
+                        {"kind", "template-specialization"},
+                        {"origin", template_origin},
+                        {"templateDeclarationId", template_declaration_id}}),
+                maximum_byte_length);
+  const std::string variable_declaration_id =
+      stable_id("declaration",
+                object({{"canonicalName", layout.canonical_name},
+                        {"canonicalUsr", layout.canonical_usr},
+                        {"kind", "variable"},
+                        {"origin", variable_origin},
+                        {"typeId", layout_type_id}}),
+                maximum_byte_length);
+  const std::string fact_id =
+      stable_id("fact",
+                object({{"kind", "affine-layout"},
+                        {"origin", variable_origin},
+                        {"resultDeclarationId", variable_declaration_id},
+                        {"shape", hierarchy_json(layout.shape)},
+                        {"stride", hierarchy_json(layout.stride)}}),
+                maximum_byte_length);
   const std::string entry_id = stable_id(
-      "entry", object({{"kind", "layout"},
-                        {"layoutFactId", fact_id},
-                        {"selectedRootDeclarationIds",
-                         array({variable_declaration_id})}}),
+      "entry",
+      object(
+          {{"kind", "layout"},
+           {"layoutFactId", fact_id},
+           {"selectedRootDeclarationIds", array({variable_declaration_id})}}),
       maximum_byte_length);
 
-  const Json type = object(
-      {{"arguments", Json::Array{}},
-       {"canonicalName", layout.canonical_type},
-       {"kind", "template-specialization"},
-       {"origin", template_origin},
-       {"qualifiers", qualifiers()},
-       {"templateDeclarationId", template_declaration_id},
-       {"typeId", layout_type_id}});
-  const Json template_declaration = object(
-      {{"canonicalName", "cute::Layout"},
-       {"canonicalUsr", "c:@N@cute@ST@Layout"},
-       {"cudaAttributes", cuda_attributes()},
-       {"declarationId", template_declaration_id},
-       {"definitionKind", "external"},
-       {"identitySpanId", nullptr},
-       {"initializerExpressionId", nullptr},
-       {"kind", "template"},
-       {"lexicalParentId", nullptr},
-       {"linkage", "external"},
-       {"mangledName", nullptr},
-       {"memorySpace", "generic"},
-       {"origin", template_origin},
-       {"semanticParentId", nullptr},
-       {"storageDuration", "none"},
-       {"targetTypeId", nullptr},
-       {"typeId", layout_type_id}});
-  const Json variable_declaration = object(
-      {{"canonicalName", layout.canonical_name},
-       {"canonicalUsr", layout.canonical_usr},
-       {"cudaAttributes", cuda_attributes()},
-       {"declarationId", variable_declaration_id},
-       {"definitionKind", "definition"},
-       {"identitySpanId", identity_span.span_id},
-       {"initializerExpressionId", nullptr},
-       {"kind", "variable"},
-       {"lexicalParentId", nullptr},
-       {"linkage", "external"},
-       {"mangledName", nullptr},
-       {"memorySpace", "generic"},
-       {"origin", variable_origin},
-       {"semanticParentId", nullptr},
-       {"storageDuration", "static"},
-       {"targetTypeId", nullptr},
-       {"typeId", layout_type_id}});
+  const Json type = object({{"arguments", Json::Array{}},
+                            {"canonicalName", layout.canonical_type},
+                            {"kind", "template-specialization"},
+                            {"origin", template_origin},
+                            {"qualifiers", qualifiers()},
+                            {"templateDeclarationId", template_declaration_id},
+                            {"typeId", layout_type_id}});
+  const Json template_declaration =
+      object({{"canonicalName", "cute::Layout"},
+              {"canonicalUsr", "c:@N@cute@ST@Layout"},
+              {"cudaAttributes", cuda_attributes()},
+              {"declarationId", template_declaration_id},
+              {"definitionKind", "external"},
+              {"identitySpanId", nullptr},
+              {"initializerExpressionId", nullptr},
+              {"kind", "template"},
+              {"lexicalParentId", nullptr},
+              {"linkage", "external"},
+              {"mangledName", nullptr},
+              {"memorySpace", "generic"},
+              {"origin", template_origin},
+              {"semanticParentId", nullptr},
+              {"storageDuration", "none"},
+              {"targetTypeId", nullptr},
+              {"typeId", layout_type_id}});
+  const Json variable_declaration =
+      object({{"canonicalName", layout.canonical_name},
+              {"canonicalUsr", layout.canonical_usr},
+              {"cudaAttributes", cuda_attributes()},
+              {"declarationId", variable_declaration_id},
+              {"definitionKind", "definition"},
+              {"identitySpanId", identity_span.span_id},
+              {"initializerExpressionId", nullptr},
+              {"kind", "variable"},
+              {"lexicalParentId", nullptr},
+              {"linkage", "external"},
+              {"mangledName", nullptr},
+              {"memorySpace", "generic"},
+              {"origin", variable_origin},
+              {"semanticParentId", nullptr},
+              {"storageDuration", "static"},
+              {"targetTypeId", nullptr},
+              {"typeId", layout_type_id}});
   Json::Array declarations = {template_declaration, variable_declaration};
-  std::sort(declarations.begin(), declarations.end(),
-            [](const Json& left, const Json& right) {
-              const auto& left_object = std::get<Json::Object>(left.value);
-              const auto& right_object = std::get<Json::Object>(right.value);
-              return std::get<std::string>(
-                         left_object.at("declarationId").value) <
-                     std::get<std::string>(
-                         right_object.at("declarationId").value);
-            });
+  std::sort(
+      declarations.begin(), declarations.end(),
+      [](const Json& left, const Json& right) {
+        const auto& left_object = std::get<Json::Object>(left.value);
+        const auto& right_object = std::get<Json::Object>(right.value);
+        return std::get<std::string>(left_object.at("declarationId").value) <
+               std::get<std::string>(right_object.at("declarationId").value);
+      });
   const Json fact = object(
       {{"cosize", object({{"kind", "integer"},
-                            {"value", decimal_u64(static_cast<std::uint64_t>(
-                                          layout.cosize))}})},
+                          {"value", decimal_u64(static_cast<std::uint64_t>(
+                                        layout.cosize))}})},
        {"factId", fact_id},
        {"kind", "affine-layout"},
        {"leafRank", layout.leaf_rank},
@@ -1146,24 +1165,23 @@ Json build_accepted_payload(const ProducerReviewResult& producer,
        {"resultDeclarationId", variable_declaration_id},
        {"shape", hierarchy_json(layout.shape)},
        {"size", object({{"kind", "integer"},
-                          {"value", decimal_u64(static_cast<std::uint64_t>(
-                                        layout.size))}})},
+                        {"value", decimal_u64(static_cast<std::uint64_t>(
+                                      layout.size))}})},
        {"stride", hierarchy_json(layout.stride)}});
   const Json frontend_entry = object(
       {{"entryId", entry_id},
        {"kind", "layout"},
        {"layoutFactId", fact_id},
        {"selectedRootDeclarationIds", array({variable_declaration_id})}});
-  const Json source_entity = object(
-      {{"canonicalIdentity", layout.canonical_usr},
-       {"domains", array({"device", "host"})},
-       {"entityKind", "variable"},
-       {"origin", variable_origin},
-       {"sourceEntityId", source_entity_id}});
+  const Json source_entity =
+      object({{"canonicalIdentity", layout.canonical_usr},
+              {"domains", array({"device", "host"})},
+              {"entityKind", "variable"},
+              {"origin", variable_origin},
+              {"sourceEntityId", source_entity_id}});
 
-  const std::string shared_surface_sha256 =
-      hash_json(shared_surface_projection(source_entity_id),
-                maximum_byte_length);
+  const std::string shared_surface_sha256 = hash_json(
+      shared_surface_projection(source_entity_id), maximum_byte_length);
   Json::Array semantic_passes;
   semantic_passes.reserve(2U);
   for (std::size_t index = 0U; index < 2U; ++index) {
@@ -1171,10 +1189,10 @@ Json build_accepted_payload(const ProducerReviewResult& producer,
     const std::vector<std::string> opened_ids =
         pass_opened_ids(producer.passes[index], files);
     const std::vector<std::string>& edge_ids = pass_edge_ids.ids[index];
-    const std::string observed_hash = hash_json(
-        semantic_pass_input_projection(pass, roots, files, edges, opened_ids,
-                                       edge_ids),
-        maximum_byte_length);
+    const std::string observed_hash =
+        hash_json(semantic_pass_input_projection(pass, roots, files, edges,
+                                                 opened_ids, edge_ids),
+                  maximum_byte_length);
     semantic_passes.push_back(object(
         {{"auxiliaryTargetTriple", pass.auxiliary_target_triple},
          {"deviceArchitecture", pass.device_architecture},
@@ -1200,19 +1218,17 @@ Json build_accepted_payload(const ProducerReviewResult& producer,
        {"declarations", Json(std::move(declarations))},
        {"diagnostics", Json::Array{}},
        {"entries", array({frontend_entry})},
-       {"extraction",
-        object({{"appliedTransforms", Json::Array{}},
-                {"compilationContractHash",
-                 session.compilation_contract_hash()},
-                {"inputClosureSha256", closure_sha256}})},
+       {"extraction", object({{"appliedTransforms", Json::Array{}},
+                              {"compilationContractHash",
+                               session.compilation_contract_hash()},
+                              {"inputClosureSha256", closure.closure_sha256}})},
        {"facts", array({fact})},
        {"functionBodies", Json::Array{}},
        {"initializerExpressions", Json::Array{}},
-       {"inputs", inputs},
+       {"inputs", closure.inputs},
        {"macroExpansions", Json::Array{}},
-       {"outcome",
-        object({{"kind", "accepted"},
-                {"selectedEntryIds", array({entry_id})}})},
+       {"outcome", object({{"kind", "accepted"},
+                           {"selectedEntryIds", array({entry_id})}})},
        {"overloadResolutions", Json::Array{}},
        {"semanticGraphOwnerPassId", "cuda-device-sema"},
        {"semanticPasses", Json(std::move(semantic_passes))},
@@ -1226,26 +1242,38 @@ Json build_accepted_payload(const ProducerReviewResult& producer,
 
 std::string_view diagnostic_phase_name(const DiagnosticPhase phase) {
   switch (phase) {
-    case DiagnosticPhase::kPreprocessing: return "preprocessing";
-    case DiagnosticPhase::kParsing: return "parsing";
-    case DiagnosticPhase::kNameLookup: return "name-lookup";
-    case DiagnosticPhase::kOverloadResolution: return "overload-resolution";
+    case DiagnosticPhase::kPreprocessing:
+      return "preprocessing";
+    case DiagnosticPhase::kParsing:
+      return "parsing";
+    case DiagnosticPhase::kNameLookup:
+      return "name-lookup";
+    case DiagnosticPhase::kOverloadResolution:
+      return "overload-resolution";
     case DiagnosticPhase::kTemplateInstantiation:
       return "template-instantiation";
-    case DiagnosticPhase::kCudaSema: return "cuda-sema";
-    case DiagnosticPhase::kArtifactExtraction: return "artifact-extraction";
+    case DiagnosticPhase::kCudaSema:
+      return "cuda-sema";
+    case DiagnosticPhase::kArtifactExtraction:
+      return "artifact-extraction";
   }
   throw InvalidObservation();
 }
 
 std::string_view diagnostic_severity_name(const DiagnosticSeverity severity) {
   switch (severity) {
-    case DiagnosticSeverity::kRemark: return "remark";
-    case DiagnosticSeverity::kNote: return "note";
-    case DiagnosticSeverity::kWarning: return "warning";
-    case DiagnosticSeverity::kError: return "error";
-    case DiagnosticSeverity::kFatal: return "fatal";
-    case DiagnosticSeverity::kNone: break;
+    case DiagnosticSeverity::kRemark:
+      return "remark";
+    case DiagnosticSeverity::kNote:
+      return "note";
+    case DiagnosticSeverity::kWarning:
+      return "warning";
+    case DiagnosticSeverity::kError:
+      return "error";
+    case DiagnosticSeverity::kFatal:
+      return "fatal";
+    case DiagnosticSeverity::kNone:
+      break;
   }
   throw InvalidObservation();
 }
@@ -1278,13 +1306,12 @@ Json normalized_diagnostic_json(const NormalizedDiagnostic& diagnostic) {
     related.reserve(diagnostic.location.related.size());
     for (const NormalizedDiagnosticRelatedLocation& entry :
          diagnostic.location.related) {
-      related.push_back(object({{"message", entry.rendered_message},
-                                {"spanId", entry.span_id}}));
+      related.push_back(object(
+          {{"message", entry.rendered_message}, {"spanId", entry.span_id}}));
     }
-    location = object(
-        {{"kind", "source"},
-         {"primarySpanId", diagnostic.location.primary_span_id},
-         {"related", Json(std::move(related))}});
+    location = object({{"kind", "source"},
+                       {"primarySpanId", diagnostic.location.primary_span_id},
+                       {"related", Json(std::move(related))}});
   } else {
     location = object({{"kind", "none"}});
   }
@@ -1292,10 +1319,9 @@ Json normalized_diagnostic_json(const NormalizedDiagnostic& diagnostic) {
       {{"code", diagnostic.code},
        {"diagnosticId", diagnostic.diagnostic_id},
        {"location", std::move(location)},
-       {"parentDiagnosticId",
-        diagnostic.parent_diagnostic_id.empty()
-            ? Json(nullptr)
-            : Json(diagnostic.parent_diagnostic_id)},
+       {"parentDiagnosticId", diagnostic.parent_diagnostic_id.empty()
+                                  ? Json(nullptr)
+                                  : Json(diagnostic.parent_diagnostic_id)},
        {"phase", diagnostic_phase_name(diagnostic.phase)},
        {"renderedMessage", diagnostic.rendered_message},
        {"severity", diagnostic_severity_name(diagnostic.severity)},
@@ -1314,16 +1340,14 @@ struct DiagnosticBuild final {
   std::vector<std::string> blocking_ids;
 };
 
-using DiagnosticSpanIds =
-    std::array<std::vector<std::string>, 2U>;
+using DiagnosticSpanIds = std::array<std::vector<std::string>, 2U>;
 
 DiagnosticSpanIds add_diagnostic_spans(
-    const ProducerReviewResult& producer,
-    const std::vector<FileRecord>& files,
+    const ProducerReviewResult& producer, const std::vector<FileRecord>& files,
     std::map<std::string, SpanRecord, std::less<>>& spans) {
   DiagnosticSpanIds result;
-  for (std::size_t pass_index = 0U;
-       pass_index < producer.completed_pass_count; ++pass_index) {
+  for (std::size_t pass_index = 0U; pass_index < producer.completed_pass_count;
+       ++pass_index) {
     const ProducerPassObservation& pass = producer.passes[pass_index];
     result[pass_index].resize(pass.diagnostics.size());
     for (std::size_t index = 0U; index < pass.diagnostics.size(); ++index) {
@@ -1350,11 +1374,18 @@ DiagnosticSpanIds add_diagnostic_spans(
 }
 
 bool pass_observation_failed(const ProducerPassObservation& pass) noexcept {
+  const bool resolved_layout = pass.layout.selected &&
+                               pass.layout.resolved_layout_type &&
+                               pass.layout.resolved_static_affine_layout &&
+                               !pass.layout.canonical_usr.empty();
+  const bool resolved_view_copy =
+      pass.view_copy.selected && !pass.view_copy.ambiguous &&
+      pass.view_copy.resolved_function && pass.view_copy.resolved_copy &&
+      !pass.view_copy.canonical_usr.empty();
   return !pass.invocation_succeeded || pass.policy_failed ||
          pass.policy_violation_count != 0U || pass.clang_error_count != 0U ||
-         !pass.layout.selected || !pass.layout.resolved_layout_type ||
-         !pass.layout.resolved_static_affine_layout ||
-         pass.layout.canonical_usr.empty();
+         !((resolved_layout && empty_view_copy(pass.view_copy)) ||
+           (resolved_view_copy && empty_layout(pass.layout)));
 }
 
 bool rejected_pass_failed(const ProducerReviewResult& producer,
@@ -1366,8 +1397,7 @@ bool rejected_pass_failed(const ProducerReviewResult& producer,
 }
 
 DiagnosticBuild normalize_diagnostics(
-    const ProducerReviewResult& producer,
-    const DecodedCompileSession& session,
+    const ProducerReviewResult& producer, const DecodedCompileSession& session,
     const std::vector<FileRecord>& files,
     const std::map<std::string, SpanRecord, std::less<>>& spans,
     const DiagnosticSpanIds& diagnostic_span_ids) {
@@ -1385,14 +1415,15 @@ DiagnosticBuild normalize_diagnostics(
 
   DiagnosticBuild output;
   std::map<std::string, DiagnosticRecord, std::less<>> records;
-  for (std::size_t pass_index = 0U;
-       pass_index < producer.completed_pass_count; ++pass_index) {
+  for (std::size_t pass_index = 0U; pass_index < producer.completed_pass_count;
+       ++pass_index) {
     const ProducerPassObservation& pass = producer.passes[pass_index];
     const SemanticPassView semantic_pass = session.semantic_pass(pass_index);
     DiagnosticNormalizerConfig config = {
         session.compilation_contract_hash(),
         semantic_pass.pass_id,
-        static_cast<std::uint32_t>(session.request_semantic_limit(CompileSemanticLimit::kDiagnostics)),
+        static_cast<std::uint32_t>(
+            session.request_semantic_limit(CompileSemanticLimit::kDiagnostics)),
         session.maximum_output_byte_length(),
         opened_span_ids,
         opened_virtual_paths,
@@ -1423,7 +1454,8 @@ DiagnosticBuild normalize_diagnostics(
     }
 
     bool has_root_blocking = false;
-    for (std::size_t index = 0U; index < normalizer.diagnostic_count(); ++index) {
+    for (std::size_t index = 0U; index < normalizer.diagnostic_count();
+         ++index) {
       const NormalizedDiagnostic* diagnostic = normalizer.diagnostic(index);
       if (diagnostic == nullptr) throw InvalidObservation();
       if (diagnostic->parent_diagnostic_id.empty() &&
@@ -1447,7 +1479,8 @@ DiagnosticBuild normalize_diagnostics(
       } else {
         synthetic.custom_code = CustomDiagnosticCode::kSemanticExtractionFailed;
         synthetic.rendered_message =
-            "selected layout extraction did not yield a supported resolved semantic fact";
+            "selected frontend extraction did not yield a supported resolved "
+            "semantic fact";
       }
       synthetic.subject.kind = DiagnosticSubjectKind::kCompiler;
       static_cast<void>(normalizer.normalize(synthetic));
@@ -1455,17 +1488,20 @@ DiagnosticBuild normalize_diagnostics(
 
     std::vector<std::string>& pass_ids = output.pass_ids[pass_index];
     pass_ids.reserve(normalizer.diagnostic_count());
-    for (std::size_t index = 0U; index < normalizer.diagnostic_count(); ++index) {
+    for (std::size_t index = 0U; index < normalizer.diagnostic_count();
+         ++index) {
       const NormalizedDiagnostic* diagnostic = normalizer.diagnostic(index);
       if (diagnostic == nullptr) throw InvalidObservation();
-      const bool root_blocking = diagnostic->parent_diagnostic_id.empty() &&
+      const bool root_blocking =
+          diagnostic->parent_diagnostic_id.empty() &&
           (diagnostic->severity == DiagnosticSeverity::kError ||
            diagnostic->severity == DiagnosticSeverity::kFatal);
       pass_ids.push_back(diagnostic->diagnostic_id);
-      if (!records.emplace(
-              diagnostic->diagnostic_id,
-              DiagnosticRecord{diagnostic->diagnostic_id, root_blocking,
-                               normalized_diagnostic_json(*diagnostic)})
+      if (!records
+               .emplace(
+                   diagnostic->diagnostic_id,
+                   DiagnosticRecord{diagnostic->diagnostic_id, root_blocking,
+                                    normalized_diagnostic_json(*diagnostic)})
                .second) {
         throw InvalidObservation();
       }
@@ -1483,13 +1519,15 @@ DiagnosticBuild normalize_diagnostics(
       throw InvalidObservation();
     }
   }
-  if (records.size() > session.request_semantic_limit(CompileSemanticLimit::kDiagnostics)) {
+  if (records.size() >
+      session.request_semantic_limit(CompileSemanticLimit::kDiagnostics)) {
     throw ArtifactResourceLimit();
   }
   output.records.reserve(records.size());
   for (auto& [id, record] : records) {
     static_cast<void>(id);
-    if (record.root_blocking) output.blocking_ids.push_back(record.diagnostic_id);
+    if (record.root_blocking)
+      output.blocking_ids.push_back(record.diagnostic_id);
     output.records.push_back(std::move(record));
   }
   if (output.blocking_ids.empty()) throw InvalidObservation();
@@ -1510,13 +1548,14 @@ Json build_rejected_payload(const ProducerReviewResult& producer,
   const std::vector<RootRecord> roots = build_roots(session);
   const OpenedIdentityMap opened = merge_opened_files(producer);
   const std::vector<FileRecord> files = build_files(session, roots, opened);
-  const FileRecord& main_file = file_by_path(files, session.main_virtual_path());
+  const FileRecord& main_file =
+      file_by_path(files, session.main_virtual_path());
   const Json::Object& main_json = std::get<Json::Object>(main_file.json.value);
   if (std::get<std::string>(main_json.at("role").value) != "main-source") {
     throw InvalidObservation();
   }
-  for (std::size_t pass_index = 0U;
-       pass_index < producer.completed_pass_count; ++pass_index) {
+  for (std::size_t pass_index = 0U; pass_index < producer.completed_pass_count;
+       ++pass_index) {
     const ProducerPassObservation& pass = producer.passes[pass_index];
     if (std::none_of(pass.opened_files.begin(), pass.opened_files.end(),
                      [&session](const ProducerOpenedFileObservation& file) {
@@ -1554,24 +1593,24 @@ Json build_rejected_payload(const ProducerReviewResult& producer,
       hash_json(file_set_projection("source", files), maximum_byte_length);
   const std::string header_set_sha256 =
       hash_json(file_set_projection("header", files), maximum_byte_length);
-  const Json closure_projection = object(
-      {{"domain", "browsergrad.compiler.cpp-cute.input-closure.v2"},
-       {"files", Json(json_array_of_files(files))},
-       {"headerSetSha256", header_set_sha256},
-       {"includeEdges", Json(json_array_of_edges(edges))},
-       {"includeRoots", Json(json_array_of_roots(roots))},
-       {"mainFileId", main_file.file_id},
-       {"sourceSetSha256", source_set_sha256}});
+  const Json closure_projection =
+      object({{"domain", "browsergrad.compiler.cpp-cute.input-closure.v2"},
+              {"files", Json(json_array_of_files(files))},
+              {"headerSetSha256", header_set_sha256},
+              {"includeEdges", Json(json_array_of_edges(edges))},
+              {"includeRoots", Json(json_array_of_roots(roots))},
+              {"mainFileId", main_file.file_id},
+              {"sourceSetSha256", source_set_sha256}});
   const std::string closure_sha256 =
       hash_json(closure_projection, maximum_byte_length);
-  const Json inputs = object(
-      {{"closureSha256", closure_sha256},
-       {"files", Json(json_array_of_files(files))},
-       {"headerSetSha256", header_set_sha256},
-       {"includeEdges", Json(json_array_of_edges(edges))},
-       {"includeRoots", Json(json_array_of_roots(roots))},
-       {"mainFileId", main_file.file_id},
-       {"sourceSetSha256", source_set_sha256}});
+  const Json inputs =
+      object({{"closureSha256", closure_sha256},
+              {"files", Json(json_array_of_files(files))},
+              {"headerSetSha256", header_set_sha256},
+              {"includeEdges", Json(json_array_of_edges(edges))},
+              {"includeRoots", Json(json_array_of_roots(roots))},
+              {"mainFileId", main_file.file_id},
+              {"sourceSetSha256", source_set_sha256}});
 
   const std::string empty_surface_sha256 =
       hash_json(empty_shared_surface_projection(), maximum_byte_length);
@@ -1596,9 +1635,8 @@ Json build_rejected_payload(const ProducerReviewResult& producer,
          {"diagnosticIds", strings_json(diagnostic_build.pass_ids[index])},
          {"domain", pass.domain},
          {"factIds", Json::Array{}},
-         {"includeEdgeIds",
-          executed ? strings_json(pass_edge_ids.ids[index])
-                   : Json(Json::Array{})},
+         {"includeEdgeIds", executed ? strings_json(pass_edge_ids.ids[index])
+                                     : Json(Json::Array{})},
          {"invocationMode", pass.invocation_mode},
          {"observedInputClosureSha256",
           executed ? Json(observed_hash) : Json(nullptr)},
@@ -1620,20 +1658,18 @@ Json build_rejected_payload(const ProducerReviewResult& producer,
        {"declarations", Json::Array{}},
        {"diagnostics", Json(std::move(diagnostic_values))},
        {"entries", Json::Array{}},
-       {"extraction",
-        object({{"appliedTransforms", Json::Array{}},
-                {"compilationContractHash",
-                 session.compilation_contract_hash()},
-                {"inputClosureSha256", closure_sha256}})},
+       {"extraction", object({{"appliedTransforms", Json::Array{}},
+                              {"compilationContractHash",
+                               session.compilation_contract_hash()},
+                              {"inputClosureSha256", closure_sha256}})},
        {"facts", Json::Array{}},
        {"functionBodies", Json::Array{}},
        {"initializerExpressions", Json::Array{}},
        {"inputs", inputs},
        {"macroExpansions", Json::Array{}},
-       {"outcome",
-        object({{"blockingDiagnosticIds",
-                 strings_json(diagnostic_build.blocking_ids)},
-                {"kind", "rejected"}})},
+       {"outcome", object({{"blockingDiagnosticIds",
+                            strings_json(diagnostic_build.blocking_ids)},
+                           {"kind", "rejected"}})},
        {"overloadResolutions", Json::Array{}},
        {"semanticGraphOwnerPassId", "cuda-device-sema"},
        {"semanticPasses", Json(std::move(semantic_passes))},
@@ -1648,21 +1684,20 @@ Json build_rejected_payload(const ProducerReviewResult& producer,
 void validate_producer(const ProducerReviewResult& producer) {
   const bool accepted =
       producer.status == ProducerReviewStatus::kReviewComplete;
-  const bool rejected = producer.status ==
+  const bool rejected =
+      producer.status ==
       ProducerReviewStatus::kReviewCompleteWithBlockingDiagnostics;
   if ((!accepted && !rejected) || producer.completed_pass_count == 0U ||
       producer.completed_pass_count > producer.passes.size()) {
     throw InvalidObservation();
   }
-  if (accepted &&
-      (producer.completed_pass_count != 2U ||
-       producer.blocking_diagnostic_pass_count != 0U ||
-       !producer.shared_surface_converged)) {
+  if (accepted && (producer.completed_pass_count != 2U ||
+                   producer.blocking_diagnostic_pass_count != 0U ||
+                   !producer.shared_surface_converged)) {
     throw InvalidObservation();
   }
-  if (rejected &&
-      (producer.blocking_diagnostic_pass_count == 0U ||
-       producer.shared_surface_converged)) {
+  if (rejected && (producer.blocking_diagnostic_pass_count == 0U ||
+                   producer.shared_surface_converged)) {
     throw InvalidObservation();
   }
   bool observed_failed_pass = false;
@@ -1679,7 +1714,27 @@ void validate_producer(const ProducerReviewResult& producer) {
           pass.layout.resolved_static_affine_layout ||
           !pass.layout.canonical_usr.empty() ||
           !pass.layout.canonical_name.empty() ||
-          !pass.layout.canonical_type.empty()) {
+          !pass.layout.canonical_type.empty() || pass.view_copy.selected ||
+          pass.view_copy.ambiguous || pass.view_copy.resolved_function ||
+          pass.view_copy.resolved_copy || pass.view_copy.cuda_host ||
+          pass.view_copy.cuda_device || pass.view_copy.cuda_global ||
+          pass.view_copy.force_inline ||
+          !pass.view_copy.canonical_usr.empty() ||
+          !pass.view_copy.canonical_name.empty() ||
+          !pass.view_copy.canonical_type.empty() ||
+          !pass.view_copy.copy_callee_usr.empty() ||
+          !pass.view_copy.copy_callee_name.empty() ||
+          !pass.view_copy.copy_callee_path.empty() ||
+          pass.view_copy.declaration_begin_byte != 0U ||
+          pass.view_copy.declaration_end_byte != 0U ||
+          pass.view_copy.identity_begin_byte != 0U ||
+          pass.view_copy.identity_end_byte != 0U ||
+          pass.view_copy.copy_begin_byte != 0U ||
+          pass.view_copy.copy_end_byte != 0U ||
+          pass.view_copy.source_tensor_ordinal != 0U ||
+          pass.view_copy.destination_tensor_ordinal != 0U ||
+          !pass.view_copy.parameters.empty() ||
+          !pass.view_copy.tensors.empty()) {
         throw InvalidObservation();
       }
       continue;
@@ -1703,8 +1758,7 @@ void validate_producer(const ProducerReviewResult& producer) {
 }  // namespace
 
 ArtifactV3WriteStatus write_cpp_cute_artifact_v3(
-    const ProducerReviewResult& producer,
-    const DecodedCompileSession& session,
+    const ProducerReviewResult& producer, const DecodedCompileSession& session,
     ArtifactV3ResultSink& result_sink) noexcept {
   try {
     validate_producer(producer);
@@ -1714,34 +1768,28 @@ ArtifactV3WriteStatus write_cpp_cute_artifact_v3(
         maximum_byte_length > ArtifactV3ResultSink::kAbiMaximumByteLength) {
       return ArtifactV3WriteStatus::kInvalidObservation;
     }
-    Json payload = producer.status == ProducerReviewStatus::kReviewComplete
-                       ? build_accepted_payload(producer, session,
-                                                maximum_byte_length)
-                       : build_rejected_payload(producer, session,
-                                                maximum_byte_length);
+    Json payload =
+        producer.status == ProducerReviewStatus::kReviewComplete
+            ? build_accepted_payload(producer, session, maximum_byte_length)
+            : build_rejected_payload(producer, session, maximum_byte_length);
     const std::string artifact_hash = hash_json(
         object(
-            {{"domain",
-              "browsergrad.compiler.cpp-cute.frontend-artifact.v3"},
+            {{"domain", "browsergrad.compiler.cpp-cute.frontend-artifact.v3"},
              {"payload", payload},
              {"requiredExtensions", Json::Array{}},
-             {"schema",
-              "browsergrad.compiler.cpp-cute.frontend-artifact"},
+             {"schema", "browsergrad.compiler.cpp-cute.frontend-artifact"},
              {"version", object({{"major", 3U}, {"minor", 0U}})}}),
         maximum_byte_length);
     Json envelope = object(
         {{"artifactId",
-          std::string("bg.artifact.cpp-cute-frontend.sha256.") +
-              artifact_hash},
+          std::string("bg.artifact.cpp-cute-frontend.sha256.") + artifact_hash},
          {"payload", std::move(payload)},
-         {"producer",
-          object({{"id", "browsergrad-tools/cpp-cute-frontend"},
-                  {"version", "0.1.0"}})},
+         {"producer", object({{"id", "browsergrad-tools/cpp-cute-frontend"},
+                              {"version", "0.1.0"}})},
          {"requiredExtensions", Json::Array{}},
          {"schema", "browsergrad.compiler.cpp-cute.frontend-artifact"},
          {"version", object({{"major", 3U}, {"minor", 0U}})}});
-    const std::string bytes =
-        canonical_json(envelope, maximum_byte_length);
+    const std::string bytes = canonical_json(envelope, maximum_byte_length);
     if (bytes.empty() ||
         bytes.size() > std::numeric_limits<std::uint32_t>::max()) {
       return ArtifactV3WriteStatus::kResourceLimit;

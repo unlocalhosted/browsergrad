@@ -411,7 +411,7 @@ describe("bounded Clang-WASM build source executor", () => {
       authority: "build-source-snapshot-only",
       lockId: lock.lockId,
       sourceSetSha256: lock.extractorSourceSetSha256,
-      fileCount: 38,
+      fileCount: 42,
       sourceVerified: true,
       buildExecuted: false,
       outputIdentityAuthorized: false,
@@ -419,6 +419,8 @@ describe("bounded Clang-WASM build source executor", () => {
       releaseReady: false,
     });
     expect((await readdir(input.roots.extractorSourceRoot)).sort()).toEqual([
+      "BrowserGradCppCuteArtifactJson.cpp",
+      "BrowserGradCppCuteArtifactJson.h",
       "BrowserGradCppCuteArtifactV3.cpp",
       "BrowserGradCppCuteArtifactV3.h",
       "BrowserGradCppCuteArtifactWriter.cpp",
@@ -454,6 +456,8 @@ describe("bounded Clang-WASM build source executor", () => {
       "BrowserGradCppCuteRuntime.h",
       "BrowserGradCppCuteSha256.cpp",
       "BrowserGradCppCuteSha256.h",
+      "BrowserGradCppCuteViewCopyArtifact.cpp",
+      "BrowserGradCppCuteViewCopyArtifact.h",
       "BrowserGradCppCuteVirtualPath.cpp",
       "BrowserGradCppCuteVirtualPath.h",
       "CMakeLists.txt",

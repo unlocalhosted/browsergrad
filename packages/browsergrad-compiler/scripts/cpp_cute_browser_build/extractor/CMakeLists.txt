@@ -94,6 +94,8 @@ add_llvm_executable(browsergrad-cpp-cute-extractor
   "${BROWSERGRAD_PATCHED_EXPR_CONSTANT_SOURCE}"
   BrowserGradCppCuteArtifactV3.cpp
   BrowserGradCppCuteArtifactV3.h
+  BrowserGradCppCuteArtifactJson.cpp
+  BrowserGradCppCuteArtifactJson.h
   BrowserGradCppCuteArtifactWriter.cpp
   BrowserGradCppCuteArtifactWriter.h
   BrowserGradCppCuteBrowserHost.cpp
@@ -126,6 +128,8 @@ add_llvm_executable(browsergrad-cpp-cute-extractor
   BrowserGradCppCuteRuntime.h
   BrowserGradCppCuteSha256.cpp
   BrowserGradCppCuteSha256.h
+  BrowserGradCppCuteViewCopyArtifact.cpp
+  BrowserGradCppCuteViewCopyArtifact.h
   BrowserGradCppCuteVirtualPath.cpp
   BrowserGradCppCuteVirtualPath.h
 )

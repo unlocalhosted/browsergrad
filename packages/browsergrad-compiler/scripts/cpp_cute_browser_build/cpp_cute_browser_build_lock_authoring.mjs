@@ -14,6 +14,9 @@ import {
 import {
   CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_RESOURCE,
 } from "../../dist/resources/cpp_cute_browser_build_lock_v1.js";
+import {
+  CPP_CUTE_BROWSER_EXTRACTOR_SOURCE_PATHS,
+} from "./cpp_cute_browser_build_plan.mjs";
 
 const AUTHORING_ERROR = "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-LOCK-AUTHORING";
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
@@ -46,15 +49,15 @@ export async function projectCppCuteBrowserBuildInputLock() {
   const projected = structuredClone(current);
   const source = projected.body.recipe.extractorSource;
   const files = [];
-  for (const [index, file] of source.files.entries()) {
+  for (const [index, path] of CPP_CUTE_BROWSER_EXTRACTOR_SOURCE_PATHS.entries()) {
     let bytes;
     try {
-      bytes = await readFile(join(extractorRoot, file.path));
+      bytes = await readFile(join(extractorRoot, path));
     } catch (cause) {
-      invalid(`$.files[${index}]`, `failed to read owned source ${file.path}`, { cause });
+      invalid(`$.files[${index}]`, `failed to read owned source ${path}`, { cause });
     }
     files.push({
-      path: file.path,
+      path,
       sha256: createHash("sha256").update(bytes).digest("hex"),
       byteLength: String(bytes.byteLength),
     });
