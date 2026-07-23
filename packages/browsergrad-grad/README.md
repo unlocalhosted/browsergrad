@@ -149,6 +149,8 @@ t.shape, t.ndim, t.size, t.data    # numpy view
 t.numpy(), t.tolist(), t.item()    # exports
 t.detach()                         # storage-sharing leaf, no autograd
 t.to("float64")                    # owning differentiable floating cast
+t.to("cpu"), t.cpu()               # CPU identity
+t.to("cuda"), t.cuda()             # explicit NotImplementedError
 
 # Arithmetic — broadcasts in v0.2
 a + b, a - b, a * b, a / b, -a
@@ -240,6 +242,9 @@ Remaining explicit limits:
 - **Floating casts stay differentiable.** `.to()` casts among
   float16/float32/float64 retain an autograd edge and restore the source dtype
   in backward. Bool/integer casts are detached.
+- **Device requests are truthful.** Eager tensor storage is CPU/Pyodide-backed.
+  CPU requests preserve identity; unavailable CUDA/MPS/XPU/Meta requests fail
+  before execution and never masquerade as a transfer.
 - **Reverse-mode only.** No forward-mode, no functional transforms (vmap, etc.).
 - **`Tensor.__slots__`.** Slot-based attribute layout to keep memory predictable for tensors in long training loops.
 

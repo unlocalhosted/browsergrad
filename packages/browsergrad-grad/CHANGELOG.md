@@ -9,6 +9,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- `Tensor.to()` now distinguishes supported dtype conversion from CPU device
+  identity and rejects invalid signatures or unavailable device storage before
+  execution. `Tensor.cuda()` raises explicitly instead of returning the same
+  CPU/Pyodide tensor and implying a transfer that never occurred.
 - Cross-dtype `Tensor.to()` now records a differentiable cast among
   float16/float32/float64 and restores the source storage dtype in its VJP.
   It preserves NumPy layout order, respects `no_grad()`, and keeps casts with a

@@ -14,6 +14,10 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Makes Grad tensor device placement honest: CPU requests preserve identity,
+  while CUDA/MPS/XPU/Meta and other unavailable eager devices fail before
+  execution. Invalid or ambiguous `Tensor.to()` requests no longer become
+  silent CPU no-ops.
 - Preserves Grad autograd through float16/float32/float64 `Tensor.to()` casts,
   including source-dtype VJPs and non-contiguous layout order; casts involving
   bool or integer storage remain explicit detached boundaries.

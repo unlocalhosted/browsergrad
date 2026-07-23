@@ -1697,8 +1697,8 @@ class Tensor:
             return self.data.shape
         return int(self.data.shape[dim])
 
-    # Device manipulation — no-op stubs (browsergrad has one notional device).
-    # Return self for chaining: tensor(...).to(device).requires_grad_()-style code.
+    # Eager storage is CPU/Pyodide-backed. Device requests must never imply a
+    # transfer to storage that does not exist.
 
     @property
     def device(self) -> str:
@@ -1706,34 +1706,89 @@ class Tensor:
         return "cpu"
 
     def to(self, *args, **kwargs) -> "Tensor":
-        # Handle dtype conversion: x.to("float32"), x.to(dtype="int64"), etc.
-        dtype_spec = kwargs.get("dtype") or (args[0] if args else None)
-        if dtype_spec is not None:
-            try:
-                target_type = _resolve_dtype(dtype_spec)
-                if target_type == self.data.dtype.type:
-                    return self  # same dtype — preserve autograd graph intact
-                out = Tensor(self.data, dtype=dtype_spec)
-                if (
-                    self.dtype in _VARIADIC_FLOATING_DTYPES
-                    and out.dtype in _VARIADIC_FLOATING_DTYPES
-                ):
-                    source_dtype = self.data.dtype
-                    return _build_ctx(
-                        out,
-                        (self,),
-                        lambda g: (g.data.astype(source_dtype, copy=False),),
+        unsupported_kwargs = sorted(set(kwargs) - {"device", "dtype"})
+        if unsupported_kwargs:
+            raise TypeError(
+                "Tensor.to only supports device= and dtype=; unsupported "
+                f"keyword(s): {', '.join(unsupported_kwargs)}"
+            )
+        if len(args) > 2:
+            raise TypeError(
+                f"Tensor.to accepts at most two positional arguments, got {len(args)}"
+            )
+
+        dtype_provided = "dtype" in kwargs
+        device_provided = "device" in kwargs
+        dtype_spec = kwargs.get("dtype")
+        device_spec = kwargs.get("device")
+        if args:
+            first = args[0]
+            if isinstance(first, Tensor):
+                if len(args) != 1 or dtype_provided or device_provided:
+                    raise TypeError(
+                        "Tensor.to(other) cannot be combined with another dtype or device"
                     )
-                return out
-            except (ValueError, TypeError):
-                pass  # Not a dtype (e.g. device string "cpu")
-        return self
+                dtype_spec = first.dtype
+                device_spec = first.device
+            elif (
+                isinstance(first, str)
+                and first.split(":", 1)[0] in ("cpu", "cuda", "mps", "xpu", "meta")
+            ):
+                if device_provided:
+                    raise TypeError("Tensor.to received device more than once")
+                device_spec = first
+                if len(args) == 2:
+                    if dtype_provided:
+                        raise TypeError("Tensor.to received dtype more than once")
+                    dtype_spec = args[1]
+            else:
+                if dtype_provided:
+                    raise TypeError("Tensor.to received dtype more than once")
+                if len(args) == 2:
+                    raise TypeError(
+                        "Tensor.to(device, dtype) requires a recognized device "
+                        "as its first argument"
+                    )
+                dtype_spec = first
+
+        if device_spec is not None:
+            if not isinstance(device_spec, str):
+                raise TypeError(
+                    "Tensor.to device must be the string 'cpu'; "
+                    f"got {type(device_spec).__name__}"
+                )
+            if device_spec != "cpu":
+                raise NotImplementedError(
+                    f"Tensor.to({device_spec!r}) is unavailable: eager Grad storage "
+                    "is CPU/Pyodide-backed and no device transfer occurred"
+                )
+
+        if dtype_spec is None:
+            return self
+        target_type = _resolve_dtype(dtype_spec)
+        if target_type == self.data.dtype.type:
+            return self  # same dtype — preserve autograd graph intact
+        out = Tensor(self.data, dtype=dtype_spec)
+        if (
+            self.dtype in _VARIADIC_FLOATING_DTYPES
+            and out.dtype in _VARIADIC_FLOATING_DTYPES
+        ):
+            source_dtype = self.data.dtype
+            return _build_ctx(
+                out,
+                (self,),
+                lambda g: (g.data.astype(source_dtype, copy=False),),
+            )
+        return out
 
     def cpu(self) -> "Tensor":
         return self
 
     def cuda(self) -> "Tensor":
-        return self
+        raise NotImplementedError(
+            "Tensor.cuda() is unavailable: eager Grad storage is "
+            "CPU/Pyodide-backed and no CUDA transfer occurred"
+        )
 
     @property
     def T(self) -> "Tensor":

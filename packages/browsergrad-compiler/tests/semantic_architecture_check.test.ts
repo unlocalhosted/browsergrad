@@ -269,6 +269,22 @@ describe("semantic architecture guardrails", () => {
       gradFreeze,
     )).toContainEqual(expect.stringContaining("Tensor.to changed"));
     expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace(
+        '    def cpu(self) -> "Tensor":\n        return self',
+        '    def cpu(self) -> "Tensor":\n        return self.detach()',
+      ),
+      torchCompatSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("Tensor.cpu changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace(
+        "CPU/Pyodide-backed and no CUDA transfer occurred",
+        "CPU/Pyodide-backed",
+      ),
+      torchCompatSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("Tensor.cuda changed"));
+    expect(checkFrozenGradCompatibilitySources(
       tensorSource.replace("if _GRAD_ENABLED and any(p.requires_grad for p in parents):", "if True and any(p.requires_grad for p in parents):"),
       torchCompatSource,
       gradFreeze,

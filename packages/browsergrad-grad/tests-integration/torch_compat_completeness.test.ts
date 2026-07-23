@@ -100,33 +100,38 @@ x = torch.zeros(3, 4, 5)
   });
 });
 
-describe("device manipulation (no-op stubs for browsergrad)", () => {
+describe("device manipulation (explicit CPU identity and device refusal)", () => {
   beforeAll(reset);
 
-  it("tensor.to(device) and .cpu() / .cuda() return the same tensor (no-op)", async () => {
-    // PyTorch user code calls these unconditionally. Since browsergrad has one
-    // notional device, they should be no-ops that return self for chaining.
+  it("keeps CPU identity and rejects unavailable CUDA storage", async () => {
     const result = await target.run<{
-      identity_to: boolean;
+      identity_to_cpu: boolean;
       identity_cpu: boolean;
-      identity_cuda: boolean;
+      to_cuda_error: string;
+      cuda_error: string;
       chains_with_method: boolean;
     }>(`
 ${PRELUDE}
 x = torch.tensor([1.0, 2.0])
-# Same data after each call?
-identity_to   = (x.to("cpu").data == x.data).all()
-identity_cpu  = (x.cpu().data == x.data).all()
-identity_cuda = (x.cuda().data == x.data).all()
-# Should also chain — e.g. tensor(...).to(device).requires_grad_()
-y = torch.tensor([1.0, 2.0]).to("cuda")
+def error_name(call):
+    try:
+        call()
+        return "no_error"
+    except Exception as exc:
+        return type(exc).__name__
+identity_to_cpu = x.to("cpu") is x
+identity_cpu = x.cpu() is x
+y = torch.tensor([1.0, 2.0]).to("cpu")
 chains = isinstance(y, torch.Tensor)
-{"identity_to": bool(identity_to), "identity_cpu": bool(identity_cpu),
- "identity_cuda": bool(identity_cuda), "chains_with_method": bool(chains)}
+{"identity_to_cpu": bool(identity_to_cpu), "identity_cpu": bool(identity_cpu),
+ "to_cuda_error": error_name(lambda: x.to("cuda")),
+ "cuda_error": error_name(lambda: x.cuda()),
+ "chains_with_method": bool(chains)}
 `);
-    expect(result.identity_to).toBe(true);
+    expect(result.identity_to_cpu).toBe(true);
     expect(result.identity_cpu).toBe(true);
-    expect(result.identity_cuda).toBe(true);
+    expect(result.to_cuda_error).toBe("NotImplementedError");
+    expect(result.cuda_error).toBe("NotImplementedError");
     expect(result.chains_with_method).toBe(true);
   });
 });

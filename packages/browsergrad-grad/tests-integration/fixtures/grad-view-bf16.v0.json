@@ -351,11 +351,40 @@
       }
     },
     {
-      "id": "grad.conversion.to-unrecognized-string-noop.v0",
+      "id": "grad.conversion.to-invalid-request-rejected.v1",
       "expected": {
-        "sameObject": true,
-        "dtype": "float32",
-        "requiresGrad": true
+        "invalidPositional": "ValueError",
+        "invalidKeyword": "ValueError",
+        "unsupportedKeyword": "TypeError",
+        "duplicateDtype": "TypeError",
+        "duplicateDtypeNone": "TypeError",
+        "duplicateDeviceNone": "TypeError",
+        "tooManyArguments": "TypeError",
+        "ambiguousTwoPositional": "TypeError",
+        "invalidDeviceType": "TypeError"
+      }
+    },
+    {
+      "id": "grad.device.tensor-cpu-identity.v1",
+      "expected": {
+        "positionalSameObject": true,
+        "keywordSameObject": true,
+        "cpuMethodSameObject": true,
+        "combinedDtype": "float64",
+        "combinedRequiresGrad": true,
+        "combinedParentIdentity": true,
+        "otherDtype": "float64",
+        "otherParentIdentity": true
+      }
+    },
+    {
+      "id": "grad.device.tensor-unsupported-rejected.v1",
+      "expected": {
+        "toCuda": "NotImplementedError",
+        "toCudaIndex": "NotImplementedError",
+        "toMps": "NotImplementedError",
+        "toIndexedCpu": "NotImplementedError",
+        "cudaMethod": "NotImplementedError"
       }
     }
   ]

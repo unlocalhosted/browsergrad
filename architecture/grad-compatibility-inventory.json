@@ -413,7 +413,7 @@
       "referenceContract": "pytorch-shaped-compatibility",
       "dtypeEffect": "preserves",
       "condition": "requested-dtype-equals-storage-dtype",
-      "failurePolicy": "unrecognized-dtype-treated-as-device-noop",
+      "failurePolicy": "reject-invalid-to-request-before-execution",
       "aliasing": "same-object",
       "contiguity": "preserved",
       "materialization": "none",
@@ -435,7 +435,7 @@
       "referenceContract": "pytorch-shaped-compatibility",
       "dtypeEffect": "resolved-target",
       "condition": "different-supported-floating-dtype",
-      "failurePolicy": "unrecognized-dtype-treated-as-device-noop",
+      "failurePolicy": "reject-invalid-to-request-before-execution",
       "aliasing": "must-not-alias",
       "contiguity": "input-dependent",
       "materialization": "always",
@@ -459,7 +459,7 @@
       "referenceContract": "pytorch-shaped-compatibility",
       "dtypeEffect": "resolved-target",
       "condition": "different-dtype-with-nonfloating-endpoint",
-      "failurePolicy": "unrecognized-dtype-treated-as-device-noop",
+      "failurePolicy": "reject-invalid-to-request-before-execution",
       "aliasing": "must-not-alias",
       "contiguity": "input-dependent",
       "materialization": "always",
@@ -473,25 +473,71 @@
       ]
     },
     {
-      "id": "grad.conversion.to-unrecognized-string-noop.v0",
-      "surface": "Tensor.to(unrecognized_string)",
-      "class": "conversion",
+      "id": "grad.conversion.to-invalid-request-rejected.v1",
+      "surface": "Tensor.to(invalid_or_ambiguous_request)",
+      "class": "dtype-refusal",
       "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
-      "referenceContract": "pytorch-shaped-compatibility",
-      "dtypeEffect": "preserves",
-      "condition": "unrecognized-string",
-      "failurePolicy": "unrecognized-dtype-treated-as-device-noop",
-      "aliasing": "same-object",
-      "contiguity": "preserved",
-      "materialization": "none",
-      "autograd": "preserved",
-      "truth": "An unrecognized string is caught as a non-dtype device argument and returns self, so invalid dtype spellings can silently succeed as no-ops.",
+      "targetConformance": "browsergrad-defined",
+      "referenceContract": "browsergrad-grad-explicit",
+      "dtypeEffect": "none-rejected",
+      "condition": "invalid-to-request",
+      "failurePolicy": "reject-invalid-to-request-before-execution",
+      "aliasing": "not-applicable",
+      "contiguity": "not-applicable",
+      "materialization": "not-applicable",
+      "autograd": "not-applicable",
+      "truth": "Unrecognized dtype strings, unsupported keywords, duplicate dtype requests, excessive positional arguments, and ambiguous signatures fail before allocation instead of becoming silent no-ops.",
       "sourceDefinitions": [
         "tensor.py:Tensor.to"
       ],
       "fixtureCaseIds": [
-        "grad.conversion.to-unrecognized-string-noop.v0"
+        "grad.conversion.to-invalid-request-rejected.v1"
+      ]
+    },
+    {
+      "id": "grad.device.tensor-cpu.v1",
+      "surface": "Tensor.to(device='cpu') and Tensor.cpu()",
+      "class": "device-placement",
+      "observationStatus": "verified",
+      "targetConformance": "browsergrad-defined",
+      "referenceContract": "browsergrad-grad-explicit",
+      "dtypeEffect": "requested-dtype-dependent",
+      "condition": "cpu-device-request",
+      "failurePolicy": "cpu-only-reject-unsupported-device-before-execution",
+      "aliasing": "conditional",
+      "contiguity": "input-dependent",
+      "materialization": "conditional",
+      "autograd": "identity-or-graph-edge",
+      "truth": "The explicit CPU device request and cpu() return the same tensor when no dtype conversion is requested; composing device='cpu' with a supported dtype follows the frozen dtype-conversion contract.",
+      "sourceDefinitions": [
+        "tensor.py:Tensor.cpu",
+        "tensor.py:Tensor.to"
+      ],
+      "fixtureCaseIds": [
+        "grad.device.tensor-cpu-identity.v1"
+      ]
+    },
+    {
+      "id": "grad.device.tensor-unsupported-rejected.v1",
+      "surface": "Tensor.to(non_cpu_device) and Tensor.cuda()",
+      "class": "device-placement",
+      "observationStatus": "verified",
+      "targetConformance": "browsergrad-defined",
+      "referenceContract": "browsergrad-grad-explicit",
+      "dtypeEffect": "none-rejected",
+      "condition": "unsupported-device-request",
+      "failurePolicy": "cpu-only-reject-unsupported-device-before-execution",
+      "aliasing": "not-applicable",
+      "contiguity": "not-applicable",
+      "materialization": "not-applicable",
+      "autograd": "not-applicable",
+      "truth": "CUDA, MPS, XPU, Meta, indexed CPU, and every other non-CPU eager storage request fail before execution and explicitly state that no device transfer occurred.",
+      "sourceDefinitions": [
+        "tensor.py:Tensor.cuda",
+        "tensor.py:Tensor.to"
+      ],
+      "fixtureCaseIds": [
+        "grad.device.tensor-unsupported-rejected.v1"
       ]
     }
   ]

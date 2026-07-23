@@ -467,11 +467,67 @@ cases["grad.conversion.to-cross-nonfloating-detached.v1"] = {
     "requiresGrad": bool(nonfloating_cross_dtype.requires_grad),
     "graphEdge": bool(nonfloating_cross_dtype._ctx is not None),
 }
-unrecognized_to = base.to("definitely-not-a-browsergrad-dtype")
-cases["grad.conversion.to-unrecognized-string-noop.v0"] = {
-    "sameObject": bool(unrecognized_to is base),
-    "dtype": unrecognized_to.dtype,
-    "requiresGrad": bool(unrecognized_to.requires_grad),
+def to_error(call):
+    try:
+        call()
+        return "no_error"
+    except Exception as exc:
+        return type(exc).__name__
+cases["grad.conversion.to-invalid-request-rejected.v1"] = {
+    "invalidPositional": to_error(
+        lambda: base.to("definitely-not-a-browsergrad-dtype")
+    ),
+    "invalidKeyword": to_error(
+        lambda: base.to(dtype="definitely-not-a-browsergrad-dtype")
+    ),
+    "unsupportedKeyword": to_error(lambda: base.to(copy=True)),
+    "duplicateDtype": to_error(
+        lambda: base.to("float64", dtype="float32")
+    ),
+    "duplicateDtypeNone": to_error(
+        lambda: base.to("float64", dtype=None)
+    ),
+    "duplicateDeviceNone": to_error(
+        lambda: base.to("cpu", device=None)
+    ),
+    "tooManyArguments": to_error(
+        lambda: base.to("cpu", "float64", False)
+    ),
+    "ambiguousTwoPositional": to_error(
+        lambda: base.to("float64", "cpu")
+    ),
+    "invalidDeviceType": to_error(lambda: base.to(device=object())),
+}
+cpu_and_dtype_source = grad.Tensor(
+    np.array([1.0, 2.0], dtype=np.float32),
+    requires_grad=True,
+)
+cpu_and_dtype = cpu_and_dtype_source.to("cpu", dtype="float64")
+other_dtype = grad.Tensor(
+    np.array([0.0], dtype=np.float64),
+    dtype="float64",
+)
+to_other = cpu_and_dtype_source.to(other_dtype)
+cases["grad.device.tensor-cpu-identity.v1"] = {
+    "positionalSameObject": bool(base.to("cpu") is base),
+    "keywordSameObject": bool(base.to(device="cpu") is base),
+    "cpuMethodSameObject": bool(base.cpu() is base),
+    "combinedDtype": cpu_and_dtype.dtype,
+    "combinedRequiresGrad": bool(cpu_and_dtype.requires_grad),
+    "combinedParentIdentity": bool(
+        cpu_and_dtype._ctx[0][0] is cpu_and_dtype_source
+    ),
+    "otherDtype": to_other.dtype,
+    "otherParentIdentity": bool(
+        to_other._ctx[0][0] is cpu_and_dtype_source
+    ),
+}
+cases["grad.device.tensor-unsupported-rejected.v1"] = {
+    "toCuda": to_error(lambda: base.to("cuda")),
+    "toCudaIndex": to_error(lambda: base.to(device="cuda:0")),
+    "toMps": to_error(lambda: base.to("mps")),
+    "toIndexedCpu": to_error(lambda: base.to("cpu:0")),
+    "cudaMethod": to_error(lambda: base.cuda()),
 }
 
 {
