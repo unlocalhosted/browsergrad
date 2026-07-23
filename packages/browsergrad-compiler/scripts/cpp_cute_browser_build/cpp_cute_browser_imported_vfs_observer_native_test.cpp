@@ -233,23 +233,38 @@ int run_observer_tests() {
 
   // Compiler-originated relative and parent-relative lookups are normalized
   // before they cross the canonical host VFS ABI.
-  std::string normalized;
-  BG_CHECK(cpp_cute_normalize_virtual_path(
+  std::array<char, kCppCuteMaximumVirtualPathByteLength> normalized_bytes{};
+  std::size_t normalized_size = 0U;
+  const auto normalize = [&](const std::string_view path) {
+    const bool result = cpp_cute_normalize_virtual_path(
+        path, normalized_bytes.data(), normalized_bytes.size(),
+        normalized_size);
+    return result;
+  };
+  const auto normalized = [&] {
+    return std::string_view(normalized_bytes.data(), normalized_size);
+  };
+  BG_CHECK(normalize(
       "/toolchain/cxx/include/c++/v1/__type_traits/../__concepts/"
-      "__concept_macros.h",
-      normalized));
-  BG_CHECK(normalized ==
+      "__concept_macros.h"));
+  BG_CHECK(normalized() ==
            "/toolchain/cxx/include/c++/v1/__concepts/__concept_macros.h");
-  BG_CHECK(cpp_cute_normalize_virtual_path(
-      "toolchain//cxx/./include/c++/v1/vector", normalized));
-  BG_CHECK(normalized == "/toolchain/cxx/include/c++/v1/vector");
-  BG_CHECK(cpp_cute_normalize_virtual_path("/toolchain/cxx/../../cuda",
-                                           normalized));
-  BG_CHECK(normalized == "/cuda");
-  BG_CHECK(!cpp_cute_normalize_virtual_path("/../../host-secret", normalized));
-  BG_CHECK(normalized.empty());
-  BG_CHECK(!cpp_cute_normalize_virtual_path("../host-secret", normalized));
-  BG_CHECK(normalized.empty());
+  BG_CHECK(normalize("toolchain//cxx/./include/c++/v1/vector"));
+  BG_CHECK(normalized() == "/toolchain/cxx/include/c++/v1/vector");
+  BG_CHECK(normalize("/toolchain/cxx/../../cuda"));
+  BG_CHECK(normalized() == "/cuda");
+  BG_CHECK(!normalize("/../../host-secret"));
+  BG_CHECK(normalized().empty());
+  BG_CHECK(!normalize("../host-secret"));
+  BG_CHECK(normalized().empty());
+  std::array<char, 4U> bounded{};
+  std::size_t bounded_size = 7U;
+  BG_CHECK(!cpp_cute_normalize_virtual_path(
+      "/four", bounded.data(), bounded.size(), bounded_size));
+  BG_CHECK(bounded_size == 0U);
+  BG_CHECK(!cpp_cute_normalize_virtual_path(
+      "/path", nullptr, 0U, bounded_size));
+  BG_CHECK(bounded_size == 0U);
 
   return 0;
 }

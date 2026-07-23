@@ -22,10 +22,10 @@ import {
 } from "../../src/cpp_cute_browser_runtime_abi.js";
 
 const LOCK_ID =
-  "bg.cpp.browser-build-input-lock.sha256.4e2a5b71dc0831a1728d8b2be730ef8b13853e4edf4c02bea92eb569f0305c0e";
-const RESOURCE_SHA256 = "6828a4be283daeb1595134989f7585348998804c32d5dcac5076178fb8d2b976";
-const RECIPE_SHA256 = "431876ed83b6e4207299c324f7d922b1559120d1bee1a690c9e8bcad9eb4facd";
-const EXTRACTOR_SOURCE_SHA256 = "1721bac6c0cc1426b3aafa8495f384444735ed34a80a945a2c78ae5236b5ab2e";
+  "bg.cpp.browser-build-input-lock.sha256.a9f38942ce47c38ad68d3096c1d25029d0b6129544ebcfce761bb55325d26af1";
+const RESOURCE_SHA256 = "abd2eb5474f23c0c3b543350bfe9e6bc03a6f00338867a1ebddd6cf056b6d70a";
+const RECIPE_SHA256 = "ad76f522c902b6bc73ca64777da5ab44e783f7fd8c7037b50eaa898e76800ae6";
+const EXTRACTOR_SOURCE_SHA256 = "b8eff61c9abe4876124545f74918c9eb8226dca55071c7ace084ef9b3c812085";
 const NOTICE_SHA256 = "ae94cc9272e8d3458778dda90db035388450075d5404f736f6daadc7192163d1";
 const BLOCKERS = [
   "browsergrad-extractor-distributed-materialization",
@@ -52,7 +52,7 @@ describe("browser Clang-WASM build-input lock", () => {
       runtimeAbiManifestId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
       runtimeAbiResourceSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
       runtimeAbiResourceByteLength: cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength,
-      resourceByteLength: 25_469,
+      resourceByteLength: 25_470,
       releaseReady: false,
       releaseBlockerIds: BLOCKERS,
     });

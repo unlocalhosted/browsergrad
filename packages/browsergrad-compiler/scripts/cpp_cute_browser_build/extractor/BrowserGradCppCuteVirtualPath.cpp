@@ -78,47 +78,53 @@ bool cpp_cute_valid_canonical_virtual_path(
   return true;
 }
 
-bool cpp_cute_normalize_virtual_path(const std::string_view path,
-                                     std::string& output) noexcept {
-  try {
-    output.clear();
-    if (path.empty() || path.size() > kCppCuteMaximumVirtualPathByteLength) {
-      return false;
-    }
-    output.reserve(path.size() + (path.front() == '/' ? 0U : 1U));
-    output.push_back('/');
-    std::size_t segment_begin = path.front() == '/' ? 1U : 0U;
-    for (std::size_t index = segment_begin; index <= path.size(); ++index) {
-      if (index < path.size() && path[index] != '/') continue;
-      const std::string_view segment =
-          path.substr(segment_begin, index - segment_begin);
-      segment_begin = index + 1U;
-      if (segment.empty() || segment == ".") continue;
-      if (segment == "..") {
-        if (output.size() == 1U) {
-          output.clear();
-          return false;
-        }
-        const std::size_t separator = output.rfind('/');
-        output.resize(separator == 0U ? 1U : separator);
-        continue;
-      }
-      if (output.size() > 1U) output.push_back('/');
-      output.append(segment);
-      if (output.size() > kCppCuteMaximumVirtualPathByteLength) {
-        output.clear();
-        return false;
-      }
-    }
-    if (!cpp_cute_valid_canonical_virtual_path(output)) {
-      output.clear();
-      return false;
-    }
-    return true;
-  } catch (...) {
-    output.clear();
+bool cpp_cute_normalize_virtual_path(
+    const std::string_view path, char* const output,
+    const std::size_t output_capacity, std::size_t& output_size) noexcept {
+  output_size = 0U;
+  if (output == nullptr || output_capacity == 0U || path.empty() ||
+      path.size() > kCppCuteMaximumVirtualPathByteLength) {
     return false;
   }
+  output[0] = '/';
+  output_size = 1U;
+  std::size_t segment_begin = path.front() == '/' ? 1U : 0U;
+  for (std::size_t index = segment_begin; index <= path.size(); ++index) {
+    if (index < path.size() && path[index] != '/') continue;
+    const std::string_view segment =
+        path.substr(segment_begin, index - segment_begin);
+    segment_begin = index + 1U;
+    if (segment.empty() || segment == ".") continue;
+    if (segment == "..") {
+      if (output_size == 1U) {
+        output_size = 0U;
+        return false;
+      }
+      std::size_t separator = output_size - 1U;
+      while (separator > 0U && output[separator] != '/') --separator;
+      output_size = separator == 0U ? 1U : separator;
+      continue;
+    }
+    const std::size_t separator_size = output_size > 1U ? 1U : 0U;
+    const std::size_t capacity =
+        output_capacity < kCppCuteMaximumVirtualPathByteLength
+            ? output_capacity
+            : kCppCuteMaximumVirtualPathByteLength;
+    if (output_size > capacity ||
+        separator_size > capacity - output_size ||
+        segment.size() > capacity - output_size - separator_size) {
+      output_size = 0U;
+      return false;
+    }
+    if (separator_size != 0U) output[output_size++] = '/';
+    for (const char byte : segment) output[output_size++] = byte;
+  }
+  if (!cpp_cute_valid_canonical_virtual_path(
+          std::string_view(output, output_size))) {
+    output_size = 0U;
+    return false;
+  }
+  return true;
 }
 
 bool cpp_cute_virtual_path_contains(const std::string_view root,

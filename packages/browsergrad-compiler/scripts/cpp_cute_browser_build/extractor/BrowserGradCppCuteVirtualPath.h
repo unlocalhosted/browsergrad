@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <string>
 #include <string_view>
 
 namespace browsergrad::cpp_cute {
@@ -16,8 +15,9 @@ bool cpp_cute_valid_canonical_virtual_path(std::string_view path) noexcept;
  * into the closed VFS namespace. Dot segments and repeated separators are
  * removed; attempts to escape above the virtual root fail closed.
  */
-bool cpp_cute_normalize_virtual_path(std::string_view path,
-                                     std::string& output) noexcept;
+bool cpp_cute_normalize_virtual_path(std::string_view path, char* output,
+                                     std::size_t output_capacity,
+                                     std::size_t& output_size) noexcept;
 
 /** Returns true when candidate is root or a path below root. */
 bool cpp_cute_virtual_path_contains(std::string_view root,

@@ -170,12 +170,14 @@ std::error_code normalized_imported_path(
     llvm::SmallString<kVfsMaximumPathByteLength>& path) {
   llvm::SmallString<kVfsMaximumPathByteLength> raw_path;
   path_twine.toVector(raw_path);
-  std::string normalized;
+  std::array<char, kVfsMaximumPathByteLength> normalized{};
+  std::size_t normalized_size = 0U;
   if (!cpp_cute_normalize_virtual_path(
-          std::string_view(raw_path.data(), raw_path.size()), normalized)) {
+          std::string_view(raw_path.data(), raw_path.size()),
+          normalized.data(), normalized.size(), normalized_size)) {
     return std::make_error_code(std::errc::invalid_argument);
   }
-  path.assign(normalized.begin(), normalized.end());
+  path.assign(normalized.begin(), normalized.begin() + normalized_size);
   return {};
 }
 
@@ -630,12 +632,14 @@ class ImportedVfsFileSystem final : public llvm::vfs::FileSystem {
 
   std::error_code makeAbsolute(
       llvm::SmallVectorImpl<char>& path) const override {
-    std::string normalized;
+    std::array<char, kVfsMaximumPathByteLength> normalized{};
+    std::size_t normalized_size = 0U;
     if (!cpp_cute_normalize_virtual_path(
-            std::string_view(path.data(), path.size()), normalized)) {
+            std::string_view(path.data(), path.size()), normalized.data(),
+            normalized.size(), normalized_size)) {
       return std::make_error_code(std::errc::invalid_argument);
     }
-    path.assign(normalized.begin(), normalized.end());
+    path.assign(normalized.begin(), normalized.begin() + normalized_size);
     return {};
   }
 

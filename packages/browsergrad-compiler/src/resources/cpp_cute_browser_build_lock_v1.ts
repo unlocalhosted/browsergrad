@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.4e2a5b71dc0831a1728d8b2be730ef8b13853e4edf4c02bea92eb569f0305c0e",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.a9f38942ce47c38ad68d3096c1d25029d0b6129544ebcfce761bb55325d26af1",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -253,7 +253,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
         },
       ],
       extractorSource: {
-        sourceSetSha256: "1721bac6c0cc1426b3aafa8495f384444735ed34a80a945a2c78ae5236b5ab2e",
+        sourceSetSha256: "b8eff61c9abe4876124545f74918c9eb8226dca55071c7ace084ef9b3c812085",
         hashDomain: "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1",
         files: [
           {
@@ -363,8 +363,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteImportedVfs.cpp",
-            sha256: "b0d53239a5e7abef11c570dd8fd7df9c399e8176bdf0676216d3b2e015f18f9e",
-            byteLength: "24865",
+            sha256: "3695bab7936405e7fa43a96b1416e6c217c5e3a3c308e6261f3cc7e741a45cd6",
+            byteLength: "25155",
           },
           {
             path: "BrowserGradCppCuteImportedVfs.h",
@@ -433,13 +433,13 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteVirtualPath.cpp",
-            sha256: "bbee3255b2404e6eaafcdd84124998f9587ecc1adcda9e12dc23fd9dc73ad5bf",
-            byteLength: "4337",
+            sha256: "9eef396870d9474d438cf02f9c113f8ec4731d43c165906d703bd2e8382d8482",
+            byteLength: "4724",
           },
           {
             path: "BrowserGradCppCuteVirtualPath.h",
-            sha256: "7042c94a7359ce7762e1e6e98670af7867a9448b1de371109326dad812361acb",
-            byteLength: "937",
+            sha256: "38bbcaef9382fe5aac3c23d26ab494d977905a7c3c2b8444e271b92889bcdb3c",
+            byteLength: "1004",
           },
           {
             path: "CMakeLists.txt",
