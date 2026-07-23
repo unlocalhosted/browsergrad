@@ -9,6 +9,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- `torch.tensor` now implements a bounded copying-constructor contract:
+  Python booleans infer bool, integers int64, and floating data float32;
+  supported NumPy arrays/scalars and existing Tensor inputs preserve dtype
+  unless explicitly converted. Results own leaf storage, and unsupported input
+  kinds, malformed `requires_grad`, or nonfloating gradient requests reject.
+  Direct `Tensor(...)` remains the separately documented float32-default
+  educational constructor.
 - `_resolve_dtype` now owns a closed eager storage boundary. String requests
   must use the documented BrowserGrad/PyTorch aliases; NumPy dtype objects and
   scalar types resolve only to bool, float16/32/64, int8/16/32/64, or

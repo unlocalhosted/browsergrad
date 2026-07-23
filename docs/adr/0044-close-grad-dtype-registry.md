@@ -42,6 +42,7 @@ NumPy parser expansion. The twelve admitted physical storage dtypes remain
 available through both explicit string aliases and NumPy dtype objects/scalar
 types.
 
-This closes the dtype-registry compatibility-debt record. Constructor-default
-classification and owning `Tensor.expand()` materialization remain as the two
-eager Grad compatibility records.
+This closes the dtype-registry compatibility-debt record. ADR-0045
+subsequently closes constructor-default classification. Owning
+`Tensor.expand()` materialization remains as the sole eager Grad compatibility
+record.

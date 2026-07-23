@@ -70,12 +70,54 @@
       }
     },
     {
-      "id": "grad.dtype.constructor-defaults.v0",
+      "id": "grad.dtype.tensor-constructor-default.v1",
       "expected": {
         "tensorInteger": "float32",
         "tensorFloat": "float32",
-        "torchInteger": "int64",
-        "torchFloat": "float32"
+        "tensorBoolean": "float32",
+        "tensorNumpyFloat64": "float32",
+        "float32ArrayAliases": true
+      }
+    },
+    {
+      "id": "grad.dtype.torch-constructor-inference.v1",
+      "expected": {
+        "pythonDtypes": {
+          "boolean": "bool",
+          "integer": "int64",
+          "floating": "float32",
+          "mixed": "float32",
+          "empty": "float32"
+        },
+        "preservedDtypes": {
+          "numpyFloat64": "float64",
+          "numpyUint16": "uint16",
+          "numpyScalarFloat16": "float16",
+          "tensorInt32": "int32",
+          "explicitFloat16": "float16"
+        },
+        "ownership": {
+          "numpyAliases": false,
+          "tensorAliases": false,
+          "explicitAliases": false,
+          "numpySourceMutationVisible": false,
+          "numpyOutputMutationVisible": false,
+          "numpyFContiguous": true
+        },
+        "autograd": {
+          "existingRequiresGrad": true,
+          "copyRequiresGrad": false,
+          "copyIsLeaf": true,
+          "requestedFloat": true
+        },
+        "errors": {
+          "complex": "ValueError: torch.tensor does not support input dtype 'complex128'; complex, object, string, structured, and datetime inputs are unavailable",
+          "object": "ValueError: torch.tensor does not support input dtype 'object'; complex, object, string, structured, and datetime inputs are unavailable",
+          "string": "ValueError: torch.tensor does not support input dtype 'str32'; complex, object, string, structured, and datetime inputs are unavailable",
+          "structured": "ValueError: torch.tensor does not support input dtype 'void32'; complex, object, string, structured, and datetime inputs are unavailable",
+          "integerRequiresGrad": "ValueError: torch.tensor requires_grad=True requires float16, float32, or float64 storage; got 'int64'",
+          "requiresGradType": "TypeError: torch.tensor requires_grad must be bool; got int"
+        }
       }
     },
     {

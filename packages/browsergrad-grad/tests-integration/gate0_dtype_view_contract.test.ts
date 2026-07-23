@@ -93,11 +93,93 @@ cases["grad.dtype.unsupported-rejected.v1"] = {
         lambda: grad.Tensor([(1,)], dtype=np.dtype([("value", np.int32)]))
     ),
 }
-cases["grad.dtype.constructor-defaults.v0"] = {
+direct_default_source = np.array([1.0, 2.0], dtype=np.float32)
+direct_default_tensor = grad.Tensor(direct_default_source)
+cases["grad.dtype.tensor-constructor-default.v1"] = {
     "tensorInteger": grad.Tensor([1, 2]).dtype,
     "tensorFloat": grad.Tensor([1.0, 2.0]).dtype,
-    "torchInteger": torch.tensor([1, 2]).dtype,
-    "torchFloat": torch.tensor([1.0, 2.0]).dtype,
+    "tensorBoolean": grad.Tensor([True, False]).dtype,
+    "tensorNumpyFloat64": grad.Tensor(
+        np.array([1.0], dtype=np.float64)
+    ).dtype,
+    "float32ArrayAliases": bool(np.shares_memory(
+        direct_default_source,
+        direct_default_tensor.data,
+    )),
+}
+torch_numpy_source = np.arange(6, dtype=np.float64).reshape(2, 3).T
+torch_numpy_tensor = torch.tensor(torch_numpy_source)
+torch_existing_source = grad.Tensor(
+    np.array([1, 2], dtype=np.int32),
+    dtype="int32",
+    requires_grad=True,
+)
+torch_existing_tensor = torch.tensor(torch_existing_source)
+torch_explicit_source = np.array([1.0, 2.0], dtype=np.float64)
+torch_explicit_tensor = torch.tensor(torch_explicit_source, dtype=torch.float16)
+torch_numpy_source[0, 0] = 17.0
+torch_numpy_source_mutation_visible = float(torch_numpy_tensor.data[0, 0]) == 17.0
+torch_numpy_tensor.data[1, 0] = 19.0
+cases["grad.dtype.torch-constructor-inference.v1"] = {
+    "pythonDtypes": {
+        "boolean": torch.tensor([True, False]).dtype,
+        "integer": torch.tensor([1, 2]).dtype,
+        "floating": torch.tensor([1.0, 2.0]).dtype,
+        "mixed": torch.tensor([1, 2.0]).dtype,
+        "empty": torch.tensor([]).dtype,
+    },
+    "preservedDtypes": {
+        "numpyFloat64": torch_numpy_tensor.dtype,
+        "numpyUint16": torch.tensor(np.array([1], dtype=np.uint16)).dtype,
+        "numpyScalarFloat16": torch.tensor(np.float16(1.0)).dtype,
+        "tensorInt32": torch_existing_tensor.dtype,
+        "explicitFloat16": torch_explicit_tensor.dtype,
+    },
+    "ownership": {
+        "numpyAliases": bool(np.shares_memory(
+            torch_numpy_source,
+            torch_numpy_tensor.data,
+        )),
+        "tensorAliases": bool(np.shares_memory(
+            torch_existing_source.data,
+            torch_existing_tensor.data,
+        )),
+        "explicitAliases": bool(np.shares_memory(
+            torch_explicit_source,
+            torch_explicit_tensor.data,
+        )),
+        "numpySourceMutationVisible": bool(
+            torch_numpy_source_mutation_visible
+        ),
+        "numpyOutputMutationVisible": bool(
+            float(torch_numpy_source[1, 0]) == 19.0
+        ),
+        "numpyFContiguous": bool(torch_numpy_tensor.data.flags.f_contiguous),
+    },
+    "autograd": {
+        "existingRequiresGrad": bool(torch_existing_source.requires_grad),
+        "copyRequiresGrad": bool(torch_existing_tensor.requires_grad),
+        "copyIsLeaf": bool(torch_existing_tensor._ctx is None),
+        "requestedFloat": bool(torch.tensor(
+            [1.0],
+            dtype=torch.float16,
+            requires_grad=True,
+        ).requires_grad),
+    },
+    "errors": {
+        "complex": error(lambda: torch.tensor([1 + 2j])),
+        "object": error(lambda: torch.tensor(np.array([object()], dtype=np.object_))),
+        "string": error(lambda: torch.tensor(["1"])),
+        "structured": error(
+            lambda: torch.tensor(np.array([(1,)], dtype=[("value", np.int32)]))
+        ),
+        "integerRequiresGrad": error(
+            lambda: torch.tensor([1], requires_grad=True)
+        ),
+        "requiresGradType": error(
+            lambda: torch.tensor([1.0], requires_grad=1)
+        ),
+    },
 }
 
 cases["grad.dtype.bf16-rejected.v1"] = {

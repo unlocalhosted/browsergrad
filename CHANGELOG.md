@@ -14,6 +14,11 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Separates Grad constructor semantics: direct `Tensor(...)` retains its
+  explicit float32-default educational contract, while `torch.tensor(...)`
+  now always owns a leaf copy, infers bool/int64/float32 for Python data,
+  preserves supported NumPy/Tensor input dtypes, and rejects unsupported input
+  kinds or nonfloating gradient requests before allocation.
 - Closes Grad's eager dtype registry: string requests must use the frozen
   BrowserGrad/PyTorch alias table, while NumPy dtype objects and scalar types
   are accepted only for the twelve real eager storage dtypes. Complex, object,

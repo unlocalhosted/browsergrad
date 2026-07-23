@@ -15,7 +15,11 @@
   },
   "dtypeResolution": {
     "defaultTensorStorageDtype": "float32",
+    "defaultTorchBooleanStorageDtype": "bool",
+    "defaultTorchFloatingStorageDtype": "float32",
     "defaultTorchIntegerStorageDtype": "int64",
+    "torchArrayLikeInputPolicy": "python-canonical-numpy-and-tensor-preserve",
+    "torchConstructorOwnership": "always-owning",
     "unknownStringPolicy": "reject-outside-alias-registry",
     "nonStringPolicy": "accept-supported-numpy-dtype-spec-otherwise-reject",
     "storageByteWidths": {
@@ -107,26 +111,48 @@
       ]
     },
     {
-      "id": "grad.dtype.constructor-defaults.v0",
-      "surface": "Tensor(data) and torch.tensor(data)",
+      "id": "grad.dtype.tensor-constructor-default.v1",
+      "surface": "Tensor(data, dtype=None)",
       "class": "dtype-resolution",
       "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
-      "referenceContract": "pytorch-shaped-compatibility",
-      "dtypeEffect": "surface-dependent",
-      "condition": "surface-and-input-dependent",
+      "targetConformance": "browsergrad-defined",
+      "referenceContract": "browsergrad-grad-explicit",
+      "dtypeEffect": "default-float32",
+      "condition": "no-requested-dtype",
       "failurePolicy": "delegate-invalid-input-to-python-or-numpy",
       "aliasing": "conditional",
       "contiguity": "input-dependent",
       "materialization": "conditional",
       "autograd": "constructor-policy",
-      "truth": "Tensor without an explicit dtype coerces all inputs to float32, while torch.tensor infers int64 for integer input and float32 for non-integer input.",
+      "truth": "The direct BrowserGrad Tensor constructor retains its legacy default: without dtype it coerces data to float32 and may alias an existing float32 ndarray.",
       "sourceDefinitions": [
-        "tensor.py:Tensor.__init__",
-        "_torch_compat_real.py:install_real._tensor_factory"
+        "tensor.py:Tensor.__init__"
       ],
       "fixtureCaseIds": [
-        "grad.dtype.constructor-defaults.v0"
+        "grad.dtype.tensor-constructor-default.v1"
+      ]
+    },
+    {
+      "id": "grad.dtype.torch-constructor-inference.v1",
+      "surface": "torch.tensor(data, dtype=None|supported, requires_grad=bool)",
+      "class": "dtype-resolution",
+      "observationStatus": "verified",
+      "targetConformance": "pytorch-compatible",
+      "referenceContract": "pytorch-shaped-compatibility",
+      "dtypeEffect": "input-or-requested-dtype",
+      "condition": "torch-constructor-request",
+      "failurePolicy": "reject-unsupported-constructor-input-before-allocation",
+      "aliasing": "must-not-alias",
+      "contiguity": "input-dependent",
+      "materialization": "always",
+      "autograd": "constructor-policy",
+      "truth": "torch.tensor always creates an owning leaf. Python booleans infer bool, Python integers int64, and Python floating data float32; supported NumPy arrays/scalars and Tensor inputs preserve storage dtype unless an explicit supported dtype is requested. Unsupported input kinds and gradient-bearing nonfloating requests reject before allocation.",
+      "sourceDefinitions": [
+        "_torch_compat_real.py:install_real._tensor_factory",
+        "_torch_compat_real.py:install_real._tensor_factory_source"
+      ],
+      "fixtureCaseIds": [
+        "grad.dtype.torch-constructor-inference.v1"
       ]
     },
     {

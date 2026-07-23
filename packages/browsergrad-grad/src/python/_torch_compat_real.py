@@ -8,12 +8,26 @@ optim, utils.data, serialization) onto torch's namespace. See ARCHITECTURE.md
 torch_mod.utils so the orchestrator can register their sys.modules entries.
 """
 
+from .tensor import _resolve_dtype
+
 
 def install_real(torch_mod, _bg, _types):
     import numpy as _np
 
+    def _tensor_factory_source(data):
+        if isinstance(data, _bg.Tensor):
+            return data.data, True
+        if isinstance(data, (_np.ndarray, _np.generic)):
+            return _np.asarray(data), True
+        return _np.asarray(data), False
+
     def _tensor_factory(data, dtype=None, requires_grad=False, device=None):
-        """torch.tensor(): infer int64 for integer data, float32 for floats."""
+        """Construct an owning leaf with bounded PyTorch-shaped dtype inference."""
+        if type(requires_grad) is not bool:
+            raise TypeError(
+                "torch.tensor requires_grad must be bool; "
+                f"got {type(requires_grad).__name__}"
+            )
         if device is not None:
             if not isinstance(device, str):
                 raise TypeError(
@@ -25,12 +39,34 @@ def install_real(torch_mod, _bg, _types):
                     f"torch.tensor(device={device!r}) is unavailable: eager Grad "
                     "storage is CPU/Pyodide-backed and no device allocation occurred"
                 )
-        if dtype is not None:
-            return _bg.Tensor(data, dtype=dtype, requires_grad=requires_grad)
-        arr = _np.asarray(data)
-        if _np.issubdtype(arr.dtype, _np.integer):
-            return _bg.Tensor(arr, dtype="int64", requires_grad=requires_grad)
-        return _bg.Tensor(arr.astype(_np.float32), requires_grad=requires_grad)
+        target_dtype = _resolve_dtype(dtype) if dtype is not None else None
+        source, preserve_source_dtype = _tensor_factory_source(data)
+        if source.dtype.kind not in "biuf":
+            raise ValueError(
+                f"torch.tensor does not support input dtype {source.dtype.name!r}; "
+                "complex, object, string, structured, and datetime inputs are unavailable"
+            )
+        if target_dtype is None:
+            if preserve_source_dtype:
+                target_dtype = _resolve_dtype(source.dtype)
+            elif _np.issubdtype(source.dtype, _np.bool_):
+                target_dtype = _np.bool_
+            elif _np.issubdtype(source.dtype, _np.integer):
+                target_dtype = _np.int64
+            else:
+                target_dtype = _np.float32
+        target_name = _np.dtype(target_dtype).name
+        if requires_grad and target_name not in ("float16", "float32", "float64"):
+            raise ValueError(
+                "torch.tensor requires_grad=True requires float16, float32, "
+                f"or float64 storage; got {target_name!r}"
+            )
+        copied = _np.array(source, dtype=target_dtype, order="K", copy=True)
+        return _bg.Tensor(
+            copied,
+            dtype=target_dtype,
+            requires_grad=requires_grad,
+        )
 
     # Core tensor + constructors
     torch_mod.Tensor = _bg.Tensor

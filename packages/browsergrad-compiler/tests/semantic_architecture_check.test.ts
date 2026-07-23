@@ -365,6 +365,24 @@ describe("semantic architecture guardrails", () => {
     )).toContainEqual(expect.stringContaining("install_real._tensor_factory changed"));
     expect(checkFrozenGradCompatibilitySources(
       tensorSource,
+      torchCompatSource.replace(
+        "return data.data, True",
+        "return data.data, False",
+      ),
+      torchCompatLimitedSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("install_real._tensor_factory_source changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource,
+      torchCompatSource.replace(
+        'order="K", copy=True',
+        'order="K", copy=False',
+      ),
+      torchCompatLimitedSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("install_real._tensor_factory changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource,
       torchCompatSource,
       torchCompatLimitedSource.replace(
         'if device_spec != "cpu":',

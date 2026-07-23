@@ -46,6 +46,6 @@ non-contiguous layouts. Every public NumPy output spelling produces the same
 owning snapshot policy.
 
 This closes the NumPy interop sub-slice. ADR-0044 subsequently closes the
-NumPy-delegated dtype fallback. Constructor-default classification and owning
-`Tensor.expand()` materialization remain, followed by generated
-runtime/profile support consumption.
+NumPy-delegated dtype fallback, and ADR-0045 closes constructor-default
+classification. Owning `Tensor.expand()` materialization remains, followed by
+generated runtime/profile support consumption.
