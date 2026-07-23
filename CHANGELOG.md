@@ -14,6 +14,9 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Makes Grad `Tensor.detach()` a truthful zero-copy metadata operation: it
+  returns a distinct tensor sharing the source storage, dtype, strides, and
+  layout while severing autograd history.
 - Makes Grad `Tensor.contiguous()` truthful: already C-contiguous tensors keep
   identity, while non-contiguous tensors produce an owning C-order,
   dtype-preserving copy with an identity-gradient edge.

@@ -323,17 +323,57 @@ cases["grad.materialization.contiguous-float16-copy.v1"] = {
     "cContiguous": bool(float16_contiguous.data.flags.c_contiguous),
 }
 
-detached = base.detach()
-cases["grad.materialization.detach-copy.v0"] = {
-    "sharesMemory": bool(np.shares_memory(base.data, detached.data)),
+detach_source = grad.Tensor(
+    np.array([1.0, 2.0], dtype=np.float32),
+    requires_grad=True,
+)
+detached = detach_source.detach()
+detach_source.data[0] = 7.0
+source_mutation_visible = float(detached.data[0]) == 7.0
+detached.data[1] = 9.0
+cases["grad.view.detach-alias.v1"] = {
+    "sameObject": bool(detached is detach_source),
+    "sharesMemory": bool(np.shares_memory(detach_source.data, detached.data)),
     "requiresGrad": bool(detached.requires_grad),
     "graphEdge": bool(detached._ctx is not None),
+    "isLeaf": bool(detached._is_leaf),
+    "sourceMutationVisible": bool(source_mutation_visible),
+    "resultMutationVisible": bool(float(detach_source.data[1]) == 9.0),
 }
-float16_detached = float16_matrix.detach()
-cases["grad.materialization.detach-float16-to-f32.v0"] = {
-    "sourceDtype": float16_matrix.dtype,
+float16_detach_source = grad.Tensor(
+    np.arange(6, dtype=np.float16).reshape(2, 3),
+    dtype="float16",
+    requires_grad=True,
+)
+float16_detached = float16_detach_source.detach()
+cases["grad.view.detach-float16-alias.v1"] = {
+    "sharesMemory": bool(np.shares_memory(
+        float16_detach_source.data,
+        float16_detached.data,
+    )),
+    "sourceDtype": float16_detach_source.dtype,
     "resultDtype": float16_detached.dtype,
     "requiresGrad": bool(float16_detached.requires_grad),
+}
+noncontiguous_detach_source = grad.Tensor(
+    np.arange(6, dtype=np.float32).reshape(2, 3).T,
+    dtype="float32",
+    requires_grad=True,
+)
+noncontiguous_detached = noncontiguous_detach_source.detach()
+cases["grad.view.detach-noncontiguous-alias.v1"] = {
+    "sharesMemory": bool(np.shares_memory(
+        noncontiguous_detach_source.data,
+        noncontiguous_detached.data,
+    )),
+    "cContiguousBefore": bool(
+        noncontiguous_detach_source.data.flags.c_contiguous
+    ),
+    "cContiguousAfter": bool(noncontiguous_detached.data.flags.c_contiguous),
+    "stridesPreserved": bool(
+        noncontiguous_detach_source.data.strides
+        == noncontiguous_detached.data.strides
+    ),
 }
 
 numpy_source = grad.Tensor(np.array([1.0, 2.0], dtype=np.float32))

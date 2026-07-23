@@ -253,6 +253,14 @@ describe("semantic architecture guardrails", () => {
       gradFreeze,
     )).toContainEqual(expect.stringContaining("Tensor.contiguous changed"));
     expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace(
+        "return Tensor(self.data, dtype=self.data.dtype, requires_grad=False)",
+        "return Tensor(self.data.copy(), dtype=self.data.dtype, requires_grad=False)",
+      ),
+      torchCompatSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("Tensor.detach changed"));
+    expect(checkFrozenGradCompatibilitySources(
       tensorSource.replace("if _GRAD_ENABLED and any(p.requires_grad for p in parents):", "if True and any(p.requires_grad for p in parents):"),
       torchCompatSource,
       gradFreeze,

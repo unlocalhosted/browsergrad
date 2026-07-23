@@ -1330,8 +1330,8 @@ class Tensor:
         return f"Tensor(shape={self.data.shape}, requires_grad={self.requires_grad})"
 
     def detach(self) -> "Tensor":
-        """Return a copy that doesn't participate in autograd."""
-        return Tensor(self.data.copy(), requires_grad=False)
+        """Return a storage-sharing tensor with autograd history removed."""
+        return Tensor(self.data, dtype=self.data.dtype, requires_grad=False)
 
     def numpy(self) -> np.ndarray:
         """Return a copy of the underlying numpy array."""

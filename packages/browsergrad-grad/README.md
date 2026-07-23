@@ -147,7 +147,7 @@ r = grad.randn(5, 5, seed=42)
 # Properties
 t.shape, t.ndim, t.size, t.data    # numpy view
 t.numpy(), t.tolist(), t.item()    # exports
-t.detach()                         # leaf copy, no autograd
+t.detach()                         # storage-sharing leaf, no autograd
 
 # Arithmetic — broadcasts in v0.2
 a + b, a - b, a * b, a / b, -a
@@ -233,7 +233,9 @@ Remaining explicit limits:
 - **No `_ctx`-mutability shenanigans.** Each op captures the data it needs at forward time and binds it in a closure. Backward functions are pure.
 - **Contiguous means contiguous.** Non-C-order storage is copied into owning
   C-order storage with a dtype-preserving identity-gradient edge.
-- **Global gradient context exists.** `grad.no_grad()` disables graph construction for inference sections; `.detach()` returns a fresh leaf copy.
+- **Global gradient context exists.** `grad.no_grad()` disables graph
+  construction for inference sections; `.detach()` returns a distinct
+  storage-sharing leaf with no autograd history.
 - **Reverse-mode only.** No forward-mode, no functional transforms (vmap, etc.).
 - **`Tensor.__slots__`.** Slot-based attribute layout to keep memory predictable for tensors in long training loops.
 

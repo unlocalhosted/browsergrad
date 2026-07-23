@@ -9,6 +9,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- `Tensor.detach()` now returns a distinct storage-sharing tensor while
+  preserving exact dtype, strides, shape, and contiguity. It severs autograd
+  history without allocating or silently converting float16 to float32, and
+  mutations remain visible through both aliases.
 - `Tensor.contiguous()` now returns self only for already C-contiguous storage.
   Non-contiguous inputs produce an independent owning C-order copy with exact
   dtype preservation and an identity-gradient edge, so

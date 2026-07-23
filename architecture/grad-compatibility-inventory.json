@@ -337,26 +337,27 @@
       ]
     },
     {
-      "id": "grad.materialization.detach-copy.v0",
+      "id": "grad.view.detach.v1",
       "surface": "Tensor.detach()",
-      "class": "materialization",
+      "class": "view",
       "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
+      "targetConformance": "pytorch-compatible",
       "referenceContract": "pytorch-shaped-compatibility",
-      "dtypeEffect": "preserves-float32-otherwise-coerces-float32",
-      "condition": "input-dtype-dependent",
+      "dtypeEffect": "preserves",
+      "condition": "all-inputs",
       "failurePolicy": "no-dedicated-failure-path",
-      "aliasing": "must-not-alias",
-      "contiguity": "contiguous",
-      "materialization": "always",
+      "aliasing": "must-alias",
+      "contiguity": "preserved",
+      "materialization": "none",
       "autograd": "detached",
-      "truth": "detach() copies storage and clears gradient tracking instead of returning a detached alias; non-float32 input is also converted to float32.",
+      "truth": "detach() returns a distinct tensor object that shares exact storage, dtype, strides, and layout with the source while clearing gradient tracking and autograd history; mutations remain visible in both directions.",
       "sourceDefinitions": [
         "tensor.py:Tensor.detach"
       ],
       "fixtureCaseIds": [
-        "grad.materialization.detach-copy.v0",
-        "grad.materialization.detach-float16-to-f32.v0"
+        "grad.view.detach-alias.v1",
+        "grad.view.detach-float16-alias.v1",
+        "grad.view.detach-noncontiguous-alias.v1"
       ]
     },
     {

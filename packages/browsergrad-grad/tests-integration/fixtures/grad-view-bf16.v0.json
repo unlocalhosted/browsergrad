@@ -256,19 +256,33 @@
       }
     },
     {
-      "id": "grad.materialization.detach-copy.v0",
+      "id": "grad.view.detach-alias.v1",
       "expected": {
-        "sharesMemory": false,
+        "sameObject": false,
+        "sharesMemory": true,
         "requiresGrad": false,
-        "graphEdge": false
+        "graphEdge": false,
+        "isLeaf": true,
+        "sourceMutationVisible": true,
+        "resultMutationVisible": true
       }
     },
     {
-      "id": "grad.materialization.detach-float16-to-f32.v0",
+      "id": "grad.view.detach-float16-alias.v1",
       "expected": {
+        "sharesMemory": true,
         "sourceDtype": "float16",
-        "resultDtype": "float32",
+        "resultDtype": "float16",
         "requiresGrad": false
+      }
+    },
+    {
+      "id": "grad.view.detach-noncontiguous-alias.v1",
+      "expected": {
+        "sharesMemory": true,
+        "cContiguousBefore": false,
+        "cContiguousAfter": false,
+        "stridesPreserved": true
       }
     },
     {
