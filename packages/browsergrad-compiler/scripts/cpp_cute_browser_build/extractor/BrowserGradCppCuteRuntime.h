@@ -19,6 +19,48 @@ enum class WireCompileStatus : std::int32_t {
 };
 
 /**
+ * Fixed, source-independent diagnostic codes emitted only through the pinned
+ * stdout/stderr host capability. They explain a rejected native invocation but
+ * never participate in ABI status, artifact identity, or authority.
+ */
+enum class NativeDiagnosticCode {
+  kProducerPolicyInstallFailure,
+  kProducerVfsFailure,
+  kProducerDiagnosticCaptureLimit,
+  kProducerFrontendWorkLimit,
+  kProducerInvocationFailure,
+  kProducerException,
+  kArtifactDecodeInternal,
+  kArtifactPlanInternal,
+  kArtifactSinkBindInternal,
+  kArtifactFrontendBeginInternal,
+  kArtifactFrontendCompleteInternal,
+  kArtifactProducerInternal,
+  kArtifactWriterInternal,
+  kRuntimePostCompilePhaseInvariant,
+  kRuntimeArtifactReadyInvariant,
+  kRuntimeTerminalStatusInvalid,
+  kAllocatorInvalidAllocationTableShape,
+  kAllocatorAllocationTableProbeExhausted,
+  kAllocatorAllocationTableRehashFailure,
+  kAllocatorAllocationTableInsertFailure,
+  kAllocatorAllocationTableEraseFailure,
+  kAllocatorCreationCounterOverflow,
+  kAllocatorReleaseInvariantFailure,
+  kAllocatorReallocationInvariantFailure,
+  kAllocatorFailedAllocationCounterOverflow,
+  kAllocatorReentrantHook,
+  kAllocatorDuplicateBuiltinPointer,
+  kAllocatorUntrackedFree,
+  kAllocatorUntrackedReallocation,
+  kAllocatorReplacementPointerCollision,
+  kAllocatorInvalidMetricsPointer,
+  kAllocatorUnknownFailure,
+};
+
+void report_native_diagnostic(NativeDiagnosticCode code) noexcept;
+
+/**
  * Review-only blockers are deliberately distinct from the C ABI status. They
  * keep incomplete producer work from ever masquerading as an artifact.
  */

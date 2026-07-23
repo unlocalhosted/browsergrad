@@ -1075,6 +1075,12 @@ and 575,477 bytes. Worker controller protocol v2 preserves one bounded,
 sanitized deepest failure detail. Failed C-ABI invocations snapshot exact
 frontend-work, allocator, and VFS state before cleanup without minting Worker
 execution or lowering authority.
+The native producer, Artifact V3 composer, and runtime also emit only fixed
+source-independent first-cause codes through the already-pinned bounded stderr
+capability. Allocator-integrity state retains the first poison reason for the
+module lifetime. These codes do not change the C ABI, contain no caller source,
+path, or rendered diagnostic text, and cannot authorize an artifact or mask
+the fail-closed status.
 The production host path now consumes those bytes through the captured platform
 and package invocation. It remains evidence-blocked from lowering until a valid
 real Worker compile authenticates the exact terminal frame, Artifact V3,

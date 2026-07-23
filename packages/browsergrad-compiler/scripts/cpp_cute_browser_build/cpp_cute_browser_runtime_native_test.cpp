@@ -25,6 +25,12 @@ bool allocator_metrics_healthy() {
   return g_allocator_metrics_healthy_for_test;
 }
 
+AllocatorMetricsFailureReason allocator_metrics_failure_reason() noexcept {
+  return g_allocator_metrics_healthy_for_test
+             ? AllocatorMetricsFailureReason::kNone
+             : AllocatorMetricsFailureReason::kUntrackedFree;
+}
+
 bool frontend_work_metrics_ready() noexcept {
   return g_frontend_work_metrics_ready_for_test;
 }

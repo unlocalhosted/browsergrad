@@ -278,6 +278,12 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect(source).toContain("RuntimePhase::kArtifactReady");
     expect(source).toContain("result.blocker.has_value()");
     expect(source).toContain("ranges_overlap");
+    expect(source).toContain("report_allocator_metrics_failure");
+    expect(source).toContain("BG-CPP-CUTE-DIAGNOSTIC:");
+    expect(source).toContain("::write(STDERR_FILENO");
+    expect(source).not.toMatch(
+      /BG-CPP-CUTE-DIAGNOSTIC:[^"\\]*(?:source|path|message|detail)=/u,
+    );
     expect(source).toMatch(/runtime_result_length\(\)[\s\S]*?g_runtime\.result_byte_length/u);
     expect(source).toMatch(/runtime_result_pointer\(\)[\s\S]*?g_runtime\.result_wire_pointer/u);
     expect(header).toContain("class ArtifactV3ResultSink final");
@@ -352,6 +358,9 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect(source).toContain("emscripten_builtin_memalign");
     expect(source).toContain("kMaximumRecordStart");
     expect(source).toContain("g_metrics_healthy");
+    expect(source).toContain("g_metrics_failure_reason");
+    expect(header).toContain("enum class AllocatorMetricsFailureReason");
+    expect(header).toContain("allocator_metrics_failure_reason");
     expect(source).toContain("g_allocator_hook_active");
     expect(header).toContain("struct alignas(8) FrontendWorkMetricsRecordV1");
     expect(header).toContain("sizeof(FrontendWorkMetricsRecordV1) == 96U");

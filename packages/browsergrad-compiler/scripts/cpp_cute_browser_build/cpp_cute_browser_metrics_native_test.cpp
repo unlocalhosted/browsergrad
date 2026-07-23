@@ -54,6 +54,7 @@ void reset_state() {
       0U,
   };
   g_metrics_healthy = true;
+  g_metrics_failure_reason = AllocatorMetricsFailureReason::kNone;
   g_allocator_hook_active = false;
   g_frontend_work = FrontendWorkMetricsRecordV1{
       {'B', 'G', 'F', 'W', 'K', '0', '0', '1'},
@@ -96,6 +97,8 @@ int run_metrics_tests() {
   BG_CHECK(std::memcmp(g_metrics.magic, "BGRTMET1", 8U) == 0);
   BG_CHECK(g_metrics.version == 1U);
   BG_CHECK(g_metrics.byte_length == 72U);
+  BG_CHECK(allocator_metrics_failure_reason() ==
+           AllocatorMetricsFailureReason::kNone);
   BG_CHECK(sizeof(g_frontend_work) == 96U);
   BG_CHECK(alignof(decltype(g_frontend_work)) == 8U);
   BG_CHECK(std::memcmp(g_frontend_work.magic, "BGFWK001", 8U) == 0);
@@ -293,6 +296,8 @@ int run_metrics_tests() {
       std::numeric_limits<std::uint64_t>::max();
   BG_CHECK(metrics_malloc(1U) == nullptr);
   BG_CHECK(!allocator_metrics_healthy());
+  BG_CHECK(allocator_metrics_failure_reason() ==
+           AllocatorMetricsFailureReason::kCreationCounterOverflow);
   BG_CHECK(g_metrics.successful_allocation_count ==
            std::numeric_limits<std::uint64_t>::max());
 
@@ -300,6 +305,13 @@ int run_metrics_tests() {
   int untracked = 0;
   BG_CHECK(!metrics_free_impl(&untracked));
   BG_CHECK(!allocator_metrics_healthy());
+  BG_CHECK(allocator_metrics_failure_reason() ==
+           AllocatorMetricsFailureReason::kUntrackedFree);
+  g_metrics.successful_allocation_count =
+      std::numeric_limits<std::uint64_t>::max();
+  BG_CHECK(metrics_malloc(1U) == nullptr);
+  BG_CHECK(allocator_metrics_failure_reason() ==
+           AllocatorMetricsFailureReason::kUntrackedFree);
   reset_state();
   return 0;
 }

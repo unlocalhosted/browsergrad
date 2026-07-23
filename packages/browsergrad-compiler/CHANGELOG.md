@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Adds fixed native first-cause diagnostics for producer, Artifact V3, runtime,
+  and allocator-integrity failures without widening the C ABI or artifact
+  authority. Allocator poisoning now retains its first internal cause for the
+  module lifetime instead of exposing only a generic status 106. Diagnostics
+  contain no caller source, path, or rendered message and use only the pinned
+  bounded stderr capability. The source lock is
+  `bg.cpp.browser-build-input-lock.sha256.c0c7ee66b05951ee3b977ccac0de68e5e417106d6c8894e1152771a4a775dbf3`.
+  A fresh 34-second two-root pipeline reverified all 17 header-distribution
+  outputs under that lock at reproducibility ID
+  `bg.cpp.browser-header-distribution-reproducibility.sha256.9f98374557977e35bff019faa9d09cae1e1aa19fc6397ec703810d68dae987cf`;
+  license, producer, Worker-execution, lowering, and release authorities remain
+  false.
 - Adds a fail-closed diagnostic authority for exact fast-build Clang-Wasm
   bytes. `--allow-untrusted-diagnostic-wasm` permits only a locally hashed
   real-browser observation; strict compile still requires the package-pinned

@@ -33,6 +33,12 @@ std::string g_producer_mode = "success";
 
 bool allocator_metrics_healthy() { return g_metrics_healthy; }
 
+AllocatorMetricsFailureReason allocator_metrics_failure_reason() noexcept {
+  return g_metrics_healthy
+             ? AllocatorMetricsFailureReason::kNone
+             : AllocatorMetricsFailureReason::kUntrackedFree;
+}
+
 bool begin_frontend_work_invocation(FrontendWorkLimitsV1 limits) noexcept {
   if (g_frontend_collecting || g_frontend_failed ||
       limits.max_include_depth == 0U || limits.max_macro_expansions == 0U ||

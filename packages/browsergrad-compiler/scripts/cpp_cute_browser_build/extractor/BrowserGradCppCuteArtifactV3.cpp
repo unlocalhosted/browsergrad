@@ -54,6 +54,8 @@ ArtifactV3CompileResult result_for_producer(
         return {WireCompileStatus::kResourceLimit,
                 ReviewOnlyBlocker::kCanonicalArtifactV3Unavailable};
       case ArtifactV3WriteStatus::kInternalError:
+        report_native_diagnostic(
+            NativeDiagnosticCode::kArtifactWriterInternal);
         return {WireCompileStatus::kInternalError,
                 ReviewOnlyBlocker::kCanonicalArtifactV3Unavailable};
     }
@@ -81,6 +83,8 @@ ArtifactV3CompileResult result_for_producer(
       return {WireCompileStatus::kVfsError,
               ReviewOnlyBlocker::kCudaDualPassUnavailable};
     case ProducerReviewStatus::kInternalError:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kArtifactProducerInternal);
       return {WireCompileStatus::kInternalError,
               ReviewOnlyBlocker::kCudaDualPassUnavailable};
   }
@@ -96,6 +100,11 @@ ArtifactV3CompileResult build_artifact_v3(
   CompileSessionDecodeResult decoded = decode_compile_session(input);
   if (decoded.status != CompileSessionDecodeStatus::kReady ||
       !decoded.session) {
+    if (decoded.status == CompileSessionDecodeStatus::kInternalError ||
+        decoded.status == CompileSessionDecodeStatus::kReady) {
+      report_native_diagnostic(
+          NativeDiagnosticCode::kArtifactDecodeInternal);
+    }
     return {wire_status_for_decode(decoded.status),
             ReviewOnlyBlocker::kCudaDualPassUnavailable};
   }
@@ -103,11 +112,18 @@ ArtifactV3CompileResult build_artifact_v3(
   PrepareCppCuteCompilePlanResult prepared =
       prepare_cpp_cute_compile_plan(*decoded.session);
   if (prepared.status != CompilePlanStatus::kReady || !prepared.plan) {
+    if (prepared.status == CompilePlanStatus::kInternalError ||
+        prepared.status == CompilePlanStatus::kReady) {
+      report_native_diagnostic(
+          NativeDiagnosticCode::kArtifactPlanInternal);
+    }
     return {wire_status_for_plan(prepared.status),
             ReviewOnlyBlocker::kCudaDualPassUnavailable};
   }
   if (!result_sink.bind_invocation_maximum_byte_length(
           prepared.plan->maximum_output_byte_length())) {
+    report_native_diagnostic(
+        NativeDiagnosticCode::kArtifactSinkBindInternal);
     return {WireCompileStatus::kInternalError,
             ReviewOnlyBlocker::kCudaDualPassUnavailable};
   }
@@ -122,6 +138,8 @@ ArtifactV3CompileResult build_artifact_v3(
       decoded.session->request_semantic_limit(CompileSemanticLimit::kTemplateDepth),
   };
   if (!begin_frontend_work_invocation(frontend_limits)) {
+    report_native_diagnostic(
+        NativeDiagnosticCode::kArtifactFrontendBeginInternal);
     return {WireCompileStatus::kInternalError,
             ReviewOnlyBlocker::kCudaDualPassUnavailable};
   }
@@ -135,6 +153,8 @@ ArtifactV3CompileResult build_artifact_v3(
   }
   if (producer.completed_pass_count == 0U ||
       !complete_frontend_work_invocation(producer.completed_pass_count)) {
+    report_native_diagnostic(
+        NativeDiagnosticCode::kArtifactFrontendCompleteInternal);
     fail_frontend_work_invocation();
     return {WireCompileStatus::kInternalError,
             ReviewOnlyBlocker::kCudaDualPassUnavailable};

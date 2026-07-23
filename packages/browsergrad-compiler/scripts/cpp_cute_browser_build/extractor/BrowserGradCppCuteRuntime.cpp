@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <string_view>
+#include <unistd.h>
 
 namespace browsergrad::cpp_cute {
 namespace {
@@ -207,7 +209,215 @@ std::int32_t wire_status(WireCompileStatus status) {
   return static_cast<std::int32_t>(status);
 }
 
+void write_native_diagnostic(const std::string_view message) noexcept {
+  std::string_view remaining = message;
+  while (!remaining.empty()) {
+    const ssize_t written =
+        ::write(STDERR_FILENO, remaining.data(), remaining.size());
+    if (written <= 0) return;
+    remaining.remove_prefix(static_cast<std::size_t>(written));
+  }
+}
+
+void report_allocator_metrics_failure() noexcept {
+  switch (allocator_metrics_failure_reason()) {
+    case AllocatorMetricsFailureReason::kNone:
+      report_native_diagnostic(NativeDiagnosticCode::kAllocatorUnknownFailure);
+      return;
+    case AllocatorMetricsFailureReason::kInvalidAllocationTableShape:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kAllocatorInvalidAllocationTableShape);
+      return;
+    case AllocatorMetricsFailureReason::kAllocationTableProbeExhausted:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kAllocatorAllocationTableProbeExhausted);
+      return;
+    case AllocatorMetricsFailureReason::kAllocationTableRehashFailure:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kAllocatorAllocationTableRehashFailure);
+      return;
+    case AllocatorMetricsFailureReason::kAllocationTableInsertFailure:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kAllocatorAllocationTableInsertFailure);
+      return;
+    case AllocatorMetricsFailureReason::kAllocationTableEraseFailure:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kAllocatorAllocationTableEraseFailure);
+      return;
+    case AllocatorMetricsFailureReason::kCreationCounterOverflow:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kAllocatorCreationCounterOverflow);
+      return;
+    case AllocatorMetricsFailureReason::kReleaseInvariantFailure:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kAllocatorReleaseInvariantFailure);
+      return;
+    case AllocatorMetricsFailureReason::kReallocationInvariantFailure:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kAllocatorReallocationInvariantFailure);
+      return;
+    case AllocatorMetricsFailureReason::kFailedAllocationCounterOverflow:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kAllocatorFailedAllocationCounterOverflow);
+      return;
+    case AllocatorMetricsFailureReason::kReentrantAllocatorHook:
+      report_native_diagnostic(NativeDiagnosticCode::kAllocatorReentrantHook);
+      return;
+    case AllocatorMetricsFailureReason::kDuplicateBuiltinPointer:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kAllocatorDuplicateBuiltinPointer);
+      return;
+    case AllocatorMetricsFailureReason::kUntrackedFree:
+      report_native_diagnostic(NativeDiagnosticCode::kAllocatorUntrackedFree);
+      return;
+    case AllocatorMetricsFailureReason::kUntrackedReallocation:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kAllocatorUntrackedReallocation);
+      return;
+    case AllocatorMetricsFailureReason::kReplacementPointerCollision:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kAllocatorReplacementPointerCollision);
+      return;
+    case AllocatorMetricsFailureReason::kInvalidMetricsPointer:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kAllocatorInvalidMetricsPointer);
+      return;
+  }
+  report_native_diagnostic(NativeDiagnosticCode::kAllocatorUnknownFailure);
+}
+
 }  // namespace
+
+void report_native_diagnostic(const NativeDiagnosticCode code) noexcept {
+  switch (code) {
+    case NativeDiagnosticCode::kProducerPolicyInstallFailure:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-policy-install-failure\n");
+      return;
+    case NativeDiagnosticCode::kProducerVfsFailure:
+      write_native_diagnostic("BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-failure\n");
+      return;
+    case NativeDiagnosticCode::kProducerDiagnosticCaptureLimit:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-diagnostic-capture-limit\n");
+      return;
+    case NativeDiagnosticCode::kProducerFrontendWorkLimit:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-frontend-work-limit\n");
+      return;
+    case NativeDiagnosticCode::kProducerInvocationFailure:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:producer-invocation-failure\n");
+      return;
+    case NativeDiagnosticCode::kProducerException:
+      write_native_diagnostic("BG-CPP-CUTE-DIAGNOSTIC:producer-exception\n");
+      return;
+    case NativeDiagnosticCode::kArtifactDecodeInternal:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:artifact-decode-internal\n");
+      return;
+    case NativeDiagnosticCode::kArtifactPlanInternal:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:artifact-plan-internal\n");
+      return;
+    case NativeDiagnosticCode::kArtifactSinkBindInternal:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:artifact-sink-bind-internal\n");
+      return;
+    case NativeDiagnosticCode::kArtifactFrontendBeginInternal:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:artifact-frontend-begin-internal\n");
+      return;
+    case NativeDiagnosticCode::kArtifactFrontendCompleteInternal:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:artifact-frontend-complete-internal\n");
+      return;
+    case NativeDiagnosticCode::kArtifactProducerInternal:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:artifact-producer-internal\n");
+      return;
+    case NativeDiagnosticCode::kArtifactWriterInternal:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:artifact-writer-internal\n");
+      return;
+    case NativeDiagnosticCode::kRuntimePostCompilePhaseInvariant:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:runtime-post-compile-phase-invariant\n");
+      return;
+    case NativeDiagnosticCode::kRuntimeArtifactReadyInvariant:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:runtime-artifact-ready-invariant\n");
+      return;
+    case NativeDiagnosticCode::kRuntimeTerminalStatusInvalid:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:runtime-terminal-status-invalid\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorInvalidAllocationTableShape:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-invalid-table-shape\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorAllocationTableProbeExhausted:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-table-probe-exhausted\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorAllocationTableRehashFailure:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-table-rehash-failure\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorAllocationTableInsertFailure:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-table-insert-failure\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorAllocationTableEraseFailure:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-table-erase-failure\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorCreationCounterOverflow:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-creation-counter-overflow\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorReleaseInvariantFailure:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-release-invariant-failure\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorReallocationInvariantFailure:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-reallocation-invariant-failure\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorFailedAllocationCounterOverflow:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-failed-counter-overflow\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorReentrantHook:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-reentrant-hook\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorDuplicateBuiltinPointer:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-duplicate-builtin-pointer\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorUntrackedFree:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-untracked-free\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorUntrackedReallocation:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-untracked-reallocation\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorReplacementPointerCollision:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-replacement-pointer-collision\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorInvalidMetricsPointer:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-invalid-metrics-pointer\n");
+      return;
+    case NativeDiagnosticCode::kAllocatorUnknownFailure:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:allocator-unknown-failure\n");
+      return;
+  }
+}
 
 bool ArtifactV3ResultSink::bind_invocation_maximum_byte_length(
     std::uint32_t byte_length) {
@@ -370,6 +580,13 @@ std::int32_t runtime_compile(std::uint32_t input_pointer,
           : compile_artifact(input_regions, result_sink);
   if (g_runtime.phase != RuntimePhase::kCompiling ||
       !allocator_metrics_healthy()) {
+    if (g_runtime.phase != RuntimePhase::kCompiling) {
+      report_native_diagnostic(
+          NativeDiagnosticCode::kRuntimePostCompilePhaseInvariant);
+    }
+    if (!allocator_metrics_healthy()) {
+      report_allocator_metrics_failure();
+    }
     result_sink.discard();
     g_runtime.status = WireCompileStatus::kInternalError;
     g_runtime.phase = RuntimePhase::kFailed;
@@ -385,6 +602,11 @@ std::int32_t runtime_compile(std::uint32_t input_pointer,
                        g_runtime.input_byte_length,
                        result_sink.wire_pointer_,
                        result_sink.byte_length_)) {
+      report_native_diagnostic(
+          NativeDiagnosticCode::kRuntimeArtifactReadyInvariant);
+      if (!allocator_metrics_healthy()) {
+        report_allocator_metrics_failure();
+      }
       const WireCompileStatus failure =
           result.blocker.has_value()
               ? WireCompileStatus::kInternalError
@@ -419,10 +641,13 @@ std::int32_t runtime_compile(std::uint32_t input_pointer,
       g_runtime.status = terminal_status;
       break;
     default:
+      report_native_diagnostic(
+          NativeDiagnosticCode::kRuntimeTerminalStatusInvalid);
       g_runtime.status = WireCompileStatus::kInternalError;
       break;
   }
   if (!allocator_metrics_healthy()) {
+    report_allocator_metrics_failure();
     g_runtime.status = WireCompileStatus::kInternalError;
   }
   g_runtime.phase = RuntimePhase::kFailed;

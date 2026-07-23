@@ -1,6 +1,7 @@
 #include "BrowserGradCppCuteProducer.h"
 
 #include "BrowserGradCppCuteClangAction.h"
+#include "BrowserGradCppCuteRuntime.h"
 
 #include <algorithm>
 #include <array>
@@ -197,23 +198,32 @@ ProducerReviewResult run_cpp_cute_producer_review(
           review));
       if (review.policy_install_status !=
           CppCutePreprocessorPolicyInstallStatus::kInstalled) {
+        report_native_diagnostic(
+            NativeDiagnosticCode::kProducerPolicyInstallFailure);
         result.status = ProducerReviewStatus::kInternalError;
         return result;
       }
       if (review.vfs_failed) {
+        report_native_diagnostic(NativeDiagnosticCode::kProducerVfsFailure);
         result.status = ProducerReviewStatus::kVfsError;
         return result;
       }
       if (review.diagnostic_capture_failed) {
+        report_native_diagnostic(
+            NativeDiagnosticCode::kProducerDiagnosticCaptureLimit);
         result.status = ProducerReviewStatus::kResourceLimit;
         return result;
       }
       if (review.frontend_work_limit_exceeded) {
+        report_native_diagnostic(
+            NativeDiagnosticCode::kProducerFrontendWorkLimit);
         result.status = ProducerReviewStatus::kResourceLimit;
         return result;
       }
       if (!review.invocation_succeeded && review.clang_error_count == 0U &&
           !review.policy_failed) {
+        report_native_diagnostic(
+            NativeDiagnosticCode::kProducerInvocationFailure);
         result.status = ProducerReviewStatus::kInternalError;
         return result;
       }
@@ -259,6 +269,7 @@ ProducerReviewResult run_cpp_cute_producer_review(
     result.status = ProducerReviewStatus::kResourceLimit;
     return result;
   } catch (...) {
+    report_native_diagnostic(NativeDiagnosticCode::kProducerException);
     result.status = ProducerReviewStatus::kInternalError;
     return result;
   }

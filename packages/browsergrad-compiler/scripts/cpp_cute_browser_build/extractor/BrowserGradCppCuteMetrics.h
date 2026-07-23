@@ -60,6 +60,32 @@ std::uint32_t allocator_metrics_pointer();
 bool allocator_metrics_healthy();
 
 /**
+ * Sticky module-internal first-cause classification for allocator-integrity
+ * failures. This is diagnostic state only: it is not exported through the C
+ * ABI and cannot authorize an artifact.
+ */
+enum class AllocatorMetricsFailureReason : std::uint32_t {
+  kNone = 0U,
+  kInvalidAllocationTableShape = 1U,
+  kAllocationTableProbeExhausted = 2U,
+  kAllocationTableRehashFailure = 3U,
+  kAllocationTableInsertFailure = 4U,
+  kAllocationTableEraseFailure = 5U,
+  kCreationCounterOverflow = 6U,
+  kReleaseInvariantFailure = 7U,
+  kReallocationInvariantFailure = 8U,
+  kFailedAllocationCounterOverflow = 9U,
+  kReentrantAllocatorHook = 10U,
+  kDuplicateBuiltinPointer = 11U,
+  kUntrackedFree = 12U,
+  kUntrackedReallocation = 13U,
+  kReplacementPointerCollision = 14U,
+  kInvalidMetricsPointer = 15U,
+};
+
+AllocatorMetricsFailureReason allocator_metrics_failure_reason() noexcept;
+
+/**
  * ABI 1.2 exact frontend-work record for one synchronous compilation.
  *
  * Counters aggregate the CUDA device pass followed by the CUDA host pass.

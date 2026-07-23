@@ -33,6 +33,8 @@ constinit AllocatorMetricsRecordV1 g_metrics = {
     0U,
 };
 constinit bool g_metrics_healthy = true;
+constinit AllocatorMetricsFailureReason g_metrics_failure_reason =
+    AllocatorMetricsFailureReason::kNone;
 constinit bool g_allocator_hook_active = false;
 
 constinit FrontendWorkMetricsRecordV1 g_frontend_work = {
@@ -68,7 +70,12 @@ struct AllocationTable {
 
 constinit AllocationTable g_allocations;
 
-void poison_metrics() { g_metrics_healthy = false; }
+void poison_metrics(const AllocatorMetricsFailureReason reason) {
+  if (g_metrics_failure_reason == AllocatorMetricsFailureReason::kNone) {
+    g_metrics_failure_reason = reason;
+  }
+  g_metrics_healthy = false;
+}
 
 FrontendWorkPhaseV1 frontend_work_phase() noexcept {
   return static_cast<FrontendWorkPhaseV1>(g_frontend_work.phase);
@@ -230,7 +237,10 @@ bool table_shape_valid() {
 
 AllocationEntry* find_entry(void* pointer) {
   if (pointer == nullptr || !table_shape_valid()) {
-    if (pointer != nullptr) poison_metrics();
+    if (pointer != nullptr) {
+      poison_metrics(
+          AllocatorMetricsFailureReason::kInvalidAllocationTableShape);
+    }
     return nullptr;
   }
   if (g_allocations.capacity == 0U) return nullptr;
@@ -242,7 +252,8 @@ AllocationEntry* find_entry(void* pointer) {
     if (entry.pointer == pointer) return &entry;
     index = (index + 1U) & mask;
   }
-  poison_metrics();
+  poison_metrics(
+      AllocatorMetricsFailureReason::kAllocationTableProbeExhausted);
   return nullptr;
 }
 
@@ -280,7 +291,8 @@ bool resize_allocation_table(std::size_t capacity) {
         !insert_without_growth(replacement, capacity, entry.pointer,
                                entry.requested_byte_length)) {
       builtin_free(replacement);
-      poison_metrics();
+      poison_metrics(
+          AllocatorMetricsFailureReason::kAllocationTableRehashFailure);
       return false;
     }
   }
@@ -292,7 +304,8 @@ bool resize_allocation_table(std::size_t capacity) {
 
 bool ensure_allocation_table_capacity() {
   if (!table_shape_valid()) {
-    poison_metrics();
+    poison_metrics(
+        AllocatorMetricsFailureReason::kInvalidAllocationTableShape);
     return false;
   }
   const std::size_t required = g_allocations.size + 1U;
@@ -317,7 +330,8 @@ bool insert_allocation(void* pointer, std::size_t requested_byte_length) {
       g_allocations.size >= g_allocations.capacity ||
       !insert_without_growth(g_allocations.entries, g_allocations.capacity,
                              pointer, requested_byte_length)) {
-    poison_metrics();
+    poison_metrics(
+        AllocatorMetricsFailureReason::kAllocationTableInsertFailure);
     return false;
   }
   ++g_allocations.size;
@@ -326,7 +340,8 @@ bool insert_allocation(void* pointer, std::size_t requested_byte_length) {
 
 bool erase_allocation(void* pointer) {
   if (pointer == nullptr || g_allocations.capacity == 0U) {
-    poison_metrics();
+    poison_metrics(
+        AllocatorMetricsFailureReason::kAllocationTableEraseFailure);
     return false;
   }
   const std::size_t mask = g_allocations.capacity - 1U;
@@ -334,7 +349,8 @@ bool erase_allocation(void* pointer) {
   for (std::size_t probe = 0U; probe < g_allocations.capacity; ++probe) {
     AllocationEntry& entry = g_allocations.entries[index];
     if (entry.pointer == nullptr) {
-      poison_metrics();
+      poison_metrics(
+          AllocatorMetricsFailureReason::kAllocationTableEraseFailure);
       return false;
     }
     if (entry.pointer == pointer) {
@@ -355,7 +371,8 @@ bool erase_allocation(void* pointer) {
     }
     index = (index + 1U) & mask;
   }
-  poison_metrics();
+  poison_metrics(
+      AllocatorMetricsFailureReason::kAllocationTableEraseFailure);
   return false;
 }
 
@@ -369,7 +386,7 @@ bool preflight_creation(std::size_t requested_byte_length) {
           g_metrics.cumulative_global_allocated_requested_byte_length,
           requested, &ignored) ||
       !checked_add(g_metrics.successful_allocation_count, 1U, &ignored)) {
-    poison_metrics();
+    poison_metrics(AllocatorMetricsFailureReason::kCreationCounterOverflow);
     return false;
   }
   return true;
@@ -397,7 +414,8 @@ bool preflight_release(std::size_t requested_byte_length) {
       cumulative_freed >
           g_metrics.cumulative_global_allocated_requested_byte_length ||
       g_metrics.free_count == std::numeric_limits<std::uint64_t>::max()) {
-    poison_metrics();
+    poison_metrics(
+        AllocatorMetricsFailureReason::kReleaseInvariantFailure);
     return false;
   }
   return true;
@@ -424,13 +442,15 @@ bool preflight_reallocation(std::size_t old_requested_byte_length,
                    old_requested, &ignored) ||
       !checked_add(g_metrics.successful_allocation_count, 1U, &ignored) ||
       !checked_add(g_metrics.free_count, 1U, &ignored)) {
-    poison_metrics();
+    poison_metrics(
+        AllocatorMetricsFailureReason::kReallocationInvariantFailure);
     return false;
   }
   const std::uint64_t without_old =
       g_metrics.current_live_global_requested_byte_length - old_requested;
   if (!checked_add(without_old, new_requested, &ignored)) {
-    poison_metrics();
+    poison_metrics(
+        AllocatorMetricsFailureReason::kReallocationInvariantFailure);
     return false;
   }
   return true;
@@ -458,7 +478,8 @@ void record_failed_request(std::size_t requested_byte_length) {
   if (requested_byte_length == 0U || !g_metrics_healthy) return;
   if (g_metrics.failed_allocation_count ==
       std::numeric_limits<std::uint64_t>::max()) {
-    poison_metrics();
+    poison_metrics(
+        AllocatorMetricsFailureReason::kFailedAllocationCounterOverflow);
     return;
   }
   ++g_metrics.failed_allocation_count;
@@ -467,8 +488,11 @@ void record_failed_request(std::size_t requested_byte_length) {
 class AllocatorHookGuard final {
  public:
   AllocatorHookGuard() {
-    if (!g_metrics_healthy || g_allocator_hook_active) {
-      poison_metrics();
+    if (!g_metrics_healthy) {
+      return;
+    }
+    if (g_allocator_hook_active) {
+      poison_metrics(AllocatorMetricsFailureReason::kReentrantAllocatorHook);
       return;
     }
     g_allocator_hook_active = true;
@@ -531,7 +555,7 @@ void* tracked_creation(std::size_t requested_byte_length,
     return nullptr;
   }
   if (find_entry(pointer) != nullptr || !g_metrics_healthy) {
-    poison_metrics();
+    poison_metrics(AllocatorMetricsFailureReason::kDuplicateBuiltinPointer);
     errno = ENOMEM;
     return nullptr;
   }
@@ -566,7 +590,7 @@ bool metrics_free_impl(void* pointer) {
   if (!guard.active()) return false;
   AllocationEntry* entry = find_entry(pointer);
   if (entry == nullptr || !g_metrics_healthy) {
-    poison_metrics();
+    poison_metrics(AllocatorMetricsFailureReason::kUntrackedFree);
     return false;
   }
   const std::size_t requested_byte_length = entry->requested_byte_length;
@@ -591,7 +615,7 @@ bool metrics_free_impl(void* pointer) {
   }
   AllocationEntry* entry = find_entry(pointer);
   if (entry == nullptr || !g_metrics_healthy) {
-    poison_metrics();
+    poison_metrics(AllocatorMetricsFailureReason::kUntrackedReallocation);
     errno = EINVAL;
     return nullptr;
   }
@@ -616,13 +640,15 @@ bool metrics_free_impl(void* pointer) {
     entry->requested_byte_length = byte_length;
   } else {
     if (find_entry(replacement) != nullptr || !g_metrics_healthy) {
-      poison_metrics();
+      poison_metrics(
+          AllocatorMetricsFailureReason::kReplacementPointerCollision);
       errno = ENOMEM;
       return nullptr;
     }
     if (!erase_allocation(pointer) ||
         !insert_allocation(replacement, byte_length)) {
-      poison_metrics();
+      poison_metrics(
+          AllocatorMetricsFailureReason::kReallocationInvariantFailure);
       errno = ENOMEM;
       return nullptr;
     }
@@ -655,13 +681,17 @@ std::uint32_t allocator_metrics_pointer() {
   if (pointer == 0U ||
       pointer > kMaximumRecordStart ||
       pointer % alignof(AllocatorMetricsRecordV1) != 0U) {
-    poison_metrics();
+    poison_metrics(AllocatorMetricsFailureReason::kInvalidMetricsPointer);
     return 0U;
   }
   return static_cast<std::uint32_t>(pointer);
 }
 
 bool allocator_metrics_healthy() { return g_metrics_healthy; }
+
+AllocatorMetricsFailureReason allocator_metrics_failure_reason() noexcept {
+  return g_metrics_failure_reason;
+}
 
 std::uint32_t frontend_work_metrics_pointer() {
   const std::uintptr_t pointer =

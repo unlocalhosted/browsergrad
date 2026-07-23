@@ -26,13 +26,13 @@ describe("package-pinned header-distribution reproducibility", () => {
       verifierSourceRevision:
         CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION,
       buildInputLockId:
-        "bg.cpp.browser-build-input-lock.sha256.1b747a53be87251e85fdedb0d43dd48ba53ae83717436abcb86b46f874d33f0e",
+        "bg.cpp.browser-build-input-lock.sha256.c0c7ee66b05951ee3b977ccac0de68e5e417106d6c8894e1152771a4a775dbf3",
       pipelineId:
-        "bg.cpp.browser-header-pack-pipeline.sha256.6c33e79fc5704328ab1147dc31b27a119a230c7b790733a335ab6657545e17aa",
+        "bg.cpp.browser-header-pack-pipeline.sha256.183827bd37e8d401d8e72ac09e037b74077269fa02f30bcbcdf28beb531fb567",
       outputVerificationId:
-        "bg.cpp.distribution-output-file-verification.sha256.a71037abea902befd009c3a8c643b1a1a98c94a891e7022d02d017d453dc764b",
+        "bg.cpp.distribution-output-file-verification.sha256.4f0dd3990cf922631bc9b36872320939e20019a69d0a54e50312d029f911fda3",
       reproducibilityId:
-        "bg.cpp.browser-header-distribution-reproducibility.sha256.c4295b8226eac800cf37b5fcf92b8064b33167d67c0e6c94096f477d9e3dc4bb",
+        "bg.cpp.browser-header-distribution-reproducibility.sha256.9f98374557977e35bff019faa9d09cae1e1aa19fc6397ec703810d68dae987cf",
       outputCount: 17,
       outputByteLength: "68899643",
       exactHeaderDistributionOutputSetReproducible: true,
