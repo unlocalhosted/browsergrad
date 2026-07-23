@@ -18,10 +18,14 @@ try {
   const grad = packAndExtract("browsergrad-grad");
   const jit = packAndExtract("browsergrad-jit");
   const compiler = packAndExtract("browsergrad-compiler");
+  linkPackedDependency(runtime, "@unlocalhosted/browsergrad-semantic-core", semanticCore);
   linkPackedDependency(kernels, "@unlocalhosted/browsergrad-semantic-core", semanticCore);
   linkPackedDependency(grad, "@unlocalhosted/browsergrad-kernels", kernels);
   linkPackedDependency(compiler, "@unlocalhosted/browsergrad-kernels", kernels);
   linkPackedDependency(compiler, "@unlocalhosted/browsergrad-semantic-core", semanticCore);
+  const workspaceSemanticCoreVersion = readPackage(
+    join(root, "packages/browsergrad-semantic-core"),
+  ).version;
 
   const workspacePrimitivesPkg = readPackage(join(root, "packages/browsergrad-primitives"));
   const primitivesPkg = readPackage(primitives);
@@ -84,10 +88,13 @@ try {
   assertRepositoryMetadata(runtimePkg, "browsergrad-runtime");
   assert(runtimePkg.private !== true, "runtime tarball must be publishable");
   assertNoWorkspaceProtocol(runtimePkg, "runtime packed manifest");
+  const runtimeSemanticCoreRange =
+    runtimePkg.dependencies?.["@unlocalhosted/browsergrad-semantic-core"];
   assert(
-    Object.keys(runtimePkg.dependencies ?? {}).length === 0
+    runtimeSemanticCoreRange === workspaceSemanticCoreVersion
+      && Object.keys(runtimePkg.dependencies ?? {}).length === 1
       && Object.keys(runtimePkg.optionalDependencies ?? {}).length === 0,
-    "runtime packed package must have no install-time dependencies",
+    `runtime packed package must depend only on semantic-core ${workspaceSemanticCoreVersion}`,
   );
   assert(
     runtimePkg.peerDependencies?.pyodide === "^0.26.0"
@@ -109,20 +116,26 @@ try {
     assert(existsSync(join(runtime, file)), `runtime tarball missing ${file}`);
   }
   const runtimeRoot = await import(pathToFileURL(join(runtime, "dist/index.js")));
-  for (const exportName of ["BrowsergradError", "createSession", "parseManifest", "isSemverCompatible"]) {
+  for (const exportName of [
+    "BrowsergradError",
+    "assignmentRequirementDefinitions",
+    "createAssignmentRequirementResolutionEnvironment",
+    "createSession",
+    "isSemverCompatible",
+    "parseManifest",
+  ]) {
     assert(exportName in runtimeRoot, `runtime packed root missing ${exportName}`);
   }
   const pyodidePeer = join(root, "packages/browsergrad-runtime/node_modules/pyodide");
   assert(existsSync(pyodidePeer), "runtime fresh npm consumer requires the installed Pyodide peer fixture");
   const npmRuntimeConsumer = installPackedNpmConsumer(
     "runtime",
-    ["browsergrad-runtime"],
+    ["browsergrad-runtime", "browsergrad-semantic-core"],
     { pyodide: `file:${pyodidePeer}` },
   );
   verifyInstalledRuntimeConsumer(npmRuntimeConsumer, workspaceRuntimePkg.version);
 
   const semanticCorePkg = readPackage(semanticCore);
-  const workspaceSemanticCoreVersion = readPackage(join(root, "packages/browsergrad-semantic-core")).version;
   assert(semanticCorePkg.version === workspaceSemanticCoreVersion, `semantic-core version mismatch: ${semanticCorePkg.version}`);
   assertRepositoryMetadata(semanticCorePkg, "browsergrad-semantic-core");
   assert(semanticCorePkg.private !== true, "semantic-core tarball must be publishable");
@@ -130,6 +143,7 @@ try {
   assert(semanticCorePkg.exports?.["./layout"], "semantic-core package missing ./layout export");
   assert(semanticCorePkg.exports?.["./kernel"], "semantic-core package missing ./kernel export");
   assert(semanticCorePkg.exports?.["./schedule"], "semantic-core package missing ./schedule export");
+  assert(semanticCorePkg.exports?.["./requirement"], "semantic-core package missing ./requirement export");
   const densePermutationFixtureExport = "./fixtures/kernel-v1/dense-permutation-view-copy.cases.json";
   assert(
     semanticCorePkg.exports?.[densePermutationFixtureExport] === densePermutationFixtureExport,
@@ -146,6 +160,8 @@ try {
     "dist/kernel.d.ts",
     "dist/schedule.js",
     "dist/schedule.d.ts",
+    "dist/requirement.js",
+    "dist/requirement.d.ts",
     "python/browsergrad_semantic_core.py",
     "fixtures/layout-v1/row-major-rank2.input.json",
     "fixtures/layout-v1/symbolic-byte-rank3.input.json",
@@ -177,6 +193,7 @@ try {
   const semanticLayout = await import(pathToFileURL(join(semanticCore, "dist/layout.js")));
   const semanticKernel = await import(pathToFileURL(join(semanticCore, "dist/kernel.js")));
   const semanticSchedule = await import(pathToFileURL(join(semanticCore, "dist/schedule.js")));
+  const semanticRequirement = await import(pathToFileURL(join(semanticCore, "dist/requirement.js")));
   for (const exportName of ["canonicalizeJson", "hashSemanticArtifact", "SCHEDULE_DIAGNOSTIC_CODES", "validateWireEnvelope"]) {
     assert(exportName in semanticSchema, `semantic-core schema export missing ${exportName}`);
   }
@@ -211,6 +228,12 @@ try {
     "verifyAttentionOnlineKvTileScheduleArtifact",
   ]) {
     assert(exportName in semanticSchedule, `semantic-core schedule export missing ${exportName}`);
+  }
+  for (const exportName of [
+    "createAssignmentRequirementDefinition",
+    "createAssignmentRequirementResolution",
+  ]) {
+    assert(exportName in semanticRequirement, `semantic-core requirement export missing ${exportName}`);
   }
   const packedLogicalGemm = await semanticKernel.createVerifiedDenseLogicalGemmTileArtifacts({
     m: "16",
@@ -1222,6 +1245,9 @@ function verifyInstalledRuntimeConsumer(consumer, expectedVersion) {
   const source = `
 import {
   BrowsergradError,
+  assignmentCapabilityEnvironmentFromRequirementResolutions,
+  assignmentRequirementDefinitions,
+  createAssignmentRequirementResolutionEnvironment,
   createSession,
   isSemverCompatible,
   parseManifest,
@@ -1230,6 +1256,16 @@ import runtimePackage from "@unlocalhosted/browsergrad-runtime/package.json" wit
 
 if (runtimePackage.version !== ${JSON.stringify(expectedVersion)}) throw new Error("unexpected packed runtime version");
 if (typeof BrowsergradError !== "function" || typeof createSession !== "function") throw new Error("packed runtime root exports invalid");
+const requirementEnvironment = createAssignmentRequirementResolutionEnvironment({
+  environmentId: "fresh-consumer",
+  providers: [{
+    requirementId: "pyodide",
+    providerId: "worker.pyodide",
+    mode: "browser",
+  }],
+});
+const capabilities = assignmentCapabilityEnvironmentFromRequirementResolutions(requirementEnvironment);
+if (assignmentRequirementDefinitions().length !== 53 || capabilities.capabilities.join(",") !== "pyodide") throw new Error("packed runtime requirement resolution invalid");
 if (!isSemverCompatible("^0.1.0", runtimePackage.version)) throw new Error("packed runtime semver export invalid");
 const parsed = parseManifest({
   id: "release-consumer",

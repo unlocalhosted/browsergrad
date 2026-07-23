@@ -9,6 +9,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Explicit `/requirement` export with immutable versioned assignment
+  requirement definitions and environment-scoped available/unavailable
+  resolutions. Availability requires one named provider, one closed provider
+  mode, and deterministic evidence IDs; it does not imply semantic lowering or
+  backend execution.
 - Closed `browsergrad.kernel.attention-forward@1` artifacts for backend-neutral
   rank-4 f32 scaled-dot-product attention. The canonical dense constructor
   derives disjoint Q/K/V/output layouts, exact inverse-square-root scale bits,

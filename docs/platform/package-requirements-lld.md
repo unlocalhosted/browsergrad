@@ -2729,6 +2729,15 @@ entrypoints—`torch.tensor(device=...)` and `nn.Module.to(...)`—are also
 CPU-only and fail closed. No recorded eager Grad behavior remains classified
 as compatibility debt.
 
+ADR-0047 adds the first concrete `/requirement` consumer. Runtime's complete
+legacy definition registry is generated from the platform vocabulary, and its
+new environment record resolves every definition as available or unavailable.
+Availability requires one exact provider, mode, and evidence set; definition
+presence alone cannot satisfy a profile gate. The compatibility capability
+environment is now derivable from these records. Run-plan/report/matrix APIs
+still accept that compatibility shape, so direct resolution consumption plus
+artifact/program-scoped lowering records remain required for Gate 6 exit.
+
 ### Adapter ledger
 
 Every adapter has an owner, permitted callers, new-use prohibition, retirement

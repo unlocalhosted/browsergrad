@@ -14,6 +14,11 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Adds the semantic-core `/requirement` protocol and a generated runtime
+  registry for all 53 assignment requirements. Runtime environments now retain
+  exact provider, mode, and evidence bindings; known definitions remain
+  unavailable unless explicitly resolved, and the legacy capability shape is
+  derived only through a compatibility bridge.
 - Makes eager Grad `Tensor.expand()` a true storage-sharing zero-stride view.
   It preserves dtype and non-contiguous layout, propagates mutations through
   aliases, avoids output-sized allocation, and retains its unbroadcast VJP.

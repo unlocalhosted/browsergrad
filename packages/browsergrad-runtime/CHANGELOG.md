@@ -7,6 +7,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- Provider-bound assignment requirement resolution environments generated from
+  the architecture vocabulary. Every known definition resolves exactly once;
+  availability requires one explicit provider/mode/evidence record, and a
+  compatibility bridge derives legacy capability inputs only from available
+  resolutions.
+
 ## [0.1.2] — 2026-07-15
 
 ### Added

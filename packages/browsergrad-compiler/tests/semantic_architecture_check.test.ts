@@ -22,6 +22,7 @@ import {
   validateCompilerPointerBehaviorFixture,
   validateGradCompatibilityInventory,
   validateJitOpaqueOperationInventory,
+  validateAssignmentRequirementRegistrySource,
   validatePlatformVocabularySnapshot,
   validateSemanticFreezeManifest,
   validateSharedSemanticFixtureContracts,
@@ -211,6 +212,46 @@ describe("semantic architecture guardrails", () => {
       typesSource.replace('export type AssignmentCapabilityMode = "browser" | "simulated" | "external";', 'export type AssignmentCapabilityMode = "browser" | "simulated" | "external" | "native";'),
       runtimeFreeze,
     )).toContainEqual(expect.stringContaining("AssignmentCapabilityMode values changed"));
+  });
+
+  it("rejects generated assignment requirement registry drift", () => {
+    const registrySource = readFileSync(
+      join(
+        repoRoot,
+        "packages/browsergrad-runtime/src/assignment-requirement-registry.generated.ts",
+      ),
+      "utf8",
+    );
+    const vocabulary = JSON.parse(
+      readFileSync(
+        join(repoRoot, "architecture/platform-vocabulary.json"),
+        "utf8",
+      ),
+    ) as { legacyAssignmentRequirements: unknown[] };
+
+    expect(
+      validateAssignmentRequirementRegistrySource(
+        registrySource,
+        vocabulary,
+      ),
+    ).toEqual([]);
+    expect(
+      validateAssignmentRequirementRegistrySource(
+        registrySource.replace(
+          '"requirementId": "webgpu"',
+          '"requirementId": "webgpu-mutated"',
+        ),
+        vocabulary,
+      ),
+    ).toContainEqual(expect.stringContaining("registry is stale"));
+
+    const duplicated = structuredClone(vocabulary);
+    duplicated.legacyAssignmentRequirements.push(
+      duplicated.legacyAssignmentRequirements[0],
+    );
+    expect(
+      validateAssignmentRequirementRegistrySource(registrySource, duplicated),
+    ).toContainEqual(expect.stringContaining("duplicate assignment requirement"));
   });
 
   it("rejects Grad dtype/view source drift", () => {

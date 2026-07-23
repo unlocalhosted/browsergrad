@@ -8,6 +8,18 @@ export {
   type BrowserGpuCapabilityInput,
 } from "./assignment-capabilities.js";
 export {
+  ASSIGNMENT_REQUIREMENT_ENVIRONMENT_SCHEMA,
+  ASSIGNMENT_REQUIREMENT_ENVIRONMENT_SCHEMA_VERSION,
+  assignmentCapabilityEnvironmentFromRequirementResolutions,
+  assignmentRequirementDefinition,
+  assignmentRequirementDefinitions,
+  createAssignmentRequirementResolutionEnvironment,
+  evaluateAssignmentRequirementResolutions,
+  type AssignmentRequirementProviderRecord,
+  type AssignmentRequirementResolutionEnvironment,
+  type AssignmentRequirementResolutionEnvironmentInput,
+} from "./assignment-requirements.js";
+export {
   createAssignmentDatasetCachePlan,
   createAssignmentMountPlan,
   createAssignmentMountPreflightReport,

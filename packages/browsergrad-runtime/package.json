@@ -45,9 +45,9 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "pretypecheck": "pnpm --filter @unlocalhosted/browsergrad-primitives build && pnpm --filter @unlocalhosted/browsergrad-kernels build && pnpm --filter @unlocalhosted/browsergrad-compiler build",
+    "pretypecheck": "pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-primitives build && pnpm --filter @unlocalhosted/browsergrad-kernels build && pnpm --filter @unlocalhosted/browsergrad-compiler build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "pretest": "pnpm --filter @unlocalhosted/browsergrad-primitives build && pnpm --filter @unlocalhosted/browsergrad-kernels build && pnpm --filter @unlocalhosted/browsergrad-compiler build",
+    "pretest": "pnpm --filter @unlocalhosted/browsergrad-semantic-core build && pnpm --filter @unlocalhosted/browsergrad-primitives build && pnpm --filter @unlocalhosted/browsergrad-kernels build && pnpm --filter @unlocalhosted/browsergrad-compiler build",
     "test": "vitest run",
     "test:watch": "vitest",
     "pretest:integration": "pnpm --filter @unlocalhosted/browsergrad-primitives build && pnpm --filter @unlocalhosted/browsergrad-kernels build",
@@ -63,6 +63,9 @@
     "pyodide": {
       "optional": false
     }
+  },
+  "dependencies": {
+    "@unlocalhosted/browsergrad-semantic-core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

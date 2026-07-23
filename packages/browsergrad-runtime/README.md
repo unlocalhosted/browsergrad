@@ -177,7 +177,8 @@ import {
   assignmentRubricKind,
   assignmentRunReadiness,
   assignmentRunnerRoute,
-  createAssignmentCapabilityEnvironment,
+  assignmentCapabilityEnvironmentFromRequirementResolutions,
+  createAssignmentRequirementResolutionEnvironment,
   createAssignmentCapabilityCatalog,
   createAssignmentBenchmarkPreflightMatrix,
   createAssignmentPlatformHandoff,
@@ -189,7 +190,7 @@ import {
   createAssignmentMountPlan,
   createAssignmentPreflightReport,
   createAssignmentRunPlan,
-  evaluateAssignmentCapabilities,
+  evaluateAssignmentRequirementResolutions,
   evaluateAssignmentMountContents,
   parseAssignmentProfile,
   requiredAssignmentCapabilities,
@@ -203,13 +204,28 @@ const parsed = parseAssignmentProfile(profileJson);
 if (!parsed.ok) throw new Error(parsed.errors.join("; "));
 
 const catalog = createAssignmentCapabilityCatalog([parsed.profile]);
-const environment = createAssignmentCapabilityEnvironment({
-  browserCapabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
-  simulatedCapabilities: ["worker-mesh", "distributed-simulator"],
-  externalCapabilities: ["native-cuda-external"],
+const requirementEnvironment =
+  createAssignmentRequirementResolutionEnvironment({
+    environmentId: "browser.local",
+    providers: [
+      { requirementId: "pyodide", providerId: "worker.pyodide", mode: "browser" },
+      { requirementId: "torch-compat", providerId: "grad.compat", mode: "browser" },
+      { requirementId: "webgpu", providerId: "navigator.gpu", mode: "browser" },
+      { requirementId: "wgsl-kernel", providerId: "kernels.wgsl", mode: "browser" },
+      { requirementId: "worker-mesh", providerId: "worker.mesh", mode: "simulated" },
+      { requirementId: "distributed-simulator", providerId: "distributed.simulator", mode: "simulated" },
+      { requirementId: "native-cuda-external", providerId: "runner.native", mode: "external" },
+    ],
 });
+const environment =
+  assignmentCapabilityEnvironmentFromRequirementResolutions(
+    requirementEnvironment,
+  );
 const required = requiredAssignmentCapabilities(parsed.profile);
-const preflight = evaluateAssignmentCapabilities(parsed.profile, environment);
+const preflight = evaluateAssignmentRequirementResolutions(
+  parsed.profile,
+  requirementEnvironment,
+);
 const plan = createAssignmentRunPlan(parsed.profile, environment);
 const report = createAssignmentPreflightReport(parsed.profile, environment);
 const handoff = createAssignmentPlatformHandoff(parsed.profile, report, {
@@ -303,9 +319,17 @@ Capability gates support `requires` for all-of requirements and `any_of` for
 alternative groups. Non-capability gates such as streaming and timeout remain
 rubric/watchdog checks.
 
-Use `createAssignmentCapabilityEnvironment()` to build the platform environment
-from browser, simulated, and external capability groups. It de-duplicates and
-sorts capabilities, then attaches `capabilityModes`; if a capability appears in
+Use `createAssignmentRequirementResolutionEnvironment()` for new platform
+readiness work. It resolves every generated definition exactly once and marks a
+requirement available only when the caller supplies one named provider, mode,
+and optional evidence IDs. Definition or method presence alone never grants
+support. `assignmentCapabilityEnvironmentFromRequirementResolutions()` is the
+temporary bridge for run-plan APIs that still consume the frozen legacy
+capability environment.
+
+`createAssignmentCapabilityEnvironment()` remains the compatibility constructor
+for existing callers. It de-duplicates and sorts browser, simulated, and
+external labels, then attaches `capabilityModes`; if a label appears in
 multiple groups, direct browser support wins over simulated and external modes.
 `assignmentRunReadiness(plan)` turns the selected capabilities into a platform
 status: `runnable`, `simulated`, `external-only`, or `blocked`. When multiple

@@ -1,8 +1,9 @@
 # `@unlocalhosted/browsergrad-semantic-core`
 
-Versioned `0.x` package for BrowserGrad's canonical semantic wire format and
-value/layout model. The API remains intentionally narrow and unstable while
-the schemas prove themselves across two frontends and two backends.
+Versioned `0.x` package for BrowserGrad's canonical semantic wire format,
+value/layout model, kernel/schedule meaning, and requirement protocol. The API
+remains intentionally narrow and unstable while the schemas prove themselves
+across two frontends and two backends.
 
 Only explicit subpaths exist:
 
@@ -10,11 +11,19 @@ Only explicit subpaths exist:
 - `@unlocalhosted/browsergrad-semantic-core/layout`
 - `@unlocalhosted/browsergrad-semantic-core/kernel`
 - `@unlocalhosted/browsergrad-semantic-core/schedule`
+- `@unlocalhosted/browsergrad-semantic-core/requirement`
 
 There is no root barrel. The package must remain browser-safe and cannot import
 compiler frontends, framework packages, runtimes, or device APIs. Public
 consumers depend only on explicit subpaths; new subpaths require a concrete
 cross-package consumer and architecture evidence.
+
+`/requirement` contains immutable versioned assignment requirement definitions
+and environment-scoped resolution records. An available resolution must bind
+one provider ID, one closed browser/simulated/external mode, and a deterministic
+evidence-ID set. An unavailable resolution carries no invented provider or
+evidence. The protocol records readiness facts only; it owns no semantic
+lowering or backend policy.
 
 `/kernel` currently contains one concrete `browsergrad.kernel@1` operation: a
 verified, materializing view copy over a verified `browsergrad.layout@1`

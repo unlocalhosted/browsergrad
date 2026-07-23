@@ -6,6 +6,8 @@ import { builtinModules, createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { buildAssignmentRequirementRegistrySource } from "./assignment-requirement-registry.mjs";
+
 const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function option(name) {
@@ -207,6 +209,28 @@ export function buildAssignmentRequirementUsage(
   const usage = assignmentRequirementUsage(directory, profileSuffix, failures, path.resolve(root));
   if (failures.length > 0) throw new Error(failures.join("\n"));
   return usage;
+}
+
+export function validateAssignmentRequirementRegistrySource(
+  source,
+  vocabulary,
+) {
+  const failures = [];
+  try {
+    const expected = buildAssignmentRequirementRegistrySource(
+      vocabulary?.legacyAssignmentRequirements,
+    );
+    if (source !== expected) {
+      failures.push(
+        "generated assignment requirement registry is stale; run pnpm architecture:generate-requirements",
+      );
+    }
+  } catch (error) {
+    failures.push(
+      `cannot generate assignment requirement registry: ${errorMessage(error)}`,
+    );
+  }
+  return failures;
 }
 
 export function checkFrozenCompilerPointerScalarMemorySource(
@@ -1661,10 +1685,11 @@ function checkRuntimeAssignmentRequirements(root, ts, freeze, failures) {
   const definitionFile = resolveManifestPath(root, freeze.definitionFile, failures);
   const typesFile = resolveManifestFile(root, freeze.typesFile, "typesFile", failures);
   const vocabularyFile = resolveManifestFile(root, freeze.vocabularyFile, "vocabularyFile", failures);
+  const registryFile = resolveManifestFile(root, freeze.registryFile, "registryFile", failures);
   const behaviorFixture = resolveManifestFile(root, freeze.behaviorFixtureFile, "behaviorFixtureFile", failures);
   const usageInventoryFile = resolveManifestFile(root, freeze.usageInventoryFile, "usageInventoryFile", failures);
   const profileDirectory = resolveManifestFile(root, freeze.profileDirectory, "profileDirectory", failures);
-  if ([definitionFile, typesFile, vocabularyFile, behaviorFixture, usageInventoryFile, profileDirectory].some((value) => value === undefined)) return;
+  if ([definitionFile, typesFile, vocabularyFile, registryFile, behaviorFixture, usageInventoryFile, profileDirectory].some((value) => value === undefined)) return;
 
   failures.push(...checkFrozenRuntimeAssignmentRequirementsSource(
     ts,
@@ -1696,6 +1721,10 @@ function checkRuntimeAssignmentRequirements(root, ts, freeze, failures) {
   }
   const profileIds = usage.requirements.map((entry) => entry.requirementId);
   const vocabulary = readJson(vocabularyFile, failures);
+  failures.push(...validateAssignmentRequirementRegistrySource(
+    fs.readFileSync(registryFile, "utf8"),
+    vocabulary,
+  ));
   validatePlatformVocabulary(root, vocabulary, profileIds, freeze.browserMappings, failures);
 }
 

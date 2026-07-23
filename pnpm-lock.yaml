@@ -160,6 +160,10 @@ importers:
         version: 4.1.7(@types/node@24.12.4)(@vitest/browser-playwright@4.1.7)(vite@8.0.14(@types/node@24.12.4))
 
   packages/browsergrad-runtime:
+    dependencies:
+      '@unlocalhosted/browsergrad-semantic-core':
+        specifier: workspace:*
+        version: link:../browsergrad-semantic-core
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
