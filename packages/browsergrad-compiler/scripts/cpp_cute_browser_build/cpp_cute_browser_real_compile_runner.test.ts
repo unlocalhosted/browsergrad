@@ -85,21 +85,12 @@ describe("real browser C++/CuTe compile runner", () => {
       wasmPath: wasm,
       packRoot: packs,
       allowUntrustedDiagnosticWasm: true,
-    })).resolves.toMatchObject({
-      schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs",
-      version: 2,
-      wasmAuthority: "untrusted-diagnostic-local-byte-observation-only",
-      pinnedReproducibleWasmMatched: false,
-      untrustedDiagnosticWasm: true,
-      workerExecutionObserved: false,
-      releaseReady: false,
-      assets: expect.arrayContaining([
-        expect.objectContaining({
-          assetId: "clang-wasm",
-          sha256: "cd5d4935a48c0672cb06407bb443bc0087aff947c6b864bac886982c73b3027f",
-          byteLength: 4,
-        }),
-      ]),
+    })).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REAL-COMPILE-RUNNER",
+      path: "$.assets[1]",
+      message: expect.stringContaining(
+        "header pack clang-resource differs from package reproducibility evidence",
+      ),
     });
 
     await expect(preflightCppCuteBrowserRealCompileInputs({

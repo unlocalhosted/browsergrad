@@ -22,6 +22,9 @@ interface ExternalInputs {
     | "untrusted-diagnostic-local-byte-observation-only";
   readonly pinnedReproducibleWasmMatched: boolean;
   readonly untrustedDiagnosticWasm: boolean;
+  readonly headerDistributionReproducibilityId: string;
+  readonly headerDistributionOutputVerificationId: string;
+  readonly packagePinnedHeaderPacksMatched: true;
   readonly headerDistributionLicenseApproved: false;
   readonly producerTrusted: false;
   readonly workerExecutionObserved: false;
@@ -42,6 +45,11 @@ const browserInputs = {
   wasmAuthority: inputs.wasmAuthority,
   pinnedReproducibleWasmMatched: inputs.pinnedReproducibleWasmMatched,
   untrustedDiagnosticWasm: inputs.untrustedDiagnosticWasm,
+  headerDistributionReproducibilityId:
+    inputs.headerDistributionReproducibilityId,
+  headerDistributionOutputVerificationId:
+    inputs.headerDistributionOutputVerificationId,
+  packagePinnedHeaderPacksMatched: inputs.packagePinnedHeaderPacksMatched,
   headerDistributionLicenseApproved: inputs.headerDistributionLicenseApproved,
   producerTrusted: inputs.producerTrusted,
   workerExecutionObserved: inputs.workerExecutionObserved,
@@ -103,6 +111,11 @@ function parseInputs(value: string | undefined): ExternalInputs {
       parsed.version !== 2 ||
       parsed.authority !== "local-exact-byte-preflight-only" ||
       (!pinned && !diagnostic) ||
+      !/^bg\.cpp\.browser-header-distribution-reproducibility\.sha256\.[0-9a-f]{64}$/u
+        .test(parsed.headerDistributionReproducibilityId ?? "") ||
+      !/^bg\.cpp\.distribution-output-file-verification\.sha256\.[0-9a-f]{64}$/u
+        .test(parsed.headerDistributionOutputVerificationId ?? "") ||
+      parsed.packagePinnedHeaderPacksMatched !== true ||
       parsed.headerDistributionLicenseApproved !== false ||
       parsed.producerTrusted !== false ||
       parsed.workerExecutionObserved !== false ||

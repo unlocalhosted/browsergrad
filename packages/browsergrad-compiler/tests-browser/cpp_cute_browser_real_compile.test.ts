@@ -114,6 +114,9 @@ interface BrowserExternalInputs {
     | "untrusted-diagnostic-local-byte-observation-only";
   readonly pinnedReproducibleWasmMatched: boolean;
   readonly untrustedDiagnosticWasm: boolean;
+  readonly headerDistributionReproducibilityId: string;
+  readonly headerDistributionOutputVerificationId: string;
+  readonly packagePinnedHeaderPacksMatched: true;
   readonly headerDistributionLicenseApproved: false;
   readonly producerTrusted: false;
   readonly workerExecutionObserved: false;
@@ -213,6 +216,25 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
     compilerWorkerExecutionObserved: false,
     releaseReady: false,
   });
+  const evidenceInputs = Object.freeze({
+    externalAssetCount: externalAssets.length,
+    totalExternalByteLength: environment.totalExternalByteLength,
+    wasmSha256: externalAssets.find((asset) => asset.assetId === "clang-wasm")?.sha256,
+    wasmAuthority: __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.wasmAuthority,
+    pinnedReproducibleWasmMatched:
+      __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.pinnedReproducibleWasmMatched,
+    untrustedDiagnosticWasm:
+      __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.untrustedDiagnosticWasm,
+    headerDistributionReproducibilityId:
+      __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.headerDistributionReproducibilityId,
+    headerDistributionOutputVerificationId:
+      __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.headerDistributionOutputVerificationId,
+    packagePinnedHeaderPacksMatched:
+      __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.packagePinnedHeaderPacksMatched,
+    assetSetSha256: environment.manifest.assetSetSha256,
+    packCount: vfsInstallation.packCount,
+    installedFileCount: vfsInstallation.fileCount,
+  });
 
   const compileStarted = performance.now();
   let execution: Awaited<ReturnType<typeof executeCppCuteBrowserWorker>>;
@@ -243,19 +265,7 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
         syntax: "unchanged-cpp17-cute",
         selectedDeclaration: "layout",
       },
-    inputs: {
-      externalAssetCount: externalAssets.length,
-      totalExternalByteLength: environment.totalExternalByteLength,
-      wasmSha256: externalAssets.find((asset) => asset.assetId === "clang-wasm")?.sha256,
-      wasmAuthority: __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.wasmAuthority,
-      pinnedReproducibleWasmMatched:
-        __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.pinnedReproducibleWasmMatched,
-      untrustedDiagnosticWasm:
-        __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.untrustedDiagnosticWasm,
-        assetSetSha256: environment.manifest.assetSetSha256,
-        packCount: vfsInstallation.packCount,
-        installedFileCount: vfsInstallation.fileCount,
-      },
+      inputs: evidenceInputs,
       execution: {
         invocationId: cause.workerFailure.invocationId,
         requestId: request.requestId,
@@ -316,19 +326,7 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
         syntax: "unchanged-cpp17-cute",
         selectedDeclaration: "layout",
       },
-      inputs: {
-        externalAssetCount: externalAssets.length,
-        totalExternalByteLength: environment.totalExternalByteLength,
-        wasmSha256: externalAssets.find((asset) => asset.assetId === "clang-wasm")?.sha256,
-        wasmAuthority: __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.wasmAuthority,
-        pinnedReproducibleWasmMatched:
-          __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.pinnedReproducibleWasmMatched,
-        untrustedDiagnosticWasm:
-          __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.untrustedDiagnosticWasm,
-        assetSetSha256: environment.manifest.assetSetSha256,
-        packCount: vfsInstallation.packCount,
-        installedFileCount: vfsInstallation.fileCount,
-      },
+      inputs: evidenceInputs,
       execution: {
         evidenceId: execution.evidenceId,
         invocationId: execution.invocationId,
@@ -417,19 +415,7 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
       syntax: "unchanged-cpp17-cute",
       selectedDeclaration: "layout",
     },
-      inputs: {
-        externalAssetCount: externalAssets.length,
-        totalExternalByteLength: environment.totalExternalByteLength,
-        wasmSha256: externalAssets.find((asset) => asset.assetId === "clang-wasm")?.sha256,
-        wasmAuthority: __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.wasmAuthority,
-        pinnedReproducibleWasmMatched:
-          __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.pinnedReproducibleWasmMatched,
-        untrustedDiagnosticWasm:
-          __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.untrustedDiagnosticWasm,
-      assetSetSha256: environment.manifest.assetSetSha256,
-      packCount: vfsInstallation.packCount,
-      installedFileCount: vfsInstallation.fileCount,
-    },
+    inputs: evidenceInputs,
     execution: {
       evidenceId: execution.evidenceId,
       invocationId: execution.invocationId,

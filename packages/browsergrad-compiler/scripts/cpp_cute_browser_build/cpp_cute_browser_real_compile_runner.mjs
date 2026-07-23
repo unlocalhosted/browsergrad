@@ -5,6 +5,10 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  cppCuteBrowserHeaderDistributionReproducibilityResourceBytes,
+  verifyCppCuteBrowserHeaderDistributionReproducibilityResource,
+} from "../../dist/cpp_cute_browser_header_distribution_reproducibility.js";
+import {
   cppCuteBrowserReproducibilityResourceBytes,
   verifyCppCuteBrowserReproducibilityResource,
 } from "../../dist/cpp_cute_browser_reproducibility.js";
@@ -37,9 +41,14 @@ export class CppCuteBrowserRealCompileRunnerError extends Error {
 
 export async function preflightCppCuteBrowserRealCompileInputs(input) {
   const values = exactInput(input);
-  const reproducibility = await verifyCppCuteBrowserReproducibilityResource(
-    cppCuteBrowserReproducibilityResourceBytes(),
-  );
+  const [reproducibility, headerReproducibility] = await Promise.all([
+    verifyCppCuteBrowserReproducibilityResource(
+      cppCuteBrowserReproducibilityResourceBytes(),
+    ),
+    verifyCppCuteBrowserHeaderDistributionReproducibilityResource(
+      cppCuteBrowserHeaderDistributionReproducibilityResourceBytes(),
+    ),
+  ]);
   const wasmPath = await canonicalRegularFile(values.wasmPath, "$.wasmPath");
   const packRoot = await canonicalDirectory(values.packRoot, "$.packRoot");
   const packAssetRoot = join(packRoot, "assets", "browsergrad-cpp-cute");
@@ -83,6 +92,7 @@ export async function preflightCppCuteBrowserRealCompileInputs(input) {
       "Clang-Wasm differs from the exact package-pinned two-clean-build output",
     );
   }
+  requirePackagePinnedHeaderPacks(assets, headerReproducibility);
   return Object.freeze({
     schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs",
     version: 2,
@@ -95,11 +105,35 @@ export async function preflightCppCuteBrowserRealCompileInputs(input) {
       : "untrusted-diagnostic-local-byte-observation-only",
     pinnedReproducibleWasmMatched,
     untrustedDiagnosticWasm: !pinnedReproducibleWasmMatched,
+    headerDistributionReproducibilityId: headerReproducibility.reproducibilityId,
+    headerDistributionOutputVerificationId: headerReproducibility.outputVerificationId,
+    packagePinnedHeaderPacksMatched: true,
     headerDistributionLicenseApproved: false,
     producerTrusted: false,
     workerExecutionObserved: false,
     releaseReady: false,
   });
+}
+
+/**
+ * @param {readonly Readonly<{ assetId: string; sha256: string; byteLength: number }>[] } assets
+ * @param {Awaited<ReturnType<typeof verifyCppCuteBrowserHeaderDistributionReproducibilityResource>>} reproducibility
+ */
+function requirePackagePinnedHeaderPacks(assets, reproducibility) {
+  for (const [includeRootId, fileName] of Object.entries(PACK_FILES)) {
+    const assetIndex = assets.findIndex((asset) => asset.assetId === includeRootId);
+    const asset = assets[assetIndex];
+    const outputPath = `assets/browsergrad-cpp-cute/${fileName}`;
+    const expected = reproducibility.outputs.find((output) => output.outputPath === outputPath);
+    if (asset === undefined || expected === undefined ||
+        asset.sha256 !== expected.sha256 ||
+        String(asset.byteLength) !== expected.byteLength) {
+      invalid(
+        `$.assets[${assetIndex < 0 ? includeRootId : assetIndex}]`,
+        `header pack ${includeRootId} differs from package reproducibility evidence`,
+      );
+    }
+  }
 }
 
 export async function runCppCuteBrowserRealCompile(argv = process.argv.slice(2)) {
@@ -160,7 +194,7 @@ export async function runCppCuteBrowserRealCompile(argv = process.argv.slice(2))
   if (exitCode !== 0) {
     invalid("$.browser", `real browser compile verifier exited with status ${exitCode}`);
   }
-  const evidence = parseEvidence(captured);
+  const evidence = parseEvidence(captured, preflight);
   if (options.requireCompiled &&
       (evidence.outcome !== "compiled" ||
        !preflight.pinnedReproducibleWasmMatched)) {
@@ -348,7 +382,11 @@ async function canonicalOutputPath(path) {
   return path;
 }
 
-function parseEvidence(output) {
+/**
+ * @param {string} output
+ * @param {Awaited<ReturnType<typeof preflightCppCuteBrowserRealCompileInputs>>} preflight
+ */
+function parseEvidence(output, preflight) {
   const clean = output.replaceAll(ANSI_COLOR_PATTERN, "");
   const matches = clean.split(/\r?\n/u).filter((line) => line.includes(EVIDENCE_MARKER));
   if (matches.length !== 1) {
@@ -362,6 +400,11 @@ function parseEvidence(output) {
     const rejected = evidence?.outcome === "rejected";
     const blocked = evidence?.outcome === "blocked";
     const workerExecuted = compiled || rejected;
+    const wasm = preflight.assets.find((asset) => asset.assetId === "clang-wasm");
+    const totalExternalByteLength = preflight.assets.reduce(
+      (total, asset) => total + asset.byteLength,
+      0,
+    );
     if (evidence?.schema !== "browsergrad.compiler.cpp-cute.browser-real-compile-observation" ||
         evidence?.version !== 1 ||
         (!workerExecuted && !blocked) ||
@@ -375,6 +418,23 @@ function parseEvidence(output) {
             : "untrusted-diagnostic-local-byte-observation-only") ||
         evidence?.inputs?.untrustedDiagnosticWasm !==
           !evidence?.inputs?.pinnedReproducibleWasmMatched ||
+        evidence?.inputs?.externalAssetCount !== preflight.assets.length ||
+        evidence?.inputs?.totalExternalByteLength !== totalExternalByteLength ||
+        evidence?.inputs?.wasmSha256 !== wasm?.sha256 ||
+        evidence?.inputs?.wasmAuthority !== preflight.wasmAuthority ||
+        evidence?.inputs?.pinnedReproducibleWasmMatched !==
+          preflight.pinnedReproducibleWasmMatched ||
+        evidence?.inputs?.untrustedDiagnosticWasm !==
+          preflight.untrustedDiagnosticWasm ||
+        evidence?.inputs?.headerDistributionReproducibilityId !==
+          preflight.headerDistributionReproducibilityId ||
+        evidence?.inputs?.headerDistributionOutputVerificationId !==
+          preflight.headerDistributionOutputVerificationId ||
+        evidence?.inputs?.packagePinnedHeaderPacksMatched !== true ||
+        evidence?.headerDistributionLicenseApproved !== false ||
+        evidence?.producerTrusted !== false ||
+        evidence?.loweringAuthorityMinted !== false ||
+        evidence?.backendExecutionAuthorized !== false ||
         evidence?.releaseReady !== false) {
       invalid("$.evidence", "browser evidence has an invalid authority boundary");
     }
