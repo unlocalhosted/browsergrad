@@ -435,11 +435,21 @@ class IncludeObservationCallbacks final : public clang::PPCallbacks {
       return;
     }
     const clang::SourceLocation hash =
-        source_manager_.getSpellingLoc(hash_location);
-    const clang::SourceLocation filename_end = clang::Lexer::getLocForEndOfToken(
-        source_manager_.getSpellingLoc(filename_range.getEnd()), 0U,
-        source_manager_, language_options_);
-    if (hash.isInvalid() || filename_end.isInvalid() ||
+        source_manager_.getFileLoc(hash_location);
+    clang::CharSourceRange file_range =
+        clang::Lexer::makeFileCharRange(
+            filename_range, source_manager_, language_options_);
+    if (file_range.isInvalid()) {
+      file_range = clang::Lexer::getAsCharRange(
+          source_manager_.getExpansionRange(filename_range),
+          source_manager_, language_options_);
+    }
+    const clang::SourceLocation filename_begin = file_range.getBegin();
+    const clang::SourceLocation filename_end = file_range.getEnd();
+    if (hash.isInvalid() || file_range.isInvalid() ||
+        filename_begin.isInvalid() || filename_end.isInvalid() ||
+        source_manager_.getFileID(hash) !=
+            source_manager_.getFileID(filename_begin) ||
         source_manager_.getFileID(hash) !=
             source_manager_.getFileID(filename_end)) {
       static_cast<void>(observer_->record_resolved_include_edge({}));

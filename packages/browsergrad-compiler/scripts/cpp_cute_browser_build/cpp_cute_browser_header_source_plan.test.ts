@@ -16,7 +16,7 @@ describe("browser header-source plan", () => {
 
     expect(plan.planId).toMatch(/^bg\.cpp\.browser-header-source-plan\.sha256\.[0-9a-f]{64}$/u);
     expect(plan.body.buildInputLockId).toBe(
-      "bg.cpp.browser-build-input-lock.sha256.4c99ffe26adf1c7b3dfaf2d8ef92db1f28d5656f6237cf19d7a523df80115ec7",
+      "bg.cpp.browser-build-input-lock.sha256.f49134879bb9340eb9c82a89e6bb18c0d9cb6c7bcbef32283bc1bbd3aef6bc9d",
     );
     expect(plan.body.archives.map((archive) => archive.sourceId)).toEqual([
       "cuda-cccl-linux-x86-64",
