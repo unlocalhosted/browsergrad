@@ -24,7 +24,7 @@ export interface CppCuteBrowserHeaderDistributionReproducibilityResourceV1
   readonly outputs: readonly CppCuteBrowserHeaderDistributionReproducibilityOutputV1[];
   readonly totals: JsonObject & {
     readonly outputCount: 17;
-    readonly byteLength: "69004028";
+    readonly byteLength: "71114813";
   };
   readonly claims: JsonObject & {
     readonly twoDistinctPrivateOutputRootsVerified: true;
@@ -45,17 +45,17 @@ const VALUE: CppCuteBrowserHeaderDistributionReproducibilityResourceV1 = {
   version: 1,
   authority: "two-root-exact-header-distribution-reproducibility-observation-only",
   scope: "five-header-packs-license-inventory-and-notice-outputs-only",
-  verifierSourceRevision: "00e1f91121045be08a045fe6636ec97ab20c109b",
+  verifierSourceRevision: "7476fd4819af82ad5b1283b82083831ab77c5d86",
   buildInputLockId:
     "bg.cpp.browser-build-input-lock.sha256.489aa5b8657d2b0a4309869dc4c18e2e32f58be03d25a4c7cf1c0c2b981d28a4",
   buildInputLockResourceSha256:
     "3a705905182a763a9cee693e270d5c7a737b264aad41cf5ca0ef913f4ad370ed",
   pipelineId:
-    "bg.cpp.browser-header-pack-pipeline.sha256.5f56bb97ae961bdbce1a319089061d82e86229816c00559972bfcee0da438dd7",
+    "bg.cpp.browser-header-pack-pipeline.sha256.80a29abc734fcf3183c98fbd3bce5c23005a045f06e6837b80231845fdf09b71",
   outputVerificationId:
-    "bg.cpp.distribution-output-file-verification.sha256.7d0cc4cfd20c83f68ba21455fafaf507a54ff4c35602c8de854eeb159dddc115",
+    "bg.cpp.distribution-output-file-verification.sha256.1cc298cf70ed624df258a14b0eb687c6a0666a14cdd4e5d208674f6c0f7fb3df",
   reproducibilityId:
-    "bg.cpp.browser-header-distribution-reproducibility.sha256.4f1795c6902d984728d72bfad601ebf654993cd00e3c2954f69818b4ab241740",
+    "bg.cpp.browser-header-distribution-reproducibility.sha256.43f703672ddbeaf1e6e6d544e3ed50721a2585e947b5d0a1e624293cac80d449",
   outputs: [
     {
       outputPath: "assets/browsergrad-cpp-cute/THIRD_PARTY_NOTICES.txt",
@@ -64,13 +64,13 @@ const VALUE: CppCuteBrowserHeaderDistributionReproducibilityResourceV1 = {
     },
     {
       outputPath: "assets/browsergrad-cpp-cute/clang-resource.headers.bgvfs",
-      sha256: "fd7fb977130d1181c5ce0e038472a45e30623b54e0249b167f5f2ed228b51977",
-      byteLength: "7704399",
+      sha256: "037acb8aaae9a437ed8275ca608dd92c31a142aa8c882b7ac238e80b3343805e",
+      byteLength: "7704705",
     },
     {
       outputPath: "assets/browsergrad-cpp-cute/cuda-12.6.3.headers.bgvfs",
-      sha256: "f795494ab3d97cbed3e8dab374daeb90574bbd52f0d462b3466bd89e2aa11a77",
-      byteLength: "16848942",
+      sha256: "1917ba19e65d1e3be9dfe23b80c693ba8de5ce8e44538a7d16715cd61ece2cbd",
+      byteLength: "18954596",
     },
     {
       outputPath: "assets/browsergrad-cpp-cute/cutlass-3.7.0.headers.bgvfs",
@@ -84,8 +84,8 @@ const VALUE: CppCuteBrowserHeaderDistributionReproducibilityResourceV1 = {
     },
     {
       outputPath: "assets/browsergrad-cpp-cute/license-inventory.json",
-      sha256: "a2c10f8d9bdabb1f225c901c02df2d7ea452e755db1883d7775a107c573e9191",
-      byteLength: "1203662",
+      sha256: "2f1a493b0fdd5eb73a46fb7c16714e716709b4ab68f968d9de9f7c9ec3c63740",
+      byteLength: "1208487",
     },
     {
       outputPath: "assets/browsergrad-cpp-cute/linux-sysroot.headers.bgvfs",
@@ -145,7 +145,7 @@ const VALUE: CppCuteBrowserHeaderDistributionReproducibilityResourceV1 = {
   ],
   totals: {
     outputCount: 17,
-    byteLength: "69004028",
+    byteLength: "71114813",
   },
   claims: {
     twoDistinctPrivateOutputRootsVerified: true,

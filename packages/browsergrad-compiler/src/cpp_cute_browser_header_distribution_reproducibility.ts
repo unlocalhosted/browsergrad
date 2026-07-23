@@ -16,10 +16,10 @@ import {
 } from "./resources/cpp_cute_browser_header_distribution_reproducibility_v1.js";
 
 export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_SHA256 =
-  "dd43e552d17ae8a878f7d8219d4742d36180f64c0793e0a130830bf7cdce27c3";
+  "8dafa7484a7ca7a5c12e6cb2128cfbbc22d2692a96ebc1581c81e48953ad8620";
 export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_BYTE_LENGTH = 4_042;
 export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION =
-  "00e1f91121045be08a045fe6636ec97ab20c109b";
+  "7476fd4819af82ad5b1283b82083831ab77c5d86";
 
 const OUTPUT_VERIFICATION_HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.distribution-output-file-verification.v1";
@@ -54,7 +54,7 @@ export interface VerifiedCppCuteBrowserHeaderDistributionReproducibility {
   readonly reproducibilityId: string;
   readonly outputs: readonly CppCuteBrowserHeaderDistributionReproducibilityOutputV1[];
   readonly outputCount: 17;
-  readonly outputByteLength: "69004028";
+  readonly outputByteLength: "71114813";
   readonly exactHeaderDistributionOutputSetReproducible: true;
   readonly fullDistributedOutputSetReproducible: false;
   readonly externalDistributedFileLicenseMapReviewed: false;
@@ -223,7 +223,7 @@ function assertOutputProjection(
     }
     total += BigInt(output.byteLength);
   }
-  if (total !== 69_004_028n) {
+  if (total !== 71_114_813n) {
     mismatch("$.totals.byteLength", "output byte total differs from the exact observation");
   }
 }
