@@ -4,13 +4,23 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  cppCuteBrowserBuildInputLockResourceBytes,
+  decodeCppCuteBrowserBuildInputLock,
+  deriveCppCuteBrowserHeaderInputProjectionId,
+  type CppCuteBrowserBuildInputLockBodyV1,
+} from "../../src/cpp_cute_browser_build_lock.js";
+import {
   CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_BYTE_LENGTH,
   CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_SHA256,
   CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION,
+  CPP_CUTE_BROWSER_HEADER_INPUT_PROJECTION_ID,
   cppCuteBrowserHeaderDistributionReproducibilityResourceBytes,
   requireVerifiedCppCuteBrowserHeaderDistributionReproducibility,
   verifyCppCuteBrowserHeaderDistributionReproducibilityResource,
 } from "../../src/cpp_cute_browser_header_distribution_reproducibility.js";
+import {
+  CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_RESOURCE,
+} from "../../src/resources/cpp_cute_browser_build_lock_v1.js";
 
 describe("package-pinned header-distribution reproducibility", () => {
   it("independently admits the exact 17-output observation without widening authority", async () => {
@@ -20,6 +30,9 @@ describe("package-pinned header-distribution reproducibility", () => {
     expect(await sha256Hex(bytes))
       .toBe(CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_SHA256);
 
+    const currentBuildLock = await decodeCppCuteBrowserBuildInputLock(
+      cppCuteBrowserBuildInputLockResourceBytes(),
+    );
     const authority = await verifyCppCuteBrowserHeaderDistributionReproducibilityResource(bytes);
     expect(authority).toMatchObject({
       authority: "package-pinned-header-distribution-reproducibility-only",
@@ -27,6 +40,9 @@ describe("package-pinned header-distribution reproducibility", () => {
         CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION,
       buildInputLockId:
         "bg.cpp.browser-build-input-lock.sha256.489aa5b8657d2b0a4309869dc4c18e2e32f58be03d25a4c7cf1c0c2b981d28a4",
+      currentBuildInputLockId: currentBuildLock.lockId,
+      currentBuildInputLockResourceSha256: currentBuildLock.resourceSha256,
+      headerInputProjectionId: CPP_CUTE_BROWSER_HEADER_INPUT_PROJECTION_ID,
       pipelineId:
         "bg.cpp.browser-header-pack-pipeline.sha256.80a29abc734fcf3183c98fbd3bce5c23005a045f06e6837b80231845fdf09b71",
       outputVerificationId:
@@ -87,5 +103,68 @@ describe("package-pinned header-distribution reproducibility", () => {
     expect(first).not.toBe(second);
     first[0] = (first[0] ?? 0) ^ 1;
     expect(second).toEqual(cppCuteBrowserHeaderDistributionReproducibilityResourceBytes());
+  });
+
+  it("isolates extractor churn while binding every build-lock field consumed by header output", async () => {
+    const baseline = structuredClone(
+      CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_RESOURCE.body,
+    ) as CppCuteBrowserBuildInputLockBodyV1;
+    expect(await deriveCppCuteBrowserHeaderInputProjectionId(baseline))
+      .toBe(CPP_CUTE_BROWSER_HEADER_INPUT_PROJECTION_ID);
+
+    const extractorOnly = structuredClone(baseline);
+    (extractorOnly.recipe.extractorSource as { sourceSetSha256: string }).sourceSetSha256 =
+      "0".repeat(64);
+    expect(await deriveCppCuteBrowserHeaderInputProjectionId(extractorOnly))
+      .toBe(CPP_CUTE_BROWSER_HEADER_INPUT_PROJECTION_ID);
+
+    const nonHeaderOutputOnly = structuredClone(baseline);
+    const wasmOutput = nonHeaderOutputOnly.recipe.distributedOutputPlan.outputs.find(
+      (output) => output.role === "clang-extractor",
+    );
+    if (wasmOutput === undefined) throw new Error("test fixture lost Clang-Wasm output");
+    (wasmOutput as { path: string }).path =
+      "assets/browsergrad-cpp-cute/changed-clang-extractor.wasm";
+    expect(await deriveCppCuteBrowserHeaderInputProjectionId(nonHeaderOutputOnly))
+      .toBe(CPP_CUTE_BROWSER_HEADER_INPUT_PROJECTION_ID);
+
+    const sourceChange = structuredClone(baseline);
+    const cutlass = sourceChange.sources.find((source) => source.sourceId === "cutlass");
+    if (cutlass === undefined) throw new Error("test fixture lost CUTLASS source");
+    (cutlass as { archiveSha256: string }).archiveSha256 = "1".repeat(64);
+
+    const configuredResourceChange = structuredClone(baseline);
+    const clangStage = configuredResourceChange.recipe.stages.find(
+      (stage) => stage.stageId === "clang-extractor-wasm",
+    );
+    const hlsl = clangStage?.definitions.find(
+      (definition) => definition.name === "CLANG_ENABLE_HLSL",
+    );
+    if (hlsl === undefined) throw new Error("test fixture lost configured-resource policy");
+    (hlsl as { value: string }).value = "ON";
+
+    const headerOutputChange = structuredClone(baseline);
+    const cutlassPack = headerOutputChange.recipe.distributedOutputPlan.outputs.find(
+      (output) => output.role === "cutlass-header-vfs",
+    );
+    if (cutlassPack === undefined) throw new Error("test fixture lost CUTLASS pack output");
+    (cutlassPack as { path: string }).path =
+      "assets/browsergrad-cpp-cute/changed-cutlass.headers.bgvfs";
+
+    const noticeChange = structuredClone(baseline);
+    const cutlassNotice = noticeChange.notices.approvedComponents.find(
+      (component) => component.componentId === "cutlass",
+    );
+    if (cutlassNotice === undefined) throw new Error("test fixture lost CUTLASS notice");
+    (cutlassNotice as { noticeSha256: string }).noticeSha256 = "2".repeat(64);
+
+    const changedIds = await Promise.all([
+      sourceChange,
+      configuredResourceChange,
+      headerOutputChange,
+      noticeChange,
+    ].map(deriveCppCuteBrowserHeaderInputProjectionId));
+    expect(changedIds).toHaveLength(4);
+    expect(new Set(changedIds)).not.toContain(CPP_CUTE_BROWSER_HEADER_INPUT_PROJECTION_ID);
   });
 });

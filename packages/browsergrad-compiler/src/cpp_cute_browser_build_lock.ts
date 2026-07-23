@@ -39,6 +39,22 @@ const WIRE_U64 = /^(?:0|[1-9][0-9]{0,19})$/u;
 const SAFE_RELATIVE_PATH = /^(?!\/)(?!.*\\)[A-Za-z0-9._/-]+$/u;
 const PLACEHOLDER = /@[A-Z][A-Z0-9_]*@/gu;
 const MAX_U64 = 18_446_744_073_709_551_615n;
+const HEADER_INPUT_PROJECTION_HASH_DOMAIN =
+  "browsergrad.compiler.cpp-cute.browser-header-input-projection.v1";
+const HEADER_RESOURCE_DEFINITION_NAMES = new Set([
+  "CLANG_ENABLE_HLSL",
+  "LLVM_TARGETS_TO_BUILD",
+]);
+const HEADER_DISTRIBUTION_OUTPUT_ROLES = new Set([
+  "clang-resource-header-vfs",
+  "component-license",
+  "cuda-header-vfs",
+  "cutlass-header-vfs",
+  "libcxx-header-vfs",
+  "license-inventory",
+  "linux-sysroot-header-vfs",
+  "third-party-notices",
+]);
 const PREPARED_LOCKS = new WeakMap<object, StoredCppCuteBrowserBuildInputLock>();
 const ABORT_SIGNAL_ABORTED_GETTER = typeof AbortSignal === "undefined"
   ? undefined
@@ -250,6 +266,80 @@ export async function deriveCppCuteBrowserBuildInputLockId(
     body,
   }, "$.lockId");
   return `bg.cpp.browser-build-input-lock.sha256.${digest}`;
+}
+
+/**
+ * Derives the narrow identity of build-lock fields that can affect the exact
+ * header-distribution subset. This is an identity projection only: accepting
+ * it does not verify a build lock or grant header, license, or release
+ * authority.
+ */
+export async function deriveCppCuteBrowserHeaderInputProjectionId(
+  body: CppCuteBrowserBuildInputLockBodyV1,
+): Promise<string> {
+  const clangWasmStages = body.recipe.stages.filter(
+    (stage) => stage.stageId === "clang-extractor-wasm",
+  );
+  if (clangWasmStages.length !== 1) {
+    invalid(
+      "$.body.recipe.stages",
+      "header-input projection requires one Clang-Wasm stage",
+    );
+  }
+  const clangWasmStage = clangWasmStages[0];
+  if (clangWasmStage === undefined) {
+    invalid("$.body.recipe.stages", "header-input projection lost its Clang-Wasm stage");
+  }
+  const resourceDefinitions = clangWasmStage.definitions.filter(
+    (definition) => HEADER_RESOURCE_DEFINITION_NAMES.has(definition.name),
+  );
+  const resourceDefinitionNames = new Set(
+    resourceDefinitions.map((definition) => definition.name),
+  );
+  if (resourceDefinitions.length !== HEADER_RESOURCE_DEFINITION_NAMES.size ||
+      [...HEADER_RESOURCE_DEFINITION_NAMES].some(
+        (name) => !resourceDefinitionNames.has(name),
+      )) {
+    invalid(
+      "$.body.recipe.stages.clang-extractor-wasm.definitions",
+      "header-input projection requires the complete configured-resource definition set",
+    );
+  }
+  const outputs = body.recipe.distributedOutputPlan.outputs.filter(
+    (output) => HEADER_DISTRIBUTION_OUTPUT_ROLES.has(output.role),
+  );
+  if (outputs.length !== 17) {
+    invalid(
+      "$.body.recipe.distributedOutputPlan.outputs",
+      "header-input projection requires the exact 17-output header subset",
+    );
+  }
+  const digest = await hashJson({
+    domain: HEADER_INPUT_PROJECTION_HASH_DOMAIN,
+    body: {
+      sources: body.sources,
+      configuredClangResourceHeaders: {
+        stageId: clangWasmStage.stageId,
+        definitions: resourceDefinitions,
+      },
+      distributedOutputPlan: {
+        closure: body.recipe.distributedOutputPlan.closure,
+        outputs,
+      },
+      notices: body.notices,
+    },
+  }, "$.headerInputProjectionId");
+  return `bg.cpp.browser-header-input-projection.sha256.${digest}`;
+}
+
+/**
+ * Derives the header-input identity only from verifier-issued build-lock
+ * authority.
+ */
+export async function cppCuteBrowserHeaderInputProjectionId(
+  prepared: PreparedCppCuteBrowserBuildInputLock,
+): Promise<string> {
+  return deriveCppCuteBrowserHeaderInputProjectionId(storedLock(prepared).lock.body);
 }
 
 export function unwrapPreparedCppCuteBrowserBuildInputLock(

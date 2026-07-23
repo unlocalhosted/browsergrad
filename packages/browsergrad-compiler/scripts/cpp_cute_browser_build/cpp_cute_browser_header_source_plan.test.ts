@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
 import {
+  cppCuteBrowserBuildInputLockResourceBytes,
+  decodeCppCuteBrowserBuildInputLock,
+} from "../../dist/cpp_cute_browser_build_lock.js";
+import {
   CppCuteBrowserHeaderSourcePlanError,
   canonicalCppCuteBrowserHeaderSourcePlanBytes,
   prepareCppCuteBrowserHeaderSourcePlan,
@@ -12,12 +16,15 @@ import {
 
 describe("browser header-source plan", () => {
   it("pins eight exact archives and all five header roles", async () => {
-    const plan = await prepareCppCuteBrowserHeaderSourcePlan();
+    const [plan, buildInputLock] = await Promise.all([
+      prepareCppCuteBrowserHeaderSourcePlan(),
+      decodeCppCuteBrowserBuildInputLock(cppCuteBrowserBuildInputLockResourceBytes()),
+    ]);
 
-    expect(plan.planId).toMatch(/^bg\.cpp\.browser-header-source-plan\.sha256\.[0-9a-f]{64}$/u);
-    expect(plan.body.buildInputLockId).toBe(
-      "bg.cpp.browser-build-input-lock.sha256.489aa5b8657d2b0a4309869dc4c18e2e32f58be03d25a4c7cf1c0c2b981d28a4",
-    );
+    expect(plan.planId)
+      .toMatch(/^bg\.cpp\.browser-header-source-plan\.sha256\.[0-9a-f]{64}$/u);
+    expect(plan.body.buildInputLockId).toBe(buildInputLock.lockId);
+    expect(plan.body.buildInputLockResourceSha256).toBe(buildInputLock.resourceSha256);
     expect(plan.body.archives.map((archive) => archive.sourceId)).toEqual([
       "cuda-cccl-linux-x86-64",
       "cuda-cudart-linux-x86-64",

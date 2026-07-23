@@ -7,6 +7,7 @@ import {
   inspectUnsharedPlainUint8Array,
 } from "./cpp_cute_aot_bytes.js";
 import {
+  cppCuteBrowserHeaderInputProjectionId,
   cppCuteBrowserBuildInputLockResourceBytes,
   decodeCppCuteBrowserBuildInputLock,
 } from "./cpp_cute_browser_build_lock.js";
@@ -20,6 +21,8 @@ export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_SHA25
 export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_BYTE_LENGTH = 4_042;
 export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION =
   "7476fd4819af82ad5b1283b82083831ab77c5d86";
+export const CPP_CUTE_BROWSER_HEADER_INPUT_PROJECTION_ID =
+  "bg.cpp.browser-header-input-projection.sha256.48490ddb7b2fe655ec36824e276b90122e2f548a77b768f5978029a31129c5b7";
 
 const OUTPUT_VERIFICATION_HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.distribution-output-file-verification.v1";
@@ -47,8 +50,13 @@ export interface VerifiedCppCuteBrowserHeaderDistributionReproducibility {
   readonly resourceSha256: string;
   readonly resourceByteLength: number;
   readonly verifierSourceRevision: string;
+  /** Full build lock observed by the historical two-root header run. */
   readonly buildInputLockId: string;
   readonly buildInputLockResourceSha256: string;
+  /** Current full lock whose narrow header projection was reauthenticated. */
+  readonly currentBuildInputLockId: string;
+  readonly currentBuildInputLockResourceSha256: string;
+  readonly headerInputProjectionId: string;
   readonly pipelineId: string;
   readonly outputVerificationId: string;
   readonly reproducibilityId: string;
@@ -132,9 +140,13 @@ export async function verifyCppCuteBrowserHeaderDistributionReproducibilityResou
   const buildLock = await decodeCppCuteBrowserBuildInputLock(
     cppCuteBrowserBuildInputLockResourceBytes(),
   );
-  if (resource.buildInputLockId !== buildLock.lockId ||
-      resource.buildInputLockResourceSha256 !== buildLock.resourceSha256) {
-    mismatch("$.buildInputLockId", "evidence does not bind the current package build-input lock");
+  const headerInputProjectionId =
+    await cppCuteBrowserHeaderInputProjectionId(buildLock);
+  if (headerInputProjectionId !== CPP_CUTE_BROWSER_HEADER_INPUT_PROJECTION_ID) {
+    mismatch(
+      "$.headerInputProjectionId",
+      "current package build lock changes the exact header-distribution inputs",
+    );
   }
   if (resource.verifierSourceRevision !==
       CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION) {
@@ -169,6 +181,9 @@ export async function verifyCppCuteBrowserHeaderDistributionReproducibilityResou
     verifierSourceRevision: resource.verifierSourceRevision,
     buildInputLockId: resource.buildInputLockId,
     buildInputLockResourceSha256: resource.buildInputLockResourceSha256,
+    currentBuildInputLockId: buildLock.lockId,
+    currentBuildInputLockResourceSha256: buildLock.resourceSha256,
+    headerInputProjectionId,
     pipelineId: resource.pipelineId,
     outputVerificationId: resource.outputVerificationId,
     reproducibilityId: resource.reproducibilityId,
