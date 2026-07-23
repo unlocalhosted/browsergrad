@@ -264,12 +264,12 @@ AMP on NumPy: not faster than f32 (NumPy lacks f16 SIMD); the value is correctne
 
 ## PRD coverage
 
-All 16 PRDs land at v0:
+Current status across the 16 PRDs:
 
 | PRD | Status |
 |---|---|
 | 001-010 | ✅ Shipped (see PROGRESS.md) |
-| 011 (WebNN) | ✅ Experimental spike at `bg.experimental.webnn.matmul`. Full backend tier when Chrome WebNN reaches GA + meaningful user fraction. |
+| 011 (WebNN) | ⏳ Draft backend. Only `bg.experimental.webnn.is_available` presence detection exists; ADR-0034 removed the non-executable matmul constructor. |
 | 011.5 (WGSL realizer seam) | ✅ Shipped |
 | 012 (megakernels) | ✅ Split: PRD-012a (tiled GEMM + fused codegen + CAST) shipped. PRD-012b (cost model + producer-consumer detection) shipped at `bg.jit.cost_model.*`. PRD-012c (transformer_block megakernel constructor) shipped at `bg.kernels.transformer_block(...)`. |
 | 013 (lab platform) | ✅ Shipped |
@@ -287,6 +287,6 @@ All 16 PRDs land at v0:
 | **torch.cuda.\*, torch.compile, torch.fx** | Out of scope for `install_torch_alias`. Raises `AttributeError`. |
 | **Cross-browser WGSL compile-error line/column parsing** | Vendor diagnostic formats differ; ship raw browser messages and call it honest. |
 | **vmap of RANDOM** | Needs PRNG key splits (JAX-style PRNGKey). Refuses with clear message; user can hand-write a key-split pattern. |
-| **`transformer_block` and `webnn_matmul`** | Constructors build OP_CUSTOM UOps; bridge dispatch lands per JS-side kernel implementation. Forward only. |
+| **`transformer_block`** | Constructor builds an `OP_CUSTOM` UOp that every realizer currently rejects. |
 
 When any of these become blocking for a real consumer, file an issue against the relevant PRD doc and we'll revisit.

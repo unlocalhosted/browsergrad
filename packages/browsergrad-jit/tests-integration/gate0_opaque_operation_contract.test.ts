@@ -55,10 +55,6 @@ user_builder = bg.custom_kernel(
 )
 user = user_builder(q)
 
-left = bg.from_numpy(np.ones((2, 3), dtype=np.float32))
-right = bg.from_numpy(np.ones((3, 4), dtype=np.float32))
-webnn = bg.experimental.webnn.matmul(left, right)
-
 x = bg.from_numpy(np.ones((1, 2, 4), dtype=np.float32))
 w_qkv = bg.from_numpy(np.ones((4, 12), dtype=np.float32))
 w_o = bg.from_numpy(np.ones((4, 4), dtype=np.float32))
@@ -75,17 +71,15 @@ class RouteBridge:
 bridge = RouteBridge()
 flash_vt = {id(node): f"flash-{i}" for i, node in enumerate(flash._uop.inputs)}
 user_vt = {id(node): f"user-{i}" for i, node in enumerate(user._uop.inputs)}
-webnn_vt = {id(node): f"webnn-{i}" for i, node in enumerate(webnn._uop.inputs)}
 transformer_vt = {id(node): f"transformer-{i}" for i, node in enumerate(transformer._uop.inputs)}
 
-nodes = [flash, transformer, user, webnn]
+nodes = [flash, transformer, user]
 {
     "labels": [node._uop.arg["op"] for node in nodes],
     "requiresGrad": [node.requires_grad for node in nodes],
     "cpuErrors": [error_name(node.numpy) for node in nodes],
     "flashLegacyRoute": _h_custom(flash._uop, flash_vt, None, bridge, None),
     "userLegacyRoute": _h_custom(user._uop, user_vt, None, bridge, None),
-    "webnnLegacyError": error_name(lambda: _h_custom(webnn._uop, webnn_vt, None, bridge, None)),
     "transformerLegacyError": error_name(lambda: _h_custom(transformer._uop, transformer_vt, None, bridge, None)),
     "functionalDisconnectedGradient": bg.func.grad(lambda value: bg.kernels.flash_attention(value, k, v).sum())(q).numpy().reshape(-1).tolist(),
 }

@@ -1,6 +1,6 @@
 /**
  * Tests for the previously-deferred PRDs that landed:
- *   - PRD-011 (WebNN spike, behind bg.experimental.webnn)
+ *   - PRD-011 (WebNN presence detection, behind bg.experimental.webnn)
  *   - PRD-012b (cost model + producer-consumer pairs)
  *   - PRD-012c (transformer_block megakernel constructor)
  *   - PRD-014b (remaining vmap rules + refusal stubs)
@@ -9,7 +9,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { clearNamespace, getJitTarget } from "./pyodide-host";
 
-describe("PRD-011 WebNN spike (bg.experimental.webnn)", () => {
+describe("PRD-011 WebNN capability detection (bg.experimental.webnn)", () => {
   beforeAll(async () => { await getJitTarget(); }, 120_000);
   beforeEach(async () => { await clearNamespace(await getJitTarget()); });
 
@@ -22,40 +22,21 @@ bg.experimental.webnn.is_available()
     expect(r).toBe(false);
   });
 
-  it("matmul constructs an OP_CUSTOM('webnn_matmul') UOp", async () => {
+  it("does not advertise the removed constructor-only matmul spike", async () => {
     const target = await getJitTarget();
-    const r = await target.run<{ op: string; arg_op: string; shape: number[] }>(`
+    const r = await target.run<{ hasMatmul: boolean; importError: string }>(`
 import browsergrad_jit as bg
-import numpy as np
-a = bg.from_numpy(np.ones((4, 8), dtype=np.float32))
-b = bg.from_numpy(np.ones((8, 6), dtype=np.float32))
-y = bg.experimental.webnn.matmul(a, b)
+try:
+    from browsergrad_jit.experimental.webnn import matmul
+    import_error = "no_error"
+except ImportError as exc:
+    import_error = type(exc).__name__
 {
-    "op": y._uop.op,
-    "arg_op": y._uop.arg["op"],
-    "shape": list(y._uop.shape),
+    "hasMatmul": hasattr(bg.experimental.webnn, "matmul"),
+    "importError": import_error,
 }
 `);
-    expect(r.op).toBe("CUSTOM");
-    expect(r.arg_op).toBe("webnn_matmul");
-    expect(r.shape).toEqual([4, 6]);
-  });
-
-  it("non-2D inputs raise", async () => {
-    const target = await getJitTarget();
-    const err = await target.run<string>(`
-import browsergrad_jit as bg
-import numpy as np
-a = bg.from_numpy(np.ones((2, 4, 8), dtype=np.float32))
-b = bg.from_numpy(np.ones((8, 6), dtype=np.float32))
-try:
-    bg.experimental.webnn.matmul(a, b)
-    result = "no_error"
-except bg.JitNotImplementedError as e:
-    result = str(e)
-result
-`);
-    expect(err).toMatch(/2-D only/);
+    expect(r).toEqual({ hasMatmul: false, importError: "ImportError" });
   });
 });
 

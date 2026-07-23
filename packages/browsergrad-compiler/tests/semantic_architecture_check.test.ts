@@ -556,6 +556,40 @@ def op(x):
     expect(validateSemanticFreezeManifest(repoRoot, mutated))
       .toContainEqual(expect.stringContaining("required freeze jit.core-custom-ops.v0"));
 
+    const removedPartitionMutated = structuredClone(freezeManifest) as {
+      adapters: Array<{
+        id?: string;
+        freeze?: { removedUnsupportedSurfaceOperationIds?: string[] };
+      }>;
+    };
+    const removedPartitionAdapter = removedPartitionMutated.adapters.find(
+      (entry) => entry.id === "jit.core-custom-ops.v0",
+    );
+    if (removedPartitionAdapter?.freeze !== undefined) {
+      delete removedPartitionAdapter.freeze.removedUnsupportedSurfaceOperationIds;
+    }
+    expect(validateSemanticFreezeManifest(repoRoot, removedPartitionMutated))
+      .toContainEqual(
+        expect.stringContaining("removedUnsupportedSurfaceOperationIds"),
+      );
+
+    const overlappingPartitionMutated = structuredClone(freezeManifest) as {
+      adapters: Array<{
+        id?: string;
+        freeze?: { removedUnsupportedSurfaceOperationIds?: string[] };
+      }>;
+    };
+    const overlappingPartitionAdapter = overlappingPartitionMutated.adapters.find(
+      (entry) => entry.id === "jit.core-custom-ops.v0",
+    );
+    if (overlappingPartitionAdapter?.freeze !== undefined) {
+      overlappingPartitionAdapter.freeze.removedUnsupportedSurfaceOperationIds = [
+        "jit.custom.user.v0",
+      ];
+    }
+    expect(validateSemanticFreezeManifest(repoRoot, overlappingPartitionMutated))
+      .toContainEqual(expect.stringContaining("remains current opaque"));
+
     const runtimeMutated = structuredClone(freezeManifest) as {
       adapters: Array<{ id?: string; freeze?: { kind?: string } }>;
     };

@@ -14,6 +14,18 @@
 
 ---
 
+## Current implementation note
+
+This PRD remains a future backend design. BrowserGrad currently exposes only
+`bg.experimental.webnn.is_available` presence detection. ADR-0034 removed the
+old `bg.experimental.webnn.matmul` constructor because it created an opaque
+node that no CPU, WebGPU, or WebNN realizer could execute. A conforming
+implementation must lower typed graph IR through the partitioner and backend
+contracts specified here; it must not restore a backend-named `CUSTOM`
+operation.
+
+---
+
 ## TL;DR
 
 WebNN ([W3C Candidate Recommendation, January 2026](https://www.w3.org/TR/webnn/); Chrome 146 ships behind Origin Trial; GA expected 2027) exposes the browser to native NN accelerators: the Apple Neural Engine on iPhone/Mac, the Hexagon NPU on Snapdragon laptops, DirectML on Windows, and XNNPACK on the long tail. Published benchmarks (Intel WebNN team, [Microsoft Edge WebNN blog](https://blogs.windows.com/msedgedev/2024/11/11/webnn-coming-to-stable/), [ONNX Runtime Web WebNN EP docs](https://onnxruntime.ai/docs/execution-providers/WebNN-ExecutionProvider.html)) show MobileNet-v2 inference at **~3–4× WASM SIMD** and **~1.5× WebGPU** on M-series Macs and Snapdragon X. PRD-011 lights up WebNN as the **inference-only** tertiary backend in the multi-tier dispatcher described in VISION.md §4 Layer 4. The IR from PRD-005 is partitioned into maximal "WebNN-mappable" islands; each island is lowered to an `MLGraph`, compiled once, cached in OPFS via PRD-008, and dispatched via `MLContext.compute()`; everything else (custom ops, anything backward) stays on the existing WGSL path from PRD-006. Buffer interop is handled by keeping islands large enough that the unavoidable `GPUBuffer ↔ MLOperand` copy is amortised. Backward stays on WebGPU — WebNN has no training surface. When WebNN is unavailable (Firefox today, Safari today, most non-Chromium browsers), the entire path is dead code and the WebGPU dispatcher is byte-for-byte unchanged. Ships behind `bg.config.experimental_webnn=True` until WebNN reaches GA in Chrome stable.

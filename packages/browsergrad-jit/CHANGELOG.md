@@ -9,6 +9,11 @@ contract in the README](README.md#compatibility-contract).
 
 ### Changed
 
+- Removed the constructor-only `bg.experimental.webnn.matmul` spike. It built
+  an opaque node that every realizer rejected and could not honestly imply
+  WebNN dispatch. `bg.experimental.webnn.is_available` remains narrow presence
+  detection; a future WebNN tier must consume typed graph IR through explicit
+  partitioning, lowering, fallback, and execution evidence.
 - `torch.nn.functional.interpolate` now emits typed `INTERPOLATE_2D` and
   `INTERPOLATE_2D_VJP` IR instead of the final framework-owned NumPy callback.
   The bounded rank-4 float16/32/64 profile covers nearest and bilinear

@@ -186,9 +186,11 @@ also remains an explicit refusal. Clamp now emits typed `CLAMP` with closed
 finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
-construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 4 constructor calls and 4 operations under ADR-0002
-and ADR-0004 through ADR-0033. Flip now emits typed `FLIP` with one strictly
+construction; tensor-plan/WebGPU remain explicit refusals. ADR-0034 also
+removes the constructor-only `bg.experimental.webnn.matmul` surface rather
+than silently substituting ordinary matmul for nonexistent WebNN execution.
+The opaque baseline is therefore narrowed to 3 constructor calls and 3
+operations under ADR-0002 and ADR-0004 through ADR-0034. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -607,8 +609,9 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 4 still-opaque and thirty-five typed retirements. ADR-0003 records
-this public contract. The table currently covers typed migrations only;
+opaque IDs into 3 still-opaque, thirty-five typed retirements, and one removed
+unsupported surface. ADR-0003 records this public contract and ADR-0034 records
+the unsupported-surface classification. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.
 
@@ -2653,7 +2656,7 @@ all five.
 | Compiler pointer/scalar memory fields | Compiler | Existing CUDA-lite semantic lowering and the Gate 2 adapter only. | No new view, layout, dtype, or alias feature may add fields. | CPU reference and WGSL consume shared offsets, bounds, and alias facts. | Compiler `1.0.0`. |
 | `cute_static_layout` parser path | Compiler | Existing parser integration and pinned regression fixtures only. | No new spellings, ranks, queries, or call sites. | Pinned real frontend handles its fixtures through layout semantics. | Compiler `1.0.0`. |
 | `TensorGpuPlan` shape-only/f32 assumptions | Kernels | Existing JIT plan serializer and kernels executor/bridge only. | No new operation, dtype, view, offset, or alias semantics may enter this schema. | New view/dtype features enter through shared schemas; plan has no unique semantics. | Kernels `1.0.0`. |
-| JIT `OP_CUSTOM` for core framework ops | JIT | Existing `_webnn.py`, explicit user-kernel code, and embedded legacy wrappers only. | No new core labels or constructor sites; only explicitly user-authored kernel IDs may extend. | Advertised core operations have typed IR, CPU/VJP decisions, and backend decisions. | JIT `1.0.0`. |
+| JIT `OP_CUSTOM` for core framework ops | JIT | Explicit user-kernel code and embedded legacy wrappers only. | No new core labels or constructor sites; only explicitly user-authored kernel IDs may extend. | Advertised core operations have typed IR, CPU/VJP decisions, and backend decisions. | JIT `1.0.0`. |
 | Eager view materialization and bf16 aliasing | Grad | Existing Tensor/torch compatibility adapters only where accurately documented. | No new API may claim view aliasing or bf16 storage through these paths. | View/alias fixtures agree or reject; bf16 is real storage/conversion or rejected. | Grad `1.0.0`. |
 | `flashAttentionDirect` name | Kernels | Existing public export and realizer compatibility call only. | New APIs and docs use the accurate row-wise online-softmax name. | Real block-tiled implementation is proven and a normal major-removal window passes. | Kernels `1.0.0`. |
 | Generic runtime backend labels | Runtime | Existing assignment requirement compatibility mapping only. | New readiness features use canonical requirement definitions/resolutions; semantic lowering uses capability decisions only where an explicit link exists. | All readiness UI consumes requirement resolutions and program-specific lowering records. | Runtime `1.0.0`. |

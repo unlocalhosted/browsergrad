@@ -312,7 +312,6 @@ _sys.modules["browsergrad_jit.lab"] = lab
 experimental = _types.ModuleType("browsergrad_jit.experimental")
 experimental_webnn = _types.ModuleType("browsergrad_jit.experimental.webnn")
 experimental_webnn.is_available = _webnn_mod_exp.is_available
-experimental_webnn.matmul = _webnn_mod_exp.matmul
 experimental.webnn = experimental_webnn
 _sys.modules["browsergrad_jit.experimental"] = experimental
 _sys.modules["browsergrad_jit.experimental.webnn"] = experimental_webnn

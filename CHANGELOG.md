@@ -22,6 +22,9 @@ Each package follows independent [SemVer](https://semver.org/).
 - Adds the first versioned executable JIT framework-operation registry and
   generates detached public support reporting from its validator-bound typed
   records rather than method presence or hand-written tables.
+- Removes the non-executable `bg.experimental.webnn.matmul` constructor-only
+  spike. WebNN presence detection remains, while future WebNN execution must
+  consume typed graph IR through an explicit backend contract.
 - Migrates JIT `Tensor.abs` and `Tensor.sign` together from opaque callbacks to
   typed unary semantics across CPU, closure/symbolic autograd, functional grad,
   vmap, and ONNX. Their tensor-plan/WebGPU profile remains an explicit refusal

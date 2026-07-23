@@ -1,33 +1,25 @@
-"""browsergrad_jit._webnn — experimental WebNN spike (PRD-011).
+"""browsergrad_jit._webnn — experimental WebNN capability detection.
 
-INTERNAL. Public surface: `bg.experimental.webnn.{is_available, matmul}`.
+INTERNAL. Public surface: `bg.experimental.webnn.is_available`.
 
-Per the DL/GPU review's verdict: full WebNN backend tier defers until
-Chrome WebNN GA (~2027) and a meaningful user fraction. But the *spike*
-— prove the Pyodide → JS → WebNN bridge works for one op — fits in a
-day and unblocks PRD-019's future "NPU dispatch" story.
+The full PRD-011 WebNN backend remains deferred until BrowserGrad owns a real
+IR partitioner, lowering, capability record, execution bridge, and fallback
+contract. Presence detection alone does not claim that any operation can run
+through WebNN.
 
 This module:
   * Detects `navigator.ml` via Pyodide's `js` import.
-  * Constructs OP_CUSTOM("webnn_matmul") UOps as a constructor-only spike.
-    No current CPU, WebGPU, or WebNN realizer handles this label.
   * Lives behind `bg.experimental` to signal instability.
 
 What this is NOT:
   * A full WebNN backend with op partitioner, tier selector, fallback
-    machinery (the deferred PRD-011 scope).
+    machinery, or execution evidence.
+  * An operation-construction API. The former constructor-only
+    `webnn_matmul` surface was removed because every realizer rejected it.
   * A WGSL replacement — WGSL stays the default GPU path.
-
-When Chrome ships WebNN to stable and NPU access fraction passes ~30%,
-this spike becomes the seed of the real PRD-011 — same surface, more
-ops, real tier selection.
 """
 
 from __future__ import annotations
-from typing import Any, Optional
-
-from ._ir import UOp, OP_CUSTOM
-from ._errors import JitNotImplementedError
 
 
 def is_available() -> bool:
@@ -44,41 +36,4 @@ def is_available() -> bool:
     return hasattr(nav, "ml") and nav.ml is not None
 
 
-def matmul(a: Any, b: Any) -> Any:
-    """Build a constructor-only CUSTOM(webnn_matmul) UOp.
-
-    Shapes are restricted to 2-D, but dtype equality and an f32-only
-    contract are not yet validated. Both current realization paths reject
-    this node. A future WebNN backend must add explicit validation, lowering,
-    fallback, and capability evidence before this can claim execution support.
-    """
-    from ._tensor_proxy import TensorProxy
-    if not isinstance(a, TensorProxy) or not isinstance(b, TensorProxy):
-        raise TypeError(
-            "bg.experimental.webnn.matmul: both inputs must be TensorProxy"
-        )
-    if a.ndim != 2 or b.ndim != 2:
-        raise JitNotImplementedError(
-            f"bg.experimental.webnn.matmul: 2-D only in v0 (got {a.shape} @ "
-            f"{b.shape}). Batched matmul lands when the full PRD-011 tier "
-            f"lands — after Chrome WebNN GA."
-        )
-    M, K = a.shape
-    K2, N = b.shape
-    if K != K2:
-        from ._errors import ShapeError
-        raise ShapeError(
-            f"webnn_matmul: inner dims don't match: {a.shape} @ {b.shape}"
-        )
-    arg = {
-        "op": "webnn_matmul",
-        "m": int(M),
-        "k": int(K),
-        "n": int(N),
-    }
-    uop = UOp(op=OP_CUSTOM, inputs=(a._uop, b._uop),
-              shape=(M, N), dtype=a.dtype, arg=arg)
-    return TensorProxy(uop, session=a._get_session(), requires_grad=False)
-
-
-__all__ = ["is_available", "matmul"]
+__all__ = ["is_available"]

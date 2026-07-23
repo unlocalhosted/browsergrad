@@ -927,12 +927,37 @@ function checkJitFrameworkOperationContracts(root, manifest, failures) {
     ? manifest.adapters.find((adapter) => isRecord(adapter) && adapter.id === "jit.core-custom-ops.v0")?.freeze
     : undefined;
   const originalIds = isRecord(jitFreeze) ? jitFreeze.originalOperationIds : undefined;
+  const removedUnsupportedIds = isRecord(jitFreeze)
+    ? jitFreeze.removedUnsupportedSurfaceOperationIds
+    : undefined;
   if (!Array.isArray(originalIds) || originalIds.length === 0 || originalIds.some((id) => typeof id !== "string")) {
     failures.push("JIT opaque-operation freeze must retain the original operation ID partition");
+  } else if (
+    !Array.isArray(removedUnsupportedIds)
+    || removedUnsupportedIds.some(
+      (id) => typeof id !== "string" || !id.startsWith("jit.custom."),
+    )
+    || new Set(removedUnsupportedIds).size !== removedUnsupportedIds.length
+  ) {
+    failures.push(
+      "JIT opaque-operation freeze must retain unique removed unsupported-surface IDs",
+    );
   } else {
+    for (const removedId of removedUnsupportedIds) {
+      if (currentOpaqueIds.includes(removedId)) {
+        failures.push(
+          `JIT removed unsupported surface ${removedId} remains in the opaque inventory`,
+        );
+      }
+      if (retiredIds.includes(removedId)) {
+        failures.push(
+          `JIT removed unsupported surface ${removedId} is also classified as typed`,
+        );
+      }
+    }
     compareStringSets(
       "JIT original opaque-operation partition",
-      [...currentOpaqueIds, ...retiredIds],
+      [...currentOpaqueIds, ...retiredIds, ...removedUnsupportedIds],
       originalIds,
       failures,
     );
@@ -979,6 +1004,39 @@ function validateManifest(root, manifest, failures) {
         const decisionsRoot = path.resolve(root, decisionDirectory);
         if (!decision.startsWith(`${decisionsRoot}${path.sep}`) || !fs.existsSync(decision)) {
           failures.push(`${prefix}.baselineDecision must reference an existing file under ${relative(root, decisionsRoot)}`);
+        }
+      }
+      if (adapter.freeze.kind === "jit-op-custom") {
+        const removedIds = adapter.freeze.removedUnsupportedSurfaceOperationIds;
+        if (
+          !Array.isArray(removedIds)
+          || removedIds.some(
+            (id) => typeof id !== "string" || !id.startsWith("jit.custom."),
+          )
+          || new Set(removedIds).size !== removedIds.length
+        ) {
+          failures.push(
+            `${prefix}.freeze.removedUnsupportedSurfaceOperationIds must contain unique frozen IDs`,
+          );
+        } else {
+          const currentIds = Array.isArray(adapter.freeze.operationIds)
+            ? adapter.freeze.operationIds
+            : [];
+          const originalIds = Array.isArray(adapter.freeze.originalOperationIds)
+            ? adapter.freeze.originalOperationIds
+            : [];
+          for (const removedId of removedIds) {
+            if (currentIds.includes(removedId)) {
+              failures.push(
+                `${prefix}.freeze removed unsupported surface ${removedId} remains current opaque`,
+              );
+            }
+            if (!originalIds.includes(removedId)) {
+              failures.push(
+                `${prefix}.freeze removed unsupported surface ${removedId} is outside the original partition`,
+              );
+            }
+          }
         }
       }
     }

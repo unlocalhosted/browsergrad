@@ -5,12 +5,11 @@
     {
       "id": "jit.custom.accelerator-and-constructor-only.v0",
       "expected": {
-        "labels": ["flash_attention", "transformer_block", "user", "webnn_matmul"],
-        "requiresGrad": [false, false, false, false],
-        "cpuErrors": ["RealizationError", "RealizationError", "RealizationError", "RealizationError"],
+        "labels": ["flash_attention", "transformer_block", "user"],
+        "requiresGrad": [false, false, false],
+        "cpuErrors": ["RealizationError", "RealizationError", "RealizationError"],
         "flashLegacyRoute": "flash-ok",
         "userLegacyRoute": "user-ok",
-        "webnnLegacyError": "JitNotImplementedError",
         "transformerLegacyError": "JitNotImplementedError",
         "functionalDisconnectedGradient": [0, 0, 0, 0, 0, 0, 0, 0]
       }
