@@ -1713,7 +1713,18 @@ class Tensor:
                 target_type = _resolve_dtype(dtype_spec)
                 if target_type == self.data.dtype.type:
                     return self  # same dtype — preserve autograd graph intact
-                return Tensor(self.data, dtype=dtype_spec)
+                out = Tensor(self.data, dtype=dtype_spec)
+                if (
+                    self.dtype in _VARIADIC_FLOATING_DTYPES
+                    and out.dtype in _VARIADIC_FLOATING_DTYPES
+                ):
+                    source_dtype = self.data.dtype
+                    return _build_ctx(
+                        out,
+                        (self,),
+                        lambda g: (g.data.astype(source_dtype, copy=False),),
+                    )
+                return out
             except (ValueError, TypeError):
                 pass  # Not a dtype (e.g. device string "cpu")
         return self

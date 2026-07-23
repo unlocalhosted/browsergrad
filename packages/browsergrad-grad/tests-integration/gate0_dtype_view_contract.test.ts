@@ -404,19 +404,68 @@ cases["grad.conversion.to-same-dtype-identity.v0"] = {
     "requiresGrad": bool(same_dtype.requires_grad),
     "graphPreserved": bool(same_dtype._ctx is base._ctx),
 }
-cross_dtype = base.to("float64")
-cases["grad.conversion.to-cross-dtype-detaches.v0"] = {
-    "sharesMemory": bool(np.shares_memory(base.data, cross_dtype.data)),
+cross_dtype_source = grad.Tensor(
+    np.array([1.5, -2.25], dtype=np.float32),
+    dtype="float32",
+    requires_grad=True,
+)
+cross_dtype = cross_dtype_source.to("float64")
+cross_dtype.backward(grad.Tensor(
+    np.array([1.0, 2.0], dtype=np.float64),
+    dtype="float64",
+))
+cases["grad.conversion.to-cross-floating-autograd.v1"] = {
+    "sharesMemory": bool(np.shares_memory(
+        cross_dtype_source.data,
+        cross_dtype.data,
+    )),
     "dtype": cross_dtype.dtype,
     "requiresGrad": bool(cross_dtype.requires_grad),
     "graphEdge": bool(cross_dtype._ctx is not None),
+    "parentIdentity": bool(cross_dtype._ctx[0][0] is cross_dtype_source),
+    "sourceGradientDtype": cross_dtype_source.grad.dtype,
+    "sourceGradient": cross_dtype_source.grad.tolist(),
 }
-noncontiguous_source = grad.Tensor(np.arange(6, dtype=np.float32).reshape(2, 3).T)
+noncontiguous_source = grad.Tensor(
+    np.arange(6, dtype=np.float16).reshape(2, 3).T,
+    dtype="float16",
+    requires_grad=True,
+)
 noncontiguous_cross_dtype = noncontiguous_source.to("float64")
-cases["grad.conversion.to-cross-dtype-preserves-layout-order.v0"] = {
+noncontiguous_cross_dtype.backward(grad.Tensor(
+    np.ones((3, 2), dtype=np.float64),
+    dtype="float64",
+))
+cases["grad.conversion.to-cross-floating-float16-layout.v1"] = {
     "cContiguous": bool(noncontiguous_cross_dtype.data.flags.c_contiguous),
     "fContiguous": bool(noncontiguous_cross_dtype.data.flags.f_contiguous),
-    "dtype": noncontiguous_cross_dtype.dtype,
+    "sourceDtype": noncontiguous_source.dtype,
+    "resultDtype": noncontiguous_cross_dtype.dtype,
+    "requiresGrad": bool(noncontiguous_cross_dtype.requires_grad),
+    "sourceGradientDtype": noncontiguous_source.grad.dtype,
+    "sourceGradient": noncontiguous_source.grad.tolist(),
+}
+no_grad_source = grad.Tensor(
+    np.array([1.0, 2.0], dtype=np.float32),
+    requires_grad=True,
+)
+with grad.no_grad():
+    no_grad_cross_dtype = no_grad_source.to("float64")
+cases["grad.conversion.to-cross-floating-no-grad.v1"] = {
+    "dtype": no_grad_cross_dtype.dtype,
+    "requiresGrad": bool(no_grad_cross_dtype.requires_grad),
+    "graphEdge": bool(no_grad_cross_dtype._ctx is not None),
+}
+nonfloating_source = grad.Tensor(
+    np.array([1.5, -2.25], dtype=np.float32),
+    requires_grad=True,
+)
+nonfloating_cross_dtype = nonfloating_source.to("int64")
+cases["grad.conversion.to-cross-nonfloating-detached.v1"] = {
+    "dtype": nonfloating_cross_dtype.dtype,
+    "values": nonfloating_cross_dtype.tolist(),
+    "requiresGrad": bool(nonfloating_cross_dtype.requires_grad),
+    "graphEdge": bool(nonfloating_cross_dtype._ctx is not None),
 }
 unrecognized_to = base.to("definitely-not-a-browsergrad-dtype")
 cases["grad.conversion.to-unrecognized-string-noop.v0"] = {

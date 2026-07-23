@@ -148,6 +148,7 @@ r = grad.randn(5, 5, seed=42)
 t.shape, t.ndim, t.size, t.data    # numpy view
 t.numpy(), t.tolist(), t.item()    # exports
 t.detach()                         # storage-sharing leaf, no autograd
+t.to("float64")                    # owning differentiable floating cast
 
 # Arithmetic — broadcasts in v0.2
 a + b, a - b, a * b, a / b, -a
@@ -236,6 +237,9 @@ Remaining explicit limits:
 - **Global gradient context exists.** `grad.no_grad()` disables graph
   construction for inference sections; `.detach()` returns a distinct
   storage-sharing leaf with no autograd history.
+- **Floating casts stay differentiable.** `.to()` casts among
+  float16/float32/float64 retain an autograd edge and restore the source dtype
+  in backward. Bool/integer casts are detached.
 - **Reverse-mode only.** No forward-mode, no functional transforms (vmap, etc.).
 - **`Tensor.__slots__`.** Slot-based attribute layout to keep memory predictable for tensors in long training loops.
 

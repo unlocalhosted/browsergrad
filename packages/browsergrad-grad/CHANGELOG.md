@@ -9,6 +9,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- Cross-dtype `Tensor.to()` now records a differentiable cast among
+  float16/float32/float64 and restores the source storage dtype in its VJP.
+  It preserves NumPy layout order, respects `no_grad()`, and keeps casts with a
+  bool or integer endpoint detached.
 - `Tensor.detach()` now returns a distinct storage-sharing tensor while
   preserving exact dtype, strides, shape, and contiguity. It severs autograd
   history without allocating or silently converting float16 to float32, and

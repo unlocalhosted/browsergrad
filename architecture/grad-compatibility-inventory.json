@@ -427,26 +427,49 @@
       ]
     },
     {
-      "id": "grad.conversion.to-cross-dtype-detaches.v0",
-      "surface": "Tensor.to(different_dtype)",
+      "id": "grad.conversion.to-cross-floating.v1",
+      "surface": "Tensor.to(different_float_dtype)",
       "class": "conversion",
       "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
+      "targetConformance": "pytorch-compatible",
       "referenceContract": "pytorch-shaped-compatibility",
       "dtypeEffect": "resolved-target",
-      "condition": "requested-dtype-differs-from-storage-dtype",
+      "condition": "different-supported-floating-dtype",
+      "failurePolicy": "unrecognized-dtype-treated-as-device-noop",
+      "aliasing": "must-not-alias",
+      "contiguity": "input-dependent",
+      "materialization": "always",
+      "autograd": "graph-edge",
+      "truth": "Cross-dtype conversion among float16, float32, and float64 constructs independent target-dtype storage in NumPy order='K' and records a differentiable cast whose VJP restores the source dtype; no_grad suppresses that graph edge.",
+      "sourceDefinitions": [
+        "tensor.py:Tensor.to"
+      ],
+      "fixtureCaseIds": [
+        "grad.conversion.to-cross-floating-autograd.v1",
+        "grad.conversion.to-cross-floating-float16-layout.v1",
+        "grad.conversion.to-cross-floating-no-grad.v1"
+      ]
+    },
+    {
+      "id": "grad.conversion.to-cross-nonfloating.v1",
+      "surface": "Tensor.to(different_dtype_with_nonfloating_endpoint)",
+      "class": "conversion",
+      "observationStatus": "verified",
+      "targetConformance": "pytorch-compatible",
+      "referenceContract": "pytorch-shaped-compatibility",
+      "dtypeEffect": "resolved-target",
+      "condition": "different-dtype-with-nonfloating-endpoint",
       "failurePolicy": "unrecognized-dtype-treated-as-device-noop",
       "aliasing": "must-not-alias",
       "contiguity": "input-dependent",
       "materialization": "always",
       "autograd": "detached",
-      "truth": "Cross-dtype conversion constructs independent target-dtype storage and drops the source autograd graph instead of recording a differentiable cast; NumPy order='K' conversion makes contiguity input-layout dependent.",
+      "truth": "A cast with a bool or integer source or target constructs independent target-dtype storage and does not create an autograd edge.",
       "sourceDefinitions": [
         "tensor.py:Tensor.to"
       ],
       "fixtureCaseIds": [
-        "grad.conversion.to-cross-dtype-detaches.v0",
-        "grad.conversion.to-cross-dtype-preserves-layout-order.v0"
+        "grad.conversion.to-cross-nonfloating-detached.v1"
       ]
     },
     {

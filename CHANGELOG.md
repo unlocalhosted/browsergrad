@@ -14,6 +14,9 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Preserves Grad autograd through float16/float32/float64 `Tensor.to()` casts,
+  including source-dtype VJPs and non-contiguous layout order; casts involving
+  bool or integer storage remain explicit detached boundaries.
 - Makes Grad `Tensor.detach()` a truthful zero-copy metadata operation: it
   returns a distinct tensor sharing the source storage, dtype, strides, and
   layout while severing autograd history.

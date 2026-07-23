@@ -310,20 +310,44 @@
       }
     },
     {
-      "id": "grad.conversion.to-cross-dtype-detaches.v0",
+      "id": "grad.conversion.to-cross-floating-autograd.v1",
       "expected": {
         "sharesMemory": false,
+        "dtype": "float64",
+        "requiresGrad": true,
+        "graphEdge": true,
+        "parentIdentity": true,
+        "sourceGradientDtype": "float32",
+        "sourceGradient": [1, 2]
+      }
+    },
+    {
+      "id": "grad.conversion.to-cross-floating-float16-layout.v1",
+      "expected": {
+        "cContiguous": false,
+        "fContiguous": true,
+        "sourceDtype": "float16",
+        "resultDtype": "float64",
+        "requiresGrad": true,
+        "sourceGradientDtype": "float16",
+        "sourceGradient": [[1, 1], [1, 1], [1, 1]]
+      }
+    },
+    {
+      "id": "grad.conversion.to-cross-floating-no-grad.v1",
+      "expected": {
         "dtype": "float64",
         "requiresGrad": false,
         "graphEdge": false
       }
     },
     {
-      "id": "grad.conversion.to-cross-dtype-preserves-layout-order.v0",
+      "id": "grad.conversion.to-cross-nonfloating-detached.v1",
       "expected": {
-        "cContiguous": false,
-        "fContiguous": true,
-        "dtype": "float64"
+        "dtype": "int64",
+        "values": [1, -2],
+        "requiresGrad": false,
+        "graphEdge": false
       }
     },
     {
