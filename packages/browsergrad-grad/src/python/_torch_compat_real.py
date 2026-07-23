@@ -105,6 +105,10 @@ def install_real(torch_mod, _bg, _types):
     torch_mod.long    = "int64"
     torch_mod.int32   = "int32"
     torch_mod.int     = "int32"
+    torch_mod.uint8   = "uint8"
+    torch_mod.uint16  = "uint16"
+    torch_mod.uint32  = "uint32"
+    torch_mod.uint64  = "uint64"
     torch_mod.bool    = "bool"
 
     # Math constants

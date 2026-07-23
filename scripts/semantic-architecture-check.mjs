@@ -360,6 +360,15 @@ export function checkFrozenGradCompatibilitySources(
     "_torch_compat_real.py": extractPythonDefinitionTokenDigests(torchCompatSource),
     "_torch_compat_limited.py": extractPythonDefinitionTokenDigests(torchCompatLimitedSource),
   };
+  const eagerStorageDtypes = pythonStringFrozensetAssignment(
+    tensorSource,
+    "_EAGER_STORAGE_DTYPES",
+  );
+  if (JSON.stringify(eagerStorageDtypes) !== JSON.stringify([...(freeze.eagerStorageDtypes ?? [])].sort())) {
+    failures.push(
+      `Grad eager storage dtypes changed; expected ${JSON.stringify([...(freeze.eagerStorageDtypes ?? [])].sort())}, got ${JSON.stringify(eagerStorageDtypes)}`,
+    );
+  }
   for (const [file, expectedDefinitions] of Object.entries(freeze.definitionTokenDigests ?? {})) {
     const fileDefinitions = actualDefinitions[file];
     if (!isRecord(fileDefinitions)) {
@@ -403,10 +412,10 @@ export function validateGradCompatibilityInventory(inventory, fixture, freeze, f
   }
   exactKeys(`${filename}.dtypeResolution`, inventory.dtypeResolution, ["defaultTensorStorageDtype", "defaultTorchIntegerStorageDtype", "unknownStringPolicy", "nonStringPolicy", "storageByteWidths", "unsupportedDtypes", "aliases", "torchTokens"]);
   if (!isRecord(inventory.dtypeResolution)) return failures;
-  if (inventory.dtypeResolution.defaultTensorStorageDtype !== "float32" || inventory.dtypeResolution.defaultTorchIntegerStorageDtype !== "int64" || inventory.dtypeResolution.unknownStringPolicy !== "delegate-to-numpy-dtype" || inventory.dtypeResolution.nonStringPolicy !== "delegate-to-numpy-dtype") {
+  if (inventory.dtypeResolution.defaultTensorStorageDtype !== "float32" || inventory.dtypeResolution.defaultTorchIntegerStorageDtype !== "int64" || inventory.dtypeResolution.unknownStringPolicy !== "reject-outside-alias-registry" || inventory.dtypeResolution.nonStringPolicy !== "accept-supported-numpy-dtype-spec-otherwise-reject") {
     failures.push(`${filename}.dtypeResolution policies changed`);
   }
-  const expectedStorageByteWidths = { bool: 1, float16: 2, float32: 4, float64: 8, int8: 1, int16: 2, int32: 4, int64: 8, uint8: 1 };
+  const expectedStorageByteWidths = { bool: 1, float16: 2, float32: 4, float64: 8, int8: 1, int16: 2, int32: 4, int64: 8, uint8: 1, uint16: 2, uint32: 4, uint64: 8 };
   const expectedUnsupportedDtypes = {
     bf16: "rejected-no-real-bfloat16-storage-or-conversion",
     bfloat16: "rejected-no-real-bfloat16-storage-or-conversion",
@@ -437,7 +446,7 @@ export function validateGradCompatibilityInventory(inventory, fixture, freeze, f
   const referenceContracts = new Set(["browsergrad-grad-explicit", "numpy-array-protocol", "pytorch-shaped-compatibility"]);
   const dtypeEffects = new Set(["distinct-unsupported-token", "none-rejected", "preserves", "preserves-supported-storage", "requested-dtype-dependent", "resolved-target", "surface-dependent"]);
   const conditions = new Set(["all-inputs", "constructor-device-request", "cpu-device-request", "different-dtype-with-nonfloating-endpoint", "different-supported-floating-dtype", "index-kind-dependent", "input-dtype-and-index-kind-dependent", "input-dtype-and-layout-dependent", "input-dtype-dependent", "input-layout-dependent", "invalid-to-request", "module-device-or-dtype-request", "no-requested-dtype", "numpy-export-request", "requested-bf16-token", "requested-dtype-dependent", "requested-dtype-equals-storage-dtype", "supported-writable-numpy-array", "surface-and-input-dependent", "torch-bfloat16-token", "unsupported-device-request"]);
-  const failurePolicies = new Set(["cpu-only-reject-module-transfer-or-dtype-conversion-before-execution", "cpu-only-reject-unsupported-device-before-execution", "delegate-invalid-broadcast-to-numpy", "delegate-invalid-dimension-to-numpy", "delegate-invalid-index-to-numpy", "delegate-invalid-input-to-python-or-numpy", "delegate-invalid-permutation-to-numpy", "delegate-invalid-shape-to-numpy", "no-dedicated-failure-path", "reject-copy-false-before-export", "reject-invalid-dtype-after-numpy-delegation", "reject-invalid-expand-shape-before-execution", "reject-invalid-to-request-before-execution", "reject-unsupported-bfloat16-before-allocation", "reject-unsupported-or-readonly-numpy-before-wrapping"]);
+  const failurePolicies = new Set(["cpu-only-reject-module-transfer-or-dtype-conversion-before-execution", "cpu-only-reject-unsupported-device-before-execution", "delegate-invalid-broadcast-to-numpy", "delegate-invalid-dimension-to-numpy", "delegate-invalid-index-to-numpy", "delegate-invalid-input-to-python-or-numpy", "delegate-invalid-permutation-to-numpy", "delegate-invalid-shape-to-numpy", "no-dedicated-failure-path", "reject-copy-false-before-export", "reject-invalid-expand-shape-before-execution", "reject-invalid-to-request-before-execution", "reject-unsupported-bfloat16-before-allocation", "reject-unsupported-dtype-before-allocation", "reject-unsupported-or-readonly-numpy-before-wrapping"]);
   const aliasing = new Set(["conditional", "must-alias", "must-not-alias", "not-applicable", "same-object"]);
   const contiguity = new Set(["contiguous", "input-dependent", "not-applicable", "preserved"]);
   const materialization = new Set(["always", "conditional", "none", "not-applicable"]);
@@ -2170,6 +2179,33 @@ function pythonAttributeStringAssignments(source, objectName) {
     assignments[tokens[index + 2].value] = tokens[index + 4].value;
   }
   return assignments;
+}
+
+function pythonStringFrozensetAssignment(source, assignmentName) {
+  const tokens = pythonTokens(source);
+  for (let index = 0; index < tokens.length - 5; index += 1) {
+    if (
+      tokens[index].kind !== "identifier"
+      || tokens[index].value !== assignmentName
+      || tokens[index + 1]?.value !== "="
+      || tokens[index + 2]?.kind !== "identifier"
+      || tokens[index + 2]?.value !== "frozenset"
+      || tokens[index + 3]?.value !== "("
+      || tokens[index + 4]?.value !== "{"
+    ) continue;
+    const close = matchingDelimiter(tokens, index + 4, "{", "}");
+    if (close === undefined || tokens[close + 1]?.value !== ")") return undefined;
+    const values = [];
+    for (const token of tokens.slice(index + 5, close)) {
+      if (token.kind === "string") {
+        values.push(token.value);
+      } else if (token.value !== ",") {
+        return undefined;
+      }
+    }
+    return [...new Set(values)].sort();
+  }
+  return undefined;
 }
 
 function readPythonString(source, start) {

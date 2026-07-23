@@ -9,8 +9,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- `_resolve_dtype` now owns a closed eager storage boundary. String requests
+  must use the documented BrowserGrad/PyTorch aliases; NumPy dtype objects and
+  scalar types resolve only to bool, float16/32/64, int8/16/32/64, or
+  uint8/16/32/64.
+  Complex, object, structured, and other unsupported dtype requests reject
+  before tensor allocation.
 - `from_numpy` now zero-copy wraps writable bool, float16/32/64,
-  int8/16/32/64, and uint8 arrays with exact dtype and stride preservation.
+  int8/16/32/64, and uint8/16/32/64 arrays with exact dtype and stride
+  preservation.
   `.numpy()` and the NumPy array protocol now share one owning `order="K"`
   snapshot policy; `copy=False`, read-only input, and unsupported input dtype
   requests reject explicitly.

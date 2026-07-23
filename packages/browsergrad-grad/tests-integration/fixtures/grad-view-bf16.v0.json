@@ -7,7 +7,7 @@
   },
   "cases": [
     {
-      "id": "grad.dtype.alias-registry.v0",
+      "id": "grad.dtype.alias-registry.v1",
       "expected": {
         "bool": ["bool", 1],
         "double": ["float64", 8],
@@ -24,14 +24,49 @@
         "int8": ["int8", 1],
         "long": ["int64", 8],
         "short": ["int16", 2],
-        "uint8": ["uint8", 1]
+        "uint8": ["uint8", 1],
+        "uint16": ["uint16", 2],
+        "uint32": ["uint32", 4],
+        "uint64": ["uint64", 8]
       }
     },
     {
-      "id": "grad.dtype.numpy-string-fallback.v0",
+      "id": "grad.dtype.numpy-spec-registry.v1",
       "expected": {
-        "dtype": "complex64",
-        "itemsize": 8
+        "dtypes": [
+          "bool",
+          "float16",
+          "float32",
+          "float64",
+          "int8",
+          "int16",
+          "int32",
+          "int64",
+          "uint8",
+          "uint16",
+          "uint32",
+          "uint64"
+        ]
+      }
+    },
+    {
+      "id": "grad.dtype.unsupported-rejected.v1",
+      "expected": {
+        "complexString": "ValueError: dtype 'complex64' is not a supported BrowserGrad dtype string. Supported aliases: bool, double, float, float16, float32, float64, fp16, half, int, int16, int32, int64, int8, long, short, uint16, uint32, uint64, uint8.",
+        "numpyAbbreviation": "ValueError: dtype 'f4' is not a supported BrowserGrad dtype string. Supported aliases: bool, double, float, float16, float32, float64, fp16, half, int, int16, int32, int64, int8, long, short, uint16, uint32, uint64, uint8.",
+        "complexType": "ValueError: dtype 'complex64' is not supported by BrowserGrad eager storage; supported dtypes: ['bool', 'float16', 'float32', 'float64', 'int16', 'int32', 'int64', 'int8', 'uint16', 'uint32', 'uint64', 'uint8']",
+        "objectDtype": "ValueError: dtype 'object' is not supported by BrowserGrad eager storage; supported dtypes: ['bool', 'float16', 'float32', 'float64', 'int16', 'int32', 'int64', 'int8', 'uint16', 'uint32', 'uint64', 'uint8']",
+        "datetimeDtype": "ValueError: dtype 'datetime64[D]' is not supported by BrowserGrad eager storage; supported dtypes: ['bool', 'float16', 'float32', 'float64', 'int16', 'int32', 'int64', 'int8', 'uint16', 'uint32', 'uint64', 'uint8']",
+        "structuredDtype": "ValueError: dtype 'void32' is not supported by BrowserGrad eager storage; supported dtypes: ['bool', 'float16', 'float32', 'float64', 'int16', 'int32', 'int64', 'int8', 'uint16', 'uint32', 'uint64', 'uint8']"
+      }
+    },
+    {
+      "id": "grad.dtype.torch-unsigned-tokens.v1",
+      "expected": {
+        "uint8": ["uint8", "uint8"],
+        "uint16": ["uint16", "uint16"],
+        "uint32": ["uint32", "uint32"],
+        "uint64": ["uint64", "uint64"]
       }
     },
     {
@@ -71,7 +106,10 @@
           "int16": "int16",
           "int32": "int32",
           "int64": "int64",
-          "uint8": "uint8"
+          "uint8": "uint8",
+          "uint16": "uint16",
+          "uint32": "uint32",
+          "uint64": "uint64"
         },
         "allShareMemory": true,
         "sourceMutationVisible": true,
@@ -96,8 +134,8 @@
       "expected": {
         "list": "TypeError: from_numpy requires a numpy.ndarray, got list",
         "readonly": "ValueError: from_numpy requires writable storage because the Tensor aliases the exact NumPy array",
-        "complex64": "ValueError: from_numpy does not support dtype 'complex64'; supported storage dtypes: ['bool', 'float16', 'float32', 'float64', 'int16', 'int32', 'int64', 'int8', 'uint8']",
-        "object": "ValueError: from_numpy does not support dtype 'object'; supported storage dtypes: ['bool', 'float16', 'float32', 'float64', 'int16', 'int32', 'int64', 'int8', 'uint8']"
+        "complex64": "ValueError: from_numpy does not support dtype 'complex64'; supported storage dtypes: ['bool', 'float16', 'float32', 'float64', 'int16', 'int32', 'int64', 'int8', 'uint16', 'uint32', 'uint64', 'uint8']",
+        "object": "ValueError: from_numpy does not support dtype 'object'; supported storage dtypes: ['bool', 'float16', 'float32', 'float64', 'int16', 'int32', 'int64', 'int8', 'uint16', 'uint32', 'uint64', 'uint8']"
       }
     },
     {

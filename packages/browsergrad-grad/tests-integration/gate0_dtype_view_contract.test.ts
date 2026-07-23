@@ -57,16 +57,41 @@ def error(call):
 dtype_aliases = [
     "bool", "double", "float", "float16", "float32", "float64", "fp16",
     "half", "int", "int16", "int32", "int64", "int8", "long", "short",
-    "uint8",
+    "uint8", "uint16", "uint32", "uint64",
 ]
-cases["grad.dtype.alias-registry.v0"] = {
+cases["grad.dtype.alias-registry.v1"] = {
     alias: [grad.Tensor([0], dtype=alias).dtype, int(grad.Tensor([0], dtype=alias).data.dtype.itemsize)]
     for alias in dtype_aliases
 }
-numpy_fallback = grad.Tensor([1 + 2j], dtype="complex64")
-cases["grad.dtype.numpy-string-fallback.v0"] = {
-    "dtype": numpy_fallback.dtype,
-    "itemsize": int(numpy_fallback.data.dtype.itemsize),
+numpy_dtype_specs = [
+    np.dtype("bool"), np.float16, np.dtype("float32"), np.float64,
+    np.int8, np.dtype("int16"), np.int32, np.dtype("int64"),
+    np.uint8, np.uint16, np.dtype("uint32"), np.uint64,
+]
+cases["grad.dtype.numpy-spec-registry.v1"] = {
+    "dtypes": [
+        grad.Tensor([0], dtype=spec).dtype
+        for spec in numpy_dtype_specs
+    ],
+}
+cases["grad.dtype.torch-unsigned-tokens.v1"] = {
+    name: [
+        getattr(torch, name),
+        torch.tensor([0], dtype=getattr(torch, name)).dtype,
+    ]
+    for name in ["uint8", "uint16", "uint32", "uint64"]
+}
+cases["grad.dtype.unsupported-rejected.v1"] = {
+    "complexString": error(lambda: grad.Tensor([1 + 2j], dtype="complex64")),
+    "numpyAbbreviation": error(lambda: grad.Tensor([1.0], dtype="f4")),
+    "complexType": error(lambda: grad.Tensor([1 + 2j], dtype=np.complex64)),
+    "objectDtype": error(lambda: grad.Tensor([object()], dtype=np.dtype("object"))),
+    "datetimeDtype": error(
+        lambda: grad.Tensor([0], dtype=np.dtype("datetime64[D]"))
+    ),
+    "structuredDtype": error(
+        lambda: grad.Tensor([(1,)], dtype=np.dtype([("value", np.int32)]))
+    ),
 }
 cases["grad.dtype.constructor-defaults.v0"] = {
     "tensorInteger": grad.Tensor([1, 2]).dtype,
@@ -90,7 +115,8 @@ from_numpy_sources = {
     name: np.array([0, 1], dtype=np.dtype(name))
     for name in [
         "bool", "float16", "float32", "float64",
-        "int8", "int16", "int32", "int64", "uint8",
+        "int8", "int16", "int32", "int64",
+        "uint8", "uint16", "uint32", "uint64",
     ]
 }
 from_numpy_tensors = {

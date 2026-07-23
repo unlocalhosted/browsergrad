@@ -252,6 +252,10 @@ Remaining explicit limits:
   arrays with exact zero-copy dtype/stride preservation. `.numpy()` and
   `np.asarray(tensor)` return owning snapshots so exported arrays cannot mutate
   tensor storage behind autograd.
+- **The eager dtype registry is closed.** String requests use the documented
+  BrowserGrad/PyTorch aliases. NumPy dtype objects and scalar types are accepted
+  only for bool, float16/32/64, int8/16/32/64, and uint8/16/32/64 storage;
+  unsupported storage rejects before allocation.
 - **Reverse-mode only.** No forward-mode, no functional transforms (vmap, etc.).
 - **`Tensor.__slots__`.** Slot-based attribute layout to keep memory predictable for tensors in long training loops.
 

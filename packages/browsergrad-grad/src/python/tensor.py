@@ -46,9 +46,13 @@ _MASKED_FILL_VALUE_TYPES = (
 )
 _EAGER_STORAGE_DTYPES = frozenset({
     "float16", "float32", "float64",
+    "int8", "int16", "int32", "int64",
+    "uint8", "uint16", "uint32", "uint64", "bool",
+})
+_MASKED_FILL_DTYPES = frozenset({
+    "float16", "float32", "float64",
     "int8", "int16", "int32", "int64", "uint8", "bool",
 })
-_MASKED_FILL_DTYPES = _EAGER_STORAGE_DTYPES
 _TRIANGULAR_DTYPES = _MASKED_FILL_DTYPES
 _CUMSUM_DTYPES = _MASKED_FILL_DTYPES
 _CUMSUM_FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
@@ -1187,10 +1191,11 @@ def _validate_gather_index_values(index: np.ndarray, axis_extent: int) -> None:
 
 
 def _resolve_dtype(spec):
-    """Normalize a torch-style dtype spec to a numpy dtype.
+    """Resolve the closed BrowserGrad dtype surface to a NumPy scalar type.
 
-    Accepts strings ('float32', 'int64', 'bool', PyTorch aliases like 'long'
-    / 'float' / 'double'), numpy dtypes, or numpy dtype objects.
+    String requests must use an explicit BrowserGrad/PyTorch alias. NumPy dtype
+    objects and scalar types are accepted only when their storage dtype belongs
+    to BrowserGrad's eager storage set.
     """
     if isinstance(spec, str) and spec in ("bfloat16", "bf16"):
         raise NotImplementedError(
@@ -1206,27 +1211,38 @@ def _resolve_dtype(spec):
         "int16": np.int16, "short": np.int16,
         "int8": np.int8,
         "uint8": np.uint8,
+        "uint16": np.uint16,
+        "uint32": np.uint32,
+        "uint64": np.uint64,
         "bool": np.bool_,
     }
     if isinstance(spec, str):
         if spec in aliases:
             return aliases[spec]
-        try:
-            return np.dtype(spec).type
-        except TypeError:
-            supported = ", ".join(sorted(aliases.keys()))
-            raise ValueError(
-                f"dtype {spec!r} not recognized. Supported aliases: {supported}."
-            )
+        supported = ", ".join(sorted(aliases.keys()))
+        raise ValueError(
+            f"dtype {spec!r} is not a supported BrowserGrad dtype string. "
+            f"Supported aliases: {supported}."
+        )
     if isinstance(spec, (list, tuple, dict)):
         raise TypeError(
             f"dtype must be a string or numpy dtype; got {type(spec).__name__} {spec!r}. "
             "Pass 'float32', 'int64', etc."
         )
     try:
-        return np.dtype(spec).type
+        resolved = np.dtype(spec)
     except (TypeError, ValueError):
-        raise ValueError(f"dtype {spec!r} not recognized; pass a string like 'float32' or a numpy dtype.")
+        raise ValueError(
+            f"dtype {spec!r} not recognized; pass a supported string like "
+            "'float32' or a NumPy dtype"
+        )
+    supported = _EAGER_STORAGE_DTYPES
+    if resolved.name not in supported:
+        raise ValueError(
+            f"dtype {resolved.name!r} is not supported by BrowserGrad eager "
+            f"storage; supported dtypes: {sorted(supported)}"
+        )
+    return resolved.type
 
 
 # ─── Autograd-enabled flag + no_grad context ──────────────────
@@ -2499,10 +2515,11 @@ def from_numpy(arr) -> Tensor:
             "from_numpy requires writable storage because the Tensor aliases "
             "the exact NumPy array"
         )
-    if arr.dtype.name not in _EAGER_STORAGE_DTYPES:
+    supported = _EAGER_STORAGE_DTYPES
+    if arr.dtype.name not in supported:
         raise ValueError(
             f"from_numpy does not support dtype {arr.dtype.name!r}; supported "
-            f"storage dtypes: {sorted(_EAGER_STORAGE_DTYPES)}"
+            f"storage dtypes: {sorted(supported)}"
         )
     return Tensor(arr, dtype=arr.dtype)
 

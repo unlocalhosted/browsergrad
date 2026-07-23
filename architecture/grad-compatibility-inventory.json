@@ -16,8 +16,8 @@
   "dtypeResolution": {
     "defaultTensorStorageDtype": "float32",
     "defaultTorchIntegerStorageDtype": "int64",
-    "unknownStringPolicy": "delegate-to-numpy-dtype",
-    "nonStringPolicy": "delegate-to-numpy-dtype",
+    "unknownStringPolicy": "reject-outside-alias-registry",
+    "nonStringPolicy": "accept-supported-numpy-dtype-spec-otherwise-reject",
     "storageByteWidths": {
       "bool": 1,
       "float16": 2,
@@ -27,7 +27,10 @@
       "int16": 2,
       "int32": 4,
       "int64": 8,
-      "uint8": 1
+      "uint8": 1,
+      "uint16": 2,
+      "uint32": 4,
+      "uint64": 8
     },
     "unsupportedDtypes": {
       "bf16": "rejected-no-real-bfloat16-storage-or-conversion",
@@ -49,7 +52,10 @@
       "int8": "int8",
       "long": "int64",
       "short": "int16",
-      "uint8": "uint8"
+      "uint8": "uint8",
+      "uint16": "uint16",
+      "uint32": "uint32",
+      "uint64": "uint64"
     },
     "torchTokens": {
       "bfloat16": "bfloat16",
@@ -63,31 +69,41 @@
       "int": "int32",
       "int32": "int32",
       "int64": "int64",
-      "long": "int64"
+      "long": "int64",
+      "uint8": "uint8",
+      "uint16": "uint16",
+      "uint32": "uint32",
+      "uint64": "uint64"
     }
   },
   "behaviors": [
     {
-      "id": "grad.dtype.alias-registry.v0",
-      "surface": "Tensor(dtype=string)",
+      "id": "grad.dtype.alias-registry.v1",
+      "surface": "Tensor(dtype=string|numpy-dtype-spec) and torch unsigned dtype tokens",
       "class": "dtype-resolution",
       "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
+      "targetConformance": "browsergrad-defined",
       "referenceContract": "browsergrad-grad-explicit",
       "dtypeEffect": "resolved-target",
       "condition": "requested-dtype-dependent",
-      "failurePolicy": "reject-invalid-dtype-after-numpy-delegation",
+      "failurePolicy": "reject-unsupported-dtype-before-allocation",
       "aliasing": "conditional",
       "contiguity": "input-dependent",
       "materialization": "conditional",
       "autograd": "constructor-policy",
-      "truth": "The closed BrowserGrad alias table resolves to the recorded NumPy storage dtypes; strings outside the table are delegated to the installed NumPy dtype parser.",
+      "truth": "The closed BrowserGrad string alias table and supported NumPy dtype objects/scalar types resolve only to bool, float16/32/64, int8/16/32/64, or uint8/16/32/64 storage. Unknown strings and NumPy dtype specifications outside that set reject before allocation.",
       "sourceDefinitions": [
+        "_torch_compat_real.py:torch_mod.uint16",
+        "_torch_compat_real.py:torch_mod.uint32",
+        "_torch_compat_real.py:torch_mod.uint64",
+        "_torch_compat_real.py:torch_mod.uint8",
         "tensor.py:_resolve_dtype"
       ],
       "fixtureCaseIds": [
-        "grad.dtype.alias-registry.v0",
-        "grad.dtype.numpy-string-fallback.v0"
+        "grad.dtype.alias-registry.v1",
+        "grad.dtype.numpy-spec-registry.v1",
+        "grad.dtype.torch-unsigned-tokens.v1",
+        "grad.dtype.unsupported-rejected.v1"
       ]
     },
     {
@@ -172,7 +188,7 @@
       "contiguity": "preserved",
       "materialization": "none",
       "autograd": "constructor-policy",
-      "truth": "Writable NumPy arrays with bool, float16/32/64, int8/16/32/64, or uint8 storage are wrapped without copying; exact dtype, ndarray identity, strides, layout, and bidirectional mutation are preserved. Non-arrays, read-only arrays, and unsupported dtypes reject before wrapping.",
+      "truth": "Writable NumPy arrays with bool, float16/32/64, int8/16/32/64, or uint8/16/32/64 storage are wrapped without copying; exact dtype, ndarray identity, strides, layout, and bidirectional mutation are preserved. Non-arrays, read-only arrays, and unsupported dtypes reject before wrapping.",
       "sourceDefinitions": [
         "tensor.py:from_numpy",
         "tensor.py:Tensor.__init__"

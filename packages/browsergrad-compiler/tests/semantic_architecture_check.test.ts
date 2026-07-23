@@ -229,6 +229,33 @@ describe("semantic architecture guardrails", () => {
       gradFreeze,
     )).toContainEqual(expect.stringContaining("tensor.py:_resolve_dtype changed"));
     expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace(
+        "        if spec in aliases:",
+        "        if True:",
+      ),
+      torchCompatSource,
+      torchCompatLimitedSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("tensor.py:_resolve_dtype changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace(
+        "    if resolved.name not in supported:",
+        "    if False:",
+      ),
+      torchCompatSource,
+      torchCompatLimitedSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("tensor.py:_resolve_dtype changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace(
+        '"uint8", "uint16", "uint32", "uint64", "bool",',
+        '"uint8", "uint16", "uint32", "complex64", "bool",',
+      ),
+      torchCompatSource,
+      torchCompatLimitedSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("Grad eager storage dtypes changed"));
+    expect(checkFrozenGradCompatibilitySources(
       tensorSource,
       torchCompatSource.replace('torch_mod.bfloat16 = "bfloat16"', 'torch_mod.bfloat16 = "float32"'),
       torchCompatLimitedSource,
@@ -314,7 +341,7 @@ describe("semantic architecture guardrails", () => {
     )).toContainEqual(expect.stringContaining("Tensor.__array__ changed"));
     expect(checkFrozenGradCompatibilitySources(
       tensorSource.replace(
-        "if arr.dtype.name not in _EAGER_STORAGE_DTYPES:",
+        "if arr.dtype.name not in supported:",
         "if False:",
       ),
       torchCompatSource,

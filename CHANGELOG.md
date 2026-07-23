@@ -14,8 +14,13 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Closes Grad's eager dtype registry: string requests must use the frozen
+  BrowserGrad/PyTorch alias table, while NumPy dtype objects and scalar types
+  are accepted only for the twelve real eager storage dtypes. Complex, object,
+  structured, and other unsupported storage requests now fail before
+  allocation instead of entering through NumPy parser fallback.
 - Makes Grad NumPy interop one coherent ownership contract: writable arrays in
-  all nine supported eager dtypes wrap with exact zero-copy dtype/layout
+  all twelve supported eager dtypes wrap with exact zero-copy dtype/layout
   preservation, while `.numpy()` and `np.asarray()` always export isolated
   order-preserving snapshots.
 - Closes Grad's remaining fake placement seams: `torch.tensor(device=...)`

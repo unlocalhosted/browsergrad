@@ -20,9 +20,11 @@ snapshot boundary depending on surface spelling.
 
 NumPy input is an explicit zero-copy wrapping boundary. `from_numpy` accepts
 writable `numpy.ndarray` storage with the closed eager dtype set: bool,
-float16/32/64, int8/16/32/64, and uint8. It preserves exact ndarray identity,
-dtype, shape, strides, contiguity, and bidirectional mutation. Non-arrays,
-read-only arrays, and unsupported dtypes reject before wrapping.
+float16/32/64, int8/16/32/64, and uint8. ADR-0044 subsequently extends the
+package-owned eager storage registry and this zero-copy boundary to uint16,
+uint32, and uint64. It preserves exact ndarray identity, dtype, shape, strides,
+contiguity, and bidirectional mutation. Non-arrays, read-only arrays, and
+unsupported dtypes reject before wrapping.
 
 NumPy output is an explicit owning-snapshot boundary. `Tensor.numpy()` and
 `Tensor.__array__` share one `_numpy_snapshot` implementation:
@@ -43,7 +45,7 @@ All supported NumPy input dtypes now retain zero-copy storage and
 non-contiguous layouts. Every public NumPy output spelling produces the same
 owning snapshot policy.
 
-This closes the NumPy interop sub-slice. Remaining eager compatibility debt is
-the NumPy-delegated dtype fallback, constructor-default classification, and
-owning `Tensor.expand()` materialization. Generated runtime/profile support
-consumption follows those contracts.
+This closes the NumPy interop sub-slice. ADR-0044 subsequently closes the
+NumPy-delegated dtype fallback. Constructor-default classification and owning
+`Tensor.expand()` materialization remain, followed by generated
+runtime/profile support consumption.
