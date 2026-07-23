@@ -356,13 +356,6 @@ function createDefaultCppCuteIncludeRoots(sourceRoot: string): readonly CppCuteF
       owner: { kind: "source" },
     },
     {
-      includeRootId: "clang-resource",
-      mode: "system",
-      virtualPath: "/toolchain/clang/lib/clang/22/include",
-      manifestSha256: CPP_CUTE_FIXTURE_COMPILER_RESOURCE_HASH,
-      owner: { kind: "compiler-resource-directory" },
-    },
-    {
       includeRootId: "cuda",
       mode: "system",
       virtualPath: "/toolchain/cuda/include",
@@ -382,6 +375,13 @@ function createDefaultCppCuteIncludeRoots(sourceRoot: string): readonly CppCuteF
       virtualPath: "/toolchain/cxx/include/c++/v1",
       manifestSha256: CPP_CUTE_FIXTURE_CXX_HEADER_HASH,
       owner: { kind: "dependency", dependencyId: "cxx-stdlib" },
+    },
+    {
+      includeRootId: "clang-resource",
+      mode: "system",
+      virtualPath: "/toolchain/clang/lib/clang/22/include",
+      manifestSha256: CPP_CUTE_FIXTURE_COMPILER_RESOURCE_HASH,
+      owner: { kind: "compiler-resource-directory" },
     },
     {
       includeRootId: "linux-sysroot",
@@ -455,16 +455,8 @@ export async function createCppCutePayloadInput(
           owner: { kind: "source" },
         },
         {
-          includeRootId: CPP_CUTE_FIXTURE_COMPILER_INCLUDE_ROOT_ID,
-          ordinal: 1,
-          mode: "system",
-          virtualPath: "/toolchain/clang/lib/clang/22/include",
-          manifestSha256: CPP_CUTE_FIXTURE_COMPILER_RESOURCE_HASH,
-          owner: { kind: "compiler-resource-directory" },
-        },
-        {
           includeRootId: CPP_CUTE_FIXTURE_CUDA_INCLUDE_ROOT_ID,
-          ordinal: 2,
+          ordinal: 1,
           mode: "system",
           virtualPath: "/toolchain/cuda/include",
           manifestSha256: CPP_CUTE_FIXTURE_CUDA_HEADER_HASH,
@@ -472,7 +464,7 @@ export async function createCppCutePayloadInput(
         },
         {
           includeRootId: CPP_CUTE_FIXTURE_INCLUDE_ROOT_ID,
-          ordinal: 3,
+          ordinal: 2,
           mode: "system",
           virtualPath: "/toolchain/cutlass/include",
           manifestSha256: CPP_CUTE_FIXTURE_CUTLASS_HEADER_HASH,
@@ -480,11 +472,19 @@ export async function createCppCutePayloadInput(
         },
         {
           includeRootId: CPP_CUTE_FIXTURE_CXX_INCLUDE_ROOT_ID,
-          ordinal: 4,
+          ordinal: 3,
           mode: "system",
           virtualPath: "/toolchain/cxx/include/c++/v1",
           manifestSha256: CPP_CUTE_FIXTURE_CXX_HEADER_HASH,
           owner: { kind: "dependency", dependencyId: "cxx-stdlib" },
+        },
+        {
+          includeRootId: CPP_CUTE_FIXTURE_COMPILER_INCLUDE_ROOT_ID,
+          ordinal: 4,
+          mode: "system",
+          virtualPath: "/toolchain/clang/lib/clang/22/include",
+          manifestSha256: CPP_CUTE_FIXTURE_COMPILER_RESOURCE_HASH,
+          owner: { kind: "compiler-resource-directory" },
         },
         {
           includeRootId: CPP_CUTE_FIXTURE_LINUX_SYSROOT_INCLUDE_ROOT_ID,

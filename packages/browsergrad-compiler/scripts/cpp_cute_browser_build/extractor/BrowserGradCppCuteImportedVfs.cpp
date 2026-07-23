@@ -165,6 +165,20 @@ bool valid_canonical_path(llvm::StringRef path) {
       std::string_view(path.data(), path.size()));
 }
 
+std::error_code normalized_imported_path(
+    const llvm::Twine& path_twine,
+    llvm::SmallString<kVfsMaximumPathByteLength>& path) {
+  llvm::SmallString<kVfsMaximumPathByteLength> raw_path;
+  path_twine.toVector(raw_path);
+  std::string normalized;
+  if (!cpp_cute_normalize_virtual_path(
+          std::string_view(raw_path.data(), raw_path.size()), normalized)) {
+    return std::make_error_code(std::errc::invalid_argument);
+  }
+  path.assign(normalized.begin(), normalized.end());
+  return {};
+}
+
 bool valid_basename(llvm::StringRef name) {
   if (name.empty() || name.size() > kVfsMaximumPathByteLength ||
       name == "." || name == ".." ||
@@ -514,7 +528,9 @@ class ImportedVfsFileSystem final : public llvm::vfs::FileSystem {
       return observer_->terminal_error();
     }
     llvm::SmallString<kVfsMaximumPathByteLength> path;
-    path_twine.toVector(path);
+    if (const auto error = normalized_imported_path(path_twine, path)) {
+      return error;
+    }
     auto metadata = imported_status(path);
     if (!metadata) return metadata.getError();
     return llvm_status(path, *metadata);
@@ -527,7 +543,9 @@ class ImportedVfsFileSystem final : public llvm::vfs::FileSystem {
       return observer_->terminal_error();
     }
     llvm::SmallString<kVfsMaximumPathByteLength> path;
-    path_twine.toVector(path);
+    if (const auto error = normalized_imported_path(path_twine, path)) {
+      return error;
+    }
     auto metadata = imported_status(path);
     if (!metadata) return metadata.getError();
     if (metadata->kind != 1U) {
@@ -563,7 +581,9 @@ class ImportedVfsFileSystem final : public llvm::vfs::FileSystem {
       return {};
     }
     llvm::SmallString<kVfsMaximumPathByteLength> directory;
-    directory_twine.toVector(directory);
+    if ((error = normalized_imported_path(directory_twine, directory))) {
+      return {};
+    }
     std::uint32_t path_pointer = 0;
     if ((error = imported_path_pointer(directory, path_pointer))) return {};
 
@@ -610,11 +630,13 @@ class ImportedVfsFileSystem final : public llvm::vfs::FileSystem {
 
   std::error_code makeAbsolute(
       llvm::SmallVectorImpl<char>& path) const override {
-    if (path.empty()) return std::make_error_code(std::errc::invalid_argument);
-    if (path.front() != '/') path.insert(path.begin(), '/');
-    return valid_canonical_path(llvm::StringRef(path.data(), path.size()))
-               ? std::error_code{}
-               : std::make_error_code(std::errc::invalid_argument);
+    std::string normalized;
+    if (!cpp_cute_normalize_virtual_path(
+            std::string_view(path.data(), path.size()), normalized)) {
+      return std::make_error_code(std::errc::invalid_argument);
+    }
+    path.assign(normalized.begin(), normalized.end());
+    return {};
   }
 
  private:

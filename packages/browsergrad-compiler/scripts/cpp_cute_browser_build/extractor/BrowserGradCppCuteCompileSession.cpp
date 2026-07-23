@@ -1357,6 +1357,23 @@ const OwnedIncludeRoot* find_include_root(const SessionStorage& storage,
   return found == storage.include_roots.end() ? nullptr : &*found;
 }
 
+std::int32_t include_root_search_rank(const SessionStorage& storage,
+                                      const OwnedIncludeRoot& root) {
+  if (root.owner_kind == "source") return 0;
+  if (root.owner_kind == "compiler-resource-directory") return 3;
+  const auto dependency = std::find_if(
+      storage.dependencies.begin(), storage.dependencies.end(),
+      [&root](const OwnedDependency& candidate) {
+        return candidate.dependency_id == root.dependency_id;
+      });
+  if (dependency == storage.dependencies.end()) return -1;
+  if (dependency->kind == "cuda-toolkit" || dependency->kind == "cutlass" ||
+      dependency->kind == "cccl") {
+    return 1;
+  }
+  return dependency->kind == "cxx-standard-library" ? 2 : 4;
+}
+
 void validate_virtual_file_system(const JsonDocument& document,
                                   const JsonNode& vfs, SessionStorage& storage,
                                   CompileSessionRegion region) {
@@ -1425,6 +1442,10 @@ void validate_virtual_file_system(const JsonDocument& document,
         output.owner_kind == "compiler-resource-directory") {
       closed_object(document, owner, {"kind"}, region);
       if (output.owner_kind == "source") {
+        if (output.mode != "quote") {
+          reject(CompileSessionDecodeStatus::kInvalidFrame, region,
+                 CompileSessionDecodeReason::kSchema, root.begin);
+        }
         const std::size_t containers = static_cast<std::size_t>(std::count_if(
             storage.source_roots.begin(), storage.source_roots.end(),
             [&output](const PmrString& source) {
@@ -1458,7 +1479,8 @@ void validate_virtual_file_system(const JsonDocument& document,
             return candidate.dependency_id == output.dependency_id;
           });
       if (dependency == storage.dependencies.end() ||
-          dependency->header_set_sha256 != output.manifest_sha256) {
+          dependency->header_set_sha256 != output.manifest_sha256 ||
+          output.mode != "system") {
         reject(CompileSessionDecodeStatus::kInvalidFrame, region,
                CompileSessionDecodeReason::kSchema, root.begin);
       }
@@ -1480,6 +1502,15 @@ void validate_virtual_file_system(const JsonDocument& document,
       reject(CompileSessionDecodeStatus::kInvalidFrame, region,
              CompileSessionDecodeReason::kSchema, include_roots.begin);
     }
+  }
+  std::int32_t prior_search_rank = -1;
+  for (const OwnedIncludeRoot& root : storage.include_roots) {
+    const std::int32_t search_rank = include_root_search_rank(storage, root);
+    if (search_rank < 0 || search_rank < prior_search_rank) {
+      reject(CompileSessionDecodeStatus::kInvalidFrame, region,
+             CompileSessionDecodeReason::kSchema, include_roots.begin);
+    }
+    prior_search_rank = search_rank;
   }
   for (const OwnedCompilerOption& option : storage.options) {
     if (option.kind != CompilerOptionKind::kForcedInclude) continue;

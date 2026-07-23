@@ -224,7 +224,7 @@ describe("producer-neutral C++/CUDA/CuTe frontend request", () => {
   it("prepares deterministic opaque authority over copied caller source bytes", async () => {
     const fixture = await createRequestFixture();
     expect(fixture.input.requestId).toBe(
-      "bg.cpp.frontend-request.sha256.0cfe01e6f55c098140d21779d1c7ffb877ed24179206ed42fc3cb1d6afbeb6bd",
+      "bg.cpp.frontend-request.sha256.236bb761d82bcf300b9aa13b1b67459780a2726785c04d77408d0e4db0555c85",
     );
     const first = await prepareCppCuteFrontendRequest(fixture.profile, fixture.input, fixture.snapshots);
     const second = await prepareCppCuteFrontendRequest(fixture.profile, cloneRequest(fixture.input), fixture.snapshots);
@@ -326,7 +326,7 @@ describe("producer-neutral C++/CUDA/CuTe frontend request", () => {
     expect(record.orderedInputs.compilerOptions).toEqual(profile.language.options);
     expect(record.orderedInputs.availableIncludeRoots).toEqual(profile.virtualFileSystem.includeRoots);
     expect(record.orderedInputs.availableIncludeRoots.map((root) => root.includeRootId)).toEqual([
-      "workspace-source", "clang-resource", "cuda", "cutlass", "cxx-stdlib", "linux-sysroot",
+      "workspace-source", "cuda", "cutlass", "cxx-stdlib", "clang-resource", "linux-sysroot",
     ]);
     expect("observedOpenedHeaders" in record.orderedInputs).toBe(false);
     expect("headerSetSha256" in record.request).toBe(false);

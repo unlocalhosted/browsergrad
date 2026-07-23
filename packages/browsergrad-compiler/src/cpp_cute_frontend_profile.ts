@@ -1671,6 +1671,9 @@ function validateProfileReferences(
   for (const [index, root] of virtualFileSystem.includeRoots.entries()) {
     const rootPath = `$.virtualFileSystem.includeRoots[${index}]`;
     if (root.owner.kind === "source") {
+      if (root.mode !== "quote") {
+        invalid(`${rootPath}.mode`, "source-owned include roots must use quote-search semantics");
+      }
       const containers = virtualFileSystem.sourceRoots.filter((sourceRoot) =>
         virtualPathContains(sourceRoot, root.virtualPath));
       if (containers.length !== 1) {
@@ -1701,6 +1704,9 @@ function validateProfileReferences(
     if (root.manifestSha256 !== dependency.headerSetSha256) {
       invalid(`${rootPath}.manifestSha256`, "dependency-owned include root must bind its dependency header set");
     }
+    if (root.mode !== "system") {
+      invalid(`${rootPath}.mode`, "toolchain dependency include roots must use system-search semantics");
+    }
     ownedDependencies.add(dependency.dependencyId);
   }
 
@@ -1718,6 +1724,17 @@ function validateProfileReferences(
       );
     }
   }
+  let priorSearchRank = -1;
+  for (const [index, root] of virtualFileSystem.includeRoots.entries()) {
+    const searchRank = includeRootSearchRank(root, dependencies);
+    if (searchRank < priorSearchRank) {
+      invalid(
+        `$.virtualFileSystem.includeRoots[${index}]`,
+        "include roots must preserve source, CUDA/CuTe, libc++, compiler-resource, then C-system search tiers",
+      );
+    }
+    priorSearchRank = searchRank;
+  }
 
   for (const [index, option] of language.options.entries()) {
     if (option.kind !== "forced-include") continue;
@@ -1731,6 +1748,24 @@ function validateProfileReferences(
       invalid(`${optionPath}.virtualPath`, "forced include must be a file contained by its declared include root");
     }
   }
+}
+
+function includeRootSearchRank(
+  root: CppCuteFrontendIncludeRoot,
+  dependencies: ReadonlyMap<string, CppCuteFrontendDependencyProfile>,
+): number {
+  if (root.owner.kind === "source") return 0;
+  if (root.owner.kind === "compiler-resource-directory") return 3;
+  const dependency = dependencies.get(root.owner.dependencyId);
+  if (dependency === undefined) {
+    invalid("$.virtualFileSystem.includeRoots", "include root dependency is absent");
+  }
+  if (dependency.kind === "cuda-toolkit" ||
+      dependency.kind === "cutlass" ||
+      dependency.kind === "cccl") {
+    return 1;
+  }
+  return dependency.kind === "cxx-standard-library" ? 2 : 4;
 }
 
 function parseCompatibility(value: JsonValue, path: string): CppCuteFrontendCompatibilityProfile {

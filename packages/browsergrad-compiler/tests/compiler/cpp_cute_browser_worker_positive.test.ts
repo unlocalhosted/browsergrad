@@ -635,7 +635,8 @@ async function createEnvironment(
     >;
     const sourceRoot = includeRoots.find((root) => root.owner.kind === "source");
     if (sourceRoot === undefined) throw new Error("fixture lost source include root");
-    includeRoots.push(...Array.from({ length: 59 }, (_, index) => ({
+    const firstSystemRoot = includeRoots.findIndex((root) => root.owner.kind !== "source");
+    includeRoots.splice(firstSystemRoot, 0, ...Array.from({ length: 59 }, (_, index) => ({
       includeRootId: `extra-source-${index}`,
       mode: "quote" as const,
       virtualPath: `/src/extra-${index}`,

@@ -78,6 +78,49 @@ bool cpp_cute_valid_canonical_virtual_path(
   return true;
 }
 
+bool cpp_cute_normalize_virtual_path(const std::string_view path,
+                                     std::string& output) noexcept {
+  try {
+    output.clear();
+    if (path.empty() || path.size() > kCppCuteMaximumVirtualPathByteLength) {
+      return false;
+    }
+    output.reserve(path.size() + (path.front() == '/' ? 0U : 1U));
+    output.push_back('/');
+    std::size_t segment_begin = path.front() == '/' ? 1U : 0U;
+    for (std::size_t index = segment_begin; index <= path.size(); ++index) {
+      if (index < path.size() && path[index] != '/') continue;
+      const std::string_view segment =
+          path.substr(segment_begin, index - segment_begin);
+      segment_begin = index + 1U;
+      if (segment.empty() || segment == ".") continue;
+      if (segment == "..") {
+        if (output.size() == 1U) {
+          output.clear();
+          return false;
+        }
+        const std::size_t separator = output.rfind('/');
+        output.resize(separator == 0U ? 1U : separator);
+        continue;
+      }
+      if (output.size() > 1U) output.push_back('/');
+      output.append(segment);
+      if (output.size() > kCppCuteMaximumVirtualPathByteLength) {
+        output.clear();
+        return false;
+      }
+    }
+    if (!cpp_cute_valid_canonical_virtual_path(output)) {
+      output.clear();
+      return false;
+    }
+    return true;
+  } catch (...) {
+    output.clear();
+    return false;
+  }
+}
+
 bool cpp_cute_virtual_path_contains(const std::string_view root,
                                     const std::string_view candidate) noexcept {
   return root == "/" ? candidate.starts_with('/')

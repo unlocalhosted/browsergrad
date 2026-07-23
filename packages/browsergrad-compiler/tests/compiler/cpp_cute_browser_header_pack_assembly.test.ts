@@ -228,10 +228,10 @@ describe("C++/CuTe browser parsed-program header-pack assembly", () => {
       releaseAuthority: "not-authorized",
     });
     expect(manifest.body.packs.map((pack) => [pack.role, pack.outputPath])).toEqual([
-      ["compiler-resource", "assets/browsergrad-cpp-cute/clang-resource.headers.bgvfs"],
       ["cuda", "assets/browsergrad-cpp-cute/cuda-12.6.3.headers.bgvfs"],
       ["cute", "assets/browsergrad-cpp-cute/cutlass-3.7.0.headers.bgvfs"],
       ["cxx-standard-library", "assets/browsergrad-cpp-cute/libcxx-22.1.8.headers.bgvfs"],
+      ["compiler-resource", "assets/browsergrad-cpp-cute/clang-resource.headers.bgvfs"],
       ["linux-sysroot", "assets/browsergrad-cpp-cute/linux-sysroot.headers.bgvfs"],
     ]);
     expect(manifest.body.notices.map((notice) => [notice.componentId, notice.reviewStatus])).toEqual([

@@ -231,6 +231,26 @@ int run_observer_tests() {
   BG_CHECK(record_read(surrogate, "/src/\xed\xa0\x80.hpp") ==
            std::make_error_code(std::errc::invalid_argument));
 
+  // Compiler-originated relative and parent-relative lookups are normalized
+  // before they cross the canonical host VFS ABI.
+  std::string normalized;
+  BG_CHECK(cpp_cute_normalize_virtual_path(
+      "/toolchain/cxx/include/c++/v1/__type_traits/../__concepts/"
+      "__concept_macros.h",
+      normalized));
+  BG_CHECK(normalized ==
+           "/toolchain/cxx/include/c++/v1/__concepts/__concept_macros.h");
+  BG_CHECK(cpp_cute_normalize_virtual_path(
+      "toolchain//cxx/./include/c++/v1/vector", normalized));
+  BG_CHECK(normalized == "/toolchain/cxx/include/c++/v1/vector");
+  BG_CHECK(cpp_cute_normalize_virtual_path("/toolchain/cxx/../../cuda",
+                                           normalized));
+  BG_CHECK(normalized == "/cuda");
+  BG_CHECK(!cpp_cute_normalize_virtual_path("/../../host-secret", normalized));
+  BG_CHECK(normalized.empty());
+  BG_CHECK(!cpp_cute_normalize_virtual_path("../host-secret", normalized));
+  BG_CHECK(normalized.empty());
+
   return 0;
 }
 

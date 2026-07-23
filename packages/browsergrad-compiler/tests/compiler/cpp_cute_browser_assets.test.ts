@@ -76,11 +76,11 @@ describe("C++/CuTe browser-local asset manifest", () => {
       minor: CPP_CUTE_BROWSER_ASSET_MANIFEST_MINOR,
     });
     expect(fixture.input.manifestId).toBe(
-      "bg.cpp.browser-assets.sha256.faed827a519204a07982798551ce980ee9d7d645ad02e82f63f9c526d5063ad9",
+      "bg.cpp.browser-assets.sha256.00bc4638648f55c8df9fd9b554194cbf9262f066c276387f0f507d631c61d30a",
     );
-    expect(first.assetSetSha256).toBe("0fdb0e46a0a59511c6680c421fc6ba81c3a592b4b7176d10cfc89f779cd5ac77");
+    expect(first.assetSetSha256).toBe("ca35995032f8056f6cde6f6c674c200f246fc520612e3a9aab04459c648bdbf6");
     expect(first.assetCount).toBe(9);
-    expect(first.manifestSha256).toBe("53760b183370fcc2328f7b8244b3a8d350ac2bebd1844a81f4745ff7abd1345f");
+    expect(first.manifestSha256).toBe("5e513484291681a94a660ab6f50bff70dd9aa6674e1bbf780f677935e5e0a331");
     expect(first.manifestByteLength).toBe("11381");
     expect(Object.isFrozen(first)).toBe(true);
     const record = unwrapPreparedCppCuteBrowserAssetManifest(first);
@@ -308,7 +308,7 @@ describe("C++/CuTe browser-local asset manifest", () => {
       createCppCuteBrowserAssetFixture({ profile: { includeRoots: roots } }),
     ).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
-      path: "$.virtualFileSystem.includeRoots[1]",
+      path: "$.virtualFileSystem.includeRoots[4]",
     });
   });
 

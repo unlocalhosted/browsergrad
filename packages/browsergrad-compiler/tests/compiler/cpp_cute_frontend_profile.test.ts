@@ -37,7 +37,7 @@ describe("C++/CuTe frontend profile", () => {
     const second = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("71d844537ce61986ae4d55f7423eb884de872d201df35ea2cd9fcd9da53c3b5c");
+    expect(first.profileHash).toBe("b578bb441aadb8f967a838aa64bb2bda65bc3308ebb1cf416f435896dc2f3b79");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.layout-tracer@2");
     expect(first.deploymentMode).toBe("ahead-of-time");
     expect(Object.isFrozen(first)).toBe(true);
@@ -159,11 +159,11 @@ describe("C++/CuTe frontend profile", () => {
     const aot = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("a8cd1c6c63518cfba391390ee9a2229ee06051fe961a5034c07ff13f5272cc8a");
+    expect(first.profileHash).toBe("f8094d358be5cffc56c9e6b6dc700563c0af489778835662931f3c559a837326");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.browser-clang@1");
     expect(first.deploymentMode).toBe("browser-local");
     expect(first.compilationContractHash).toBe(aot.compilationContractHash);
-    expect(first.compilationContractHash).toBe("693f648a441be89ff32d0153a4cc4b61e1094ae5f782c526d9261eac50707f7e");
+    expect(first.compilationContractHash).toBe("a21271020cfdb9ebd5cd2a53a70aeb4ed918087e2f1a36038d4fd5c0c035156f");
     const record = unwrapPreparedCppCuteBrowserFrontendProfile(first);
     expect(record.profile.deployment.assetSetSha256).toBe("8".repeat(64));
     expect(record.profile.deployment.buildProvenanceLockSha256).toBe("7".repeat(64));
@@ -388,7 +388,7 @@ describe("C++/CuTe frontend profile", () => {
     await expectProfileError(value, "BG-COMPILER-CPP-CUTE-PROFILE-INVALID", "$.compatibility.supportedSourceFeatures");
   });
 
-  it("preserves order-sensitive compiler options and include roots", async () => {
+  it("preserves options and enforces semantic include-search tiers", async () => {
     const value = cloneCppCuteProfileInput();
     const language = value["language"] as Record<string, unknown>;
     language["options"] = [
@@ -402,8 +402,6 @@ describe("C++/CuTe frontend profile", () => {
       { kind: "frontend-option", id: "error-limit", value: "100000" },
     ];
     const vfs = value["virtualFileSystem"] as Record<string, unknown>;
-    vfs["includeRoots"] = [...vfs["includeRoots"] as unknown[]].reverse();
-
     const prepared = await prepareCppCuteFrontendProfile(value);
     const profile = unwrapPreparedCppCuteFrontendProfile(prepared).profile;
     expect(profile.language.options).toEqual([
@@ -417,13 +415,20 @@ describe("C++/CuTe frontend profile", () => {
       { kind: "frontend-option", id: "error-limit", value: "100000" },
     ]);
     expect(profile.virtualFileSystem.includeRoots.map((root) => root.includeRootId)).toEqual([
-      "linux-sysroot",
-      "cxx-stdlib",
-      "cutlass",
-      "cuda",
-      "clang-resource",
       "workspace-source",
+      "cuda",
+      "cutlass",
+      "cxx-stdlib",
+      "clang-resource",
+      "linux-sysroot",
     ]);
+
+    vfs["includeRoots"] = [...vfs["includeRoots"] as unknown[]].reverse();
+    await expectProfileError(
+      value,
+      "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      "$.virtualFileSystem.includeRoots[1]",
+    );
   });
 
   it("requires the sealed syntax-only and error-limit frontend options", async () => {
@@ -592,7 +597,10 @@ describe("C++/CuTe frontend profile", () => {
     });
     const vfs = value["virtualFileSystem"] as Record<string, unknown>;
     const includeRoots = vfs["includeRoots"] as Record<string, unknown>[];
-    includeRoots.push({
+    const cxxIndex = includeRoots.findIndex(
+      (root) => (root["owner"] as Record<string, unknown>)["dependencyId"] === "cxx-stdlib",
+    );
+    includeRoots.splice(cxxIndex, 0, {
       includeRootId: "cccl",
       mode: "system",
       virtualPath: "/toolchain/cccl/include",
