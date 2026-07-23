@@ -80,6 +80,12 @@ BATCH_NORM_1D_WORK_ELEMENT_MAX = 1 << 28
 BATCH_NORM_1D_WORKSPACE_BYTE_MAX = 1 << 28
 BATCH_NORM_1D_WORK_VISIT_FACTOR = 32
 BATCH_NORM_1D_STATE_EFFECT_KIND = "batch-norm-1d-running-stats"
+INTERPOLATE_2D_OUTPUT_BYTE_MAX = 1 << 28
+INTERPOLATE_2D_OUTPUT_EXTENT_MAX = 1 << 20
+INTERPOLATE_2D_WORK_ELEMENT_MAX = 1 << 28
+INTERPOLATE_2D_WORKSPACE_BYTE_MAX = 1 << 28
+INTERPOLATE_2D_NEAREST_WORK_VISIT_FACTOR = 4
+INTERPOLATE_2D_BILINEAR_WORK_VISIT_FACTOR = 32
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 64 * 1024
@@ -130,6 +136,7 @@ _ENUMS = {
         "class-axis-logits-loss-with-index-or-probability-target-and-batched-reduction",
         "preserve-input-with-elementwise-bernoulli-mask",
         "preserve-rank-2-or-3-channel-normalized-input",
+        "resize-last-two-spatial-axes-of-rank-4-input",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
@@ -176,6 +183,7 @@ _ENUMS = {
         "supported-numpy-owning-stable-cross-entropy-reduction",
         "supported-numpy-owning-keyed-inverted-dropout",
         "supported-numpy-owning-batch-normalization",
+        "supported-numpy-owning-nearest-or-bilinear-resample",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -209,6 +217,7 @@ _ENUMS = {
         "supported-stable-logits-and-probability-target-gradients",
         "supported-keyed-mask-replay",
         "supported-batch-stat-or-running-stat-derivatives",
+        "supported-transpose-of-nearest-or-bilinear-resample",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -242,6 +251,7 @@ _ENUMS = {
         "supported-stable-logits-and-probability-target-gradients",
         "supported-keyed-mask-replay",
         "supported-batch-stat-or-running-stat-derivatives",
+        "supported-transpose-of-nearest-or-bilinear-resample",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
@@ -270,6 +280,7 @@ _ENUMS = {
         "supported-leading-batch-axis-preserving-pad",
         "supported-deterministic-drop-all-refuses-stochastic-without-randomness-policy",
         "refused-state-and-batch-axis-contract-undefined",
+        "supported-leading-batch-axis-preserve-spatial-axes",
     }),
     "onnxExport": frozenset({
         "supported-opset17-clip-export-dtypes",
@@ -300,6 +311,7 @@ _ENUMS = {
         "supported-opset17-softmax-cross-entropy-loss-unmapped-index-profile",
         "refused-training-dropout-in-inference-export",
         "refused-no-stable-running-stat-export-profile",
+        "supported-opset17-resize-nearest-or-linear-floating",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -319,6 +331,7 @@ _ENUMS = {
         "supported-primitive",
         "refused-no-canonical-keyed-rng-lowering",
         "refused-no-canonical-batch-normalization-lowering",
+        "refused-no-canonical-spatial-resample-lowering",
     }),
     "webgpu": frozenset({
         "profile-nonempty-f32-rank-at-most-4",
@@ -889,6 +902,24 @@ class BatchNorm1dStatsUpdateContract:
     running_mean_buffer_id: str
     running_var_buffer_id: str
     num_batches_tracked_buffer_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class Interpolate2dContract:
+    input_shape: Tuple[int, ...]
+    output_shape: Tuple[int, ...]
+    output_dtype: str
+    output_size: Tuple[int, int]
+    mode: str
+    align_corners: bool
+    scale_factors: Optional[Tuple[float, float]]
+    recompute_scale_factor: bool
+    coordinate_scales: Tuple[float, float]
+    batch_rank: int
+    input_elements: int
+    output_elements: int
+    work_elements: int
+    workspace_bytes: int
 
 
 def _elementwise_loss_checked_product(extents: Tuple[int, ...], ceiling: int) -> int:
@@ -2171,6 +2202,515 @@ def execute_batch_norm_1d_vjp_array(
             - x_hat * sum_grad_xhat / count
         )
     return np.array(grad_x, dtype=np.float32, copy=True)
+
+
+def _interpolate_2d_source_metadata(
+    source: Any,
+    batch_rank: int,
+) -> tuple[Tuple[int, ...], str, int]:
+    shape = getattr(source, "shape", None)
+    dtype = getattr(source, "dtype", None)
+    if type(batch_rank) is not int or batch_rank < 0:
+        raise ShapeError("interpolate: batch_rank must be a normalized non-negative integer")
+    if type(shape) is not tuple or len(shape) != batch_rank + 4:
+        raise ShapeError(
+            "interpolate: v1 requires rank-4 (N,C,H,W) input plus any "
+            f"leading mapped axes, got shape {shape!r} and batch_rank={batch_rank}"
+        )
+    if dtype not in _FLOATING_DTYPES:
+        raise ShapeError(
+            "interpolate: v1 requires float16, float32, or float64 input, "
+            f"got {dtype!r}"
+        )
+    for axis, extent in enumerate(shape):
+        if type(extent) is not int or extent < 0:
+            raise ShapeError(
+                f"interpolate: input shape[{axis}] must be a non-negative integer"
+            )
+        if extent > INTERPOLATE_2D_OUTPUT_EXTENT_MAX:
+            raise ShapeError(
+                f"interpolate: input extent {extent} on axis {axis} exceeds the "
+                f"{INTERPOLATE_2D_OUTPUT_EXTENT_MAX}-element ceiling"
+            )
+    if shape[-2] == 0 or shape[-1] == 0:
+        raise ShapeError("interpolate: input spatial extents must be positive")
+    elements = _elementwise_loss_checked_product(
+        shape, INTERPOLATE_2D_WORK_ELEMENT_MAX
+    )
+    dtype_bytes = _DROPOUT_DTYPE_BYTES[dtype]
+    if elements * dtype_bytes > INTERPOLATE_2D_OUTPUT_BYTE_MAX:
+        raise ShapeError(
+            "interpolate: input bytes exceed the "
+            f"{INTERPOLATE_2D_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    return shape, dtype, elements
+
+
+def _normalize_interpolate_2d_mode_and_alignment(
+    mode: Any,
+    align_corners: Any,
+) -> tuple[str, bool]:
+    if type(mode) is not str or mode not in ("nearest", "bilinear"):
+        raise ShapeError(
+            "interpolate: v1 mode must be exactly 'nearest' or 'bilinear'"
+        )
+    if mode == "nearest":
+        if align_corners is not None:
+            raise ShapeError(
+                "interpolate: align_corners must be None for nearest mode"
+            )
+        return mode, False
+    if align_corners is None:
+        return mode, False
+    if type(align_corners) is not bool:
+        raise ShapeError(
+            "interpolate: align_corners must be None or an exact bool"
+        )
+    return mode, align_corners
+
+
+def _normalize_interpolate_2d_size(value: Any) -> Tuple[int, int]:
+    if type(value) in _PAD_INTEGER_TYPES and type(value) is not bool:
+        raw = (value, value)
+    elif type(value) in (tuple, list) and len(value) == 2:
+        raw = (value[0], value[1])
+    else:
+        raise ShapeError(
+            "interpolate: size must be an integer or a length-2 tuple/list"
+        )
+    normalized = []
+    for axis, extent in enumerate(raw):
+        if type(extent) not in _PAD_INTEGER_TYPES or type(extent) is bool:
+            raise ShapeError(
+                f"interpolate: size[{axis}] must be a built-in or NumPy integer"
+            )
+        canonical = int(extent)
+        if canonical <= 0 or canonical > INTERPOLATE_2D_OUTPUT_EXTENT_MAX:
+            raise ShapeError(
+                f"interpolate: size[{axis}] must be in "
+                f"[1, {INTERPOLATE_2D_OUTPUT_EXTENT_MAX}], got {canonical}"
+            )
+        normalized.append(canonical)
+    return normalized[0], normalized[1]
+
+
+def _normalize_interpolate_2d_scale_factors(
+    value: Any,
+) -> Tuple[float, float]:
+    if type(value) in _PAD_VALUE_TYPES and type(value) is not bool:
+        raw = (value, value)
+    elif type(value) in (tuple, list) and len(value) == 2:
+        raw = (value[0], value[1])
+    else:
+        raise ShapeError(
+            "interpolate: scale_factor must be a real scalar or a "
+            "length-2 tuple/list"
+        )
+    normalized = []
+    for axis, scale in enumerate(raw):
+        if type(scale) not in _PAD_VALUE_TYPES or type(scale) is bool:
+            raise ShapeError(
+                f"interpolate: scale_factor[{axis}] must be an exact real scalar"
+            )
+        canonical = float(scale)
+        if not math.isfinite(canonical) or canonical <= 0.0:
+            raise ShapeError(
+                f"interpolate: scale_factor[{axis}] must be finite and positive"
+            )
+        normalized.append(canonical)
+    return normalized[0], normalized[1]
+
+
+def _interpolate_2d_scaled_extent(input_extent: int, scale: float) -> int:
+    if scale > INTERPOLATE_2D_OUTPUT_EXTENT_MAX / input_extent:
+        raise ShapeError(
+            "interpolate: scaled output extent exceeds the "
+            f"{INTERPOLATE_2D_OUTPUT_EXTENT_MAX}-element ceiling"
+        )
+    output_extent = math.floor(input_extent * scale)
+    if output_extent <= 0 or output_extent > INTERPOLATE_2D_OUTPUT_EXTENT_MAX:
+        raise ShapeError(
+            "interpolate: scale_factor produces a non-positive or oversized "
+            f"output extent {output_extent}"
+        )
+    return output_extent
+
+
+def normalize_interpolate_2d_request(
+    source: Any,
+    size: Any,
+    scale_factor: Any,
+    mode: Any,
+    align_corners: Any,
+    recompute_scale_factor: Any,
+    antialias: Any,
+) -> Interpolate2dContract:
+    shape, _, _ = _interpolate_2d_source_metadata(source, 0)
+    normalized_mode, normalized_align_corners = (
+        _normalize_interpolate_2d_mode_and_alignment(mode, align_corners)
+    )
+    if type(antialias) is not bool:
+        raise ShapeError("interpolate: antialias must be an exact bool")
+    if antialias:
+        raise ShapeError(
+            "interpolate: antialias=True is outside the typed v1 profile"
+        )
+    if (size is None) == (scale_factor is None):
+        raise ShapeError(
+            "interpolate: exactly one of size or scale_factor must be provided"
+        )
+    if recompute_scale_factor is not None and type(recompute_scale_factor) is not bool:
+        raise ShapeError(
+            "interpolate: recompute_scale_factor must be None or an exact bool"
+        )
+
+    if size is not None:
+        if recompute_scale_factor is not None:
+            raise ShapeError(
+                "interpolate: recompute_scale_factor is invalid with explicit size"
+            )
+        output_size = _normalize_interpolate_2d_size(size)
+        scale_factors = None
+        recompute = False
+    else:
+        scale_factors = _normalize_interpolate_2d_scale_factors(scale_factor)
+        output_size = (
+            _interpolate_2d_scaled_extent(shape[-2], scale_factors[0]),
+            _interpolate_2d_scaled_extent(shape[-1], scale_factors[1]),
+        )
+        recompute = (
+            False if recompute_scale_factor is None else recompute_scale_factor
+        )
+    return infer_interpolate_2d_contract(
+        source,
+        output_size,
+        normalized_mode,
+        normalized_align_corners,
+        scale_factors,
+        recompute,
+        0,
+    )
+
+
+def infer_interpolate_2d_contract(
+    source: Any,
+    output_size: Any,
+    mode: Any,
+    align_corners: Any,
+    scale_factors: Any,
+    recompute_scale_factor: Any,
+    batch_rank: Any,
+) -> Interpolate2dContract:
+    shape, dtype, input_elements = _interpolate_2d_source_metadata(
+        source, batch_rank
+    )
+    if type(output_size) is not tuple or len(output_size) != 2:
+        raise ShapeError(
+            "INTERPOLATE_2D arg.output_size must be a canonical length-2 tuple"
+        )
+    for axis, extent in enumerate(output_size):
+        if (
+            type(extent) is not int
+            or extent <= 0
+            or extent > INTERPOLATE_2D_OUTPUT_EXTENT_MAX
+        ):
+            raise ShapeError(
+                f"INTERPOLATE_2D arg.output_size[{axis}] is invalid"
+            )
+    if type(mode) is not str or mode not in ("nearest", "bilinear"):
+        raise ShapeError(
+            "INTERPOLATE_2D arg.mode must be 'nearest' or 'bilinear'"
+        )
+    if type(align_corners) is not bool:
+        raise ShapeError("INTERPOLATE_2D arg.align_corners must be a boolean")
+    if mode == "nearest" and align_corners:
+        raise ShapeError(
+            "INTERPOLATE_2D nearest mode cannot align corner centers"
+        )
+    if type(recompute_scale_factor) is not bool:
+        raise ShapeError(
+            "INTERPOLATE_2D arg.recompute_scale_factor must be a boolean"
+        )
+    if scale_factors is None:
+        if recompute_scale_factor:
+            raise ShapeError(
+                "INTERPOLATE_2D cannot recompute without scale factors"
+            )
+        canonical_scales = None
+    else:
+        if type(scale_factors) is not tuple or len(scale_factors) != 2:
+            raise ShapeError(
+                "INTERPOLATE_2D arg.scale_factors must be None or a canonical pair"
+            )
+        for axis, scale in enumerate(scale_factors):
+            if (
+                type(scale) is not float
+                or not math.isfinite(scale)
+                or scale <= 0.0
+            ):
+                raise ShapeError(
+                    f"INTERPOLATE_2D arg.scale_factors[{axis}] is invalid"
+                )
+        canonical_scales = scale_factors
+        expected_output = (
+            _interpolate_2d_scaled_extent(shape[-2], scale_factors[0]),
+            _interpolate_2d_scaled_extent(shape[-1], scale_factors[1]),
+        )
+        if output_size != expected_output:
+            raise ShapeError(
+                "INTERPOLATE_2D output_size does not match its scale factors"
+            )
+
+    if align_corners:
+        coordinate_scales = tuple(
+            0.0 if output_extent == 1 else (input_extent - 1) / (output_extent - 1)
+            for input_extent, output_extent in zip(shape[-2:], output_size)
+        )
+    elif canonical_scales is not None and not recompute_scale_factor:
+        coordinate_scales = tuple(1.0 / scale for scale in canonical_scales)
+    else:
+        coordinate_scales = tuple(
+            input_extent / output_extent
+            for input_extent, output_extent in zip(shape[-2:], output_size)
+        )
+    output_shape = shape[:-2] + output_size
+    output_elements = _elementwise_loss_checked_product(
+        output_shape, INTERPOLATE_2D_WORK_ELEMENT_MAX
+    )
+    dtype_bytes = _DROPOUT_DTYPE_BYTES[dtype]
+    output_bytes = output_elements * dtype_bytes
+    if output_bytes > INTERPOLATE_2D_OUTPUT_BYTE_MAX:
+        raise ShapeError(
+            f"interpolate: output requires {output_bytes} bytes, exceeding the "
+            f"{INTERPOLATE_2D_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    visit_factor = (
+        INTERPOLATE_2D_NEAREST_WORK_VISIT_FACTOR
+        if mode == "nearest"
+        else INTERPOLATE_2D_BILINEAR_WORK_VISIT_FACTOR
+    )
+    if output_elements > INTERPOLATE_2D_WORK_ELEMENT_MAX // visit_factor:
+        work_elements = INTERPOLATE_2D_WORK_ELEMENT_MAX + 1
+    else:
+        work_elements = output_elements * visit_factor
+    if work_elements > INTERPOLATE_2D_WORK_ELEMENT_MAX:
+        raise ShapeError(
+            "interpolate: projected work exceeds the "
+            f"{INTERPOLATE_2D_WORK_ELEMENT_MAX}-element-visit ceiling"
+        )
+    input_bytes = input_elements * dtype_bytes
+    spatial_output_elements = output_size[0] * output_size[1]
+    if mode == "nearest":
+        workspace_bytes = (
+            input_bytes + output_bytes * 3 + spatial_output_elements * 8
+        )
+    else:
+        workspace_bytes = (
+            input_bytes
+            + output_bytes * 8
+            + spatial_output_elements * 56
+            + (output_size[0] + output_size[1]) * 64
+        )
+    if workspace_bytes > INTERPOLATE_2D_WORKSPACE_BYTE_MAX:
+        raise ShapeError(
+            f"interpolate: projected workspace requires {workspace_bytes} bytes, "
+            f"exceeding the {INTERPOLATE_2D_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+    return Interpolate2dContract(
+        input_shape=shape,
+        output_shape=output_shape,
+        output_dtype=dtype,
+        output_size=output_size,
+        mode=mode,
+        align_corners=align_corners,
+        scale_factors=canonical_scales,
+        recompute_scale_factor=recompute_scale_factor,
+        coordinate_scales=(
+            float(coordinate_scales[0]),
+            float(coordinate_scales[1]),
+        ),
+        batch_rank=batch_rank,
+        input_elements=input_elements,
+        output_elements=output_elements,
+        work_elements=work_elements,
+        workspace_bytes=workspace_bytes,
+    )
+
+
+def _interpolate_2d_validate_runtime_array(
+    contract: Interpolate2dContract,
+    array: np.ndarray,
+    *,
+    gradient: bool,
+) -> None:
+    expected_shape = contract.output_shape if gradient else contract.input_shape
+    role = "upstream gradient" if gradient else "input"
+    if (
+        type(array) is not np.ndarray
+        or tuple(array.shape) != expected_shape
+        or array.dtype.name != contract.output_dtype
+    ):
+        raise ShapeError(
+            f"interpolate runtime {role} must have shape {expected_shape} "
+            f"and dtype {contract.output_dtype!r}"
+        )
+
+
+def _interpolate_2d_axis_geometry(
+    input_extent: int,
+    output_extent: int,
+    coordinate_scale: float,
+    mode: str,
+    align_corners: bool,
+    compute_dtype: np.dtype,
+) -> tuple[np.ndarray, ...]:
+    positions = np.arange(output_extent, dtype=compute_dtype)
+    if mode == "nearest":
+        indices = np.floor(positions * coordinate_scale).astype(np.int64)
+        return (np.clip(indices, 0, input_extent - 1),)
+    if align_corners:
+        coordinates = positions * coordinate_scale
+    else:
+        coordinates = (positions + compute_dtype.type(0.5)) * coordinate_scale - 0.5
+    lower = np.floor(coordinates).astype(np.int64)
+    upper = lower + 1
+    fraction = np.asarray(coordinates - lower, dtype=compute_dtype)
+    return (
+        np.clip(lower, 0, input_extent - 1),
+        np.clip(upper, 0, input_extent - 1),
+        fraction,
+    )
+
+
+def execute_interpolate_2d_array(
+    contract: Interpolate2dContract,
+    source: np.ndarray,
+) -> np.ndarray:
+    _interpolate_2d_validate_runtime_array(contract, source, gradient=False)
+    compute_dtype = np.dtype(
+        "float32" if contract.output_dtype == "float16" else contract.output_dtype
+    )
+    h_in, w_in = contract.input_shape[-2:]
+    out_h, out_w = contract.output_size
+    h_geometry = _interpolate_2d_axis_geometry(
+        h_in,
+        out_h,
+        contract.coordinate_scales[0],
+        contract.mode,
+        contract.align_corners,
+        compute_dtype,
+    )
+    w_geometry = _interpolate_2d_axis_geometry(
+        w_in,
+        out_w,
+        contract.coordinate_scales[1],
+        contract.mode,
+        contract.align_corners,
+        compute_dtype,
+    )
+    if contract.mode == "nearest":
+        result = source[..., h_geometry[0][:, None], w_geometry[0][None, :]]
+    else:
+        source_compute = source.astype(compute_dtype, copy=False)
+        h0, h1, h_fraction = h_geometry
+        w0, w1, w_fraction = w_geometry
+        v00 = source_compute[..., h0[:, None], w0[None, :]]
+        v01 = source_compute[..., h0[:, None], w1[None, :]]
+        v10 = source_compute[..., h1[:, None], w0[None, :]]
+        v11 = source_compute[..., h1[:, None], w1[None, :]]
+        h_weight = h_fraction[:, None]
+        w_weight = w_fraction[None, :]
+        one = compute_dtype.type(1.0)
+        result = (
+            (one - h_weight)
+            * ((one - w_weight) * v00 + w_weight * v01)
+            + h_weight * ((one - w_weight) * v10 + w_weight * v11)
+        )
+    return np.array(
+        result,
+        dtype=np.dtype(contract.output_dtype),
+        copy=True,
+    )
+
+
+def execute_interpolate_2d_vjp_array(
+    contract: Interpolate2dContract,
+    dy: np.ndarray,
+    source: np.ndarray,
+) -> np.ndarray:
+    _interpolate_2d_validate_runtime_array(contract, source, gradient=False)
+    _interpolate_2d_validate_runtime_array(contract, dy, gradient=True)
+    compute_dtype = np.dtype(
+        "float32" if contract.output_dtype == "float16" else contract.output_dtype
+    )
+    h_in, w_in = contract.input_shape[-2:]
+    out_h, out_w = contract.output_size
+    h_geometry = _interpolate_2d_axis_geometry(
+        h_in,
+        out_h,
+        contract.coordinate_scales[0],
+        contract.mode,
+        contract.align_corners,
+        compute_dtype,
+    )
+    w_geometry = _interpolate_2d_axis_geometry(
+        w_in,
+        out_w,
+        contract.coordinate_scales[1],
+        contract.mode,
+        contract.align_corners,
+        compute_dtype,
+    )
+    prefix_elements = _elementwise_loss_checked_product(
+        contract.input_shape[:-2], INTERPOLATE_2D_WORK_ELEMENT_MAX
+    )
+    dy_flat = dy.astype(compute_dtype, copy=False).reshape(
+        (prefix_elements, out_h * out_w)
+    )
+    dx_flat = np.zeros(
+        (prefix_elements, h_in * w_in),
+        dtype=compute_dtype,
+    )
+    if contract.mode == "nearest":
+        source_indices = (
+            h_geometry[0][:, None] * w_in + w_geometry[0][None, :]
+        ).reshape(-1)
+        np.add.at(dx_flat, (slice(None), source_indices), dy_flat)
+    else:
+        h0, h1, h_fraction = h_geometry
+        w0, w1, w_fraction = w_geometry
+        h_weight = h_fraction[:, None]
+        w_weight = w_fraction[None, :]
+        one = compute_dtype.type(1.0)
+        corners = (
+            (
+                (h0[:, None] * w_in + w0[None, :]).reshape(-1),
+                ((one - h_weight) * (one - w_weight)).reshape(-1),
+            ),
+            (
+                (h0[:, None] * w_in + w1[None, :]).reshape(-1),
+                ((one - h_weight) * w_weight).reshape(-1),
+            ),
+            (
+                (h1[:, None] * w_in + w0[None, :]).reshape(-1),
+                (h_weight * (one - w_weight)).reshape(-1),
+            ),
+            (
+                (h1[:, None] * w_in + w1[None, :]).reshape(-1),
+                (h_weight * w_weight).reshape(-1),
+            ),
+        )
+        for source_indices, weights in corners:
+            np.add.at(
+                dx_flat,
+                (slice(None), source_indices),
+                dy_flat * weights,
+            )
+    return np.array(
+        dx_flat.reshape(contract.input_shape),
+        dtype=np.dtype(contract.output_dtype),
+        copy=True,
+    )
 
 
 def _validate_elementwise_loss_runtime_arrays(
@@ -6354,6 +6894,121 @@ def _validate_batch_norm_1d_vjp(
     return forward_contract, operand
 
 
+def _validate_interpolate_2d(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> Interpolate2dContract:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    inputs = _require_single_input_tuple(node, contract.opcode)
+    arg = getattr(node, "arg", None)
+    required = {
+        "output_size",
+        "mode",
+        "align_corners",
+        "scale_factors",
+        "recompute_scale_factor",
+        "batch_rank",
+    }
+    if type(arg) is not dict or set(arg) != required:
+        raise ShapeError(
+            "INTERPOLATE_2D arg fields must be exactly 'output_size', 'mode', "
+            "'align_corners', 'scale_factors', 'recompute_scale_factor', and "
+            "'batch_rank'"
+        )
+    normalized = infer_interpolate_2d_contract(
+        inputs[0],
+        arg["output_size"],
+        arg["mode"],
+        arg["align_corners"],
+        arg["scale_factors"],
+        arg["recompute_scale_factor"],
+        arg["batch_rank"],
+    )
+    if getattr(node, "shape", None) != normalized.output_shape:
+        raise ShapeError(
+            "INTERPOLATE_2D declared shape does not match its spatial contract"
+        )
+    if getattr(node, "dtype", None) != normalized.output_dtype:
+        raise ShapeError("INTERPOLATE_2D must preserve its floating input dtype")
+    return normalized
+
+
+def _validate_interpolate_2d_vjp(
+    node: Any,
+) -> Interpolate2dContract:
+    if getattr(node, "op", None) != "INTERPOLATE_2D_VJP":
+        raise ShapeError(
+            "INTERPOLATE_2D_VJP validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    arg = getattr(node, "arg", None)
+    required = {
+        "output_size",
+        "mode",
+        "align_corners",
+        "scale_factors",
+        "recompute_scale_factor",
+        "batch_rank",
+        "vjp_of",
+    }
+    if type(arg) is not dict or set(arg) != required:
+        raise ShapeError(
+            "INTERPOLATE_2D_VJP arg fields must be exactly the forward "
+            "contract fields plus 'vjp_of'"
+        )
+    forward = arg["vjp_of"]
+    if getattr(forward, "op", None) != "INTERPOLATE_2D":
+        raise ShapeError(
+            "INTERPOLATE_2D_VJP arg.vjp_of must reference INTERPOLATE_2D"
+        )
+    forward_contract = _validate_interpolate_2d(
+        forward,
+        _BY_OPCODE["INTERPOLATE_2D"].record,
+    )
+    for field in (
+        "output_size",
+        "mode",
+        "align_corners",
+        "scale_factors",
+        "recompute_scale_factor",
+        "batch_rank",
+    ):
+        if arg[field] != forward.arg[field]:
+            raise ShapeError(
+                f"INTERPOLATE_2D_VJP arg.{field} must match its forward node"
+            )
+    inputs = getattr(node, "inputs", None)
+    if (
+        type(inputs) is not tuple
+        or len(inputs) != 2
+        or inputs[1] is not forward.inputs[0]
+    ):
+        raise ShapeError(
+            "INTERPOLATE_2D_VJP inputs must be the upstream gradient and "
+            "the exact forward source"
+        )
+    dy = inputs[0]
+    if (
+        getattr(dy, "shape", None) != forward_contract.output_shape
+        or getattr(dy, "dtype", None) != forward_contract.output_dtype
+    ):
+        raise ShapeError(
+            "INTERPOLATE_2D_VJP upstream gradient must match the forward output"
+        )
+    if (
+        getattr(node, "shape", None) != forward_contract.input_shape
+        or getattr(node, "dtype", None) != forward_contract.output_dtype
+    ):
+        raise ShapeError(
+            "INTERPOLATE_2D_VJP output metadata must match the forward source"
+        )
+    return forward_contract
+
+
 _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = MappingProxyType({
     "browsergrad.jit.framework.tensor.abs.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.cat.v1": _validate_cat,
@@ -6373,6 +7028,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.functional.cross-entropy.v1": _validate_cross_entropy,
     "browsergrad.jit.framework.functional.dropout.v1": _validate_dropout,
     "browsergrad.jit.framework.module.batch-norm-1d.v1": _validate_batch_norm_1d,
+    "browsergrad.jit.framework.functional.interpolate-2d.v1": _validate_interpolate_2d,
     "browsergrad.jit.framework.tensor.masked-fill.v1": _validate_masked_fill,
     "browsergrad.jit.framework.tensor.pad.v1": _validate_pad,
     "browsergrad.jit.framework.tensor.prod.v1": _validate_prod,
@@ -6413,6 +7069,7 @@ _INTERNAL_VALIDATORS: Mapping[str, Callable[[Any], Any]] = MappingProxyType({
     "DROPOUT_VJP": _validate_dropout_vjp,
     "BATCH_NORM_1D_STATS_UPDATE": _validate_batch_norm_1d_stats_update,
     "BATCH_NORM_1D_VJP": _validate_batch_norm_1d_vjp,
+    "INTERPOLATE_2D_VJP": _validate_interpolate_2d_vjp,
 })
 
 
@@ -6697,6 +7354,24 @@ def validate_batch_norm_1d_vjp_contract(
     return validate_internal_operation_contract(node)
 
 
+def validate_interpolate_2d_contract(node: Any) -> Interpolate2dContract:
+    record, normalized = validate_framework_operation_contract(node)
+    if (
+        record.contract_id
+        != "browsergrad.jit.framework.functional.interpolate-2d.v1"
+    ):
+        raise ShapeError(
+            "INTERPOLATE_2D resolved to the wrong framework-operation contract"
+        )
+    return normalized
+
+
+def validate_interpolate_2d_vjp_contract(
+    node: Any,
+) -> Interpolate2dContract:
+    return validate_internal_operation_contract(node)
+
+
 def validate_tril_contract(node: Any) -> int:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.tril.v1":
@@ -6866,6 +7541,12 @@ __all__ = [
     "BATCH_NORM_1D_WORKSPACE_BYTE_MAX",
     "BATCH_NORM_1D_WORK_VISIT_FACTOR",
     "BATCH_NORM_1D_STATE_EFFECT_KIND",
+    "INTERPOLATE_2D_OUTPUT_BYTE_MAX",
+    "INTERPOLATE_2D_OUTPUT_EXTENT_MAX",
+    "INTERPOLATE_2D_WORK_ELEMENT_MAX",
+    "INTERPOLATE_2D_WORKSPACE_BYTE_MAX",
+    "INTERPOLATE_2D_NEAREST_WORK_VISIT_FACTOR",
+    "INTERPOLATE_2D_BILINEAR_WORK_VISIT_FACTOR",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "EinsumContract",
@@ -6879,6 +7560,7 @@ __all__ = [
     "DropoutContract",
     "BatchNorm1dContract",
     "BatchNorm1dStatsUpdateContract",
+    "Interpolate2dContract",
     "framework_operation_support",
     "has_framework_operation_contract",
     "has_internal_operation_contract",
@@ -6898,11 +7580,13 @@ __all__ = [
     "infer_cross_entropy_contract",
     "infer_dropout_contract",
     "infer_batch_norm_1d_contract",
+    "infer_interpolate_2d_contract",
     "normalize_dropout_probability",
     "normalize_batch_norm_1d_num_features",
     "normalize_batch_norm_1d_eps",
     "normalize_batch_norm_1d_momentum",
     "normalize_batch_norm_1d_flag",
+    "normalize_interpolate_2d_request",
     "normalize_smooth_l1_beta",
     "normalize_pad_request",
     "normalize_pad_value",
@@ -6931,6 +7615,8 @@ __all__ = [
     "batch_norm_1d_batch_stats_array",
     "execute_batch_norm_1d_array",
     "execute_batch_norm_1d_vjp_array",
+    "execute_interpolate_2d_array",
+    "execute_interpolate_2d_vjp_array",
     "einsum_onnx_equation",
     "stable_sort_indices_array",
     "partial_topk_indices_array",
@@ -6971,6 +7657,8 @@ __all__ = [
     "validate_batch_norm_1d_contract",
     "validate_batch_norm_1d_stats_update_contract",
     "validate_batch_norm_1d_vjp_contract",
+    "validate_interpolate_2d_contract",
+    "validate_interpolate_2d_vjp_contract",
     "validate_gather_scatter_add_contract",
     "validate_tril_contract",
     "validate_triu_contract",

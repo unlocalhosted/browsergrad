@@ -87,6 +87,8 @@ from ._ir import (
     OP_BATCH_NORM_1D,
     OP_BATCH_NORM_1D_STATS_UPDATE,
     OP_BATCH_NORM_1D_VJP,
+    OP_INTERPOLATE_2D,
+    OP_INTERPOLATE_2D_VJP,
     OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
@@ -114,6 +116,8 @@ from ._framework_contracts import (
     validate_batch_norm_1d_contract,
     validate_batch_norm_1d_stats_update_contract,
     validate_batch_norm_1d_vjp_contract,
+    validate_interpolate_2d_contract,
+    validate_interpolate_2d_vjp_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -1407,6 +1411,89 @@ def export_inference(
                 nm,
                 "Pad",
             ))
+        elif node.op == OP_INTERPOLATE_2D:
+            contract = validate_interpolate_2d_contract(node)
+            suffix = next_node_id - 1
+            roi_name = f"const_interpolate_roi_{suffix}"
+            initializers.append(_emit_tensor_proto(
+                roi_name,
+                DT_FLOAT,
+                (0,),
+                b"",
+            ))
+            scales_name = f"const_interpolate_scales_{suffix}"
+            sizes_name = f"const_interpolate_sizes_{suffix}"
+            if (
+                contract.scale_factors is not None
+                and not contract.recompute_scale_factor
+            ):
+                scales = (
+                    (1.0,) * (len(contract.input_shape) - 2)
+                    + contract.scale_factors
+                )
+                initializers.append(_emit_tensor_proto(
+                    scales_name,
+                    DT_FLOAT,
+                    (len(scales),),
+                    b"".join(struct.pack("<f", value) for value in scales),
+                ))
+                initializers.append(_emit_tensor_proto(
+                    sizes_name,
+                    DT_INT64,
+                    (0,),
+                    b"",
+                ))
+            else:
+                initializers.append(_emit_tensor_proto(
+                    scales_name,
+                    DT_FLOAT,
+                    (0,),
+                    b"",
+                ))
+                sizes = contract.input_shape[:-2] + contract.output_size
+                initializers.append(_emit_tensor_proto(
+                    sizes_name,
+                    DT_INT64,
+                    (len(sizes),),
+                    _i64_initializer_for_shape(sizes),
+                ))
+            attributes = [
+                _emit_attr_string(
+                    "mode",
+                    "nearest" if contract.mode == "nearest" else "linear",
+                ),
+                _emit_attr_string(
+                    "coordinate_transformation_mode",
+                    (
+                        "asymmetric"
+                        if contract.mode == "nearest"
+                        else (
+                            "align_corners"
+                            if contract.align_corners
+                            else "half_pixel"
+                        )
+                    ),
+                ),
+            ]
+            if contract.mode == "nearest":
+                attributes.append(_emit_attr_string("nearest_mode", "floor"))
+            nodes.append(_emit_node(
+                input_names + [
+                    roi_name,
+                    scales_name,
+                    sizes_name,
+                ],
+                [out_name],
+                nm,
+                "Resize",
+                attributes,
+            ))
+        elif node.op == OP_INTERPOLATE_2D_VJP:
+            validate_interpolate_2d_vjp_contract(node)
+            raise OnnxUnmappableOp(
+                "export_inference: gradient-only INTERPOLATE_2D_VJP is not "
+                "exportable"
+            )
         elif node.op == OP_NARROW:
             validate_narrow_contract(node)
             raise OnnxUnmappableOp(
@@ -1748,7 +1835,7 @@ def export_inference(
         else:
             raise OnnxUnmappableOp(
                 f"export_inference: opcode {node.op!r} is not exportable in v0. "
-                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_PAD, OP_SORT_INDICES, OP_SORT_VALUES, OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_L1_LOSS, OP_SMOOTH_L1_LOSS, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
+                f"Supported ops: {sorted(set(_SIMPLE_OPS) | {OP_CAST, OP_RESHAPE, OP_PERMUTE, OP_REDUCE, OP_BROADCAST_TO, OP_CLAMP, OP_FLIP, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_PAD, OP_INTERPOLATE_2D, OP_SORT_INDICES, OP_SORT_VALUES, OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_L1_LOSS, OP_SMOOTH_L1_LOSS, OP_TRIL, OP_TRIU, OP_INDEX, OP_PROD, OP_VAR, OP_REPEAT, OP_REPEAT_INTERLEAVE, OP_CMP, OP_LOAD, OP_BUFFER, OP_CONST})}. "
                 f"Unsupported tensor IR ops such as {OP_CONV1D!r}, "
                 f"{OP_CONV1D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV1D_BACKWARD_WEIGHT!r}, "

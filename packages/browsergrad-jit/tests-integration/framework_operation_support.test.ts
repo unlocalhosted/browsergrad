@@ -91,6 +91,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.dropout.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.functional.interpolate-2d.v1",
+      publicSurface: "torch.nn.functional.interpolate",
+      opcode: "INTERPOLATE_2D",
+      semanticState: "typed",
+      shapeContract: "resize-last-two-spatial-axes-of-rank-4-input",
+      dtypeContract: "preserve-floating-input",
+      decisions: {
+        cpu: "supported-numpy-owning-nearest-or-bilinear-resample",
+        closureAutograd: "supported-transpose-of-nearest-or-bilinear-resample",
+        symbolicVjp: "supported-transpose-of-nearest-or-bilinear-resample",
+        functionalGrad: "supported-for-floating-input-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-preserve-spatial-axes",
+        onnxExport: "supported-opset17-resize-nearest-or-linear-floating",
+        tensorPlan: "refused-no-canonical-spatial-resample-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.interpolate.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.functional.l1-loss.v1",
       publicSurface: "torch.nn.functional.l1_loss",
       opcode: "L1_LOSS",
@@ -761,7 +782,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(35);
+    expect(result.first.operations).toHaveLength(36);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

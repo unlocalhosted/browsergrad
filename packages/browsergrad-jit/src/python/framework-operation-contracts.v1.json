@@ -90,6 +90,27 @@
       "retiredOpaqueOperationId": "jit.custom.dropout.v0"
     },
     {
+      "contractId": "browsergrad.jit.framework.functional.interpolate-2d.v1",
+      "publicSurface": "torch.nn.functional.interpolate",
+      "opcode": "INTERPOLATE_2D",
+      "semanticState": "typed",
+      "shapeContract": "resize-last-two-spatial-axes-of-rank-4-input",
+      "dtypeContract": "preserve-floating-input",
+      "decisions": {
+        "cpu": "supported-numpy-owning-nearest-or-bilinear-resample",
+        "closureAutograd": "supported-transpose-of-nearest-or-bilinear-resample",
+        "symbolicVjp": "supported-transpose-of-nearest-or-bilinear-resample",
+        "functionalGrad": "supported-for-floating-input-via-symbolic-vjp",
+        "vmap": "supported-leading-batch-axis-preserve-spatial-axes",
+        "onnxExport": "supported-opset17-resize-nearest-or-linear-floating",
+        "tensorPlan": "refused-no-canonical-spatial-resample-lowering",
+        "webgpu": "refused-no-tensor-plan-kernel",
+        "residency": "host-materialized",
+        "materialization": "cpu-owning-copy"
+      },
+      "retiredOpaqueOperationId": "jit.custom.interpolate.v0"
+    },
+    {
       "contractId": "browsergrad.jit.framework.functional.kl-div.v1",
       "publicSurface": "torch.nn.functional.kl_div",
       "opcode": "KL_DIV",

@@ -9,6 +9,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- `torch.nn.functional.interpolate` now shares JIT's bounded rank-4
+  float16/32/64 nearest/bilinear contract, including floor-derived scaled
+  extents, explicit scale recomputation, aligned-corner geometry, owning
+  dtype-preserving results, and vectorized transpose derivatives. Unsupported
+  modes, ambiguous geometry, coercive arguments, antialiasing, and
+  resource-excess requests fail before NumPy allocation.
 - `nn.BatchNorm1d` now shares JIT's exact float32 constructor, shape, batch
   statistics, affine-gradient, and state contract. Running variance uses the
   unbiased estimator, `num_batches_tracked` is persistent, `momentum=None`

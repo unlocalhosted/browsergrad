@@ -1,7 +1,7 @@
 # BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
 - **Status:** normative platform architecture; implementation status is not implied
-- **Last reviewed:** 2026-07-22
+- **Last reviewed:** 2026-07-23
 - **Implementation ledger:**
   [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
 - **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
@@ -158,7 +158,8 @@ Gate 6 has started by retiring public `Tensor.expand`, `Tensor.abs`,
 `torch.nn.functional.binary_cross_entropy_with_logits` and
 `torch.nn.functional.kl_div`, `torch.nn.functional.nll_loss`, and
 `torch.nn.functional.cross_entropy` plus
-`torch.nn.functional.dropout`, from the frozen opaque callback
+`torch.nn.functional.dropout`, `torch.nn.BatchNorm1d`, and
+`torch.nn.functional.interpolate`, from the frozen opaque callback
 inventory.
 Expand emits the existing typed `BROADCAST_TO`
 primitive. One shared contract validates exact arity, closed shape arguments,
@@ -186,8 +187,8 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 5 constructor calls and 5 operations under ADR-0002
-and ADR-0004 through ADR-0032. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 4 constructor calls and 4 operations under ADR-0002
+and ADR-0004 through ADR-0033. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -564,8 +565,19 @@ long-lived sessions. Closure and symbolic
 VJPs share runtime array validation and bounded work/storage contracts with
 Grad. Vmap, ONNX, tensor-plan, and WebGPU routes validate then refuse until
 their batch-axis, export-snapshot, normalization, and ordered device-state
-contracts exist. This is thirty-four migrated operation records, not Gate 6
-completion.
+contracts exist. Typed `INTERPOLATE_2D` now owns bounded rank-four
+float16/32/64 nearest and bilinear spatial resampling. Exactly one static
+size or positive scale determines output geometry; scaled extents use floor,
+and explicit non-recomputed scales retain their reciprocal coordinate map.
+Forward gather and transpose scatter are vectorized and preserve declared
+dtype, while half accumulates in float32. Closure and symbolic
+`INTERPOLATE_2D_VJP`, functional grad, leading-axis vmap with captured
+cotangent broadcast, and checkpoint replay share the same immutable geometry.
+ONNX opset 17 emits exact nearest or linear `Resize`; tensor-plan and WebGPU
+explicitly refuse until canonical spatial-resampling lowering exists. Grad
+shares the same fixture, bounds, scale-recomputation, aligned-corner, ownership,
+dtype, and derivative contract. This is thirty-five migrated operation records,
+not Gate 6 completion.
 
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
@@ -580,6 +592,7 @@ records bind `Tensor.abs`, `torch.cat`, `Tensor.clamp`, `Tensor.cos`, `Tensor.ex
 `torch.nn.functional.cross_entropy`,
 `torch.nn.functional.dropout`,
 `torch.nn.BatchNorm1d`,
+`torch.nn.functional.interpolate`,
 `torch.nn.functional.smooth_l1_loss`,
 `torch.sort.indices`, `torch.sort.values`, `torch.stack`,
 `torch.topk.indices`, `torch.topk.values`,
@@ -594,7 +607,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 5 still-opaque and thirty-four typed retirements. ADR-0003 records
+opaque IDs into 4 still-opaque and thirty-five typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.
@@ -2640,7 +2653,7 @@ all five.
 | Compiler pointer/scalar memory fields | Compiler | Existing CUDA-lite semantic lowering and the Gate 2 adapter only. | No new view, layout, dtype, or alias feature may add fields. | CPU reference and WGSL consume shared offsets, bounds, and alias facts. | Compiler `1.0.0`. |
 | `cute_static_layout` parser path | Compiler | Existing parser integration and pinned regression fixtures only. | No new spellings, ranks, queries, or call sites. | Pinned real frontend handles its fixtures through layout semantics. | Compiler `1.0.0`. |
 | `TensorGpuPlan` shape-only/f32 assumptions | Kernels | Existing JIT plan serializer and kernels executor/bridge only. | No new operation, dtype, view, offset, or alias semantics may enter this schema. | New view/dtype features enter through shared schemas; plan has no unique semantics. | Kernels `1.0.0`. |
-| JIT `OP_CUSTOM` for core framework ops | JIT | Existing `_tensor_proxy.py`, `_functional.py`, `_nn.py`, `_webnn.py`, explicit user-kernel code, and embedded legacy wrappers only. | No new core labels or constructor sites; only explicitly user-authored kernel IDs may extend. | Advertised core operations have typed IR, CPU/VJP decisions, and backend decisions. | JIT `1.0.0`. |
+| JIT `OP_CUSTOM` for core framework ops | JIT | Existing `_webnn.py`, explicit user-kernel code, and embedded legacy wrappers only. | No new core labels or constructor sites; only explicitly user-authored kernel IDs may extend. | Advertised core operations have typed IR, CPU/VJP decisions, and backend decisions. | JIT `1.0.0`. |
 | Eager view materialization and bf16 aliasing | Grad | Existing Tensor/torch compatibility adapters only where accurately documented. | No new API may claim view aliasing or bf16 storage through these paths. | View/alias fixtures agree or reject; bf16 is real storage/conversion or rejected. | Grad `1.0.0`. |
 | `flashAttentionDirect` name | Kernels | Existing public export and realizer compatibility call only. | New APIs and docs use the accurate row-wise online-softmax name. | Real block-tiled implementation is proven and a normal major-removal window passes. | Kernels `1.0.0`. |
 | Generic runtime backend labels | Runtime | Existing assignment requirement compatibility mapping only. | New readiness features use canonical requirement definitions/resolutions; semantic lowering uses capability decisions only where an explicit link exists. | All readiness UI consumes requirement resolutions and program-specific lowering records. | Runtime `1.0.0`. |

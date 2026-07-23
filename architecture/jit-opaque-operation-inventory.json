@@ -16,24 +16,6 @@
   },
   "policies": [
     {
-      "id": "cpu-callback-with-conditional-closure",
-      "category": "legacy-numpy-callback",
-      "cpuRealization": "numpy-callback",
-      "closureAutograd": "nearest-implemented-bilinear-refused",
-      "symbolicVjp": "refused-no-custom-rule",
-      "functionalGrad": "refused-missing-symbolic-vjp",
-      "vmap": "refused-custom",
-      "onnxExport": "refused-custom",
-      "tensorGpuPlanDefault": "refused-custom",
-      "tensorGpuPlanAllowCustom": "admitted-plan-structure-only",
-      "tensorGpuPlanExecution": "refused-custom",
-      "legacyWebgpu": "refused-name-field",
-      "residency": "host-materialized",
-      "realizedResultValidation": "ndarray-only-shape-and-dtype-unchecked",
-      "failurePolicy": "bilinear-backward-raises-not-implemented",
-      "targetConformance": "compatibility-debt"
-    },
-    {
       "id": "legacy-webgpu-forward-only",
       "category": "explicit-accelerator-kernel",
       "cpuRealization": "refused-missing-fn",
@@ -80,14 +62,6 @@
       "operationIds": ["jit.custom.user.v0"]
     },
     {
-      "id": "functional.interpolate",
-      "file": "packages/browsergrad-jit/src/python/_functional.py",
-      "definition": "interpolate",
-      "constructorCount": 1,
-      "labelBinding": "static-name",
-      "operationIds": ["jit.custom.interpolate.v0"]
-    },
-    {
       "id": "webnn.matmul",
       "file": "packages/browsergrad-jit/src/python/_webnn.py",
       "definition": "matmul",
@@ -128,7 +102,6 @@
   ],
   "operations": [
     {"id":"jit.custom.flash-attention.v0","label":"flash_attention","labelField":"op","constructorSite":"embedded.flash-attention","policy":"legacy-webgpu-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"legacy-webgpu-bridge-required","effectClass":"accelerator-kernel","replayContract":"forward-only-root-materialization","inputArity":"3-or-4","shapeRule":"preserve-query-shape","declaredDtypeRule":"preserve-query-dtype","realizedDtypeRule":"bridge-materialized-as-declared","webgpuRoute":"flash-attention","currentFailure":"CPU and portable tensor plan refuse; input relationships are only partially validated","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze","legacy-webgpu-flash"]},
-    {"id":"jit.custom.interpolate.v0","label":"interpolate","labelField":"name","constructorSite":"functional.interpolate","policy":"cpu-callback-with-conditional-closure","constructorReachability":"supported-nearest-or-bilinear-four-dimensional-input","effectCondition":"nearest-has-closure;bilinear-backward-refused","effectClass":"captured-state","replayContract":"nearest-deterministic-bilinear-backward-refused","inputArity":"1","shapeRule":"resized-four-dimensional-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"callback-result-unvalidated","webgpuRoute":"none","currentFailure":"bilinear forward builds a graph whose backward fails only at execution","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.transformer-block.v0","label":"transformer_block","labelField":"op","constructorSite":"embedded.transformer-block","policy":"constructor-only-forward-only","constructorReachability":"always-when-surface-called","effectCondition":"no-realizer-support","effectClass":"constructor-only","replayContract":"not-realizable","inputArity":"5","shapeRule":"preserve-input","declaredDtypeRule":"preserve-input","realizedDtypeRule":"not-realizable","webgpuRoute":"none","currentFailure":"CPU and WebGPU realizers both refuse; weights, dtype agreement, and head divisibility are not validated","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]},
     {"id":"jit.custom.user.v0","label":"user","labelField":"op","constructorSite":"custom-kernel.builder","policy":"legacy-webgpu-forward-only","constructorReachability":"registered-decorator-builder-invoked","effectCondition":"legacy-webgpu-bridge-and-live-kernel-registry-entry-required","effectClass":"user-authored-kernel","replayContract":"forward-only-root-materialization","inputArity":"decorator-num-inputs","shapeRule":"decorator-output-shape-function","declaredDtypeRule":"decorator-output-dtype","realizedDtypeRule":"bridge-materialized-as-declared","webgpuRoute":"user-kernel","currentFailure":"CPU and portable tensor plan refuse; autograd is explicitly disconnected","targetConformance":"intentional-extension","evidence":["gate0-contract","source-freeze","legacy-webgpu-user"]},
     {"id":"jit.custom.webnn-matmul.v0","label":"webnn_matmul","labelField":"op","constructorSite":"webnn.matmul","policy":"constructor-only-forward-only","constructorReachability":"two-dimensional-inputs-only","effectCondition":"no-realizer-support","effectClass":"constructor-only","replayContract":"not-realizable","inputArity":"2","shapeRule":"matrix-product-two-dimensional","declaredDtypeRule":"preserve-left-input-without-equality-validation","realizedDtypeRule":"not-realizable","webgpuRoute":"none","currentFailure":"CPU and WebGPU realizers both refuse; advertised f32 and fallback contracts are absent","targetConformance":"compatibility-debt","evidence":["gate0-contract","source-freeze"]}

@@ -9,6 +9,13 @@ contract in the README](README.md#compatibility-contract).
 
 ### Changed
 
+- `torch.nn.functional.interpolate` now emits typed `INTERPOLATE_2D` and
+  `INTERPOLATE_2D_VJP` IR instead of the final framework-owned NumPy callback.
+  The bounded rank-4 float16/32/64 profile covers nearest and bilinear
+  resampling, exact size/scale geometry, scale recomputation, aligned corners,
+  owning dtype-preserving CPU results, vectorized closure and symbolic
+  derivatives, leading-axis vmap, checkpoint replay, ONNX `Resize`, and
+  explicit tensor-plan/WebGPU refusal.
 - `nn.BatchNorm1d` now emits typed float32 `BATCH_NORM_1D`,
   `BATCH_NORM_1D_STATS_UPDATE`, and `BATCH_NORM_1D_VJP` IR. Training uses
   biased batch variance while persistent state uses the unbiased estimator;

@@ -807,6 +807,28 @@ function checkJitFrameworkOperationContracts(root, manifest, failures) {
   allowed.tensorPlan.add(
     "refused-no-canonical-batch-normalization-lowering",
   );
+  allowed.shapeContract.add(
+    "resize-last-two-spatial-axes-of-rank-4-input",
+  );
+  allowed.dtypeContract.add("preserve-floating-input");
+  allowed.cpu.add(
+    "supported-numpy-owning-nearest-or-bilinear-resample",
+  );
+  allowed.closureAutograd.add(
+    "supported-transpose-of-nearest-or-bilinear-resample",
+  );
+  allowed.symbolicVjp.add(
+    "supported-transpose-of-nearest-or-bilinear-resample",
+  );
+  allowed.vmap.add(
+    "supported-leading-batch-axis-preserve-spatial-axes",
+  );
+  allowed.onnxExport.add(
+    "supported-opset17-resize-nearest-or-linear-floating",
+  );
+  allowed.tensorPlan.add(
+    "refused-no-canonical-spatial-resample-lowering",
+  );
   const irSource = fs.readFileSync(
     path.join(root, "packages/browsergrad-jit/src/python/_ir.py"),
     "utf8",

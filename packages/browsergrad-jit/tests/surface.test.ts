@@ -87,7 +87,7 @@ describe("Python source registry", () => {
     expect(initFile!.content).toContain(`__version__ = "${pkg.version}"`);
   });
 
-  it("declares all 97 opcodes in _ir.py (core + typed framework + CNN + norm + fusion + autograd + AMP + optimizer)", () => {
+  it("declares all 99 opcodes in _ir.py (core + typed framework + CNN + norm + fusion + autograd + AMP + optimizer)", () => {
     // Sanity check that the codegen bundled the IR with every opcode the
     // PRD-005 + PRD-006 + PRD-007 + PRD-010 surface needs.
     const irFile = SOURCE_FILES.find((f) => f.path.endsWith("_ir.py"));
@@ -113,12 +113,14 @@ describe("Python source registry", () => {
       "OP_BINARY_CROSS_ENTROPY", "OP_BINARY_CROSS_ENTROPY_WITH_LOGITS",
       "OP_KL_DIV", "OP_NLL_LOSS", "OP_CROSS_ENTROPY", "OP_DROPOUT",
       "OP_BATCH_NORM_1D", "OP_BATCH_NORM_1D_STATS_UPDATE",
+      "OP_INTERPOLATE_2D",
       "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
       "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",
       "OP_SCATTER_ADD", "OP_BROADCAST_TO", "OP_EINSUM_VJP", "OP_L1_LOSS_VJP", "OP_SMOOTH_L1_LOSS_VJP",
       "OP_BINARY_CROSS_ENTROPY_VJP", "OP_BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP",
       "OP_KL_DIV_VJP", "OP_NLL_LOSS_VJP", "OP_CROSS_ENTROPY_VJP", "OP_DROPOUT_VJP",
       "OP_BATCH_NORM_1D_VJP",
+      "OP_INTERPOLATE_2D_VJP",
       "OP_ISNAN", "OP_SGD_UPDATE", "OP_ADAMW_UPDATE_M",
       "OP_ADAMW_UPDATE_V", "OP_ADAMW_UPDATE_PARAM",
       "OP_ADAM_UPDATE_M", "OP_ADAM_UPDATE_V", "OP_ADAM_UPDATE_PARAM",

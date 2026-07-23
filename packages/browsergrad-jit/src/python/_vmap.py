@@ -80,6 +80,7 @@ from ._ir import (
     OP_DROPOUT, OP_DROPOUT_VJP,
     OP_BATCH_NORM_1D, OP_BATCH_NORM_1D_STATS_UPDATE,
     OP_BATCH_NORM_1D_VJP,
+    OP_INTERPOLATE_2D, OP_INTERPOLATE_2D_VJP,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
     OP_STORE,
@@ -114,6 +115,8 @@ from ._framework_contracts import (
     validate_cross_entropy_vjp_contract,
     validate_dropout_contract,
     validate_dropout_vjp_contract,
+    validate_interpolate_2d_contract,
+    validate_interpolate_2d_vjp_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -137,6 +140,7 @@ from ._framework_contracts import (
     infer_nll_loss_contract,
     infer_cross_entropy_contract,
     infer_dropout_contract,
+    infer_interpolate_2d_contract,
 )
 
 
@@ -952,6 +956,100 @@ def _vmap_dropout_vjp(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
         shape=mapped_contract.input_shape,
         dtype=mapped_contract.output_dtype,
         arg=arg,
+    )
+
+
+@register_vmap(OP_INTERPOLATE_2D)
+def _vmap_interpolate_2d(
+    node: UOp,
+    batched: Dict[int, UOp],
+    B: int,
+) -> UOp:
+    contract = validate_interpolate_2d_contract(node)
+    source = node.inputs[0]
+    mapped_source = batched[id(source)]
+    if mapped_source.shape == source.shape:
+        return node
+    if mapped_source.shape != (B,) + source.shape:
+        raise JitNotImplementedError(
+            "bg.func.vmap: interpolate requires its source to be captured or "
+            "on the leading mapped axis"
+        )
+    mapped_contract = infer_interpolate_2d_contract(
+        mapped_source,
+        contract.output_size,
+        contract.mode,
+        contract.align_corners,
+        contract.scale_factors,
+        contract.recompute_scale_factor,
+        contract.batch_rank + 1,
+    )
+    return UOp(
+        op=OP_INTERPOLATE_2D,
+        inputs=(mapped_source,),
+        shape=mapped_contract.output_shape,
+        dtype=mapped_contract.output_dtype,
+        arg={
+            "output_size": mapped_contract.output_size,
+            "mode": mapped_contract.mode,
+            "align_corners": mapped_contract.align_corners,
+            "scale_factors": mapped_contract.scale_factors,
+            "recompute_scale_factor": mapped_contract.recompute_scale_factor,
+            "batch_rank": mapped_contract.batch_rank,
+        },
+    )
+
+
+@register_vmap(OP_INTERPOLATE_2D_VJP)
+def _vmap_interpolate_2d_vjp(
+    node: UOp,
+    batched: Dict[int, UOp],
+    B: int,
+) -> UOp:
+    contract = validate_interpolate_2d_vjp_contract(node)
+    inner_inputs = tuple(batched[id(source)] for source in node.inputs)
+    if all(
+        inner.shape == source.shape
+        for inner, source in zip(inner_inputs, node.inputs)
+    ):
+        return node
+    mapped_inputs = _vmap_variadic_inputs(
+        node.inputs,
+        batched,
+        B,
+        "interpolate_vjp",
+        (True, True),
+    )
+    mapped_contract = infer_interpolate_2d_contract(
+        mapped_inputs[1],
+        contract.output_size,
+        contract.mode,
+        contract.align_corners,
+        contract.scale_factors,
+        contract.recompute_scale_factor,
+        contract.batch_rank + 1,
+    )
+    forward_arg = {
+        "output_size": mapped_contract.output_size,
+        "mode": mapped_contract.mode,
+        "align_corners": mapped_contract.align_corners,
+        "scale_factors": mapped_contract.scale_factors,
+        "recompute_scale_factor": mapped_contract.recompute_scale_factor,
+        "batch_rank": mapped_contract.batch_rank,
+    }
+    mapped_forward = UOp(
+        op=OP_INTERPOLATE_2D,
+        inputs=(mapped_inputs[1],),
+        shape=mapped_contract.output_shape,
+        dtype=mapped_contract.output_dtype,
+        arg=forward_arg,
+    )
+    return UOp(
+        op=OP_INTERPOLATE_2D_VJP,
+        inputs=mapped_inputs,
+        shape=mapped_contract.input_shape,
+        dtype=mapped_contract.output_dtype,
+        arg={**forward_arg, "vjp_of": mapped_forward},
     )
 
 

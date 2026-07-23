@@ -3,33 +3,6 @@
   "adapterId": "jit.core-custom-ops.v0",
   "cases": [
     {
-      "id": "jit.custom.shared-refusals.v0",
-      "expected": {
-        "label": "interpolate",
-        "labelField": "name",
-        "cpuValues": [[[[0, 0, 0, 0]]]],
-        "cpuGradient": [[[[2, 2]]]],
-        "symbolicVjpRegistered": false,
-        "functionalGradError": "JitNotImplementedError",
-        "vmapError": "JitNotImplementedError",
-        "onnxError": "OnnxUnmappableOp",
-        "tensorPlanError": "GpuPlanUnsupported",
-        "tensorPlanAllowCustom": {
-          "hasCustomOps": true,
-          "rootOp": "CUSTOM"
-        },
-        "tensorPlanExecutionError": "GpuPlanUnsupported",
-        "legacyWebgpuError": "JitNotImplementedError"
-      }
-    },
-    {
-      "id": "jit.custom.conditional-backward-refusal.v0",
-      "expected": {
-        "nearestGradient": [4],
-        "bilinearBackwardError": "NotImplementedError"
-      }
-    },
-    {
       "id": "jit.custom.accelerator-and-constructor-only.v0",
       "expected": {
         "labels": ["flash_attention", "transformer_block", "user", "webnn_matmul"],
@@ -40,17 +13,6 @@
         "webnnLegacyError": "JitNotImplementedError",
         "transformerLegacyError": "JitNotImplementedError",
         "functionalDisconnectedGradient": [0, 0, 0, 0, 0, 0, 0, 0]
-      }
-    },
-    {
-      "id": "jit.custom.all-callback-labels-and-dtypes.v0",
-      "expected": {
-        "environment": {"pyodide": "0.26.4", "numpy": "1.26.4"},
-        "observedLabels": ["interpolate"],
-        "allLabelsMatch": true,
-        "closureGradientLabels": ["interpolate"],
-        "allClosureGradientsPresent": true,
-        "realizedDtypeDrift": {}
       }
     }
   ]

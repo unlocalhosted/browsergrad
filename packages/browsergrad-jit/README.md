@@ -79,7 +79,7 @@ pretending to match PyTorch.
   `train()`, `eval()`, `zero_grad()`
 - `nn.functional`: `relu`, `sigmoid`, `tanh`, `gelu`, `softmax`,
   `cross_entropy`, `mse_loss`, `nll_loss`, `linear`, `layer_norm`,
-  `conv1d`, `conv2d`, `conv_transpose2d`, `conv3d`
+  `conv1d`, `conv2d`, `conv_transpose2d`, `conv3d`, `interpolate`
 - `optim.SGD`, `optim.Adam`, `optim.AdamW`
 
 `Conv1d`, `Conv2d`, `ConvTranspose2d`, `Conv3d`, and `LayerNorm` are primitive
@@ -96,6 +96,11 @@ resident WebGPU path when the graph already reads GPU-owned buffers.
 `BatchNorm1d` uses typed forward, VJP, and exactly-once running-state IR. Its
 v1 profile is float32 CPU execution with explicit vmap, ONNX, tensor-plan, and
 WebGPU refusals until those boundaries own normalization/state semantics.
+`nn.functional.interpolate` uses typed spatial-resampling forward and VJP IR.
+Its v1 profile supports bounded rank-4 float16/32/64 nearest and bilinear CPU
+execution, closure/symbolic gradients, leading-axis vmap, checkpoint replay,
+and ONNX `Resize`; tensor-plan and WebGPU execution refuse until canonical
+resampling layout and kernel semantics exist.
 `bg.optim.sgd_update(...)`, `bg.optim.adam_update(...)`, and
 `bg.optim.adamw_update(...)` are functional optimizer/update IR nodes and lower
 through the same tensor-plan WebGPU path. They return updated tensors/state;

@@ -45,6 +45,7 @@ from ._ir import (
     OP_DROPOUT, OP_DROPOUT_VJP,
     OP_BATCH_NORM_1D, OP_BATCH_NORM_1D_STATS_UPDATE,
     OP_BATCH_NORM_1D_VJP,
+    OP_INTERPOLATE_2D, OP_INTERPOLATE_2D_VJP,
     OP_WHERE, OP_INDEX, OP_VAR, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_NARROW, OP_TRIL, OP_TRIU, OP_MASK, OP_SCATTER_ADD, OP_BROADCAST_TO,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
@@ -81,6 +82,8 @@ from ._framework_contracts import (
     validate_batch_norm_1d_contract,
     validate_batch_norm_1d_stats_update_contract,
     validate_batch_norm_1d_vjp_contract,
+    validate_interpolate_2d_contract,
+    validate_interpolate_2d_vjp_contract,
     validate_gather_contract,
     validate_gather_scatter_add_contract,
     validate_narrow_contract,
@@ -334,6 +337,10 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
         validate_batch_norm_1d_stats_update_contract(root)
     elif root.op == OP_BATCH_NORM_1D_VJP:
         validate_batch_norm_1d_vjp_contract(root)
+    elif root.op == OP_INTERPOLATE_2D:
+        validate_interpolate_2d_contract(root)
+    elif root.op == OP_INTERPOLATE_2D_VJP:
+        validate_interpolate_2d_vjp_contract(root)
     step_index: Dict[int, int] = {id(node): i for i, node in enumerate(order)}
     last_use: Dict[int, int] = {id(node): i for i, node in enumerate(order)}
     for i, node in enumerate(order):
@@ -477,6 +484,18 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
             raise GpuPlanUnsupported(
                 "GPU tensor plan does not support BATCH_NORM_1D_VJP. Add a "
                 "canonical batch-normalization gradient lowering first."
+            )
+        elif node.op == OP_INTERPOLATE_2D:
+            validate_interpolate_2d_contract(node)
+            raise GpuPlanUnsupported(
+                "GPU tensor plan does not support INTERPOLATE_2D. Add a "
+                "canonical spatial-resampling lowering before GPU codegen."
+            )
+        elif node.op == OP_INTERPOLATE_2D_VJP:
+            validate_interpolate_2d_vjp_contract(node)
+            raise GpuPlanUnsupported(
+                "GPU tensor plan does not support INTERPOLATE_2D_VJP. Add a "
+                "canonical resampling-gradient lowering before GPU codegen."
             )
         elif node.op == OP_VAR:
             validate_var_contract(node)

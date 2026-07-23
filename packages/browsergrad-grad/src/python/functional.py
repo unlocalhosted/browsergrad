@@ -1,6 +1,8 @@
 
 """browsergrad_grad.functional — stateless ops with autograd."""
 
+import math
+
 import numpy as np
 from .tensor import Tensor, _build_ctx, _normalize_pad_contract
 from . import _device
@@ -1763,107 +1765,460 @@ def pad(input: Tensor, pad, mode: str = "constant", value=None) -> Tensor:
     return out
 
 
-def _interp_nearest_2d(x_data, out_h, out_w, scale_h, scale_w):
-    H_in, W_in = x_data.shape[-2:]
-    # Source-index map per output pixel.
-    si = np.floor(np.arange(out_h) / scale_h).astype(np.int64)
-    sj = np.floor(np.arange(out_w) / scale_w).astype(np.int64)
-    si = np.clip(si, 0, H_in - 1)
-    sj = np.clip(sj, 0, W_in - 1)
-    return x_data[..., si[:, None], sj[None, :]], si, sj
+_INTERPOLATE_2D_FLOATING_DTYPES = frozenset(
+    {"float16", "float32", "float64"}
+)
+_INTERPOLATE_2D_DTYPE_BYTES = {
+    "float16": 2,
+    "float32": 4,
+    "float64": 8,
+}
+_INTERPOLATE_2D_INTEGER_TYPES = (
+    int,
+    np.int8,
+    np.int16,
+    np.int32,
+    np.int64,
+    np.uint8,
+    np.uint16,
+    np.uint32,
+    np.uint64,
+)
+_INTERPOLATE_2D_REAL_TYPES = _INTERPOLATE_2D_INTEGER_TYPES + (
+    float,
+    np.float16,
+    np.float32,
+    np.float64,
+)
+_INTERPOLATE_2D_OUTPUT_BYTE_MAX = 1 << 28
+_INTERPOLATE_2D_OUTPUT_EXTENT_MAX = 1 << 20
+_INTERPOLATE_2D_WORK_ELEMENT_MAX = 1 << 28
+_INTERPOLATE_2D_WORKSPACE_BYTE_MAX = 1 << 28
+_INTERPOLATE_2D_NEAREST_WORK_VISIT_FACTOR = 4
+_INTERPOLATE_2D_BILINEAR_WORK_VISIT_FACTOR = 32
 
 
-def _interp_bilinear_2d(x_data, out_h, out_w, scale_h, scale_w, align_corners):
-    H_in, W_in = x_data.shape[-2:]
-    if align_corners:
-        ih = np.linspace(0, H_in - 1, out_h).astype(np.float32) if out_h > 1 else np.zeros(out_h, dtype=np.float32)
-        iw = np.linspace(0, W_in - 1, out_w).astype(np.float32) if out_w > 1 else np.zeros(out_w, dtype=np.float32)
+def _interpolate_2d_checked_product(extents):
+    product = 1
+    for extent in extents:
+        if extent == 0:
+            return 0
+        if product > _INTERPOLATE_2D_WORK_ELEMENT_MAX // extent:
+            return _INTERPOLATE_2D_WORK_ELEMENT_MAX + 1
+        product *= extent
+    return product
+
+
+def _interpolate_2d_size(value):
+    if type(value) in _INTERPOLATE_2D_INTEGER_TYPES:
+        raw = (value, value)
+    elif type(value) in (tuple, list) and len(value) == 2:
+        raw = (value[0], value[1])
     else:
-        # Half-pixel-center mapping (PyTorch default).
-        ih = (np.arange(out_h, dtype=np.float32) + 0.5) / scale_h - 0.5
-        iw = (np.arange(out_w, dtype=np.float32) + 0.5) / scale_w - 0.5
-    i0 = np.floor(ih).astype(np.int64); i1 = i0 + 1
-    j0 = np.floor(iw).astype(np.int64); j1 = j0 + 1
-    a = (ih - i0).astype(np.float32)
-    b = (iw - j0).astype(np.float32)
-    i0c = np.clip(i0, 0, H_in - 1); i1c = np.clip(i1, 0, H_in - 1)
-    j0c = np.clip(j0, 0, W_in - 1); j1c = np.clip(j1, 0, W_in - 1)
-    # Gather the 4 corners per output pixel.
-    v00 = x_data[..., i0c[:, None], j0c[None, :]]
-    v01 = x_data[..., i0c[:, None], j1c[None, :]]
-    v10 = x_data[..., i1c[:, None], j0c[None, :]]
-    v11 = x_data[..., i1c[:, None], j1c[None, :]]
-    aw = a[:, None]; bw = b[None, :]
-    out = (1 - aw) * ((1 - bw) * v00 + bw * v01) + aw * ((1 - bw) * v10 + bw * v11)
-    return out.astype(np.float32)
+        raise ValueError(
+            "interpolate: size must be an integer or a length-2 tuple/list"
+        )
+    normalized = []
+    for axis, extent in enumerate(raw):
+        if type(extent) not in _INTERPOLATE_2D_INTEGER_TYPES:
+            raise ValueError(
+                f"interpolate: size[{axis}] must be a built-in or NumPy integer"
+            )
+        canonical = int(extent)
+        if (
+            canonical <= 0
+            or canonical > _INTERPOLATE_2D_OUTPUT_EXTENT_MAX
+        ):
+            raise ValueError(
+                f"interpolate: size[{axis}] must be in "
+                f"[1, {_INTERPOLATE_2D_OUTPUT_EXTENT_MAX}], got {canonical}"
+            )
+        normalized.append(canonical)
+    return normalized[0], normalized[1]
 
 
-def interpolate(input: Tensor, size=None, scale_factor=None, mode: str = "nearest", align_corners: bool = False) -> Tensor:
-    """Resize 4D (N, C, H, W) feature maps.
-
-    Supports mode in {'nearest', 'bilinear'}. Either size or scale_factor must
-    be given. Backward path is implemented but slow — fine for educational use.
-    """
-    if input.data.ndim != 4:
-        raise NotImplementedError(f"interpolate: only 4D input supported; got {input.data.ndim}D")
-    H_in, W_in = input.data.shape[-2:]
-    if size is not None:
-        out_h, out_w = int(size[0]), int(size[1])
-    elif scale_factor is not None:
-        sf = scale_factor
-        if isinstance(sf, (int, float)):
-            sf = (sf, sf)
-        out_h = int(round(H_in * sf[0]))
-        out_w = int(round(W_in * sf[1]))
+def _interpolate_2d_scale_factors(value):
+    if type(value) in _INTERPOLATE_2D_REAL_TYPES:
+        raw = (value, value)
+    elif type(value) in (tuple, list) and len(value) == 2:
+        raw = (value[0], value[1])
     else:
-        raise ValueError("interpolate: provide size or scale_factor")
-    scale_h = out_h / H_in
-    scale_w = out_w / W_in
+        raise ValueError(
+            "interpolate: scale_factor must be a real scalar or a "
+            "length-2 tuple/list"
+        )
+    normalized = []
+    for axis, scale in enumerate(raw):
+        if type(scale) not in _INTERPOLATE_2D_REAL_TYPES:
+            raise ValueError(
+                f"interpolate: scale_factor[{axis}] must be an exact real scalar"
+            )
+        canonical = float(scale)
+        if not math.isfinite(canonical) or canonical <= 0.0:
+            raise ValueError(
+                f"interpolate: scale_factor[{axis}] must be finite and positive"
+            )
+        normalized.append(canonical)
+    return normalized[0], normalized[1]
 
+
+def _interpolate_2d_scaled_extent(input_extent, scale):
+    if scale > _INTERPOLATE_2D_OUTPUT_EXTENT_MAX / input_extent:
+        raise ValueError(
+            "interpolate: scaled output extent exceeds the "
+            f"{_INTERPOLATE_2D_OUTPUT_EXTENT_MAX}-element ceiling"
+        )
+    output_extent = math.floor(input_extent * scale)
+    if (
+        output_extent <= 0
+        or output_extent > _INTERPOLATE_2D_OUTPUT_EXTENT_MAX
+    ):
+        raise ValueError(
+            "interpolate: scale_factor produces a non-positive or oversized "
+            f"output extent {output_extent}"
+        )
+    return output_extent
+
+
+def _normalize_interpolate_2d_contract(
+    input,
+    size,
+    scale_factor,
+    mode,
+    align_corners,
+    recompute_scale_factor,
+    antialias,
+):
+    if type(input) is not Tensor:
+        raise TypeError(
+            f"interpolate: input must be a Tensor, got {type(input).__name__}"
+        )
+    shape = tuple(input.data.shape)
+    dtype = input.dtype
+    if len(shape) != 4:
+        raise ValueError(
+            "interpolate: v1 requires rank-4 (N,C,H,W) input, "
+            f"got shape {shape!r}"
+        )
+    if dtype not in _INTERPOLATE_2D_FLOATING_DTYPES:
+        raise ValueError(
+            "interpolate: v1 requires float16, float32, or float64 input, "
+            f"got {dtype!r}"
+        )
+    for axis, extent in enumerate(shape):
+        if extent > _INTERPOLATE_2D_OUTPUT_EXTENT_MAX:
+            raise ValueError(
+                f"interpolate: input extent {extent} on axis {axis} exceeds the "
+                f"{_INTERPOLATE_2D_OUTPUT_EXTENT_MAX}-element ceiling"
+            )
+    if shape[-2] == 0 or shape[-1] == 0:
+        raise ValueError("interpolate: input spatial extents must be positive")
+    input_elements = _interpolate_2d_checked_product(shape)
+    dtype_bytes = _INTERPOLATE_2D_DTYPE_BYTES[dtype]
+    if input_elements * dtype_bytes > _INTERPOLATE_2D_OUTPUT_BYTE_MAX:
+        raise ValueError(
+            "interpolate: input bytes exceed the "
+            f"{_INTERPOLATE_2D_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    if type(mode) is not str or mode not in ("nearest", "bilinear"):
+        raise ValueError(
+            "interpolate: v1 mode must be exactly 'nearest' or 'bilinear'"
+        )
     if mode == "nearest":
-        out_data, si, sj = _interp_nearest_2d(input.data, out_h, out_w, scale_h, scale_w)
-        out = Tensor(out_data.astype(np.float32))
-        def backward(g):
-            # Scatter-add gradients back to source positions.
-            dx = np.zeros_like(input.data)
-            # g shape: (..., out_h, out_w); we add g[..., y, x] to dx[..., si[y], sj[x]].
-            for y in range(out_h):
-                for x in range(out_w):
-                    dx[..., si[y], sj[x]] += g.data[..., y, x]
-            return (dx,)
-        return _build_ctx(out, (input,), backward)
+        if align_corners is not None:
+            raise ValueError(
+                "interpolate: align_corners must be None for nearest mode"
+            )
+        normalized_align_corners = False
+    elif align_corners is None:
+        normalized_align_corners = False
+    elif type(align_corners) is bool:
+        normalized_align_corners = align_corners
+    else:
+        raise ValueError(
+            "interpolate: align_corners must be None or an exact bool"
+        )
+    if type(antialias) is not bool:
+        raise ValueError("interpolate: antialias must be an exact bool")
+    if antialias:
+        raise ValueError(
+            "interpolate: antialias=True is outside the typed v1 profile"
+        )
+    if (size is None) == (scale_factor is None):
+        raise ValueError(
+            "interpolate: exactly one of size or scale_factor must be provided"
+        )
+    if (
+        recompute_scale_factor is not None
+        and type(recompute_scale_factor) is not bool
+    ):
+        raise ValueError(
+            "interpolate: recompute_scale_factor must be None or an exact bool"
+        )
+    if size is not None:
+        if recompute_scale_factor is not None:
+            raise ValueError(
+                "interpolate: recompute_scale_factor is invalid with explicit size"
+            )
+        output_size = _interpolate_2d_size(size)
+        scale_factors = None
+        recompute = False
+    else:
+        scale_factors = _interpolate_2d_scale_factors(scale_factor)
+        output_size = (
+            _interpolate_2d_scaled_extent(shape[-2], scale_factors[0]),
+            _interpolate_2d_scaled_extent(shape[-1], scale_factors[1]),
+        )
+        recompute = (
+            False
+            if recompute_scale_factor is None
+            else recompute_scale_factor
+        )
+    if normalized_align_corners:
+        coordinate_scales = tuple(
+            0.0
+            if output_extent == 1
+            else (input_extent - 1) / (output_extent - 1)
+            for input_extent, output_extent in zip(shape[-2:], output_size)
+        )
+    elif scale_factors is not None and not recompute:
+        coordinate_scales = tuple(1.0 / scale for scale in scale_factors)
+    else:
+        coordinate_scales = tuple(
+            input_extent / output_extent
+            for input_extent, output_extent in zip(shape[-2:], output_size)
+        )
+    output_shape = shape[:-2] + output_size
+    output_elements = _interpolate_2d_checked_product(output_shape)
+    output_bytes = output_elements * dtype_bytes
+    if output_bytes > _INTERPOLATE_2D_OUTPUT_BYTE_MAX:
+        raise ValueError(
+            f"interpolate: output requires {output_bytes} bytes, exceeding the "
+            f"{_INTERPOLATE_2D_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    visit_factor = (
+        _INTERPOLATE_2D_NEAREST_WORK_VISIT_FACTOR
+        if mode == "nearest"
+        else _INTERPOLATE_2D_BILINEAR_WORK_VISIT_FACTOR
+    )
+    if (
+        output_elements
+        > _INTERPOLATE_2D_WORK_ELEMENT_MAX // visit_factor
+    ):
+        raise ValueError(
+            "interpolate: projected work exceeds the "
+            f"{_INTERPOLATE_2D_WORK_ELEMENT_MAX}-element-visit ceiling"
+        )
+    input_bytes = input_elements * dtype_bytes
+    spatial_output_elements = output_size[0] * output_size[1]
+    if mode == "nearest":
+        workspace_bytes = (
+            input_bytes + output_bytes * 3 + spatial_output_elements * 8
+        )
+    else:
+        workspace_bytes = (
+            input_bytes
+            + output_bytes * 8
+            + spatial_output_elements * 56
+            + (output_size[0] + output_size[1]) * 64
+        )
+    if workspace_bytes > _INTERPOLATE_2D_WORKSPACE_BYTE_MAX:
+        raise ValueError(
+            f"interpolate: projected workspace requires {workspace_bytes} bytes, "
+            f"exceeding the {_INTERPOLATE_2D_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+    return {
+        "input_shape": shape,
+        "output_shape": output_shape,
+        "output_dtype": dtype,
+        "output_size": output_size,
+        "mode": mode,
+        "align_corners": normalized_align_corners,
+        "scale_factors": scale_factors,
+        "recompute_scale_factor": recompute,
+        "coordinate_scales": coordinate_scales,
+    }
 
-    if mode == "bilinear":
-        out_data = _interp_bilinear_2d(input.data, out_h, out_w, scale_h, scale_w, align_corners)
-        out = Tensor(out_data)
-        # Backward: numerical for the educational case (small enough).
-        def backward(g):
-            # Build the bilinear weight tensor and apply its transpose.
-            if align_corners:
-                ih = np.linspace(0, H_in - 1, out_h).astype(np.float32) if out_h > 1 else np.zeros(out_h, dtype=np.float32)
-                iw = np.linspace(0, W_in - 1, out_w).astype(np.float32) if out_w > 1 else np.zeros(out_w, dtype=np.float32)
-            else:
-                ih = (np.arange(out_h, dtype=np.float32) + 0.5) / scale_h - 0.5
-                iw = (np.arange(out_w, dtype=np.float32) + 0.5) / scale_w - 0.5
-            i0 = np.floor(ih).astype(np.int64); i1 = i0 + 1
-            j0 = np.floor(iw).astype(np.int64); j1 = j0 + 1
-            a = (ih - i0).astype(np.float32)
-            b = (iw - j0).astype(np.float32)
-            i0c = np.clip(i0, 0, H_in - 1); i1c = np.clip(i1, 0, H_in - 1)
-            j0c = np.clip(j0, 0, W_in - 1); j1c = np.clip(j1, 0, W_in - 1)
-            dx = np.zeros_like(input.data)
-            for y in range(out_h):
-                for x in range(out_w):
-                    g_yx = g.data[..., y, x]
-                    aw = a[y]; bw = b[x]
-                    dx[..., i0c[y], j0c[x]] += g_yx * (1 - aw) * (1 - bw)
-                    dx[..., i0c[y], j1c[x]] += g_yx * (1 - aw) * bw
-                    dx[..., i1c[y], j0c[x]] += g_yx * aw * (1 - bw)
-                    dx[..., i1c[y], j1c[x]] += g_yx * aw * bw
-            return (dx,)
-        return _build_ctx(out, (input,), backward)
 
-    raise NotImplementedError(f"interpolate: mode {mode!r} not supported")
+def _interpolate_2d_axis_geometry(
+    input_extent,
+    output_extent,
+    coordinate_scale,
+    mode,
+    align_corners,
+    compute_dtype,
+):
+    positions = np.arange(output_extent, dtype=compute_dtype)
+    if mode == "nearest":
+        indices = np.floor(positions * coordinate_scale).astype(np.int64)
+        return (np.clip(indices, 0, input_extent - 1),)
+    if align_corners:
+        coordinates = positions * coordinate_scale
+    else:
+        coordinates = (
+            (positions + compute_dtype.type(0.5)) * coordinate_scale - 0.5
+        )
+    lower = np.floor(coordinates).astype(np.int64)
+    upper = lower + 1
+    fraction = np.asarray(coordinates - lower, dtype=compute_dtype)
+    return (
+        np.clip(lower, 0, input_extent - 1),
+        np.clip(upper, 0, input_extent - 1),
+        fraction,
+    )
+
+
+def _interpolate_2d_geometry(contract):
+    compute_dtype = np.dtype(
+        "float32"
+        if contract["output_dtype"] == "float16"
+        else contract["output_dtype"]
+    )
+    h_in, w_in = contract["input_shape"][-2:]
+    out_h, out_w = contract["output_size"]
+    return (
+        compute_dtype,
+        _interpolate_2d_axis_geometry(
+            h_in,
+            out_h,
+            contract["coordinate_scales"][0],
+            contract["mode"],
+            contract["align_corners"],
+            compute_dtype,
+        ),
+        _interpolate_2d_axis_geometry(
+            w_in,
+            out_w,
+            contract["coordinate_scales"][1],
+            contract["mode"],
+            contract["align_corners"],
+            compute_dtype,
+        ),
+    )
+
+
+def _execute_interpolate_2d(contract, source):
+    compute_dtype, h_geometry, w_geometry = _interpolate_2d_geometry(contract)
+    if contract["mode"] == "nearest":
+        result = source[
+            ...,
+            h_geometry[0][:, None],
+            w_geometry[0][None, :],
+        ]
+    else:
+        source_compute = source.astype(compute_dtype, copy=False)
+        h0, h1, h_fraction = h_geometry
+        w0, w1, w_fraction = w_geometry
+        v00 = source_compute[..., h0[:, None], w0[None, :]]
+        v01 = source_compute[..., h0[:, None], w1[None, :]]
+        v10 = source_compute[..., h1[:, None], w0[None, :]]
+        v11 = source_compute[..., h1[:, None], w1[None, :]]
+        h_weight = h_fraction[:, None]
+        w_weight = w_fraction[None, :]
+        one = compute_dtype.type(1.0)
+        result = (
+            (one - h_weight)
+            * ((one - w_weight) * v00 + w_weight * v01)
+            + h_weight * ((one - w_weight) * v10 + w_weight * v11)
+        )
+    return np.array(
+        result,
+        dtype=np.dtype(contract["output_dtype"]),
+        copy=True,
+    )
+
+
+def _execute_interpolate_2d_vjp(contract, dy):
+    compute_dtype, h_geometry, w_geometry = _interpolate_2d_geometry(contract)
+    h_in, w_in = contract["input_shape"][-2:]
+    out_h, out_w = contract["output_size"]
+    prefix_elements = _interpolate_2d_checked_product(
+        contract["input_shape"][:-2]
+    )
+    dy_flat = dy.astype(compute_dtype, copy=False).reshape(
+        (prefix_elements, out_h * out_w)
+    )
+    dx_flat = np.zeros(
+        (prefix_elements, h_in * w_in),
+        dtype=compute_dtype,
+    )
+    if contract["mode"] == "nearest":
+        source_indices = (
+            h_geometry[0][:, None] * w_in + w_geometry[0][None, :]
+        ).reshape(-1)
+        np.add.at(dx_flat, (slice(None), source_indices), dy_flat)
+    else:
+        h0, h1, h_fraction = h_geometry
+        w0, w1, w_fraction = w_geometry
+        h_weight = h_fraction[:, None]
+        w_weight = w_fraction[None, :]
+        one = compute_dtype.type(1.0)
+        corners = (
+            (
+                (h0[:, None] * w_in + w0[None, :]).reshape(-1),
+                ((one - h_weight) * (one - w_weight)).reshape(-1),
+            ),
+            (
+                (h0[:, None] * w_in + w1[None, :]).reshape(-1),
+                ((one - h_weight) * w_weight).reshape(-1),
+            ),
+            (
+                (h1[:, None] * w_in + w0[None, :]).reshape(-1),
+                (h_weight * (one - w_weight)).reshape(-1),
+            ),
+            (
+                (h1[:, None] * w_in + w1[None, :]).reshape(-1),
+                (h_weight * w_weight).reshape(-1),
+            ),
+        )
+        for source_indices, weights in corners:
+            np.add.at(
+                dx_flat,
+                (slice(None), source_indices),
+                dy_flat * weights,
+            )
+    return np.array(
+        dx_flat.reshape(contract["input_shape"]),
+        dtype=np.dtype(contract["output_dtype"]),
+        copy=True,
+    )
+
+
+def interpolate(
+    input: Tensor,
+    size=None,
+    scale_factor=None,
+    mode: str = "nearest",
+    align_corners=None,
+    recompute_scale_factor=None,
+    antialias: bool = False,
+) -> Tensor:
+    """Resize a 4D (N, C, H, W) floating tensor with a bounded typed contract."""
+    contract = _normalize_interpolate_2d_contract(
+        input,
+        size,
+        scale_factor,
+        mode,
+        align_corners,
+        recompute_scale_factor,
+        antialias,
+    )
+    out = Tensor(
+        _execute_interpolate_2d(contract, input.data),
+        dtype=contract["output_dtype"],
+    )
+
+    def backward(g):
+        if (
+            tuple(g.data.shape) != contract["output_shape"]
+            or g.dtype != contract["output_dtype"]
+        ):
+            raise ValueError(
+                "interpolate: upstream gradient must match output shape and dtype"
+            )
+        return (_execute_interpolate_2d_vjp(contract, g.data),)
+
+    return _build_ctx(out, (input,), backward)
 
 
 def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12) -> Tensor:

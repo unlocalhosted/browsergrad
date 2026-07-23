@@ -146,6 +146,7 @@ OP_CROSS_ENTROPY = "CROSS_ENTROPY"  # arg: reduction/batch/target/weight/smoothi
 OP_DROPOUT = "DROPOUT"  # arg: {p, training, inplace, seed_key}
 OP_BATCH_NORM_1D = "BATCH_NORM_1D"  # inputs: x[, stats][, weight, bias]
 OP_BATCH_NORM_1D_STATS_UPDATE = "BATCH_NORM_1D_STATS_UPDATE"  # typed state effect
+OP_INTERPOLATE_2D = "INTERPOLATE_2D"  # arg: static spatial resize contract
 OP_WHERE   = "WHERE"
 OP_INDEX   = "INDEX"    # arg: {dim: int}, inputs: (source, int64 index) ← gather elements
 OP_MASK    = "MASK"     # arg: None                    ← bool-mask indexing
@@ -179,6 +180,7 @@ OP_NLL_LOSS_VJP = "NLL_LOSS_VJP"  # inputs: (dy, input, target[, weight])
 OP_CROSS_ENTROPY_VJP = "CROSS_ENTROPY_VJP"  # inputs: (dy, logits, target[, weight])
 OP_DROPOUT_VJP = "DROPOUT_VJP"  # inputs: (dy, input), same keyed mask as forward
 OP_BATCH_NORM_1D_VJP = "BATCH_NORM_1D_VJP"  # inputs: (dy, *forward inputs)
+OP_INTERPOLATE_2D_VJP = "INTERPOLATE_2D_VJP"  # inputs: (dy, source)
 
 # Mixed-precision support (PRD-010). ISNAN is the per-element NaN
 # check used by GradScaler's overflow detection. The "OR across all
@@ -221,6 +223,7 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_DROPOUT,
     OP_BATCH_NORM_1D,
     OP_BATCH_NORM_1D_STATS_UPDATE,
+    OP_INTERPOLATE_2D,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     # Fusion-emitted (PRD-006)
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
@@ -233,12 +236,13 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_CROSS_ENTROPY_VJP,
     OP_DROPOUT_VJP,
     OP_BATCH_NORM_1D_VJP,
+    OP_INTERPOLATE_2D_VJP,
     # Mixed precision (PRD-010)
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 })
-assert len(ALL_OPS) == 97, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
+assert len(ALL_OPS) == 99, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -489,6 +493,7 @@ __all__ = [
     "OP_DROPOUT",
     "OP_BATCH_NORM_1D",
     "OP_BATCH_NORM_1D_STATS_UPDATE",
+    "OP_INTERPOLATE_2D",
     "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
     "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",
     "OP_SCATTER_ADD", "OP_BROADCAST_TO", "OP_EINSUM_VJP", "OP_L1_LOSS_VJP",
@@ -499,6 +504,7 @@ __all__ = [
     "OP_CROSS_ENTROPY_VJP",
     "OP_DROPOUT_VJP",
     "OP_BATCH_NORM_1D_VJP",
+    "OP_INTERPOLATE_2D_VJP",
     "OP_ISNAN", "OP_SGD_UPDATE", "OP_ADAMW_UPDATE_M",
     "OP_ADAMW_UPDATE_V", "OP_ADAMW_UPDATE_PARAM",
     "OP_ADAM_UPDATE_M", "OP_ADAM_UPDATE_V", "OP_ADAM_UPDATE_PARAM",

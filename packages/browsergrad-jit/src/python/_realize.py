@@ -57,6 +57,7 @@ from ._ir import (
     OP_DROPOUT,
     OP_BATCH_NORM_1D,
     OP_BATCH_NORM_1D_STATS_UPDATE,
+    OP_INTERPOLATE_2D,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_BROADCAST_TO, OP_EINSUM_VJP, OP_L1_LOSS_VJP,
@@ -67,6 +68,7 @@ from ._ir import (
     OP_CROSS_ENTROPY_VJP,
     OP_DROPOUT_VJP,
     OP_BATCH_NORM_1D_VJP,
+    OP_INTERPOLATE_2D_VJP,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
@@ -104,6 +106,8 @@ from ._framework_contracts import (
     validate_batch_norm_1d_contract,
     validate_batch_norm_1d_stats_update_contract,
     validate_batch_norm_1d_vjp_contract,
+    validate_interpolate_2d_contract,
+    validate_interpolate_2d_vjp_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -145,6 +149,8 @@ from ._framework_contracts import (
     execute_batch_norm_1d_array,
     execute_batch_norm_1d_vjp_array,
     BATCH_NORM_1D_STATE_EFFECT_KIND,
+    execute_interpolate_2d_array,
+    execute_interpolate_2d_vjp_array,
 )
 
 
@@ -1406,6 +1412,31 @@ def _h_batch_norm_1d_vjp(
     )
 
 
+def _h_interpolate_2d(
+    node: UOp,
+    vt: dict,
+    bt: BufferTable,
+) -> np.ndarray:
+    contract = validate_interpolate_2d_contract(node)
+    return execute_interpolate_2d_array(
+        contract,
+        vt[id(node.inputs[0])],
+    )
+
+
+def _h_interpolate_2d_vjp(
+    node: UOp,
+    vt: dict,
+    bt: BufferTable,
+) -> np.ndarray:
+    contract = validate_interpolate_2d_vjp_contract(node)
+    return execute_interpolate_2d_vjp_array(
+        contract,
+        vt[id(node.inputs[0])],
+        vt[id(node.inputs[1])],
+    )
+
+
 def _h_where(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     validate_where_contract(node)
     cond = vt[id(node.inputs[0])]
@@ -1752,6 +1783,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_DROPOUT: _h_dropout,
     OP_BATCH_NORM_1D: _h_batch_norm_1d,
     OP_BATCH_NORM_1D_STATS_UPDATE: _h_batch_norm_1d_stats_update,
+    OP_INTERPOLATE_2D: _h_interpolate_2d,
     OP_WHERE:   _h_where,
     OP_INDEX:   _h_index,
     OP_MASK:    _h_mask,
@@ -1772,6 +1804,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_CROSS_ENTROPY_VJP: _h_cross_entropy_vjp,
     OP_DROPOUT_VJP: _h_dropout_vjp,
     OP_BATCH_NORM_1D_VJP: _h_batch_norm_1d_vjp,
+    OP_INTERPOLATE_2D_VJP: _h_interpolate_2d_vjp,
     # Mixed precision (PRD-010)
     OP_ISNAN:             _h_isnan,
     # Optimizer/update IR

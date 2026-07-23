@@ -75,6 +75,7 @@ from ._ir import (
     OP_DROPOUT, OP_DROPOUT_VJP,
     OP_BATCH_NORM_1D, OP_BATCH_NORM_1D_STATS_UPDATE,
     OP_BATCH_NORM_1D_VJP,
+    OP_INTERPOLATE_2D, OP_INTERPOLATE_2D_VJP,
     OP_CONST, OP_BROADCAST_TO, OP_WHERE, OP_INDEX, OP_SCATTER_ADD,
     OP_ISNAN,
 )
@@ -99,6 +100,7 @@ from ._framework_contracts import (
     validate_dropout_contract,
     validate_batch_norm_1d_contract,
     validate_batch_norm_1d_stats_update_contract,
+    validate_interpolate_2d_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -1641,6 +1643,42 @@ def _vjp_batch_norm_1d_stats_update(
             "BATCH_NORM_1D_STATS_UPDATE VJP inputs must equal its operands"
         )
     return tuple(None for _ in inputs)
+
+
+@register_vjp(OP_INTERPOLATE_2D)
+def _vjp_interpolate_2d(
+    output: UOp,
+    inputs: Tuple[UOp, ...],
+    dy: UOp,
+) -> Tuple[Optional[UOp], ...]:
+    contract = validate_interpolate_2d_contract(output)
+    if (
+        len(inputs) != 1
+        or len(output.inputs) != 1
+        or inputs[0] is not output.inputs[0]
+    ):
+        raise ShapeError(
+            "INTERPOLATE_2D VJP input must equal the exact forward source"
+        )
+    if dy.shape != output.shape or dy.dtype != output.dtype:
+        raise ShapeError(
+            "INTERPOLATE_2D VJP upstream gradient must match the forward output"
+        )
+    return (_vjp_uop(
+        OP_INTERPOLATE_2D_VJP,
+        (dy, inputs[0]),
+        contract.input_shape,
+        contract.output_dtype,
+        output,
+        arg={
+            "output_size": contract.output_size,
+            "mode": contract.mode,
+            "align_corners": contract.align_corners,
+            "scale_factors": contract.scale_factors,
+            "recompute_scale_factor": contract.recompute_scale_factor,
+            "batch_rank": contract.batch_rank,
+        },
+    ),)
 
 
 def _broadcast_batch_shape(

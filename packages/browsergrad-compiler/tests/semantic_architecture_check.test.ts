@@ -494,16 +494,16 @@ def op(x):
       .toContainEqual(expect.stringContaining("labelField disagrees"));
 
     const extraOperationIdentity = structuredClone(inventory);
-    const interpolateSite = extraOperationIdentity.constructorSites.find(
-      (site) => site.id === "functional.interpolate",
+    const customKernelSite = extraOperationIdentity.constructorSites.find(
+      (site) => site.id === "custom-kernel.builder",
     );
     if (
-      interpolateSite === undefined
-      || !Array.isArray(interpolateSite.operationIds)
+      customKernelSite === undefined
+      || !Array.isArray(customKernelSite.operationIds)
     ) {
-      throw new Error("missing interpolate constructor fixture");
+      throw new Error("missing custom-kernel constructor fixture");
     }
-    interpolateSite.operationIds.push("jit.custom.unreviewed-resample.v0");
+    customKernelSite.operationIds.push("jit.custom.unreviewed-kernel.v0");
     expect(validateJitOpaqueOperationInventory(extraOperationIdentity, fixture, jitFreeze))
       .toContainEqual(expect.stringContaining("constructor-site operation coverage changed"));
 

@@ -2,15 +2,13 @@
 
 INTERNAL module. Users import as `browsergrad_jit.nn.functional as F`.
 
-PRD-005 cut-down scope (per the critique): elementwise + MLP-style ops
-needed for the 0.1.0 conformance bar. Conv and LayerNorm have since moved to
-primitive IR ops; pool, attention, embedding, recurrent, and other heavy ops
-still use CUSTOM until promoted.
+PRD-005 started with elementwise and MLP-style operations. Convolution,
+LayerNorm, losses, dropout, padding, and spatial interpolation now use typed
+operation contracts with explicit transform and backend decisions.
 
-The pattern across every op: build new UOps + new TensorProxies with the
-right backward closures. NumPy-heavy logic that doesn't decompose into
-the primitive opcode set lives behind a CUSTOM op so it still participates
-in the IR (just opaque to fusion).
+The pattern across every operation is to build typed UOps and TensorProxies
+with exact closure derivatives. Operation-specific NumPy execution belongs in
+validated realizer handlers rather than source-shaped callbacks.
 """
 
 from __future__ import annotations
@@ -19,7 +17,7 @@ from typing import Any, Optional, Tuple
 import numpy as np
 
 from ._ir import (
-    UOp, OP_WHERE, OP_CONST, OP_CUSTOM, OP_CONV1D, OP_CONV2D,
+    UOp, OP_WHERE, OP_CONST, OP_CONV1D, OP_CONV2D,
     OP_CONV_TRANSPOSE2D, OP_CONV3D,
     OP_LAYER_NORM, OP_REDUCE, OP_DIV, OP_PAD, OP_L1_LOSS, OP_SMOOTH_L1_LOSS,
     OP_BINARY_CROSS_ENTROPY,
@@ -28,6 +26,7 @@ from ._ir import (
     OP_NLL_LOSS,
     OP_CROSS_ENTROPY,
     OP_DROPOUT,
+    OP_INTERPOLATE_2D,
 )
 from ._tensor_proxy import (
     TensorProxy, _BackwardCtx, _should_track, _to_proxy, from_numpy, where,
@@ -42,6 +41,7 @@ from ._framework_contracts import (
     execute_nll_loss_vjp_array,
     execute_cross_entropy_vjp_array,
     execute_dropout_vjp_array,
+    execute_interpolate_2d_vjp_array,
     infer_l1_loss_contract,
     infer_smooth_l1_loss_contract,
     infer_binary_cross_entropy_contract,
@@ -51,6 +51,7 @@ from ._framework_contracts import (
     infer_cross_entropy_contract,
     infer_dropout_contract,
     normalize_pad_request,
+    normalize_interpolate_2d_request,
 )
 
 
@@ -1442,105 +1443,63 @@ def cosine_similarity(x1: TensorProxy, x2: TensorProxy, dim: int = 1, eps: float
     return (dot / (n1 * n2)).squeeze(dim=dim)
 
 
-def _interp_nearest_2d(x_data: np.ndarray, out_h: int, out_w: int, scale_h: float, scale_w: float):
-    h_in, w_in = x_data.shape[-2:]
-    si = np.floor(np.arange(out_h) / scale_h).astype(np.int64)
-    sj = np.floor(np.arange(out_w) / scale_w).astype(np.int64)
-    si = np.clip(si, 0, h_in - 1)
-    sj = np.clip(sj, 0, w_in - 1)
-    return x_data[..., si[:, None], sj[None, :]], si, sj
-
-
-def _interp_bilinear_2d(
-    x_data: np.ndarray,
-    out_h: int,
-    out_w: int,
-    scale_h: float,
-    scale_w: float,
-    align_corners: bool,
-) -> np.ndarray:
-    h_in, w_in = x_data.shape[-2:]
-    if align_corners:
-        ih = np.linspace(0, h_in - 1, out_h).astype(np.float32) if out_h > 1 else np.zeros(out_h, dtype=np.float32)
-        iw = np.linspace(0, w_in - 1, out_w).astype(np.float32) if out_w > 1 else np.zeros(out_w, dtype=np.float32)
-    else:
-        ih = (np.arange(out_h, dtype=np.float32) + 0.5) / scale_h - 0.5
-        iw = (np.arange(out_w, dtype=np.float32) + 0.5) / scale_w - 0.5
-    i0 = np.floor(ih).astype(np.int64)
-    i1 = i0 + 1
-    j0 = np.floor(iw).astype(np.int64)
-    j1 = j0 + 1
-    a = (ih - i0).astype(np.float32)
-    b = (iw - j0).astype(np.float32)
-    i0c = np.clip(i0, 0, h_in - 1)
-    i1c = np.clip(i1, 0, h_in - 1)
-    j0c = np.clip(j0, 0, w_in - 1)
-    j1c = np.clip(j1, 0, w_in - 1)
-    v00 = x_data[..., i0c[:, None], j0c[None, :]]
-    v01 = x_data[..., i0c[:, None], j1c[None, :]]
-    v10 = x_data[..., i1c[:, None], j0c[None, :]]
-    v11 = x_data[..., i1c[:, None], j1c[None, :]]
-    aw = a[:, None]
-    bw = b[None, :]
-    out = (1 - aw) * ((1 - bw) * v00 + bw * v01) + aw * ((1 - bw) * v10 + bw * v11)
-    return out.astype(np.float32)
-
-
 def interpolate(
     input: TensorProxy,
     size=None,
     scale_factor=None,
     mode: str = "nearest",
-    align_corners: bool = False,
+    align_corners=None,
+    recompute_scale_factor=None,
+    antialias: bool = False,
 ) -> TensorProxy:
-    if input.ndim != 4:
-        raise NotImplementedError(f"interpolate: only 4D input supported; got {input.ndim}D")
-    h_in, w_in = input.shape[-2:]
-    if size is not None:
-        out_h, out_w = int(size[0]), int(size[1])
-    elif scale_factor is not None:
-        sf = scale_factor if isinstance(scale_factor, (tuple, list)) else (scale_factor, scale_factor)
-        out_h = int(round(h_in * sf[0]))
-        out_w = int(round(w_in * sf[1]))
-    else:
-        raise ValueError("interpolate: provide size or scale_factor")
-    scale_h = out_h / h_in
-    scale_w = out_w / w_in
-    out_shape = input.shape[:-2] + (out_h, out_w)
-
-    captured: dict = {}
-
-    def _interpolate_forward(x_arr: np.ndarray) -> np.ndarray:
-        if mode == "nearest":
-            out, si, sj = _interp_nearest_2d(x_arr, out_h, out_w, scale_h, scale_w)
-            captured["nearest"] = (si, sj)
-            return out.astype(np.dtype(input.dtype), copy=False)
-        if mode == "bilinear":
-            return _interp_bilinear_2d(x_arr, out_h, out_w, scale_h, scale_w, align_corners).astype(np.dtype(input.dtype), copy=False)
-        raise NotImplementedError(f"interpolate: mode {mode!r} not supported")
-
+    if type(input) is not TensorProxy:
+        raise TypeError(
+            f"interpolate: input must be a TensorProxy, got {type(input).__name__}"
+        )
+    contract = normalize_interpolate_2d_request(
+        input._uop,
+        size,
+        scale_factor,
+        mode,
+        align_corners,
+        recompute_scale_factor,
+        antialias,
+    )
     uop = UOp(
-        op=OP_CUSTOM,
+        op=OP_INTERPOLATE_2D,
         inputs=(input._uop,),
-        shape=out_shape,
-        dtype=input.dtype,
-        arg={"fn": _interpolate_forward, "captures": (), "name": "interpolate"},
+        shape=contract.output_shape,
+        dtype=contract.output_dtype,
+        arg={
+            "output_size": contract.output_size,
+            "mode": contract.mode,
+            "align_corners": contract.align_corners,
+            "scale_factors": contract.scale_factors,
+            "recompute_scale_factor": contract.recompute_scale_factor,
+            "batch_rank": 0,
+        },
     )
 
-    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
-        (x_arr,) = ins
-        dx = np.zeros_like(x_arr)
-        if mode == "nearest":
-            si, sj = captured["nearest"]
-            for y in range(out_h):
-                for x in range(out_w):
-                    dx[..., si[y], sj[x]] += dy[..., y, x]
-            return (dx.astype(x_arr.dtype, copy=False),)
-        raise NotImplementedError("interpolate: bilinear backward not implemented in JIT yet")
+    def _bw(
+        dy: np.ndarray,
+        arrays: Tuple[np.ndarray, ...],
+    ) -> Tuple[Optional[np.ndarray], ...]:
+        return (
+            execute_interpolate_2d_vjp_array(
+                contract,
+                dy,
+                arrays[0],
+            ),
+        )
 
     requires = _should_track(input)
     ctx = _BackwardCtx(fn=_bw, input_proxies=(input,)) if requires else None
-    return TensorProxy(uop, session=input._get_session(), requires_grad=requires, ctx=ctx)
+    return TensorProxy(
+        uop,
+        session=input._get_session(),
+        requires_grad=requires,
+        ctx=ctx,
+    )
 
 
 def scaled_dot_product_attention(
