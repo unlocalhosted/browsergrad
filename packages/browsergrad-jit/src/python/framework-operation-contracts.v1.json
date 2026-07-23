@@ -48,6 +48,27 @@
       "retiredOpaqueOperationId": "jit.custom.binary-cross-entropy.v0"
     },
     {
+      "contractId": "browsergrad.jit.framework.functional.cross-entropy.v1",
+      "publicSurface": "torch.nn.functional.cross_entropy",
+      "opcode": "CROSS_ENTROPY",
+      "semanticState": "typed",
+      "shapeContract": "class-axis-logits-loss-with-index-or-probability-target-and-batched-reduction",
+      "dtypeContract": "preserve-floating-input-require-index-or-matching-floating-target-and-optional-matching-weight",
+      "decisions": {
+        "cpu": "supported-numpy-owning-stable-cross-entropy-reduction",
+        "closureAutograd": "supported-stable-logits-and-probability-target-gradients",
+        "symbolicVjp": "supported-stable-logits-and-probability-target-gradients",
+        "functionalGrad": "supported-for-floating-input-and-probability-target-via-symbolic-vjp",
+        "vmap": "supported-leading-batch-axis-with-target-mode-class-axis-shift-and-captured-weight",
+        "onnxExport": "supported-opset17-softmax-cross-entropy-loss-unmapped-index-profile",
+        "tensorPlan": "refused-no-canonical-loss-reduction-lowering",
+        "webgpu": "refused-no-tensor-plan-kernel",
+        "residency": "host-materialized",
+        "materialization": "cpu-owning-array"
+      },
+      "retiredOpaqueOperationId": "jit.custom.cross-entropy.v0"
+    },
+    {
       "contractId": "browsergrad.jit.framework.functional.kl-div.v1",
       "publicSurface": "torch.nn.functional.kl_div",
       "opcode": "KL_DIV",

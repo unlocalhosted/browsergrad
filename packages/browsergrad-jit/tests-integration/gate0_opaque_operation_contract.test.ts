@@ -42,9 +42,8 @@ def error_name(fn):
     except Exception as exc:
         return type(exc).__name__
 
-x = bg.from_numpy(np.zeros((2, 2), dtype=np.float32), requires_grad=True)
-target = bg.from_numpy(np.array([0, 1], dtype=np.int64))
-y = F.cross_entropy(x, target, reduction="none")
+x = bg.from_numpy(np.zeros((1, 1, 1, 2), dtype=np.float32), requires_grad=True)
+y = F.interpolate(x, size=(1, 4), mode="nearest")
 cpu_values = y.numpy().tolist()
 y.sum().backward()
 custom_plan = bg.gpu_plan_summary(y, allow_custom=True)
@@ -58,7 +57,9 @@ class PlanOnlyGpuBuffers:
     "cpuValues": cpu_values,
     "cpuGradient": x.grad.numpy().tolist(),
     "symbolicVjpRegistered": _vjp.get_rule("CUSTOM") is not None,
-    "functionalGradError": error_name(lambda: bg.func.grad(lambda value: F.cross_entropy(value, target, reduction="none").sum())(x)),
+    "functionalGradError": error_name(lambda: bg.func.grad(
+        lambda value: F.interpolate(value, size=(1, 4), mode="nearest").sum()
+    )(x)),
     "vmapError": error_name(lambda: _vmap._VMAP_RULES["CUSTOM"](y._uop, {}, 2)),
     "onnxError": error_name(lambda: bg.onnx.export_inference(y, input_buffers=(x,))),
     "tensorPlanError": error_name(lambda: bg.gpu_plan_summary(y)),
@@ -252,9 +253,6 @@ gradient_present = {}
 def leaf(values, dtype=np.float32):
     return bg.from_numpy(np.asarray(values, dtype=dtype), requires_grad=True)
 
-def constant(values, dtype=np.float32):
-    return bg.from_numpy(np.asarray(values, dtype=dtype))
-
 def error_name(fn):
     try:
         fn()
@@ -269,7 +267,6 @@ def check(label, output, source):
     gradient_present[label] = source.grad is not None
 
 a = leaf([[1.0, 3.0], [5.0, 7.0]]); check("batch_norm1d", bg.nn.BatchNorm1d(2, affine=False)(a), a)
-a = leaf([[1.0, 2.0], [3.0, 1.0]]); check("cross_entropy", F.cross_entropy(a, constant([1, 0], np.int64)), a)
 np.random.seed(17)
 a = leaf([[1.0, 1.0], [1.0, 1.0]]); check("dropout", F.dropout(a, p=0.5, training=True), a)
 a = leaf([[[[2.0]]]]); check("interpolate", F.interpolate(a, size=(2, 2), mode="nearest"), a)

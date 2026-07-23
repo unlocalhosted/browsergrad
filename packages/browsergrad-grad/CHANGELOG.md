@@ -9,6 +9,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- `torch.nn.functional.cross_entropy` and `CrossEntropyLoss` now match the
+  admitted JIT contract for stable logits, spatial/unbatched index targets,
+  differentiable probability targets, class weights, ignored indices, label
+  smoothing, complete reductions, dtype preservation, bounded allocation, and
+  mutation-safe saved backward state.
 - `Tensor.expand` now rejects malformed dimensions before NumPy execution and
   preserves float16 and integer dtypes while retaining its documented owning,
   contiguous materialization behavior. Its valid and invalid shape contract is

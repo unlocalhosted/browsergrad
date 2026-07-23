@@ -71,6 +71,7 @@ from ._ir import (
     OP_BINARY_CROSS_ENTROPY_WITH_LOGITS, OP_BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP,
     OP_KL_DIV, OP_KL_DIV_VJP,
     OP_NLL_LOSS, OP_NLL_LOSS_VJP,
+    OP_CROSS_ENTROPY, OP_CROSS_ENTROPY_VJP,
     OP_CONST, OP_BROADCAST_TO, OP_WHERE, OP_INDEX, OP_SCATTER_ADD,
     OP_ISNAN,
 )
@@ -91,6 +92,7 @@ from ._framework_contracts import (
     validate_binary_cross_entropy_with_logits_contract,
     validate_kl_div_contract,
     validate_nll_loss_contract,
+    validate_cross_entropy_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -1499,6 +1501,48 @@ def _vjp_nll_loss(
         },
     )
     return (gradient,) + (None,) * (len(inputs) - 1)
+
+
+@register_vjp(OP_CROSS_ENTROPY)
+def _vjp_cross_entropy(
+    output: UOp,
+    inputs: Tuple[UOp, ...],
+    dy: UOp,
+) -> Tuple[Optional[UOp], ...]:
+    contract = validate_cross_entropy_contract(output)
+    if inputs != output.inputs:
+        raise ShapeError(
+            "CROSS_ENTROPY VJP inputs must equal the forward operands"
+        )
+    if dy.shape != output.shape or dy.dtype != output.dtype:
+        raise ShapeError(
+            "CROSS_ENTROPY VJP upstream gradient must match the forward output"
+        )
+    gradients: list[Optional[UOp]] = []
+    differentiable = (
+        (0, 1) if contract.target_mode == "probabilities" else (0,)
+    )
+    for operand, source in enumerate(inputs):
+        if operand not in differentiable:
+            gradients.append(None)
+            continue
+        gradients.append(_vjp_uop(
+            OP_CROSS_ENTROPY_VJP,
+            (dy,) + inputs,
+            source.shape,
+            source.dtype,
+            output,
+            arg={
+                "reduction": contract.reduction,
+                "batch_rank": contract.batch_rank,
+                "ignore_index": contract.ignore_index,
+                "has_weight": contract.has_weight,
+                "label_smoothing": contract.label_smoothing,
+                "target_mode": contract.target_mode,
+                "operand": operand,
+            },
+        ))
+    return tuple(gradients)
 
 
 def _broadcast_batch_shape(

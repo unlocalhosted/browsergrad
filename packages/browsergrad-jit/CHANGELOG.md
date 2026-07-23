@@ -9,6 +9,12 @@ contract in the README](README.md#compatibility-contract).
 
 ### Changed
 
+- `torch.nn.functional.cross_entropy` now emits typed `CROSS_ENTROPY` with
+  stable log-sum-exp, index and probability targets, class weights, ignored
+  indices, label smoothing, complete reductions, logits/probability-target
+  VJPs, nested `vmap`, bounded allocation, unmapped index-target ONNX export,
+  and explicit tensor-plan/WebGPU refusal. `ReLU` now uses the canonical
+  three-operand `WHERE` context exposed by this symbolic-gradient path.
 - `Tensor.expand` now emits typed `BROADCAST_TO` instead of `CUSTOM`, with
   strict shape capture, shared contract revalidation, symbolic VJP, vmap,
   ONNX `Expand`, and materializing/resident tensor-plan coverage.

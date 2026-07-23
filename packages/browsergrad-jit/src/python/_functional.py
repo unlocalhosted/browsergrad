@@ -26,6 +26,7 @@ from ._ir import (
     OP_BINARY_CROSS_ENTROPY_WITH_LOGITS,
     OP_KL_DIV,
     OP_NLL_LOSS,
+    OP_CROSS_ENTROPY,
 )
 from ._tensor_proxy import (
     TensorProxy, _BackwardCtx, _should_track, _to_proxy, from_numpy, where,
@@ -38,12 +39,14 @@ from ._framework_contracts import (
     execute_binary_cross_entropy_with_logits_vjp_array,
     execute_kl_div_vjp_array,
     execute_nll_loss_vjp_array,
+    execute_cross_entropy_vjp_array,
     infer_l1_loss_contract,
     infer_smooth_l1_loss_contract,
     infer_binary_cross_entropy_contract,
     infer_binary_cross_entropy_with_logits_contract,
     infer_kl_div_contract,
     infer_nll_loss_contract,
+    infer_cross_entropy_contract,
     normalize_pad_request,
 )
 
@@ -91,23 +94,17 @@ def _check_groups(
 
 def relu(x: TensorProxy) -> TensorProxy:
     """Standard ReLU: max(x, 0). Backward: dy * (x > 0)."""
-    sess = x._get_session()
-    # Express as WHERE(x > 0, x, 0). CMP+WHERE is one of our supported
-    # primitive paths.
-    zero = UOp(op=OP_CONST, inputs=(), shape=(), dtype=x.dtype, arg={"value": 0.0})
-    cond_uop = UOp(op="CMP", inputs=(x._uop, zero), shape=x.shape, dtype="bool",
-                   arg={"op": "gt"})
-    uop = UOp(op=OP_WHERE, inputs=(cond_uop, x._uop, zero), shape=x.shape,
-              dtype=x.dtype, arg=None)
-
-    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
-        # ins is (x_arr,) — we passed `x` as the only input proxy.
-        (x_arr,) = ins
-        return (dy * (x_arr > 0).astype(dy.dtype),)
-
-    requires = _should_track(x)
-    ctx = _BackwardCtx(fn=_bw, input_proxies=(x,)) if requires else None
-    return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
+    zero = TensorProxy(
+        UOp(
+            op=OP_CONST,
+            inputs=(),
+            shape=(),
+            dtype=x.dtype,
+            arg={"value": 0.0},
+        ),
+        session=x._get_session(),
+    )
+    return where(x > zero, x, zero)
 
 
 def sigmoid(x: TensorProxy) -> TensorProxy:
@@ -174,79 +171,109 @@ def log_softmax(x: TensorProxy, dim: int = -1) -> TensorProxy:
     return shifted - s.log()
 
 
-def cross_entropy(logits: TensorProxy, targets: TensorProxy,
-                  reduction: str = "mean") -> TensorProxy:
-    """Cross-entropy loss matching torch.nn.functional.cross_entropy.
-
-    `logits`: shape (N, C) — raw scores.
-    `targets`: shape (N,) — integer class indices.
-    """
-    if logits.ndim != 2:
-        raise ShapeError(
-            f"cross_entropy: logits must be 2-D (N, C), got shape {logits.shape}"
+def cross_entropy(
+    input: TensorProxy,
+    target: TensorProxy,
+    weight: Optional[TensorProxy] = None,
+    size_average: Optional[bool] = None,
+    ignore_index: int = -100,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+    label_smoothing: float = 0.0,
+) -> TensorProxy:
+    """Typed stable cross entropy for class indices or class probabilities."""
+    if not isinstance(input, TensorProxy):
+        raise TypeError(
+            f"cross_entropy: input must be a TensorProxy, got "
+            f"{type(input).__name__}"
         )
-    if targets.ndim != 1:
-        raise ShapeError(
-            f"cross_entropy: targets must be 1-D (N,), got shape {targets.shape}"
+    if not isinstance(target, TensorProxy):
+        raise TypeError(
+            f"cross_entropy: target must be a TensorProxy, got "
+            f"{type(target).__name__}"
         )
-
-    # Build the loss as a CUSTOM op for v0 — the gather-by-targets pattern
-    # is awkward to express without INDEX-with-batched-dim yet. PRD-006
-    # decomposes this into primitive ops.
-    sess = logits._get_session()
-    N, C = logits.shape
-
-    def _ce_forward(logits_arr: np.ndarray, targets_arr: np.ndarray) -> np.ndarray:
-        # Standard numerically-stable CE.
-        x_max = logits_arr.max(axis=-1, keepdims=True)
-        shifted = logits_arr - x_max
-        log_sum_exp = np.log(np.exp(shifted).sum(axis=-1, keepdims=True))
-        log_probs = shifted - log_sum_exp  # (N, C)
-        nll = -log_probs[np.arange(N), targets_arr.astype(np.int64)]
-        if reduction == "mean":
-            return np.asarray(nll.mean(), dtype=logits_arr.dtype)
-        if reduction == "sum":
-            return np.asarray(nll.sum(), dtype=logits_arr.dtype)
-        if reduction == "none":
-            return nll.astype(logits_arr.dtype, copy=False)
-        raise ValueError(f"cross_entropy: unknown reduction {reduction!r}")
-
-    out_shape: Tuple[int, ...]
-    if reduction in ("mean", "sum"):
-        out_shape = ()
-    else:
-        out_shape = (N,)
-
+    session = input._get_session()
+    if target._get_session() is not session:
+        raise ShapeError(
+            "cross_entropy: input and target must belong to the same session"
+        )
+    if weight is not None:
+        if not isinstance(weight, TensorProxy):
+            raise TypeError(
+                "cross_entropy: weight must be a TensorProxy or None, got "
+                f"{type(weight).__name__}"
+            )
+        if weight._get_session() is not session:
+            raise ShapeError(
+                "cross_entropy: input, target, and weight must belong to the "
+                "same session"
+            )
+        if weight.requires_grad:
+            raise ValueError(
+                "cross_entropy: weight is non-differentiable and must not "
+                "require grad"
+            )
+    normalized_reduction = _normalize_legacy_loss_reduction(
+        "cross_entropy",
+        reduction,
+        size_average,
+        reduce,
+    )
+    target_mode = (
+        "probabilities" if target.shape == input.shape else "indices"
+    )
+    proxies = (input, target) if weight is None else (input, target, weight)
+    inputs = tuple(proxy._uop for proxy in proxies)
+    contract = infer_cross_entropy_contract(
+        inputs,
+        normalized_reduction,
+        ignore_index,
+        weight is not None,
+        label_smoothing,
+        target_mode,
+        0,
+    )
+    arg = {
+        "reduction": contract.reduction,
+        "batch_rank": contract.batch_rank,
+        "ignore_index": contract.ignore_index,
+        "has_weight": contract.has_weight,
+        "label_smoothing": contract.label_smoothing,
+        "target_mode": contract.target_mode,
+    }
     uop = UOp(
-        op=OP_CUSTOM,
-        inputs=(logits._uop, targets._uop),
-        shape=out_shape,
-        dtype=logits.dtype,
-        arg={"fn": _ce_forward, "captures": (), "name": "cross_entropy"},
+        op=OP_CROSS_ENTROPY,
+        inputs=inputs,
+        shape=contract.output_shape,
+        dtype=contract.output_dtype,
+        arg=arg,
     )
 
-    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
-        logits_arr, targets_arr = ins
-        # softmax probs - one_hot(targets)
-        x_max = logits_arr.max(axis=-1, keepdims=True)
-        shifted = logits_arr - x_max
-        e = np.exp(shifted)
-        probs = e / e.sum(axis=-1, keepdims=True)
-        one_hot = np.zeros_like(probs)
-        one_hot[np.arange(N), targets_arr.astype(np.int64)] = 1.0
-        grad_logits = probs - one_hot
-        if reduction == "mean":
-            grad_logits *= (dy / N)
-        elif reduction == "sum":
-            grad_logits *= dy
-        else:  # none — dy shape (N,)
-            grad_logits *= dy[:, None]
-        # targets has no gradient.
-        return (grad_logits.astype(logits_arr.dtype, copy=False), None)
+    def _bw(
+        dy: np.ndarray,
+        arrays: Tuple[np.ndarray, ...],
+    ) -> Tuple[Optional[np.ndarray], ...]:
+        gradients: list[Optional[np.ndarray]] = [
+            execute_cross_entropy_vjp_array(contract, 0, dy, arrays)
+        ]
+        if contract.target_mode == "probabilities":
+            gradients.append(
+                execute_cross_entropy_vjp_array(contract, 1, dy, arrays)
+            )
+        else:
+            gradients.append(None)
+        if contract.has_weight:
+            gradients.append(None)
+        return tuple(gradients)
 
-    requires = _should_track(logits)
-    ctx = _BackwardCtx(fn=_bw, input_proxies=(logits, targets)) if requires else None
-    return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
+    requires = _should_track(input, target)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=proxies) if requires else None
+    return TensorProxy(
+        uop,
+        session=session,
+        requires_grad=requires,
+        ctx=ctx,
+    )
 
 
 def mse_loss(input: TensorProxy, target: TensorProxy,
@@ -681,11 +708,25 @@ def bce_loss(
 
 
 def cross_entropy_loss(
-    logits: TensorProxy,
-    targets: TensorProxy,
+    input: TensorProxy,
+    target: TensorProxy,
+    weight: Optional[TensorProxy] = None,
+    size_average: Optional[bool] = None,
+    ignore_index: int = -100,
+    reduce: Optional[bool] = None,
     reduction: str = "mean",
+    label_smoothing: float = 0.0,
 ) -> TensorProxy:
-    return cross_entropy(logits, targets, reduction=reduction)
+    return cross_entropy(
+        input,
+        target,
+        weight=weight,
+        size_average=size_average,
+        ignore_index=ignore_index,
+        reduce=reduce,
+        reduction=reduction,
+        label_smoothing=label_smoothing,
+    )
 
 
 # ---------------------------------------------------------------------------

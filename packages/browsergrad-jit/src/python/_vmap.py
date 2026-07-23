@@ -76,6 +76,7 @@ from ._ir import (
     OP_BINARY_CROSS_ENTROPY_WITH_LOGITS, OP_BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP,
     OP_KL_DIV, OP_KL_DIV_VJP,
     OP_NLL_LOSS, OP_NLL_LOSS_VJP,
+    OP_CROSS_ENTROPY, OP_CROSS_ENTROPY_VJP,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
     OP_STORE,
@@ -106,6 +107,8 @@ from ._framework_contracts import (
     validate_kl_div_vjp_contract,
     validate_nll_loss_contract,
     validate_nll_loss_vjp_contract,
+    validate_cross_entropy_contract,
+    validate_cross_entropy_vjp_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -127,6 +130,7 @@ from ._framework_contracts import (
     infer_binary_cross_entropy_with_logits_contract,
     infer_kl_div_contract,
     infer_nll_loss_contract,
+    infer_cross_entropy_contract,
 )
 
 
@@ -770,6 +774,88 @@ def _vmap_nll_loss_vjp(
         inputs=mapped_inputs,
         shape=mapped_inputs[1].shape,
         dtype=mapped_inputs[1].dtype,
+        arg=arg,
+    )
+
+
+@register_vmap(OP_CROSS_ENTROPY)
+def _vmap_cross_entropy(
+    node: UOp,
+    batched: Dict[int, UOp],
+    B: int,
+) -> UOp:
+    contract = validate_cross_entropy_contract(node)
+    mapped_inputs = _vmap_variadic_inputs(
+        node.inputs,
+        batched,
+        B,
+        "cross_entropy",
+        (True,) * len(node.inputs),
+    )
+    mapped_contract = infer_cross_entropy_contract(
+        mapped_inputs,
+        contract.reduction,
+        contract.ignore_index,
+        contract.has_weight,
+        contract.label_smoothing,
+        contract.target_mode,
+        contract.batch_rank + 1,
+    )
+    return UOp(
+        op=OP_CROSS_ENTROPY,
+        inputs=mapped_inputs,
+        shape=mapped_contract.output_shape,
+        dtype=mapped_contract.output_dtype,
+        arg={
+            "reduction": mapped_contract.reduction,
+            "batch_rank": mapped_contract.batch_rank,
+            "ignore_index": mapped_contract.ignore_index,
+            "has_weight": mapped_contract.has_weight,
+            "label_smoothing": mapped_contract.label_smoothing,
+            "target_mode": mapped_contract.target_mode,
+        },
+    )
+
+
+@register_vmap(OP_CROSS_ENTROPY_VJP)
+def _vmap_cross_entropy_vjp(
+    node: UOp,
+    batched: Dict[int, UOp],
+    B: int,
+) -> UOp:
+    contract, operand = validate_cross_entropy_vjp_contract(node)
+    mapped_inputs = _vmap_variadic_inputs(
+        node.inputs,
+        batched,
+        B,
+        "cross_entropy_vjp",
+        (True,) * len(node.inputs),
+    )
+    mapped_contract = infer_cross_entropy_contract(
+        mapped_inputs[1:],
+        contract.reduction,
+        contract.ignore_index,
+        contract.has_weight,
+        contract.label_smoothing,
+        contract.target_mode,
+        contract.batch_rank + 1,
+    )
+    arg = {
+        "reduction": mapped_contract.reduction,
+        "batch_rank": mapped_contract.batch_rank,
+        "ignore_index": mapped_contract.ignore_index,
+        "has_weight": mapped_contract.has_weight,
+        "label_smoothing": mapped_contract.label_smoothing,
+        "target_mode": mapped_contract.target_mode,
+        "operand": operand,
+    }
+    if "vjp_of" in node.arg:
+        arg["vjp_of"] = node.arg["vjp_of"]
+    return UOp(
+        op=OP_CROSS_ENTROPY_VJP,
+        inputs=mapped_inputs,
+        shape=mapped_inputs[operand + 1].shape,
+        dtype=mapped_inputs[operand + 1].dtype,
         arg=arg,
     )
 

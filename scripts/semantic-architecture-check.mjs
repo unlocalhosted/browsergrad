@@ -690,8 +690,8 @@ function checkJitFrameworkOperationContracts(root, manifest, failures) {
   );
   const registry = readJson(registryFile, failures);
   if (!isRecord(registry)) return;
-  if (fs.statSync(registryFile).size < 1 || fs.statSync(registryFile).size > 32 * 1024) {
-    failures.push("JIT framework-operation registry must contain 1..32768 bytes");
+  if (fs.statSync(registryFile).size < 1 || fs.statSync(registryFile).size > 64 * 1024) {
+    failures.push("JIT framework-operation registry must contain 1..65536 bytes");
   }
   compareExactKeys("JIT framework-operation registry", registry, ["schema", "version", "operations"], failures);
   if (registry.schema !== "browsergrad.jit.framework-operation-contracts") {
@@ -747,6 +747,28 @@ function checkJitFrameworkOperationContracts(root, manifest, failures) {
     residency: new Set(["host-materialized", "supported-materializing-and-resident"]),
     materialization: new Set(["cpu-owning-array", "cpu-owning-copy"]),
   };
+  allowed.shapeContract.add(
+    "class-axis-logits-loss-with-index-or-probability-target-and-batched-reduction",
+  );
+  allowed.dtypeContract.add(
+    "preserve-floating-input-require-index-or-matching-floating-target-and-optional-matching-weight",
+  );
+  allowed.cpu.add("supported-numpy-owning-stable-cross-entropy-reduction");
+  allowed.closureAutograd.add(
+    "supported-stable-logits-and-probability-target-gradients",
+  );
+  allowed.symbolicVjp.add(
+    "supported-stable-logits-and-probability-target-gradients",
+  );
+  allowed.functionalGrad.add(
+    "supported-for-floating-input-and-probability-target-via-symbolic-vjp",
+  );
+  allowed.vmap.add(
+    "supported-leading-batch-axis-with-target-mode-class-axis-shift-and-captured-weight",
+  );
+  allowed.onnxExport.add(
+    "supported-opset17-softmax-cross-entropy-loss-unmapped-index-profile",
+  );
   const irSource = fs.readFileSync(
     path.join(root, "packages/browsergrad-jit/src/python/_ir.py"),
     "utf8",

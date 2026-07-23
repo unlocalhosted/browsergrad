@@ -801,11 +801,86 @@ class MSELoss(Module):
 
 
 class CrossEntropyLoss(Module):
-    def __init__(self, reduction: str = "mean") -> None:
+    def __init__(
+        self,
+        weight: Optional[TensorProxy] = None,
+        size_average: Optional[bool] = None,
+        ignore_index: int = -100,
+        reduce: Optional[bool] = None,
+        reduction: str = "mean",
+        label_smoothing: float = 0.0,
+    ) -> None:
         super().__init__()
-        self.reduction = reduction
-    def forward(self, logits: TensorProxy, targets: TensorProxy) -> TensorProxy:
-        return F.cross_entropy(logits, targets, reduction=self.reduction)
+        validation_target = UOp(
+            op=OP_BUFFER,
+            inputs=(),
+            shape=(),
+            dtype="int64",
+            arg="cross-entropy-weight-validation-target",
+        )
+        if weight is None:
+            validation_input = UOp(
+                op=OP_BUFFER,
+                inputs=(),
+                shape=(1,),
+                dtype="float32",
+                arg="cross-entropy-validation-input",
+            )
+            object.__setattr__(self, "weight", None)
+            validation_inputs = (validation_input, validation_target)
+        else:
+            if not isinstance(weight, TensorProxy):
+                raise TypeError(
+                    "CrossEntropyLoss: weight must be a TensorProxy or None, "
+                    f"got {type(weight).__name__}"
+                )
+            if weight.requires_grad:
+                raise ValueError(
+                    "CrossEntropyLoss: weight is non-differentiable and must "
+                    "not require grad"
+                )
+            validation_inputs = (
+                weight._uop,
+                validation_target,
+                weight._uop,
+            )
+        normalized_reduction = F._normalize_legacy_loss_reduction(
+            "CrossEntropyLoss",
+            reduction,
+            size_average,
+            reduce,
+        )
+        F.infer_cross_entropy_contract(
+            validation_inputs,
+            normalized_reduction,
+            ignore_index,
+            weight is not None,
+            label_smoothing,
+            "indices",
+            0,
+        )
+        if weight is not None:
+            self.register_buffer("weight", weight.numpy())
+        self.ignore_index = ignore_index
+        self.reduction = normalized_reduction
+        self.label_smoothing = float(label_smoothing)
+    def forward(self, input: TensorProxy, target: TensorProxy) -> TensorProxy:
+        weight = (
+            None
+            if self.weight is None
+            else from_numpy(
+                np.array(self.weight, copy=True),
+                session=input._get_session(),
+            )
+        )
+        return F.cross_entropy(
+            input,
+            target,
+            weight=weight,
+            ignore_index=self.ignore_index,
+            reduction=self.reduction,
+            label_smoothing=self.label_smoothing,
+        )
 
 
 class NLLLoss(Module):

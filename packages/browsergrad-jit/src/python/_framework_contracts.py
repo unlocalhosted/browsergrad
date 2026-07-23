@@ -67,9 +67,10 @@ BINARY_CROSS_ENTROPY_GRAD_EPSILON = 1e-12
 BINARY_CROSS_ENTROPY_WITH_LOGITS_WORK_VISIT_FACTOR = 36
 KL_DIV_WORK_VISIT_FACTOR = 48
 NLL_LOSS_WORK_VISIT_FACTOR = 32
+CROSS_ENTROPY_WORK_VISIT_FACTOR = 64
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
-_REGISTRY_BYTE_LIMIT = 32 * 1024
+_REGISTRY_BYTE_LIMIT = 64 * 1024
 _ROOT_FIELDS = frozenset({"schema", "version", "operations"})
 _VERSION_FIELDS = frozenset({"major", "minor"})
 _OPERATION_FIELDS = frozenset({
@@ -114,6 +115,7 @@ _ENUMS = {
         "canonical-general-einstein-contraction",
         "same-shape-elementwise-loss-with-batched-reduction",
         "class-axis-index-loss-with-batched-reduction",
+        "class-axis-logits-loss-with-index-or-probability-target-and-batched-reduction",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
@@ -132,6 +134,7 @@ _ENUMS = {
         "dimensioned-tensor-promotion-with-fp32-half-accumulator",
         "promote-floating-inputs-with-fp32-half-accumulator",
         "preserve-floating-input-require-int64-target-and-optional-matching-weight",
+        "preserve-floating-input-require-index-or-matching-floating-target-and-optional-matching-weight",
         "promote-integral-default-or-explicit-scan-dtype",
         "pytorch-dimensioned-tensor-promotion",
     }),
@@ -154,6 +157,7 @@ _ENUMS = {
         "supported-numpy-owning-stable-bce-with-logits-reduction",
         "supported-numpy-owning-kl-div-reduction",
         "supported-numpy-owning-bounded-nll-reduction",
+        "supported-numpy-owning-stable-cross-entropy-reduction",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -184,6 +188,7 @@ _ENUMS = {
         "supported-stable-bce-with-logits-derivatives-for-both-inputs",
         "supported-native-kl-div-derivatives-for-both-inputs",
         "supported-selected-class-negative-weight-gradient",
+        "supported-stable-logits-and-probability-target-gradients",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -214,6 +219,7 @@ _ENUMS = {
         "supported-stable-bce-with-logits-derivatives-for-both-inputs",
         "supported-native-kl-div-derivatives-for-both-inputs",
         "supported-selected-class-negative-weight-gradient",
+        "supported-stable-logits-and-probability-target-gradients",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
@@ -222,6 +228,7 @@ _ENUMS = {
         "supported-for-floating-input-via-symbolic-vjp",
         "supported-for-floating-target-and-source-via-symbolic-vjp",
         "supported-for-both-floating-inputs-via-symbolic-vjp",
+        "supported-for-floating-input-and-probability-target-via-symbolic-vjp",
         "not-applicable-discrete-output",
     }),
     "vmap": frozenset({
@@ -237,6 +244,7 @@ _ENUMS = {
         "supported-leading-batch-axis-with-einsum-captured-broadcast",
         "supported-leading-batch-axis-with-per-example-reduction",
         "supported-leading-batch-axis-with-class-axis-shift-and-captured-weight",
+        "supported-leading-batch-axis-with-target-mode-class-axis-shift-and-captured-weight",
         "supported-leading-batch-axis-preserving-pad",
     }),
     "onnxExport": frozenset({
@@ -265,6 +273,7 @@ _ENUMS = {
         "supported-opset17-stable-bce-with-logits-float16-float32-float64",
         "supported-opset17-kl-div-float16-float32-float64",
         "supported-opset17-negative-log-likelihood-loss-unmapped-profile",
+        "supported-opset17-softmax-cross-entropy-loss-unmapped-index-profile",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -777,6 +786,28 @@ class NllLossContract:
     workspace_bytes: int
 
 
+@dataclass(frozen=True, slots=True)
+class CrossEntropyContract:
+    input_shape: Tuple[int, ...]
+    target_shape: Tuple[int, ...]
+    weight_shape: Tuple[int, ...] | None
+    output_shape: Tuple[int, ...]
+    output_dtype: str
+    target_dtype: str
+    target_mode: str
+    reduction: str
+    batch_rank: int
+    class_axis: int
+    class_count: int
+    ignore_index: int
+    has_weight: bool
+    label_smoothing: float
+    input_elements: int
+    target_elements: int
+    work_elements: int
+    workspace_bytes: int
+
+
 def _elementwise_loss_checked_product(extents: Tuple[int, ...], ceiling: int) -> int:
     product = 1
     for extent in extents:
@@ -1259,6 +1290,254 @@ def infer_nll_loss_contract(
         class_count=class_count,
         ignore_index=normalized_ignore_index,
         has_weight=has_weight,
+        input_elements=input_elements,
+        target_elements=target_elements,
+        work_elements=work_elements,
+        workspace_bytes=workspace_bytes,
+    )
+
+
+def _normalize_cross_entropy_ignore_index(ignore_index: Any) -> int:
+    if type(ignore_index) not in _PAD_INTEGER_TYPES or type(ignore_index) is bool:
+        raise ShapeError("cross_entropy: ignore_index must be an exact integer")
+    normalized = int(ignore_index)
+    if normalized < -(1 << 63) or normalized > (1 << 63) - 1:
+        raise ShapeError("cross_entropy: ignore_index must fit signed int64")
+    return normalized
+
+
+def _normalize_cross_entropy_label_smoothing(label_smoothing: Any) -> float:
+    if type(label_smoothing) not in _PAD_VALUE_TYPES or type(label_smoothing) is bool:
+        raise ShapeError(
+            "cross_entropy: label_smoothing must be an exact real scalar"
+        )
+    normalized = float(label_smoothing)
+    if not math.isfinite(normalized) or normalized < 0.0 or normalized > 1.0:
+        raise ShapeError(
+            "cross_entropy: label_smoothing must be finite and in [0, 1], "
+            f"got {normalized!r}"
+        )
+    return normalized
+
+
+def infer_cross_entropy_contract(
+    inputs: tuple[Any, ...],
+    reduction: Any,
+    ignore_index: Any,
+    has_weight: Any,
+    label_smoothing: Any,
+    target_mode: Any,
+    batch_rank: Any = 0,
+) -> CrossEntropyContract:
+    if type(has_weight) is not bool:
+        raise ShapeError("cross_entropy: has_weight must be an exact bool")
+    expected_arity = 3 if has_weight else 2
+    if type(inputs) is not tuple or len(inputs) != expected_arity:
+        raise ShapeError(
+            f"cross_entropy requires exactly {expected_arity} tensor inputs "
+            f"for has_weight={has_weight}"
+        )
+    if type(reduction) is not str:
+        raise ShapeError(
+            "cross_entropy: reduction must be a string, got "
+            f"{type(reduction).__name__}"
+        )
+    if reduction not in ("none", "sum", "mean"):
+        raise ShapeError(
+            "cross_entropy: reduction must be 'none', 'sum', or 'mean', got "
+            f"{reduction!r}"
+        )
+    if type(batch_rank) is not int:
+        raise ShapeError("cross_entropy: batch_rank must be a normalized integer")
+    if type(target_mode) is not str or target_mode not in (
+        "indices",
+        "probabilities",
+    ):
+        raise ShapeError(
+            "cross_entropy: target_mode must be 'indices' or 'probabilities'"
+        )
+    normalized_ignore_index = _normalize_cross_entropy_ignore_index(ignore_index)
+    normalized_smoothing = _normalize_cross_entropy_label_smoothing(
+        label_smoothing
+    )
+
+    shapes: list[Tuple[int, ...]] = []
+    dtypes: list[str] = []
+    for index, source in enumerate(inputs):
+        shape = getattr(source, "shape", None)
+        if type(shape) is not tuple:
+            raise ShapeError(f"cross_entropy input {index} shape must be a tuple")
+        if len(shape) > L1_LOSS_RANK_MAX:
+            raise ShapeError(
+                f"cross_entropy input {index} rank {len(shape)} exceeds the "
+                f"{L1_LOSS_RANK_MAX}-rank ceiling"
+            )
+        for axis, extent in enumerate(shape):
+            if type(extent) is not int or extent < 0:
+                raise ShapeError(
+                    f"cross_entropy input {index} shape[{axis}] must be a "
+                    "non-negative integer"
+                )
+            if extent > L1_LOSS_OUTPUT_EXTENT_MAX:
+                raise ShapeError(
+                    f"cross_entropy input {index} extent {extent} on axis "
+                    f"{axis} exceeds the {L1_LOSS_OUTPUT_EXTENT_MAX}-element "
+                    "per-axis ceiling"
+                )
+        shapes.append(shape)
+        dtypes.append(getattr(source, "dtype", None))
+
+    input_shape, target_shape = shapes[:2]
+    input_dtype, target_dtype = dtypes[:2]
+    if input_dtype not in _FLOATING_DTYPES:
+        raise ShapeError(
+            f"cross_entropy input dtype {input_dtype!r} is not supported; "
+            "expected float16, float32, or float64"
+        )
+    if batch_rank < 0 or batch_rank >= len(input_shape):
+        raise ShapeError(
+            f"cross_entropy: batch_rank {batch_rank} leaves no user input "
+            f"dimension in shape {input_shape}"
+        )
+    user_rank = len(input_shape) - batch_rank
+    class_axis = batch_rank if user_rank == 1 else batch_rank + 1
+    class_count = input_shape[class_axis]
+    if class_count == 0:
+        raise ShapeError(
+            "cross_entropy: class dimension must contain at least one class"
+        )
+    position_shape = (
+        input_shape[:class_axis] + input_shape[class_axis + 1:]
+    )
+    derived_target_mode = (
+        "probabilities" if target_shape == input_shape else "indices"
+    )
+    if target_mode != derived_target_mode:
+        raise ShapeError(
+            f"cross_entropy: target_mode {target_mode!r} does not match "
+            f"shape-derived mode {derived_target_mode!r}"
+        )
+    if target_mode == "probabilities":
+        if target_dtype != input_dtype:
+            raise ShapeError(
+                f"cross_entropy probability target dtype {target_dtype!r} "
+                f"must equal input dtype {input_dtype!r}"
+            )
+        if normalized_ignore_index >= 0:
+            raise ShapeError(
+                "cross_entropy: ignore_index is not supported for floating "
+                "point targets unless it is negative"
+            )
+    else:
+        if target_shape != position_shape:
+            raise ShapeError(
+                f"cross_entropy: index target shape {target_shape} must equal "
+                f"input shape {input_shape} with class axis {class_axis} "
+                f"removed ({position_shape})"
+            )
+        if target_dtype != "int64":
+            raise ShapeError(
+                f"cross_entropy index target dtype {target_dtype!r} is not "
+                "supported; expected int64"
+            )
+
+    weight_shape: Tuple[int, ...] | None = None
+    if has_weight:
+        weight_shape = shapes[2]
+        expected_weight_shape = input_shape[:batch_rank] + (class_count,)
+        if weight_shape != expected_weight_shape:
+            raise ShapeError(
+                f"cross_entropy: weight shape {weight_shape} must equal "
+                f"mapped batch prefix plus class count {expected_weight_shape}"
+            )
+        if dtypes[2] != input_dtype:
+            raise ShapeError(
+                f"cross_entropy: weight dtype {dtypes[2]!r} must equal input "
+                f"dtype {input_dtype!r}"
+            )
+
+    output_shape = position_shape if reduction == "none" else input_shape[:batch_rank]
+    input_elements = _elementwise_loss_checked_product(
+        input_shape, L1_LOSS_WORK_ELEMENT_MAX
+    )
+    target_elements = _elementwise_loss_checked_product(
+        target_shape, L1_LOSS_WORK_ELEMENT_MAX
+    )
+    weight_elements = (
+        _elementwise_loss_checked_product(
+            weight_shape, L1_LOSS_WORK_ELEMENT_MAX
+        )
+        if weight_shape is not None
+        else 0
+    )
+    capacity_elements = max(
+        _elementwise_loss_checked_product(
+            tuple(max(1, extent) for extent in shape),
+            L1_LOSS_WORK_ELEMENT_MAX,
+        )
+        for shape in shapes
+    )
+    if (
+        capacity_elements
+        > L1_LOSS_WORK_ELEMENT_MAX // CROSS_ENTROPY_WORK_VISIT_FACTOR
+    ):
+        work_elements = L1_LOSS_WORK_ELEMENT_MAX + 1
+    else:
+        work_elements = capacity_elements * CROSS_ENTROPY_WORK_VISIT_FACTOR
+    if work_elements > L1_LOSS_WORK_ELEMENT_MAX:
+        raise ShapeError(
+            "cross_entropy: projected work exceeds the "
+            f"{L1_LOSS_WORK_ELEMENT_MAX}-element-visit ceiling"
+        )
+
+    output_elements = _elementwise_loss_checked_product(
+        output_shape, L1_LOSS_OUTPUT_BYTE_MAX
+    )
+    output_bytes = output_elements * _VARIADIC_DTYPE_BYTES[input_dtype]
+    if output_bytes > L1_LOSS_OUTPUT_BYTE_MAX:
+        raise ShapeError(
+            f"cross_entropy: output requires {output_bytes} bytes, exceeding "
+            f"the {L1_LOSS_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    compute_dtype = "float32" if input_dtype == "float16" else input_dtype
+    compute_bytes = _VARIADIC_DTYPE_BYTES[compute_dtype]
+    cast_bytes = 0
+    if input_dtype != compute_dtype:
+        cast_bytes += input_elements * compute_bytes
+        if target_mode == "probabilities":
+            cast_bytes += target_elements * compute_bytes
+        cast_bytes += weight_elements * compute_bytes
+    position_elements = _elementwise_loss_checked_product(
+        position_shape, L1_LOSS_WORK_ELEMENT_MAX
+    )
+    workspace_bytes = (
+        output_bytes
+        + cast_bytes
+        + input_elements * compute_bytes * 6
+        + position_elements * (2 * compute_bytes + 8 + 1)
+    )
+    if workspace_bytes > L1_LOSS_WORKSPACE_BYTE_MAX:
+        raise ShapeError(
+            "cross_entropy: projected stable-softmax/target/gradient "
+            f"workspace requires {workspace_bytes} bytes, exceeding the "
+            f"{L1_LOSS_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+
+    return CrossEntropyContract(
+        input_shape=input_shape,
+        target_shape=target_shape,
+        weight_shape=weight_shape,
+        output_shape=output_shape,
+        output_dtype=input_dtype,
+        target_dtype=target_dtype,
+        target_mode=target_mode,
+        reduction=reduction,
+        batch_rank=batch_rank,
+        class_axis=class_axis,
+        class_count=class_count,
+        ignore_index=normalized_ignore_index,
+        has_weight=has_weight,
+        label_smoothing=normalized_smoothing,
         input_elements=input_elements,
         target_elements=target_elements,
         work_elements=work_elements,
@@ -1910,6 +2189,435 @@ def execute_nll_loss_vjp_array(
     if gradient.dtype.name == contract.output_dtype:
         return gradient
     return gradient.astype(np.dtype(contract.output_dtype), copy=True)
+
+
+def _validate_cross_entropy_runtime_arrays(
+    contract: CrossEntropyContract,
+    arrays: tuple[np.ndarray, ...],
+) -> None:
+    expected_arity = 3 if contract.has_weight else 2
+    if type(arrays) is not tuple or len(arrays) != expected_arity:
+        raise ShapeError(
+            f"cross_entropy execution requires exactly {expected_arity} arrays"
+        )
+    expected = (
+        (contract.input_shape, contract.output_dtype),
+        (contract.target_shape, contract.target_dtype),
+    )
+    if contract.has_weight:
+        expected += ((contract.weight_shape, contract.output_dtype),)
+    for index, (array, (shape, dtype)) in enumerate(zip(arrays, expected)):
+        if type(array) is not np.ndarray:
+            raise ShapeError(
+                f"cross_entropy runtime input {index} must be an exact ndarray"
+            )
+        if tuple(array.shape) != shape:
+            raise ShapeError(
+                f"cross_entropy runtime input {index} shape "
+                f"{tuple(array.shape)} does not match {shape}"
+            )
+        if array.dtype.name != dtype:
+            raise ShapeError(
+                f"cross_entropy runtime input {index} dtype "
+                f"{array.dtype.name!r} does not match {dtype!r}"
+            )
+
+
+def _cross_entropy_compute_dtype(contract: CrossEntropyContract) -> np.dtype:
+    return np.dtype(
+        "float32" if contract.output_dtype == "float16" else contract.output_dtype
+    )
+
+
+def _cross_entropy_position_shape(
+    contract: CrossEntropyContract,
+) -> Tuple[int, ...]:
+    return (
+        contract.input_shape[:contract.class_axis]
+        + contract.input_shape[contract.class_axis + 1:]
+    )
+
+
+def _cross_entropy_weight_view(
+    contract: CrossEntropyContract,
+    arrays: tuple[np.ndarray, ...],
+    dtype: np.dtype,
+) -> np.ndarray | None:
+    if not contract.has_weight:
+        return None
+    shape = (
+        contract.input_shape[:contract.batch_rank]
+        + (1,) * (contract.class_axis - contract.batch_rank)
+        + (contract.class_count,)
+        + (1,) * (len(contract.input_shape) - contract.class_axis - 1)
+    )
+    return arrays[2].astype(dtype, copy=False).reshape(shape)
+
+
+def _cross_entropy_log_probabilities(
+    contract: CrossEntropyContract,
+    arrays: tuple[np.ndarray, ...],
+    dtype: np.dtype,
+) -> np.ndarray:
+    logits = arrays[0].astype(dtype, copy=False)
+    maximum = np.max(logits, axis=contract.class_axis, keepdims=True)
+    shifted = np.empty(contract.input_shape, dtype=dtype)
+    np.subtract(logits, maximum, out=shifted)
+    exponentials = np.empty(contract.input_shape, dtype=dtype)
+    with np.errstate(over="ignore", invalid="ignore"):
+        np.exp(shifted, out=exponentials)
+    normalizer = exponentials.sum(
+        axis=contract.class_axis,
+        keepdims=True,
+        dtype=dtype,
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        np.log(normalizer, out=normalizer)
+    np.subtract(shifted, normalizer, out=shifted)
+    return shifted
+
+
+def _cross_entropy_index_selection(
+    contract: CrossEntropyContract,
+    arrays: tuple[np.ndarray, ...],
+    dtype: np.dtype,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    targets = arrays[1]
+    valid = targets != contract.ignore_index
+    if bool(valid.any()):
+        minimum = int(np.min(targets, where=valid, initial=0))
+        maximum = int(np.max(targets, where=valid, initial=0))
+        if minimum < 0 or maximum >= contract.class_count:
+            raise ShapeError(
+                "cross_entropy: target values must be in "
+                f"[0, {contract.class_count}) or equal ignore_index "
+                f"{contract.ignore_index}"
+            )
+    safe_targets = np.where(valid, targets, 0)
+    if contract.has_weight:
+        weight = arrays[2].astype(dtype, copy=False)
+        singleton_count = (
+            len(_cross_entropy_position_shape(contract)) - contract.batch_rank
+        )
+        selection_view = weight.reshape(
+            contract.input_shape[:contract.batch_rank]
+            + (1,) * singleton_count
+            + (contract.class_count,)
+        )
+        selected_weight = np.take_along_axis(
+            selection_view,
+            safe_targets[..., None],
+            axis=-1,
+        )[..., 0]
+        selected_weight = np.where(valid, selected_weight, 0.0)
+    else:
+        selected_weight = valid.astype(dtype, copy=False)
+    return valid, safe_targets, selected_weight
+
+
+def _cross_entropy_reduction_axes(
+    contract: CrossEntropyContract,
+) -> tuple[int, ...]:
+    return tuple(
+        range(contract.batch_rank, len(_cross_entropy_position_shape(contract)))
+    )
+
+
+def _cross_entropy_index_denominator(
+    contract: CrossEntropyContract,
+    valid: np.ndarray,
+    selected_weight: np.ndarray,
+) -> np.ndarray:
+    source = selected_weight if contract.has_weight else valid
+    axes = _cross_entropy_reduction_axes(contract)
+    if axes:
+        return source.sum(axis=axes)
+    return np.asarray(source)
+
+
+def _cross_entropy_reduce(
+    contract: CrossEntropyContract,
+    per_position: np.ndarray,
+    valid: np.ndarray | None,
+    selected_weight: np.ndarray | None,
+    dtype: np.dtype,
+) -> np.ndarray:
+    if contract.reduction == "none":
+        return per_position
+    axes = _cross_entropy_reduction_axes(contract)
+    numerator = (
+        per_position.sum(axis=axes, dtype=dtype)
+        if axes
+        else np.asarray(per_position)
+    )
+    if contract.reduction == "sum":
+        return numerator
+    if contract.target_mode == "indices":
+        assert valid is not None and selected_weight is not None
+        denominator = _cross_entropy_index_denominator(
+            contract, valid, selected_weight
+        )
+    else:
+        denominator = _elementwise_loss_checked_product(
+            _cross_entropy_position_shape(contract)[contract.batch_rank:],
+            L1_LOSS_WORK_ELEMENT_MAX,
+        )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.divide(numerator, denominator)
+
+
+def execute_cross_entropy_arrays(
+    contract: CrossEntropyContract,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_cross_entropy_runtime_arrays(contract, arrays)
+    dtype = _cross_entropy_compute_dtype(contract)
+    log_probabilities = _cross_entropy_log_probabilities(
+        contract, arrays, dtype
+    )
+    weight_view = _cross_entropy_weight_view(contract, arrays, dtype)
+    valid: np.ndarray | None = None
+    selected_weight: np.ndarray | None = None
+
+    if contract.target_mode == "probabilities":
+        coefficient = arrays[1].astype(dtype, copy=False)
+        if contract.label_smoothing != 0.0:
+            coefficient = np.array(coefficient, dtype=dtype, copy=True)
+            np.multiply(
+                coefficient,
+                1.0 - contract.label_smoothing,
+                out=coefficient,
+            )
+            np.add(
+                coefficient,
+                contract.label_smoothing / contract.class_count,
+                out=coefficient,
+            )
+        if weight_view is not None:
+            coefficient = np.multiply(coefficient, weight_view)
+        per_class = np.multiply(log_probabilities, coefficient)
+        per_position = per_class.sum(
+            axis=contract.class_axis,
+            dtype=dtype,
+        )
+        np.negative(per_position, out=per_position)
+    else:
+        valid, safe_targets, selected_weight = (
+            _cross_entropy_index_selection(contract, arrays, dtype)
+        )
+        class_last = np.moveaxis(
+            log_probabilities, contract.class_axis, -1
+        )
+        per_position = np.take_along_axis(
+            class_last,
+            safe_targets[..., None],
+            axis=-1,
+        )[..., 0]
+        np.negative(per_position, out=per_position)
+        if contract.has_weight:
+            np.multiply(per_position, selected_weight, out=per_position)
+        if contract.label_smoothing != 0.0:
+            smooth_source = log_probabilities
+            if weight_view is not None:
+                smooth_source = np.multiply(smooth_source, weight_view)
+            smooth_loss = smooth_source.sum(
+                axis=contract.class_axis,
+                dtype=dtype,
+            )
+            np.negative(smooth_loss, out=smooth_loss)
+            np.multiply(
+                per_position,
+                1.0 - contract.label_smoothing,
+                out=per_position,
+            )
+            np.multiply(
+                smooth_loss,
+                contract.label_smoothing / contract.class_count,
+                out=smooth_loss,
+            )
+            np.add(per_position, smooth_loss, out=per_position)
+        np.copyto(per_position, 0.0, where=~valid)
+
+    result = _cross_entropy_reduce(
+        contract,
+        per_position,
+        valid,
+        selected_weight,
+        dtype,
+    )
+    return np.array(result, dtype=np.dtype(contract.output_dtype), copy=True)
+
+
+def _cross_entropy_vjp_upstream(
+    contract: CrossEntropyContract,
+    dy: np.ndarray,
+    valid: np.ndarray | None,
+    selected_weight: np.ndarray | None,
+    dtype: np.dtype,
+) -> np.ndarray:
+    if type(dy) is not np.ndarray:
+        raise ShapeError("cross_entropy VJP cotangent must be an exact ndarray")
+    if (
+        tuple(dy.shape) != contract.output_shape
+        or dy.dtype.name != contract.output_dtype
+    ):
+        raise ShapeError(
+            "cross_entropy VJP cotangent must have shape "
+            f"{contract.output_shape} and dtype {contract.output_dtype!r}"
+        )
+    upstream = dy.astype(dtype, copy=False)
+    position_shape = _cross_entropy_position_shape(contract)
+    if contract.reduction != "none":
+        user_position_rank = len(position_shape) - contract.batch_rank
+        upstream = upstream.reshape(
+            contract.output_shape + (1,) * user_position_rank
+        )
+        upstream = np.broadcast_to(upstream, position_shape)
+        if contract.reduction == "mean":
+            if contract.target_mode == "indices":
+                assert valid is not None and selected_weight is not None
+                denominator = _cross_entropy_index_denominator(
+                    contract, valid, selected_weight
+                )
+                denominator = np.asarray(denominator, dtype=dtype).reshape(
+                    contract.output_shape + (1,) * user_position_rank
+                )
+            else:
+                denominator = _elementwise_loss_checked_product(
+                    position_shape[contract.batch_rank:],
+                    L1_LOSS_WORK_ELEMENT_MAX,
+                )
+            with np.errstate(divide="ignore", invalid="ignore"):
+                upstream = np.divide(upstream, denominator)
+    return np.expand_dims(upstream, axis=contract.class_axis)
+
+
+def execute_cross_entropy_vjp_array(
+    contract: CrossEntropyContract,
+    operand: int,
+    dy: np.ndarray,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_cross_entropy_runtime_arrays(contract, arrays)
+    allowed = (0, 1) if contract.target_mode == "probabilities" else (0,)
+    if type(operand) is not int or operand not in allowed:
+        raise ShapeError(
+            f"cross_entropy VJP operand must be one of {allowed} for "
+            f"{contract.target_mode} targets"
+        )
+    dtype = _cross_entropy_compute_dtype(contract)
+    log_probabilities = _cross_entropy_log_probabilities(
+        contract, arrays, dtype
+    )
+    weight_view = _cross_entropy_weight_view(contract, arrays, dtype)
+    valid: np.ndarray | None = None
+    selected_weight: np.ndarray | None = None
+
+    if contract.target_mode == "indices":
+        valid, safe_targets, selected_weight = (
+            _cross_entropy_index_selection(contract, arrays, dtype)
+        )
+    upstream = _cross_entropy_vjp_upstream(
+        contract,
+        dy,
+        valid,
+        selected_weight,
+        dtype,
+    )
+
+    if operand == 1:
+        if contract.label_smoothing == 1.0:
+            gradient = np.zeros(contract.target_shape, dtype=dtype)
+        else:
+            gradient = np.empty(contract.target_shape, dtype=dtype)
+            np.negative(log_probabilities, out=gradient)
+            if weight_view is not None:
+                np.multiply(gradient, weight_view, out=gradient)
+            if contract.label_smoothing != 0.0:
+                np.multiply(
+                    gradient,
+                    1.0 - contract.label_smoothing,
+                    out=gradient,
+                )
+            np.multiply(gradient, upstream, out=gradient)
+        if gradient.dtype.name == contract.target_dtype:
+            return gradient
+        return gradient.astype(np.dtype(contract.target_dtype), copy=True)
+
+    if contract.target_mode == "probabilities":
+        coefficient = arrays[1].astype(dtype, copy=False)
+        if contract.label_smoothing != 0.0:
+            coefficient = np.array(coefficient, dtype=dtype, copy=True)
+            np.multiply(
+                coefficient,
+                1.0 - contract.label_smoothing,
+                out=coefficient,
+            )
+            np.add(
+                coefficient,
+                contract.label_smoothing / contract.class_count,
+                out=coefficient,
+            )
+        if weight_view is not None:
+            coefficient = np.multiply(coefficient, weight_view)
+    else:
+        coefficient = np.zeros(contract.input_shape, dtype=dtype)
+        if contract.label_smoothing != 0.0:
+            if weight_view is None:
+                coefficient.fill(
+                    contract.label_smoothing / contract.class_count
+                )
+            else:
+                coefficient = np.array(
+                    np.broadcast_to(weight_view, contract.input_shape),
+                    dtype=dtype,
+                    copy=True,
+                )
+                np.multiply(
+                    coefficient,
+                    contract.label_smoothing / contract.class_count,
+                    out=coefficient,
+                )
+        class_last = np.moveaxis(coefficient, contract.class_axis, -1)
+        selected = (1.0 - contract.label_smoothing) * selected_weight
+        previous = np.take_along_axis(
+            class_last,
+            safe_targets[..., None],
+            axis=-1,
+        )[..., 0]
+        np.add(previous, selected, out=previous)
+        np.put_along_axis(
+            class_last,
+            safe_targets[..., None],
+            previous[..., None],
+            axis=-1,
+        )
+        invalid = np.broadcast_to(
+            np.expand_dims(~valid, axis=contract.class_axis),
+            contract.input_shape,
+        )
+        np.copyto(coefficient, 0.0, where=invalid)
+
+    probabilities = np.empty(contract.input_shape, dtype=dtype)
+    with np.errstate(over="ignore", invalid="ignore"):
+        np.exp(log_probabilities, out=probabilities)
+    normalizer = coefficient.sum(
+        axis=contract.class_axis,
+        keepdims=True,
+        dtype=dtype,
+    )
+    np.multiply(probabilities, normalizer, out=probabilities)
+    np.subtract(probabilities, coefficient, out=probabilities)
+    np.multiply(probabilities, upstream, out=probabilities)
+    if contract.target_mode == "indices":
+        invalid = np.broadcast_to(
+            np.expand_dims(~valid, axis=contract.class_axis),
+            contract.input_shape,
+        )
+        np.copyto(probabilities, 0.0, where=invalid)
+    if probabilities.dtype.name == contract.output_dtype:
+        return probabilities
+    return probabilities.astype(np.dtype(contract.output_dtype), copy=True)
 
 
 _EINSUM_LABEL_ORDER = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -4349,6 +5057,127 @@ def _validate_nll_loss_vjp(node: Any) -> NllLossContract:
     return normalized
 
 
+def _validate_cross_entropy(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> CrossEntropyContract:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    arg = getattr(node, "arg", None)
+    required = {
+        "reduction",
+        "batch_rank",
+        "ignore_index",
+        "has_weight",
+        "label_smoothing",
+        "target_mode",
+    }
+    if type(arg) is not dict or set(arg) != required:
+        raise ShapeError(
+            "CROSS_ENTROPY arg fields must be exactly 'reduction', "
+            "'batch_rank', 'ignore_index', 'has_weight', "
+            "'label_smoothing', and 'target_mode'"
+        )
+    normalized = infer_cross_entropy_contract(
+        getattr(node, "inputs", None),
+        arg["reduction"],
+        arg["ignore_index"],
+        arg["has_weight"],
+        arg["label_smoothing"],
+        arg["target_mode"],
+        arg["batch_rank"],
+    )
+    if getattr(node, "shape", None) != normalized.output_shape:
+        raise ShapeError(
+            f"CROSS_ENTROPY declared shape {getattr(node, 'shape', None)!r} "
+            f"does not match derived shape {normalized.output_shape!r}"
+        )
+    if getattr(node, "dtype", None) != normalized.output_dtype:
+        raise ShapeError(
+            f"CROSS_ENTROPY declared dtype {getattr(node, 'dtype', None)!r} "
+            f"does not match input dtype {normalized.output_dtype!r}"
+        )
+    return normalized
+
+
+def _validate_cross_entropy_vjp(
+    node: Any,
+) -> tuple[CrossEntropyContract, int]:
+    if getattr(node, "op", None) != "CROSS_ENTROPY_VJP":
+        raise ShapeError(
+            "CROSS_ENTROPY_VJP validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    arg = getattr(node, "arg", None)
+    if type(arg) is not dict:
+        raise ShapeError("CROSS_ENTROPY_VJP arg must be a plain dict")
+    required = {
+        "reduction",
+        "batch_rank",
+        "ignore_index",
+        "has_weight",
+        "label_smoothing",
+        "target_mode",
+        "operand",
+    }
+    fields = set(arg)
+    if not required.issubset(fields) or not fields.issubset(
+        required | {"vjp_of"}
+    ):
+        raise ShapeError(
+            "CROSS_ENTROPY_VJP arg fields must be the forward contract "
+            "fields plus 'operand' and optional 'vjp_of'"
+        )
+    if "vjp_of" in arg and type(arg["vjp_of"]) is not type(node):
+        raise ShapeError("CROSS_ENTROPY_VJP arg.vjp_of must reference a UOp")
+    inputs = getattr(node, "inputs", None)
+    expected_arity = 4 if arg["has_weight"] is True else 3
+    if type(inputs) is not tuple or len(inputs) != expected_arity:
+        raise ShapeError(
+            f"CROSS_ENTROPY_VJP must have exactly {expected_arity} inputs "
+            f"for has_weight={arg['has_weight']!r}"
+        )
+    normalized = infer_cross_entropy_contract(
+        inputs[1:],
+        arg["reduction"],
+        arg["ignore_index"],
+        arg["has_weight"],
+        arg["label_smoothing"],
+        arg["target_mode"],
+        arg["batch_rank"],
+    )
+    dy = inputs[0]
+    if (
+        getattr(dy, "shape", None) != normalized.output_shape
+        or getattr(dy, "dtype", None) != normalized.output_dtype
+    ):
+        raise ShapeError(
+            "CROSS_ENTROPY_VJP dy must have shape "
+            f"{normalized.output_shape!r} and dtype "
+            f"{normalized.output_dtype!r}"
+        )
+    operand = arg["operand"]
+    allowed = (0, 1) if normalized.target_mode == "probabilities" else (0,)
+    if type(operand) is not int or operand not in allowed:
+        raise ShapeError(
+            f"CROSS_ENTROPY_VJP operand must be one of {allowed} for "
+            f"{normalized.target_mode} targets"
+        )
+    source = inputs[operand + 1]
+    if getattr(node, "shape", None) != getattr(source, "shape", None):
+        raise ShapeError(
+            "CROSS_ENTROPY_VJP must preserve its selected operand shape"
+        )
+    if getattr(node, "dtype", None) != getattr(source, "dtype", None):
+        raise ShapeError(
+            "CROSS_ENTROPY_VJP must preserve its selected operand dtype"
+        )
+    return normalized, operand
+
+
 def _validate_repeat(
     node: Any,
     contract: FrameworkOperationContract,
@@ -4605,6 +5434,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.functional.binary-cross-entropy-with-logits.v1": _validate_binary_cross_entropy_with_logits,
     "browsergrad.jit.framework.functional.kl-div.v1": _validate_kl_div,
     "browsergrad.jit.framework.functional.nll-loss.v1": _validate_nll_loss,
+    "browsergrad.jit.framework.functional.cross-entropy.v1": _validate_cross_entropy,
     "browsergrad.jit.framework.tensor.masked-fill.v1": _validate_masked_fill,
     "browsergrad.jit.framework.tensor.pad.v1": _validate_pad,
     "browsergrad.jit.framework.tensor.prod.v1": _validate_prod,
@@ -4641,6 +5471,7 @@ _INTERNAL_VALIDATORS: Mapping[str, Callable[[Any], Any]] = MappingProxyType({
     "BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP": _validate_binary_cross_entropy_with_logits_vjp,
     "KL_DIV_VJP": _validate_kl_div_vjp,
     "NLL_LOSS_VJP": _validate_nll_loss_vjp,
+    "CROSS_ENTROPY_VJP": _validate_cross_entropy_vjp,
 })
 
 
@@ -4870,6 +5701,24 @@ def validate_nll_loss_vjp_contract(node: Any) -> NllLossContract:
     return validate_internal_operation_contract(node)
 
 
+def validate_cross_entropy_contract(node: Any) -> CrossEntropyContract:
+    record, normalized = validate_framework_operation_contract(node)
+    if (
+        record.contract_id
+        != "browsergrad.jit.framework.functional.cross-entropy.v1"
+    ):
+        raise ShapeError(
+            "CROSS_ENTROPY resolved to the wrong framework-operation contract"
+        )
+    return normalized
+
+
+def validate_cross_entropy_vjp_contract(
+    node: Any,
+) -> tuple[CrossEntropyContract, int]:
+    return validate_internal_operation_contract(node)
+
+
 def validate_tril_contract(node: Any) -> int:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.tril.v1":
@@ -5026,6 +5875,7 @@ __all__ = [
     "BINARY_CROSS_ENTROPY_WITH_LOGITS_WORK_VISIT_FACTOR",
     "KL_DIV_WORK_VISIT_FACTOR",
     "NLL_LOSS_WORK_VISIT_FACTOR",
+    "CROSS_ENTROPY_WORK_VISIT_FACTOR",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "EinsumContract",
@@ -5035,6 +5885,7 @@ __all__ = [
     "BinaryCrossEntropyWithLogitsContract",
     "KlDivContract",
     "NllLossContract",
+    "CrossEntropyContract",
     "framework_operation_support",
     "has_framework_operation_contract",
     "has_internal_operation_contract",
@@ -5051,6 +5902,7 @@ __all__ = [
     "infer_binary_cross_entropy_with_logits_contract",
     "infer_kl_div_contract",
     "infer_nll_loss_contract",
+    "infer_cross_entropy_contract",
     "normalize_smooth_l1_beta",
     "normalize_pad_request",
     "normalize_pad_value",
@@ -5072,6 +5924,8 @@ __all__ = [
     "execute_kl_div_vjp_array",
     "execute_nll_loss_arrays",
     "execute_nll_loss_vjp_array",
+    "execute_cross_entropy_arrays",
+    "execute_cross_entropy_vjp_array",
     "einsum_onnx_equation",
     "stable_sort_indices_array",
     "partial_topk_indices_array",
@@ -5105,6 +5959,8 @@ __all__ = [
     "validate_kl_div_vjp_contract",
     "validate_nll_loss_contract",
     "validate_nll_loss_vjp_contract",
+    "validate_cross_entropy_contract",
+    "validate_cross_entropy_vjp_contract",
     "validate_gather_scatter_add_contract",
     "validate_tril_contract",
     "validate_triu_contract",

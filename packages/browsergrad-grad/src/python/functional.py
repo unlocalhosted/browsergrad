@@ -119,40 +119,28 @@ def mse_loss(y_hat: Tensor, y: Tensor) -> Tensor:
     return _build_ctx(out, (y_hat,), lambda g: (g.data * (2.0 / n) * diff,))
 
 
-def cross_entropy_loss(logits: Tensor, targets) -> Tensor:
-    """Fused softmax + NLL: -mean(log_softmax(logits)[range(N), targets]).
-
-    `logits`: shape (N, C). `targets`: int array shape (N,) — class indices.
-    Returns a scalar Tensor. The fused form avoids both the numerical-stability
-    pitfalls of naive log(softmax) and the need for differentiable indexing.
-    """
-    if isinstance(targets, Tensor):
-        targets_np = targets.data.astype(np.int64)
-    else:
-        targets_np = np.asarray(targets, dtype=np.int64)
-    if logits.data.ndim != 2:
-        raise ValueError(f"cross_entropy_loss: logits must be 2D (N, C), got {logits.data.ndim}D")
-    if targets_np.ndim != 1 or targets_np.shape[0] != logits.data.shape[0]:
-        raise ValueError(
-            f"cross_entropy_loss: targets shape {targets_np.shape} doesn't match logits batch {logits.data.shape[0]}"
-        )
-    N, C = logits.data.shape
-    if (targets_np < 0).any() or (targets_np >= C).any():
-        raise ValueError(f"cross_entropy_loss: targets out of range [0, {C})")
-
-    # Numerically stable log_softmax.
-    shifted = logits.data - logits.data.max(axis=1, keepdims=True)
-    log_sum = np.log(np.exp(shifted).sum(axis=1, keepdims=True))
-    log_probs = shifted - log_sum
-    # Pick targets and average.
-    loss_data = float(-log_probs[np.arange(N), targets_np].mean())
-    out = Tensor(np.float32(loss_data))
-    # Gradient w.r.t. logits: (softmax - one_hot(targets)) / N
-    softmax_probs = np.exp(log_probs)
-    one_hot = np.zeros_like(softmax_probs)
-    one_hot[np.arange(N), targets_np] = 1.0
-    grad_logits = (softmax_probs - one_hot) / N
-    return _build_ctx(out, (logits,), lambda g: (g.data * grad_logits,))
+def cross_entropy_loss(
+    input: Tensor,
+    target: Tensor,
+    weight=None,
+    size_average=None,
+    ignore_index=-100,
+    reduce=None,
+    reduction="mean",
+    label_smoothing=0.0,
+) -> Tensor:
+    if not isinstance(target, Tensor):
+        target = Tensor(np.asarray(target, dtype=np.int64), dtype="int64")
+    return cross_entropy(
+        input,
+        target,
+        weight=weight,
+        size_average=size_average,
+        ignore_index=ignore_index,
+        reduce=reduce,
+        reduction=reduction,
+        label_smoothing=label_smoothing,
+    )
 
 
 def bce_with_logits_loss(
@@ -607,6 +595,543 @@ def nll_loss(
     return _build_ctx(out, (input,), backward)
 
 
+def _cross_entropy_contract(
+    input,
+    target,
+    weight,
+    reduction,
+    ignore_index,
+    label_smoothing,
+):
+    if not isinstance(input, Tensor):
+        raise TypeError(
+            f"cross_entropy: input must be a Tensor, got {type(input).__name__}"
+        )
+    if not isinstance(target, Tensor):
+        raise TypeError(
+            f"cross_entropy: target must be a Tensor, got {type(target).__name__}"
+        )
+    if type(input.data) is not np.ndarray:
+        raise TypeError("cross_entropy: input data must be an exact ndarray")
+    if type(target.data) is not np.ndarray:
+        raise TypeError("cross_entropy: target data must be an exact ndarray")
+    if type(reduction) is not str:
+        raise ValueError(
+            "cross_entropy: reduction must be a string, got "
+            f"{type(reduction).__name__}"
+        )
+    if reduction not in ("none", "sum", "mean"):
+        raise ValueError(
+            "cross_entropy: reduction must be 'none', 'sum', or 'mean', got "
+            f"{reduction!r}"
+        )
+    integer_types = (
+        int,
+        np.int8,
+        np.int16,
+        np.int32,
+        np.int64,
+        np.uint8,
+        np.uint16,
+        np.uint32,
+        np.uint64,
+    )
+    if type(ignore_index) not in integer_types or type(ignore_index) is bool:
+        raise ValueError(
+            "cross_entropy: ignore_index must be an exact integer"
+        )
+    normalized_ignore_index = int(ignore_index)
+    if (
+        normalized_ignore_index < -(1 << 63)
+        or normalized_ignore_index > (1 << 63) - 1
+    ):
+        raise ValueError("cross_entropy: ignore_index must fit signed int64")
+    if (
+        type(label_smoothing) not in _SMOOTH_L1_BETA_TYPES
+        or type(label_smoothing) is bool
+    ):
+        raise ValueError(
+            "cross_entropy: label_smoothing must be an exact real scalar"
+        )
+    normalized_smoothing = float(label_smoothing)
+    if (
+        not np.isfinite(normalized_smoothing)
+        or normalized_smoothing < 0.0
+        or normalized_smoothing > 1.0
+    ):
+        raise ValueError(
+            "cross_entropy: label_smoothing must be finite and in [0, 1], "
+            f"got {normalized_smoothing!r}"
+        )
+
+    input_shape = tuple(input.data.shape)
+    target_shape = tuple(target.data.shape)
+    if len(input_shape) < 1:
+        raise ValueError(
+            "cross_entropy: batch_rank 0 leaves no user input dimension "
+            f"in shape {input_shape}"
+        )
+    shapes = [input_shape, target_shape]
+    if weight is not None:
+        if not isinstance(weight, Tensor):
+            raise TypeError(
+                "cross_entropy: weight must be a Tensor or None, got "
+                f"{type(weight).__name__}"
+            )
+        if weight.requires_grad:
+            raise ValueError(
+                "cross_entropy: weight is non-differentiable and must not "
+                "require grad"
+            )
+        if type(weight.data) is not np.ndarray:
+            raise TypeError("cross_entropy: weight data must be an exact ndarray")
+        shapes.append(tuple(weight.data.shape))
+    for index, shape in enumerate(shapes):
+        if len(shape) > _L1_LOSS_RANK_MAX:
+            raise ValueError(
+                f"cross_entropy input {index} rank {len(shape)} exceeds the "
+                f"{_L1_LOSS_RANK_MAX}-rank ceiling"
+            )
+        for axis, extent in enumerate(shape):
+            if extent > _L1_LOSS_OUTPUT_EXTENT_MAX:
+                raise ValueError(
+                    f"cross_entropy input {index} extent {extent} on axis "
+                    f"{axis} exceeds the {_L1_LOSS_OUTPUT_EXTENT_MAX}-element "
+                    "per-axis ceiling"
+                )
+
+    input_dtype = input.data.dtype.name
+    target_dtype = target.data.dtype.name
+    if input_dtype not in _L1_LOSS_FLOATING_DTYPES:
+        raise ValueError(
+            f"cross_entropy input dtype {input_dtype!r} is not supported; "
+            "expected float16, float32, or float64"
+        )
+    class_axis = 0 if len(input_shape) == 1 else 1
+    class_count = input_shape[class_axis]
+    if class_count == 0:
+        raise ValueError(
+            "cross_entropy: class dimension must contain at least one class"
+        )
+    position_shape = (
+        input_shape[:class_axis] + input_shape[class_axis + 1:]
+    )
+    target_mode = (
+        "probabilities" if target_shape == input_shape else "indices"
+    )
+    if target_mode == "probabilities":
+        if target_dtype != input_dtype:
+            raise ValueError(
+                f"cross_entropy probability target dtype {target_dtype!r} "
+                f"must equal input dtype {input_dtype!r}"
+            )
+        if normalized_ignore_index >= 0:
+            raise ValueError(
+                "cross_entropy: ignore_index is not supported for floating "
+                "point targets unless it is negative"
+            )
+    else:
+        if target_shape != position_shape:
+            raise ValueError(
+                f"cross_entropy: index target shape {target_shape} must equal "
+                f"input shape {input_shape} with class axis {class_axis} "
+                f"removed ({position_shape})"
+            )
+        if target_dtype != "int64":
+            raise ValueError(
+                f"cross_entropy index target dtype {target_dtype!r} is not "
+                "supported; expected int64"
+            )
+
+    weight_shape = None
+    if weight is not None:
+        weight_shape = tuple(weight.data.shape)
+        if weight_shape != (class_count,):
+            raise ValueError(
+                f"cross_entropy: weight shape {weight_shape} must equal class "
+                f"count ({class_count},)"
+            )
+        if weight.data.dtype.name != input_dtype:
+            raise ValueError(
+                f"cross_entropy: weight dtype {weight.data.dtype.name!r} "
+                f"must equal input dtype {input_dtype!r}"
+            )
+
+    input_elements = _l1_loss_checked_product(
+        input_shape, _L1_LOSS_WORK_ELEMENT_MAX
+    )
+    target_elements = _l1_loss_checked_product(
+        target_shape, _L1_LOSS_WORK_ELEMENT_MAX
+    )
+    weight_elements = (
+        _l1_loss_checked_product(weight_shape, _L1_LOSS_WORK_ELEMENT_MAX)
+        if weight_shape is not None
+        else 0
+    )
+    capacity_elements = max(
+        _l1_loss_checked_product(
+            tuple(max(1, extent) for extent in shape),
+            _L1_LOSS_WORK_ELEMENT_MAX,
+        )
+        for shape in shapes
+    )
+    if (
+        capacity_elements
+        > _L1_LOSS_WORK_ELEMENT_MAX // _CROSS_ENTROPY_WORK_VISIT_FACTOR
+    ):
+        work_elements = _L1_LOSS_WORK_ELEMENT_MAX + 1
+    else:
+        work_elements = (
+            capacity_elements * _CROSS_ENTROPY_WORK_VISIT_FACTOR
+        )
+    if work_elements > _L1_LOSS_WORK_ELEMENT_MAX:
+        raise ValueError(
+            "cross_entropy: projected work exceeds the "
+            f"{_L1_LOSS_WORK_ELEMENT_MAX}-element-visit ceiling"
+        )
+    output_shape = position_shape if reduction == "none" else ()
+    output_elements = _l1_loss_checked_product(
+        output_shape, _L1_LOSS_OUTPUT_BYTE_MAX
+    )
+    output_bytes = output_elements * input.data.dtype.itemsize
+    if output_bytes > _L1_LOSS_OUTPUT_BYTE_MAX:
+        raise ValueError(
+            f"cross_entropy: output requires {output_bytes} bytes, exceeding "
+            f"the {_L1_LOSS_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    compute_dtype = "float32" if input_dtype == "float16" else input_dtype
+    compute_bytes = np.dtype(compute_dtype).itemsize
+    cast_bytes = 0
+    if input_dtype != compute_dtype:
+        cast_bytes += input_elements * compute_bytes
+        if target_mode == "probabilities":
+            cast_bytes += target_elements * compute_bytes
+        cast_bytes += weight_elements * compute_bytes
+    position_elements = _l1_loss_checked_product(
+        position_shape, _L1_LOSS_WORK_ELEMENT_MAX
+    )
+    workspace_bytes = (
+        output_bytes
+        + cast_bytes
+        + input_elements * compute_bytes * 6
+        + position_elements * (2 * compute_bytes + 8 + 1)
+    )
+    if workspace_bytes > _L1_LOSS_WORKSPACE_BYTE_MAX:
+        raise ValueError(
+            "cross_entropy: projected stable-softmax/target/gradient "
+            f"workspace requires {workspace_bytes} bytes, exceeding the "
+            f"{_L1_LOSS_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+    return {
+        "input_shape": input_shape,
+        "target_shape": target_shape,
+        "position_shape": position_shape,
+        "output_shape": output_shape,
+        "input_dtype": input_dtype,
+        "target_dtype": target_dtype,
+        "compute_dtype": compute_dtype,
+        "class_axis": class_axis,
+        "class_count": class_count,
+        "ignore_index": normalized_ignore_index,
+        "reduction": reduction,
+        "target_mode": target_mode,
+        "has_weight": weight is not None,
+        "label_smoothing": normalized_smoothing,
+    }
+
+
+def cross_entropy(
+    input: Tensor,
+    target: Tensor,
+    weight=None,
+    size_average=None,
+    ignore_index=-100,
+    reduce=None,
+    reduction="mean",
+    label_smoothing=0.0,
+) -> Tensor:
+    """Stable cross entropy for class indices or class probabilities."""
+    normalized_reduction = _normalize_legacy_loss_reduction(
+        "cross_entropy",
+        reduction,
+        size_average,
+        reduce,
+    )
+    contract = _cross_entropy_contract(
+        input,
+        target,
+        weight,
+        normalized_reduction,
+        ignore_index,
+        label_smoothing,
+    )
+    dtype = np.dtype(contract["compute_dtype"])
+    logits = input.data.astype(dtype, copy=False)
+    maximum = np.max(
+        logits,
+        axis=contract["class_axis"],
+        keepdims=True,
+    )
+    log_probabilities = np.empty(contract["input_shape"], dtype=dtype)
+    np.subtract(logits, maximum, out=log_probabilities)
+    exponentials = np.empty(contract["input_shape"], dtype=dtype)
+    with np.errstate(over="ignore", invalid="ignore"):
+        np.exp(log_probabilities, out=exponentials)
+    normalizer = exponentials.sum(
+        axis=contract["class_axis"],
+        keepdims=True,
+        dtype=dtype,
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        np.log(normalizer, out=normalizer)
+    np.subtract(log_probabilities, normalizer, out=log_probabilities)
+
+    weight_view = None
+    if contract["has_weight"]:
+        view_shape = [1] * len(contract["input_shape"])
+        view_shape[contract["class_axis"]] = contract["class_count"]
+        weight_view = weight.data.astype(dtype, copy=False).reshape(view_shape)
+
+    valid = None
+    safe_targets = None
+    selected_weight = None
+    if contract["target_mode"] == "probabilities":
+        coefficient = target.data.astype(dtype, copy=False)
+        if contract["label_smoothing"] != 0.0:
+            coefficient = np.array(coefficient, dtype=dtype, copy=True)
+            np.multiply(
+                coefficient,
+                1.0 - contract["label_smoothing"],
+                out=coefficient,
+            )
+            np.add(
+                coefficient,
+                contract["label_smoothing"] / contract["class_count"],
+                out=coefficient,
+            )
+        if weight_view is not None:
+            coefficient = np.multiply(coefficient, weight_view)
+        per_class = np.multiply(log_probabilities, coefficient)
+        per_position = per_class.sum(
+            axis=contract["class_axis"],
+            dtype=dtype,
+        )
+        np.negative(per_position, out=per_position)
+    else:
+        targets = target.data
+        valid = targets != contract["ignore_index"]
+        if bool(valid.any()):
+            minimum = int(np.min(targets, where=valid, initial=0))
+            maximum = int(np.max(targets, where=valid, initial=0))
+            if minimum < 0 or maximum >= contract["class_count"]:
+                raise ValueError(
+                    "cross_entropy: target values must be in "
+                    f"[0, {contract['class_count']}) or equal ignore_index "
+                    f"{contract['ignore_index']}"
+                )
+        safe_targets = np.where(valid, targets, 0)
+        if contract["has_weight"]:
+            weights = weight.data.astype(dtype, copy=False)
+            selected_weight = weights[safe_targets]
+            selected_weight = np.where(valid, selected_weight, 0.0)
+        else:
+            selected_weight = valid.astype(dtype, copy=False)
+        class_last = np.moveaxis(
+            log_probabilities, contract["class_axis"], -1
+        )
+        per_position = np.take_along_axis(
+            class_last,
+            safe_targets[..., None],
+            axis=-1,
+        )[..., 0]
+        np.negative(per_position, out=per_position)
+        if contract["has_weight"]:
+            np.multiply(per_position, selected_weight, out=per_position)
+        if contract["label_smoothing"] != 0.0:
+            smooth_source = log_probabilities
+            if weight_view is not None:
+                smooth_source = np.multiply(smooth_source, weight_view)
+            smooth_loss = smooth_source.sum(
+                axis=contract["class_axis"],
+                dtype=dtype,
+            )
+            np.negative(smooth_loss, out=smooth_loss)
+            np.multiply(
+                per_position,
+                1.0 - contract["label_smoothing"],
+                out=per_position,
+            )
+            np.multiply(
+                smooth_loss,
+                contract["label_smoothing"] / contract["class_count"],
+                out=smooth_loss,
+            )
+            np.add(per_position, smooth_loss, out=per_position)
+        np.copyto(per_position, 0.0, where=~valid)
+        coefficient = np.zeros(contract["input_shape"], dtype=dtype)
+        if contract["label_smoothing"] != 0.0:
+            if weight_view is None:
+                coefficient.fill(
+                    contract["label_smoothing"] / contract["class_count"]
+                )
+            else:
+                coefficient = np.array(
+                    np.broadcast_to(weight_view, contract["input_shape"]),
+                    dtype=dtype,
+                    copy=True,
+                )
+                np.multiply(
+                    coefficient,
+                    contract["label_smoothing"] / contract["class_count"],
+                    out=coefficient,
+                )
+        coefficient_last = np.moveaxis(
+            coefficient, contract["class_axis"], -1
+        )
+        selected = (
+            1.0 - contract["label_smoothing"]
+        ) * selected_weight
+        previous = np.take_along_axis(
+            coefficient_last,
+            safe_targets[..., None],
+            axis=-1,
+        )[..., 0]
+        np.add(previous, selected, out=previous)
+        np.put_along_axis(
+            coefficient_last,
+            safe_targets[..., None],
+            previous[..., None],
+            axis=-1,
+        )
+        invalid = np.broadcast_to(
+            np.expand_dims(~valid, axis=contract["class_axis"]),
+            contract["input_shape"],
+        )
+        np.copyto(coefficient, 0.0, where=invalid)
+
+    if contract["reduction"] == "none":
+        result = per_position
+    else:
+        numerator = per_position.sum(dtype=dtype)
+        if contract["reduction"] == "sum":
+            result = numerator
+        else:
+            if contract["target_mode"] == "indices":
+                denominator = (
+                    selected_weight.sum(dtype=dtype)
+                    if contract["has_weight"]
+                    else valid.sum()
+                )
+            else:
+                denominator = per_position.size
+            with np.errstate(divide="ignore", invalid="ignore"):
+                result = np.divide(numerator, denominator)
+    out = Tensor(
+        np.array(
+            result,
+            dtype=np.dtype(contract["input_dtype"]),
+            copy=True,
+        ),
+        dtype=contract["input_dtype"],
+    )
+
+    saved_log_probabilities = np.array(
+        log_probabilities, dtype=dtype, copy=True
+    )
+    saved_coefficient = np.array(coefficient, dtype=dtype, copy=True)
+    saved_valid = (
+        None if valid is None else np.array(valid, dtype=np.bool_, copy=True)
+    )
+    saved_selected_weight = (
+        None
+        if selected_weight is None
+        else np.array(selected_weight, dtype=dtype, copy=True)
+    )
+    saved_weight_view = (
+        None
+        if weight_view is None
+        else np.array(weight_view, dtype=dtype, copy=True)
+    )
+
+    def backward(g):
+        upstream = g.data.astype(dtype, copy=False)
+        if contract["reduction"] != "none":
+            upstream = np.broadcast_to(upstream, contract["position_shape"])
+            if contract["reduction"] == "mean":
+                if contract["target_mode"] == "indices":
+                    denominator = (
+                        saved_selected_weight.sum(dtype=dtype)
+                        if contract["has_weight"]
+                        else saved_valid.sum()
+                    )
+                else:
+                    denominator = int(np.prod(contract["position_shape"]))
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    upstream = np.divide(upstream, denominator)
+        upstream = np.expand_dims(
+            upstream,
+            axis=contract["class_axis"],
+        )
+        probabilities = np.empty(contract["input_shape"], dtype=dtype)
+        with np.errstate(over="ignore", invalid="ignore"):
+            np.exp(saved_log_probabilities, out=probabilities)
+        coefficient_sum = saved_coefficient.sum(
+            axis=contract["class_axis"],
+            keepdims=True,
+            dtype=dtype,
+        )
+        np.multiply(probabilities, coefficient_sum, out=probabilities)
+        np.subtract(probabilities, saved_coefficient, out=probabilities)
+        np.multiply(probabilities, upstream, out=probabilities)
+        if saved_valid is not None:
+            invalid = np.broadcast_to(
+                np.expand_dims(
+                    ~saved_valid,
+                    axis=contract["class_axis"],
+                ),
+                contract["input_shape"],
+            )
+            np.copyto(probabilities, 0.0, where=invalid)
+        input_gradient = probabilities.astype(
+            np.dtype(contract["input_dtype"]),
+            copy=probabilities.dtype.name != contract["input_dtype"],
+        )
+        if contract["target_mode"] != "probabilities":
+            return (input_gradient,)
+        if contract["label_smoothing"] == 1.0:
+            target_gradient = np.zeros(contract["target_shape"], dtype=dtype)
+        else:
+            target_gradient = np.empty(contract["target_shape"], dtype=dtype)
+            np.negative(saved_log_probabilities, out=target_gradient)
+            if saved_weight_view is not None:
+                np.multiply(
+                    target_gradient,
+                    saved_weight_view,
+                    out=target_gradient,
+                )
+            if contract["label_smoothing"] != 0.0:
+                np.multiply(
+                    target_gradient,
+                    1.0 - contract["label_smoothing"],
+                    out=target_gradient,
+                )
+            np.multiply(target_gradient, upstream, out=target_gradient)
+        return (
+            input_gradient,
+            target_gradient.astype(
+                np.dtype(contract["target_dtype"]),
+                copy=target_gradient.dtype.name != contract["target_dtype"],
+            ),
+        )
+
+    parents = (
+        (input, target)
+        if contract["target_mode"] == "probabilities"
+        else (input,)
+    )
+    return _build_ctx(out, parents, backward)
+
+
 def _reduce_loss(per_elem: np.ndarray, grad_per_elem: np.ndarray, input_t: Tensor,
                  reduction: str, op_name: str, mean_denom=None) -> Tensor:
     """Shared reduction handler for losses.
@@ -647,6 +1172,7 @@ _BINARY_CROSS_ENTROPY_GRAD_EPSILON = 1e-12
 _BINARY_CROSS_ENTROPY_WITH_LOGITS_WORK_VISIT_FACTOR = 36
 _KL_DIV_WORK_VISIT_FACTOR = 48
 _NLL_LOSS_WORK_VISIT_FACTOR = 32
+_CROSS_ENTROPY_WORK_VISIT_FACTOR = 64
 _SMOOTH_L1_BETA_TYPES = (
     int,
     float,
@@ -1371,7 +1897,6 @@ def scaled_dot_product_attention(query: Tensor, key: Tensor, value: Tensor,
 # drops the suffix for some (cross_entropy, nll, bce_with_logits). Expose
 # both so user code copied from PyTorch tutorials works against the grad
 # namespace without going through install_torch_alias().
-cross_entropy = cross_entropy_loss
 nll = nll_loss
 bce_with_logits = bce_with_logits_loss
 binary_cross_entropy_with_logits = bce_with_logits_loss

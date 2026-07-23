@@ -1,9 +1,39 @@
 class CrossEntropyLoss(Module):
     """Module form of cross_entropy_loss. Matches torch.nn.CrossEntropyLoss."""
-    def forward(self, logits: Tensor, targets) -> Tensor:
-        return F.cross_entropy_loss(logits, targets)
+    def __init__(
+        self,
+        weight=None,
+        size_average=None,
+        ignore_index=-100,
+        reduce=None,
+        reduction="mean",
+        label_smoothing=0.0,
+    ):
+        super().__init__()
+        self.register_buffer("weight", weight)
+        self.ignore_index = ignore_index
+        self.reduction = F._normalize_legacy_loss_reduction(
+            "CrossEntropyLoss",
+            reduction,
+            size_average,
+            reduce,
+        )
+        self.label_smoothing = label_smoothing
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        return F.cross_entropy_loss(
+            input,
+            target,
+            weight=self.weight,
+            ignore_index=self.ignore_index,
+            reduction=self.reduction,
+            label_smoothing=self.label_smoothing,
+        )
     def __repr__(self):
-        return "CrossEntropyLoss()"
+        return (
+            f"CrossEntropyLoss(ignore_index={self.ignore_index}, "
+            f"reduction={self.reduction!r}, "
+            f"label_smoothing={self.label_smoothing})"
+        )
 
 
 class MSELoss(Module):

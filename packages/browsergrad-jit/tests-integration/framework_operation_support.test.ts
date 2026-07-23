@@ -49,6 +49,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.binary-cross-entropy.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.functional.cross-entropy.v1",
+      publicSurface: "torch.nn.functional.cross_entropy",
+      opcode: "CROSS_ENTROPY",
+      semanticState: "typed",
+      shapeContract: "class-axis-logits-loss-with-index-or-probability-target-and-batched-reduction",
+      dtypeContract: "preserve-floating-input-require-index-or-matching-floating-target-and-optional-matching-weight",
+      decisions: {
+        cpu: "supported-numpy-owning-stable-cross-entropy-reduction",
+        closureAutograd: "supported-stable-logits-and-probability-target-gradients",
+        symbolicVjp: "supported-stable-logits-and-probability-target-gradients",
+        functionalGrad: "supported-for-floating-input-and-probability-target-via-symbolic-vjp",
+        vmap: "supported-leading-batch-axis-with-target-mode-class-axis-shift-and-captured-weight",
+        onnxExport: "supported-opset17-softmax-cross-entropy-loss-unmapped-index-profile",
+        tensorPlan: "refused-no-canonical-loss-reduction-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-array",
+      },
+      retiredOpaqueOperationId: "jit.custom.cross-entropy.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.functional.l1-loss.v1",
       publicSurface: "torch.nn.functional.l1_loss",
       opcode: "L1_LOSS",
@@ -698,7 +719,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(32);
+    expect(result.first.operations).toHaveLength(33);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");
@@ -734,7 +755,7 @@ boolean_version["version"]["major"] = True
 
 {
     "duplicate": error(b'{"schema":"a","schema":"b"}'),
-    "oversized": error(b"x" * (32 * 1024 + 1)),
+    "oversized": error(b"x" * (64 * 1024 + 1)),
     "mutable": error(bytearray(b"{}")),
     "extra": error(json.dumps(extra).encode("utf-8")),
     "unknownEnum": error(json.dumps(unknown_enum).encode("utf-8")),
@@ -744,7 +765,7 @@ boolean_version["version"]["major"] = True
 `);
 
     expect(errors.duplicate).toMatch(/^ValueError: .*duplicates field/u);
-    expect(errors.oversized).toMatch(/^ValueError: .*1\.\.32768 bytes/u);
+    expect(errors.oversized).toMatch(/^ValueError: .*1\.\.65536 bytes/u);
     expect(errors.mutable).toMatch(/^ValueError: .*immutable bytes/u);
     expect(errors.extra).toMatch(/^ValueError: .*fields changed/u);
     expect(errors.unknownEnum).toMatch(/^ValueError: .*not registered/u);

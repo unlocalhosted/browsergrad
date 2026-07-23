@@ -365,13 +365,13 @@
       "newUseProhibition": "No new core label or constructor site; only the explicit user-authored kernel API may supply user kernel names.",
       "retirementGate": "Advertised core operations have typed IR plus explicit CPU, VJP, transform, export, and backend decisions.",
       "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-jit@1.0.0",
-      "baselineDecision": "docs/adr/0029-migrate-jit-nll-loss-to-typed-class-index-loss.md",
+      "baselineDecision": "docs/adr/0030-migrate-jit-cross-entropy-to-typed-stable-class-axis-loss.md",
       "freeze": {
         "kind": "jit-op-custom",
         "inventoryFile": "architecture/jit-opaque-operation-inventory.json",
-        "inventorySha256": "bc4e3e7b628924d655b08d11029bd6c3d52c197c8256bacb069831c915efdd17",
+        "inventorySha256": "6aad6d0b89a84ee29e9507f4f320313eaf8b9b01521fd7091c7c14cae8b58355",
         "behaviorFixtureFile": "packages/browsergrad-jit/tests-integration/fixtures/jit-opaque-operation.v0.json",
-        "behaviorFixtureSha256": "14b95a1c5ba2f6e7e95db5bf2d49399789276575603ccec64328a349accc12f4",
+        "behaviorFixtureSha256": "66dfe0474266dee90b97942e2aac6496d73361c8b969f9ffe44e04ed44c3ea81",
         "behaviorFixtureIds": [
           "jit.custom.accelerator-and-constructor-only.v0",
           "jit.custom.all-callback-labels-and-dtypes.v0",
@@ -380,10 +380,10 @@
           "jit.custom.stateful-replay.v0"
         ],
         "behaviorTestFile": "packages/browsergrad-jit/tests-integration/gate0_opaque_operation_contract.test.ts",
-        "behaviorTestSha256": "6e899293e1f51dd54f49600ffdbbd9873102663e5ba2fdad9f6498b04220008f",
+        "behaviorTestSha256": "2276182949d9a9b5d7c78552449b85e8f265d0204dfd4abf3550f3d9de58c9de",
         "constructorCounts": {
           "packages/browsergrad-jit/src/python/_custom_kernel.py": 1,
-          "packages/browsergrad-jit/src/python/_functional.py": 3,
+          "packages/browsergrad-jit/src/python/_functional.py": 2,
           "packages/browsergrad-jit/src/python/_nn.py": 1,
           "packages/browsergrad-jit/src/python/_webnn.py": 1,
           "packages/browsergrad-jit/src/python/index.ts": 2
@@ -396,11 +396,7 @@
             "dynamicOp": []
           },
           "packages/browsergrad-jit/src/python/_functional.py": {
-            "name": [
-              "cross_entropy",
-              "dropout",
-              "interpolate"
-            ],
+            "name": ["dropout", "interpolate"],
             "op": [],
             "dynamicName": [],
             "dynamicOp": []
@@ -426,7 +422,6 @@
         },
         "labels": [
           "batch_norm1d",
-          "cross_entropy",
           "dropout",
           "flash_attention",
           "interpolate",
@@ -444,7 +439,6 @@
           "custom-kernel.builder",
           "embedded.flash-attention",
           "embedded.transformer-block",
-          "functional.cross-entropy",
           "functional.dropout",
           "functional.interpolate",
           "nn.batch-norm-1d-forward",
@@ -452,7 +446,6 @@
         ],
         "operationIds": [
           "jit.custom.batch-norm-1d.v0",
-          "jit.custom.cross-entropy.v0",
           "jit.custom.dropout.v0",
           "jit.custom.flash-attention.v0",
           "jit.custom.interpolate.v0",
@@ -520,7 +513,6 @@
             "builder": ["d854e3eac2368c21f08505f94253c086a0f4ee5611c7227c5350570364b59af0"]
           },
           "packages/browsergrad-jit/src/python/_functional.py": {
-            "cross_entropy": ["e4d4c3ee6dedfd9e5d0e7a7c4ee02468c36ef61bc8c9851486919ee530368401"],
             "dropout": ["d2c4e5933ad2ff32e7a2f3a1ece653c3ba15bc2e0f428fdd0bebecace2f53fac"],
             "interpolate": ["36a841391a32e753815e12ebc3ceedf99a4ef145dcf9c60c2c381d2a8679a326"]
           },
@@ -546,7 +538,7 @@
             "realize_webgpu": ["c8bb56f6665b8071d800ba3c035f97a83cc5c0334d2133315fd024693c91e774"]
           },
           "packages/browsergrad-jit/src/python/_gpu_plan.py": {
-            "build_gpu_execution_plan": ["d8cc29f030cc0faf7541db0bc0f1cbf01cafdfadf7e80b1636d3b22859167846"]
+            "build_gpu_execution_plan": ["a4617f38ad4cdeba8f088f36ef5122c9c031b68d1caa0094dcc2d0703cc4a25f"]
           },
           "packages/browsergrad-jit/src/python/_vjp.py": {
             "get_rule": ["b851b98e25bc8ae27bc0c88b0caf3080e1604f2880ffaea8d0fb3f4100f5e976"],
