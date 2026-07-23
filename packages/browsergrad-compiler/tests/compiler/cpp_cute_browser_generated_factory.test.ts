@@ -31,14 +31,14 @@ it("pins the exact package-owned generated factory without widening its authorit
     source: "reviewed-cached-diagnostic-build-output",
     packageOwned: true,
     exactSourcePinned: true,
-    diagnosticBuildRunId: "30036413179",
+    diagnosticBuildRunId: "30037750529",
     diagnosticBuildSourceRevision:
-      "8d784a5a6f10194cf10621f690ff522cd050396e",
+      "6a9def86c81051b38650359b6f0ff1e33376f407",
     diagnosticBuildWasmSha256:
-      "9645fc7cfba18132d4cd32f2285c9b8b3ea71ea0015e4071e511240d79668f38",
-    diagnosticBuildWasmByteLength: 31_651_665,
+      "318a5063284b368538afbf620906297c0ff7876aca837ea98c6b510baf477775",
+    diagnosticBuildWasmByteLength: 31_651_668,
     diagnosticBuildProjectionSha256:
-      "dadb54ca1239780e4833dafc50b4e6277644d26a7c1277e4b9d7316ffbdcbd46",
+      "167025594d83ee17a932f27b5a0c3f9880869f0f4500437323bce0d2fd7629d0",
     exactDiagnosticFactoryMatch: true,
     exactInterfaceConformance: true,
     cleanBuildVerified: false,
