@@ -9,6 +9,10 @@ contract in the README](README.md#compatibility-contract).
 
 ### Changed
 
+- Removed `bg.kernels.transformer_block`, whose constructor produced an opaque
+  node with no CPU, autograd, portable-plan, or legacy-WebGPU execution path.
+  PRD-012c remains a draft for typed graph-pattern recognition and megakernel
+  lowering; no replacement API implies that capability ships.
 - Removed the constructor-only `bg.experimental.webnn.matmul` spike. It built
   an opaque node that every realizer rejected and could not honestly imply
   WebNN dispatch. `bg.experimental.webnn.is_available` remains narrow presence

@@ -362,21 +362,21 @@
       "newUseProhibition": "No new core label or constructor site; only the explicit user-authored kernel API may supply user kernel names.",
       "retirementGate": "Advertised core operations have typed IR plus explicit CPU, VJP, transform, export, and backend decisions.",
       "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-jit@1.0.0",
-      "baselineDecision": "docs/adr/0034-retire-constructor-only-webnn-matmul.md",
+      "baselineDecision": "docs/adr/0035-retire-constructor-only-transformer-block.md",
       "freeze": {
         "kind": "jit-op-custom",
         "inventoryFile": "architecture/jit-opaque-operation-inventory.json",
-        "inventorySha256": "9ad5eaa27b7c904c1c9a99df308f16b6d76a95290ff5e5b43f222c2204237812",
+        "inventorySha256": "6a521d30028c998fad47c5eb9d90950a872644d65e45299bfca7b337dc0914a3",
         "behaviorFixtureFile": "packages/browsergrad-jit/tests-integration/fixtures/jit-opaque-operation.v0.json",
-        "behaviorFixtureSha256": "9e3ae4da827e8fe8adf513f98a5d331ca999cd2aca0be423b32b8ce218d861cb",
+        "behaviorFixtureSha256": "c1afd539e3836e92c9c4135e4df3b8da6cc3b5a5ae9e812398bb1938941d7a5d",
         "behaviorFixtureIds": [
-          "jit.custom.accelerator-and-constructor-only.v0"
+          "jit.custom.accelerator-and-user-extension.v0"
         ],
         "behaviorTestFile": "packages/browsergrad-jit/tests-integration/gate0_opaque_operation_contract.test.ts",
-        "behaviorTestSha256": "79f20f99bd1e7d0299c04b2d340c4b19cccd3a5987817114af7acdb37f8bf0ec",
+        "behaviorTestSha256": "786a40a288a338289e6eb9ae795eb545d2dfa6acbb0e08c93bc8bcda8c521258",
         "constructorCounts": {
           "packages/browsergrad-jit/src/python/_custom_kernel.py": 1,
-          "packages/browsergrad-jit/src/python/index.ts": 2
+          "packages/browsergrad-jit/src/python/index.ts": 1
         },
         "labelFieldsByFile": {
           "packages/browsergrad-jit/src/python/_custom_kernel.py": {
@@ -387,28 +387,24 @@
           },
           "packages/browsergrad-jit/src/python/index.ts": {
             "name": [],
-            "op": ["flash_attention", "transformer_block"],
+            "op": ["flash_attention"],
             "dynamicName": [],
             "dynamicOp": []
           }
         },
         "labels": [
           "flash_attention",
-          "transformer_block",
           "user"
         ],
         "policyIds": [
-          "constructor-only-forward-only",
           "legacy-webgpu-forward-only"
         ],
         "constructorSiteIds": [
           "custom-kernel.builder",
-          "embedded.flash-attention",
-          "embedded.transformer-block"
+          "embedded.flash-attention"
         ],
         "operationIds": [
           "jit.custom.flash-attention.v0",
-          "jit.custom.transformer-block.v0",
           "jit.custom.user.v0"
         ],
         "originalOperationIds": [
@@ -453,6 +449,7 @@
           "jit.custom.webnn-matmul.v0"
         ],
         "removedUnsupportedSurfaceOperationIds": [
+          "jit.custom.transformer-block.v0",
           "jit.custom.webnn-matmul.v0"
         ],
         "decisionSourceDefinitions": [
@@ -477,8 +474,7 @@
             "TensorProxy.backward": ["1da373743a463164ce02511e2ff37dba438853e2597018e855fe90d9834d4167"]
           },
           "packages/browsergrad-jit/src/python/index.ts": {
-            "flash_attention": ["c1fcd493d55d90b099de084b494bd28a115f6c7165ef234fa2a4791294a76b2f"],
-            "transformer_block": ["af3c982ef1706a6fa741ef9bbacd2b003a31f4848839541fee229fab84600f11"]
+            "flash_attention": ["c1fcd493d55d90b099de084b494bd28a115f6c7165ef234fa2a4791294a76b2f"]
           },
           "packages/browsergrad-jit/src/python/_realize.py": {
             "_h_custom": ["dc1657e72eb8abadccd86a63e85f596550698d512dd71b9cccc759b6aa78690d"]

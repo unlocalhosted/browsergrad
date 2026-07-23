@@ -14,6 +14,13 @@
 
 ---
 
+> **Current implementation note (2026-07-23):** This PRD remains a draft.
+> PRD-012a/012b shipped narrower tiled-GEMM, fusion, and cost-model substrate,
+> but the PRD-012c transformer-block pattern, code generator, execution route,
+> and benchmark acceptance criteria below are not implemented. ADR-0035
+> removed the former `bg.kernels.transformer_block` constructor because it
+> only created an opaque node that no backend could execute.
+
 ## TL;DR
 
 PRD-006 cut dispatch count by ~35–50% on transformer-shaped workloads through two narrow patterns: linear elementwise chains and per-row softmax / layernorm. The remaining bottleneck is not dispatch count — it is **DRAM bandwidth**. A standard attention block touching a (B=4, H=12, S=512, D=64) Q/K/V tensor moves ~150 MB through global memory per forward pass on the unfused-megakernel path, against a WebGPU FP32 peak bandwidth ceiling on M2-class hardware of ~80 GB/s ([nuss-and-bolts.com WGSL matmul](https://www.nuss-and-bolts.com/p/optimizing-a-webgpu-matmul-kernel), reporting ~17% peak achieved). PRD-012 attacks bandwidth directly: it generalises fusion from "consecutive cheap ops" to **producer-consumer fusion across matmul boundaries with workgroup-shared tiles**, **cross-block fusion** that swallows attention + residual + layernorm + FFN into a single dispatch, **Flash-Attention-v2-style tiled attention** with online softmax in workgroup memory ([arXiv:2205.14135](https://arxiv.org/abs/2205.14135), [arXiv:2307.08691](https://arxiv.org/abs/2307.08691)), and **forward+backward joint fusion** that stashes activations in workgroup memory rather than DRAM when the working set fits. The pipeline emits megakernels gated by a cost model that respects WebGPU's `maxComputeWorkgroupStorageSize` (default 16384 bytes per [GPUSupportedLimits](https://gpuweb.github.io/gpuweb/#gpusupportedlimits)) and falls back to PRD-006 kernels when limits are exceeded. Tile sizes are autotuned by sweeping `(BM, BN, BK)` over a small grid and cached per-shape in OPFS via PRD-008. The target is a transformer training step within 25% of native PyTorch on M2-class hardware — the 1/4-of-native ceiling claim from VISION.md §3.6 — without regressing the 1e-3 numerical tolerance established by PRD-007. Implementation budget: 10 weeks.

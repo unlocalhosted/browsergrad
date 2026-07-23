@@ -346,42 +346,6 @@ def gpu_plan_summary(tensor, *, allow_custom=False):
     )
 
 
-# bg.kernels.transformer_block — opt-in megakernel constructor (PRD-012c).
-# Forward-only; user explicitly opts in via this constructor. Builds an
-# OP_CUSTOM tagged "transformer_block". This is constructor-only today:
-# neither current realizer dispatches it and no automatic decomposition or
-# fallback exists.
-def transformer_block(x, w_qkv, w_o, w_ff1, w_ff2, *, num_heads=8, eps=1e-5):
-    """Single transformer block: LayerNorm -> Attention -> Residual ->
-    LayerNorm -> FFN -> Residual. Forward only.
-
-    Shapes:
-        x: (B, S, D) — input activations
-        w_qkv: (D, 3*D) — fused Q/K/V projection
-        w_o: (D, D) — output projection
-        w_ff1: (D, 4*D), w_ff2: (4*D, D) — FFN
-    Returns: (B, S, D)
-    """
-    if x.ndim != 3:
-        raise TypeError(
-            f"bg.kernels.transformer_block: x must be (B, S, D); got {x.shape}"
-        )
-    B, S, D = x.shape
-    arg = {
-        "op": "transformer_block",
-        "b": int(B), "s": int(S), "d": int(D),
-        "num_heads": int(num_heads),
-        "eps": float(eps),
-    }
-    from ._ir import UOp, OP_CUSTOM
-    uop = UOp(op=OP_CUSTOM,
-              inputs=(x._uop, w_qkv._uop, w_o._uop, w_ff1._uop, w_ff2._uop),
-              shape=(B, S, D), dtype=x.dtype, arg=arg)
-    return TensorProxy(uop, session=x._get_session(), requires_grad=False)
-
-kernels.transformer_block = transformer_block
-
-
 # bg.realize_webgpu — explicit-realize entry point (PRD-011.5).
 # Mirrors the .numpy() trigger but routes through the WebGPU bridge
 # instead of the NumPy realizer. Raises if no bridge is registered.

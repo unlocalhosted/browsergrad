@@ -189,8 +189,11 @@ lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. ADR-0034 also
 removes the constructor-only `bg.experimental.webnn.matmul` surface rather
 than silently substituting ordinary matmul for nonexistent WebNN execution.
-The opaque baseline is therefore narrowed to 3 constructor calls and 3
-operations under ADR-0002 and ADR-0004 through ADR-0034. Flip now emits typed `FLIP` with one strictly
+ADR-0035 removes the similarly non-executable
+`bg.kernels.transformer_block` constructor rather than implying that the draft
+PRD-012c megakernel exists. The opaque baseline is therefore narrowed to 2
+constructor calls and 2 operations under ADR-0002 and ADR-0004 through
+ADR-0035. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -609,9 +612,9 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 3 still-opaque, thirty-five typed retirements, and one removed
-unsupported surface. ADR-0003 records this public contract and ADR-0034 records
-the unsupported-surface classification. The table currently covers typed migrations only;
+opaque IDs into 2 still-opaque, thirty-five typed retirements, and two removed
+unsupported surfaces. ADR-0003 records this public contract; ADR-0034 and
+ADR-0035 record the unsupported-surface classifications. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.
 

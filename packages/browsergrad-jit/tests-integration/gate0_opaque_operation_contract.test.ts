@@ -26,7 +26,7 @@ describe("Gate 0 JIT opaque-operation contract", () => {
     await clearNamespace(await getJitTarget());
   });
 
-  it("separates accelerator-only routes from constructor-only labels", async () => {
+  it("separates the accelerator route from the user extension", async () => {
     const target = await getJitTarget();
     const result = await target.run<Record<string, unknown>>(`
 import browsergrad_jit as bg
@@ -55,13 +55,6 @@ user_builder = bg.custom_kernel(
 )
 user = user_builder(q)
 
-x = bg.from_numpy(np.ones((1, 2, 4), dtype=np.float32))
-w_qkv = bg.from_numpy(np.ones((4, 12), dtype=np.float32))
-w_o = bg.from_numpy(np.ones((4, 4), dtype=np.float32))
-w_ff1 = bg.from_numpy(np.ones((4, 16), dtype=np.float32))
-w_ff2 = bg.from_numpy(np.ones((16, 4), dtype=np.float32))
-transformer = bg.kernels.transformer_block(x, w_qkv, w_o, w_ff1, w_ff2, num_heads=1)
-
 class RouteBridge:
     def flash_attention(self, *args):
         return "flash-ok"
@@ -71,20 +64,17 @@ class RouteBridge:
 bridge = RouteBridge()
 flash_vt = {id(node): f"flash-{i}" for i, node in enumerate(flash._uop.inputs)}
 user_vt = {id(node): f"user-{i}" for i, node in enumerate(user._uop.inputs)}
-transformer_vt = {id(node): f"transformer-{i}" for i, node in enumerate(transformer._uop.inputs)}
-
-nodes = [flash, transformer, user]
+nodes = [flash, user]
 {
     "labels": [node._uop.arg["op"] for node in nodes],
     "requiresGrad": [node.requires_grad for node in nodes],
     "cpuErrors": [error_name(node.numpy) for node in nodes],
     "flashLegacyRoute": _h_custom(flash._uop, flash_vt, None, bridge, None),
     "userLegacyRoute": _h_custom(user._uop, user_vt, None, bridge, None),
-    "transformerLegacyError": error_name(lambda: _h_custom(transformer._uop, transformer_vt, None, bridge, None)),
     "functionalDisconnectedGradient": bg.func.grad(lambda value: bg.kernels.flash_attention(value, k, v).sum())(q).numpy().reshape(-1).tolist(),
 }
 `);
-    expect(result).toEqual(expected("jit.custom.accelerator-and-constructor-only.v0"));
+    expect(result).toEqual(expected("jit.custom.accelerator-and-user-extension.v0"));
   });
 
 });

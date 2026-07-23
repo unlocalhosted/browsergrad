@@ -3,14 +3,13 @@
   "adapterId": "jit.core-custom-ops.v0",
   "cases": [
     {
-      "id": "jit.custom.accelerator-and-constructor-only.v0",
+      "id": "jit.custom.accelerator-and-user-extension.v0",
       "expected": {
-        "labels": ["flash_attention", "transformer_block", "user"],
-        "requiresGrad": [false, false, false],
-        "cpuErrors": ["RealizationError", "RealizationError", "RealizationError"],
+        "labels": ["flash_attention", "user"],
+        "requiresGrad": [false, false],
+        "cpuErrors": ["RealizationError", "RealizationError"],
         "flashLegacyRoute": "flash-ok",
         "userLegacyRoute": "user-ok",
-        "transformerLegacyError": "JitNotImplementedError",
         "functionalDisconnectedGradient": [0, 0, 0, 0, 0, 0, 0, 0]
       }
     }

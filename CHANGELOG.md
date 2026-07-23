@@ -14,6 +14,9 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Removes the constructor-only `bg.kernels.transformer_block` placeholder. It
+  produced an opaque node with no executable backend or autograd contract;
+  PRD-012c remains an unimplemented typed graph/codegen design.
 - Begins Gate 6 framework convergence by migrating JIT `Tensor.expand` from an
   opaque callback to typed `BROADCAST_TO` across CPU, autograd, transforms,
   export, planning, and resident WebGPU bridge paths. Grad eager expand now

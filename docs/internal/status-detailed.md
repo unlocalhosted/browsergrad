@@ -271,7 +271,7 @@ Current status across the 16 PRDs:
 | 001-010 | ✅ Shipped (see PROGRESS.md) |
 | 011 (WebNN) | ⏳ Draft backend. Only `bg.experimental.webnn.is_available` presence detection exists; ADR-0034 removed the non-executable matmul constructor. |
 | 011.5 (WGSL realizer seam) | ✅ Shipped |
-| 012 (megakernels) | ✅ Split: PRD-012a (tiled GEMM + fused codegen + CAST) shipped. PRD-012b (cost model + producer-consumer detection) shipped at `bg.jit.cost_model.*`. PRD-012c (transformer_block megakernel constructor) shipped at `bg.kernels.transformer_block(...)`. |
+| 012 (megakernels) | ⏳ Split: PRD-012a (tiled GEMM + fused codegen + CAST) and PRD-012b (cost model + producer-consumer detection) shipped. PRD-012c remains a draft; ADR-0035 removed its non-executable constructor placeholder. |
 | 013 (lab platform) | ✅ Shipped |
 | 014 (functional transforms) | ✅ Shipped — `grad`, `vjp`, `functional_call`, full `vmap` with 17 active rules + explicit refusal stubs for random, masking, custom ops, CNN primitives/backward roots, STORE, and optimizer-update roots. `vmap(grad(fn))` composition works. |
 | 015 (custom WGSL) | ✅ Shipped |
@@ -287,6 +287,6 @@ Current status across the 16 PRDs:
 | **torch.cuda.\*, torch.compile, torch.fx** | Out of scope for `install_torch_alias`. Raises `AttributeError`. |
 | **Cross-browser WGSL compile-error line/column parsing** | Vendor diagnostic formats differ; ship raw browser messages and call it honest. |
 | **vmap of RANDOM** | Needs PRNG key splits (JAX-style PRNGKey). Refuses with clear message; user can hand-write a key-split pattern. |
-| **`transformer_block`** | Constructor builds an `OP_CUSTOM` UOp that every realizer currently rejects. |
+| **`transformer_block`** | Not exposed. PRD-012c remains a draft until typed recognition/codegen and actual execution evidence exist. |
 
 When any of these become blocking for a real consumer, file an issue against the relevant PRD doc and we'll revisit.

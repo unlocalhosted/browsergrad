@@ -2,7 +2,7 @@
  * Tests for the previously-deferred PRDs that landed:
  *   - PRD-011 (WebNN presence detection, behind bg.experimental.webnn)
  *   - PRD-012b (cost model + producer-consumer pairs)
- *   - PRD-012c (transformer_block megakernel constructor)
+ *   - PRD-012c (removed constructor-only transformer-block placeholder)
  *   - PRD-014b (remaining vmap rules + refusal stubs)
  */
 
@@ -115,49 +115,19 @@ bg.jit.cost_model.cost_stats(y._uop)
   });
 });
 
-describe("PRD-012c transformer_block megakernel constructor", () => {
+describe("PRD-012c transformer-block surface", () => {
   beforeAll(async () => { await getJitTarget(); }, 120_000);
   beforeEach(async () => { await clearNamespace(await getJitTarget()); });
 
-  it("builds an OP_CUSTOM('transformer_block') UOp", async () => {
+  it("does not advertise the removed constructor-only placeholder", async () => {
     const target = await getJitTarget();
-    const r = await target.run<{ op: string; arg_op: string; shape: number[] }>(`
+    const r = await target.run<{ hasTransformerBlock: boolean }>(`
 import browsergrad_jit as bg
-import numpy as np
-B, S, D = 2, 16, 64
-x = bg.from_numpy(np.zeros((B, S, D), dtype=np.float32))
-w_qkv = bg.from_numpy(np.zeros((D, 3 * D), dtype=np.float32))
-w_o = bg.from_numpy(np.zeros((D, D), dtype=np.float32))
-w_ff1 = bg.from_numpy(np.zeros((D, 4 * D), dtype=np.float32))
-w_ff2 = bg.from_numpy(np.zeros((4 * D, D), dtype=np.float32))
-
-y = bg.kernels.transformer_block(x, w_qkv, w_o, w_ff1, w_ff2, num_heads=4)
 {
-    "op": y._uop.op,
-    "arg_op": y._uop.arg["op"],
-    "shape": list(y._uop.shape),
+    "hasTransformerBlock": hasattr(bg.kernels, "transformer_block"),
 }
 `);
-    expect(r.op).toBe("CUSTOM");
-    expect(r.arg_op).toBe("transformer_block");
-    expect(r.shape).toEqual([2, 16, 64]);
-  });
-
-  it("refuses non-3D inputs", async () => {
-    const target = await getJitTarget();
-    const err = await target.run<string>(`
-import browsergrad_jit as bg
-import numpy as np
-x = bg.from_numpy(np.zeros((16, 64), dtype=np.float32))  # 2-D
-w = bg.from_numpy(np.zeros((64, 192), dtype=np.float32))
-try:
-    bg.kernels.transformer_block(x, w, w, w, w)
-    result = "no_error"
-except TypeError as e:
-    result = str(e)
-result
-`);
-    expect(err).toMatch(/\(B, S, D\)/);
+    expect(r).toEqual({ hasTransformerBlock: false });
   });
 });
 
