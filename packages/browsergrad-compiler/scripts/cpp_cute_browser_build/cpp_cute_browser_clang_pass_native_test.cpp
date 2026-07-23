@@ -179,7 +179,7 @@ int main() {
   BG_CHECK(accepted_work.completed_semantic_passes == 2U);
 
   constexpr std::string_view macro_include_source =
-      "#define BG_HEADER \"dependency.h\"\n"
+      "#define BG_HEADER \"nested/../dependency.h\"\n"
       "#include BG_HEADER\n"
       "namespace cute {\n"
       "template <auto Value> struct C {};\n"

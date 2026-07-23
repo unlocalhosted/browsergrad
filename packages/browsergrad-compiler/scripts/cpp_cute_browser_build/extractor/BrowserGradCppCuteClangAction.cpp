@@ -26,6 +26,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 
+#include <array>
 #include <charconv>
 #include <limits>
 #include <memory>
@@ -463,7 +464,18 @@ class IncludeObservationCallbacks final : public clang::PPCallbacks {
     edge.kind = is_angled ? ImportedVfsIncludeKind::kSourceAngle
                           : ImportedVfsIncludeKind::kSourceQuote;
     edge.including_file_path = including_file.str();
-    edge.resolved_file_path = resolved_file.str();
+    std::array<char, kCppCuteMaximumVirtualPathByteLength>
+        canonical_resolved_file{};
+    std::size_t canonical_resolved_file_size = 0U;
+    if (!cpp_cute_normalize_virtual_path(
+            std::string_view(resolved_file.data(), resolved_file.size()),
+            canonical_resolved_file.data(), canonical_resolved_file.size(),
+            canonical_resolved_file_size)) {
+      edge.resolved_file_path = resolved_file.str();
+    } else {
+      edge.resolved_file_path.assign(
+          canonical_resolved_file.data(), canonical_resolved_file_size);
+    }
     edge.spelling = file_name.str();
     edge.directive_start_byte_offset = begin;
     edge.directive_end_byte_offset = end;
