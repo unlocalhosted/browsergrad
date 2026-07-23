@@ -63,7 +63,15 @@ describe("browser header-source plan", () => {
         buildStageId: "clang-extractor-wasm",
         llvmTargetsToBuild: "WebAssembly",
         clangEnableHlsl: "OFF",
-        generatedVirtualPaths: [],
+        generatedVirtualPaths: ["__clang_cuda_runtime_wrapper.h"],
+        generatedHeaderProfiles: [{
+          virtualPath: "__clang_cuda_runtime_wrapper.h",
+          profile:
+            "browsergrad.compiler.cpp-cute.clang-cuda-runtime-wrapper.cuda-12.6-libcxx-x86_64@1",
+          upstreamSha256:
+            "877d48f0f311943eacdef11807c1935108c7d9b083da6974b764a97c478648bc",
+          upstreamByteLength: "18624",
+        }],
         omittedSourceVirtualPaths: ["CMakeLists.txt"],
       },
     });

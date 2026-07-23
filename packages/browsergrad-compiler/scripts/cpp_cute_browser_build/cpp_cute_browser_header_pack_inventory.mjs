@@ -21,6 +21,11 @@ import {
   requireCppCuteBrowserHeaderSourceExtractionAuthority,
 } from "./cpp_cute_browser_header_source_extraction.mjs";
 import {
+  CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_PROFILE,
+  CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_VIRTUAL_PATH,
+  materializeCppCuteBrowserClangCudaRuntimeWrapper,
+} from "./cpp_cute_browser_clang_cuda_runtime_wrapper.mjs";
+import {
   CPP_CUTE_BROWSER_LIBCXX_CONFIG_SITE_PROFILE,
   CPP_CUTE_BROWSER_LIBCXX_MODULE_MAP_PROFILE,
   materializeCppCuteBrowserLibcxxConfigSite,
@@ -282,10 +287,20 @@ export async function inventoryCppCuteBrowserExtractedHeaderSources(extraction) 
         )) {
           continue;
         }
+        const configuredClangHeader = materializeConfiguredClangResourceHeader(
+          selection.configuredResourceOutput,
+          file,
+          virtualPath,
+          bytes,
+          `$.extraction.archives.${source.sourceId}.${selection.includeRootId}`,
+        );
         const expected = Object.freeze({
           virtualPath,
-          contentSha256: file.contentSha256,
-          byteLength: file.byteLength,
+          contentSha256:
+            configuredClangHeader?.configuredSha256 ?? file.contentSha256,
+          byteLength: configuredClangHeader === undefined
+            ? file.byteLength
+            : String(configuredClangHeader.bytes.byteLength),
           licenseComponentIds: Object.freeze([...selection.licenseComponentIds]),
         });
         const prior = group.filesByPath.get(virtualPath);
@@ -313,6 +328,9 @@ export async function inventoryCppCuteBrowserExtractedHeaderSources(extraction) 
           sourceId: source.sourceId,
           includeRootId: selection.includeRootId,
           relativePath: file.relativePath,
+          ...(configuredClangHeader === undefined
+            ? {}
+            : { derivedProfile: configuredClangHeader.profile }),
           expected,
         }));
         if (source.sourceId === "llvm-project" &&
@@ -540,13 +558,75 @@ function finalizeInventory(input) {
   return manifest;
 }
 
+function materializeConfiguredClangResourceHeader(
+  policy,
+  file,
+  virtualPath,
+  bytes,
+  diagnosticPath,
+) {
+  if (policy === undefined ||
+      virtualPath !== CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_VIRTUAL_PATH) {
+    return undefined;
+  }
+  const profile = configuredClangResourceHeaderProfile(policy, diagnosticPath);
+  if (file.contentSha256 !== profile.upstreamSha256 ||
+      file.byteLength !== profile.upstreamByteLength) {
+    invalid(
+      diagnosticPath,
+      "configured Clang CUDA wrapper input differs from its exact profile",
+    );
+  }
+  let configured;
+  try {
+    configured = materializeCppCuteBrowserClangCudaRuntimeWrapper(bytes);
+  } catch (cause) {
+    invalid(
+      diagnosticPath,
+      "failed to configure the exact Clang CUDA runtime wrapper",
+      { cause },
+    );
+  }
+  if (configured.profile !== profile.profile ||
+      configured.templateSha256 !== profile.upstreamSha256) {
+    invalid(
+      diagnosticPath,
+      "configured Clang CUDA wrapper transform differs from its exact profile",
+    );
+  }
+  return configured;
+}
+
+function configuredClangResourceHeaderProfile(policy, diagnosticPath) {
+  if (!Array.isArray(policy.generatedVirtualPaths) ||
+      policy.generatedVirtualPaths.length !== 1 ||
+      policy.generatedVirtualPaths[0] !==
+        CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_VIRTUAL_PATH ||
+      !Array.isArray(policy.generatedHeaderProfiles) ||
+      policy.generatedHeaderProfiles.length !== 1) {
+    invalid(diagnosticPath, "configured Clang resource header set is malformed");
+  }
+  const profile = policy.generatedHeaderProfiles[0];
+  if (profile.virtualPath !==
+        CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_VIRTUAL_PATH ||
+      profile.profile !== CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_PROFILE ||
+      typeof profile.upstreamSha256 !== "string" ||
+      !SHA256.test(profile.upstreamSha256) ||
+      typeof profile.upstreamByteLength !== "string" ||
+      !/^[1-9][0-9]*$/u.test(profile.upstreamByteLength)) {
+    invalid(diagnosticPath, "configured Clang resource header profile is malformed");
+  }
+  return profile;
+}
+
 function isConfiguredResourceOutputOmission(policy, file, diagnosticPath) {
   if (policy === undefined || !policy.omittedSourceVirtualPaths.includes(file.relativePath)) {
     return false;
   }
   const manifest = policy.upstreamBuildManifest;
+  configuredClangResourceHeaderProfile(policy, diagnosticPath);
   if (file.relativePath !== manifest.virtualPath || file.contentSha256 !== manifest.sha256 ||
-      file.byteLength !== manifest.byteLength || policy.generatedVirtualPaths.length !== 0 ||
+      file.byteLength !== manifest.byteLength ||
       policy.llvmTargetsToBuild !== "WebAssembly" || policy.clangEnableHlsl !== "OFF") {
     invalid(diagnosticPath, "configured Clang resource output omission is not exact");
   }
@@ -612,12 +692,17 @@ export async function copyCppCuteBrowserHeaderPackInventorySourceFile(
         ? materializeCppCuteBrowserLibcxxConfigSite(bytes)
         : source.derivedProfile === CPP_CUTE_BROWSER_LIBCXX_MODULE_MAP_PROFILE
           ? materializeCppCuteBrowserLibcxxModuleMap(bytes)
-          : undefined;
-      if (configured === undefined) invalid("$.virtualPath", "configured libc++ source profile changed");
+          : source.derivedProfile ===
+              CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_PROFILE
+            ? materializeCppCuteBrowserClangCudaRuntimeWrapper(bytes)
+            : undefined;
+      if (configured === undefined) {
+        invalid("$.virtualPath", "configured header source profile changed");
+      }
       if (configured.profile !== source.derivedProfile ||
           configured.bytes.byteLength !== Number(source.expected.byteLength) ||
           configured.configuredSha256 !== source.expected.contentSha256) {
-        invalid("$.virtualPath", "configured libc++ inventory source bytes changed");
+        invalid("$.virtualPath", "configured inventory source bytes changed");
       }
       return configured.bytes;
     }

@@ -196,7 +196,7 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
   const vfsInstallation = await installCppCuteBrowserVfs(assetSet);
   expect(vfsInstallation).toMatchObject({
     packCount: 5,
-    fileCount: 5_771,
+    fileCount: 5_788,
   });
 
   const independentWasmConformance =

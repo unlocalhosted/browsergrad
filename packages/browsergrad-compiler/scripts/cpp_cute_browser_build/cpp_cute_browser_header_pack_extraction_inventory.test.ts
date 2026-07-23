@@ -46,6 +46,10 @@ import {
   inventoryCppCuteBrowserExtractedHeaderSources,
 } from "./cpp_cute_browser_header_pack_inventory.mjs";
 import {
+  CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_PROFILE,
+  materializeCppCuteBrowserClangCudaRuntimeWrapper,
+} from "./cpp_cute_browser_clang_cuda_runtime_wrapper.mjs";
+import {
   materializeCppCuteBrowserLibcxxConfigSite,
   materializeCppCuteBrowserLibcxxModuleMap,
 } from "./cpp_cute_browser_libcxx_config_site.mjs";
@@ -64,12 +68,17 @@ describe("extracted header-source inventory", () => {
     const configuredModuleBytes =
       materializeCppCuteBrowserLibcxxModuleMap(moduleTemplateBytes).bytes;
     const assertionHandlerBytes = Buffer.from("// assertion handler\n", "utf8");
+    const configuredClangWrapperBytes =
+      materializeCppCuteBrowserClangCudaRuntimeWrapper(
+        Buffer.from(clangWrapperFixture(), "utf8"),
+      ).bytes;
     expect(inventory.totals).toEqual({
       packCount: 5,
       sourceCount: 9,
-      fileCount: 12,
+      fileCount: 13,
       fileContentByteLength: String(
         91 +
+        configuredClangWrapperBytes.byteLength +
         templateBytes.byteLength +
         configuredBytes.byteLength +
         moduleTemplateBytes.byteLength +
@@ -80,7 +89,15 @@ describe("extracted header-source inventory", () => {
     expect(inventory.packs.find(({ includeRootId }) => includeRootId === "cuda"))
       .toMatchObject({ fileCount: 2, fileContentByteLength: "26" });
     expect(inventory.packs.find(({ includeRootId }) => includeRootId === "clang-resource"))
-      .toMatchObject({ fileCount: 1, files: [expect.objectContaining({ virtualPath: "stddef.h" })] });
+      .toMatchObject({
+        fileCount: 2,
+        files: [
+          expect.objectContaining({
+            virtualPath: "__clang_cuda_runtime_wrapper.h",
+          }),
+          expect.objectContaining({ virtualPath: "stddef.h" }),
+        ],
+      });
     expect(inventory.claims.generatedClangResourceHeadersComplete).toBe(true);
     expect(inventory.claims.configuredLibcxxHeaderComplete).toBe(true);
     expect(Buffer.from(await copyCppCuteBrowserHeaderPackInventorySourceFile(
@@ -108,6 +125,11 @@ describe("extracted header-source inventory", () => {
       "cuda",
       "curand_mtgp32_kernel.h",
     )).toString("utf8")).toBe("curand-header\n");
+    expect(Buffer.from(await copyCppCuteBrowserHeaderPackInventorySourceFile(
+      inventory,
+      "clang-resource",
+      "__clang_cuda_runtime_wrapper.h",
+    )).toString("utf8")).toContain("#define _ALLOW_UNSUPPORTED_LIBCPP 1");
 
     extraction.fixtureContents.set(
       key("cuda-cccl-linux-x86-64", "cuda", "cuda.h"),
@@ -153,6 +175,12 @@ interface FixtureExtraction {
         llvmTargetsToBuild: string;
         clangEnableHlsl: string;
         generatedVirtualPaths: readonly string[];
+        generatedHeaderProfiles: readonly [{
+          virtualPath: string;
+          profile: string;
+          upstreamSha256: string;
+          upstreamByteLength: string;
+        }];
         omittedSourceVirtualPaths: readonly string[];
       };
     }>;
@@ -212,6 +240,13 @@ async function fixtureExtraction(): Promise<FixtureExtraction> {
   );
   setFile(extraction, "cutlass", "cutlass", "cute/tensor.hpp", "cute-header\n");
   setFile(extraction, "llvm-project", "clang-resource", "CMakeLists.txt", "fixture-cmake\n");
+  setFile(
+    extraction,
+    "llvm-project",
+    "clang-resource",
+    "__clang_cuda_runtime_wrapper.h",
+    clangWrapperFixture(),
+  );
   setFile(extraction, "llvm-project", "clang-resource", "stddef.h", "clang-header\n");
   setFile(extraction, "llvm-project", "cxx-stdlib", "vector", "libcxx-header\n");
   setFile(
@@ -335,7 +370,10 @@ function selectionPolicy(includeRootId: string) {
     "clang-resource": {
       intendedAsset: "compiler-resource-pack",
       licenseComponentIds: ["clang"],
-      configuredResourceOutput: configuredResourceOutput("fixture-cmake\n"),
+      configuredResourceOutput: configuredResourceOutput(
+        "fixture-cmake\n",
+        clangWrapperFixture(),
+      ),
     },
     cuda: {
       intendedAsset: "dependency-header-pack:cuda",
@@ -359,8 +397,9 @@ function selectionPolicy(includeRootId: string) {
   return policy;
 }
 
-function configuredResourceOutput(value: string) {
+function configuredResourceOutput(value: string, wrapper: string) {
   const bytes = Buffer.from(value, "utf8");
+  const wrapperBytes = Buffer.from(wrapper, "utf8");
   return {
     upstreamBuildManifest: {
       virtualPath: "CMakeLists.txt",
@@ -370,9 +409,38 @@ function configuredResourceOutput(value: string) {
     buildStageId: "clang-extractor-wasm",
     llvmTargetsToBuild: "WebAssembly",
     clangEnableHlsl: "OFF",
-    generatedVirtualPaths: [] as const,
+    generatedVirtualPaths: ["__clang_cuda_runtime_wrapper.h"] as const,
+    generatedHeaderProfiles: [{
+      virtualPath: "__clang_cuda_runtime_wrapper.h",
+      profile: CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_PROFILE,
+      upstreamSha256: createHash("sha256").update(wrapperBytes).digest("hex"),
+      upstreamByteLength: String(wrapperBytes.byteLength),
+    }] as const,
     omittedSourceVirtualPaths: ["CMakeLists.txt"] as const,
   };
+}
+
+function clangWrapperFixture(): string {
+  return [
+    "#ifndef __CLANG_CUDA_RUNTIME_WRAPPER_H__",
+    "#define __CLANG_CUDA_RUNTIME_WRAPPER_H__",
+    "",
+    "#if defined(__CUDA__) && defined(__clang__)",
+    '#pragma push_macro("__host__")',
+    "#define __host__ UNEXPECTED_HOST_ATTRIBUTE",
+    '#pragma push_macro("__USE_FAST_MATH__")',
+    '#pragma pop_macro("__USE_FAST_MATH__")',
+    "#define __host__",
+    "#undef __CUDABE__",
+    '#pragma pop_macro("__host__")',
+    '#pragma push_macro("uint3")',
+    '#pragma pop_macro("uint3")',
+    '#pragma pop_macro("__USE_FAST_MATH__")',
+    '#pragma pop_macro("__CUDA_INCLUDE_COMPILER_INTERNAL_HEADERS__")',
+    "#endif // __CUDA__",
+    "#endif // __CLANG_CUDA_RUNTIME_WRAPPER_H__",
+    "",
+  ].join("\n");
 }
 
 function setFile(

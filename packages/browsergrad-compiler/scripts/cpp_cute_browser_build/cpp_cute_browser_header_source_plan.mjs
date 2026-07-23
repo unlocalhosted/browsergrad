@@ -8,6 +8,12 @@ import {
   decodeCppCuteBrowserBuildInputLock,
   unwrapPreparedCppCuteBrowserBuildInputLock,
 } from "../../dist/cpp_cute_browser_build_lock.js";
+import {
+  CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_PROFILE,
+  CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_UPSTREAM_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_UPSTREAM_SHA256,
+  CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_VIRTUAL_PATH,
+} from "./cpp_cute_browser_clang_cuda_runtime_wrapper.mjs";
 
 export const CPP_CUTE_BROWSER_HEADER_SOURCE_PLAN_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-header-source-plan";
@@ -398,7 +404,20 @@ function bindConfiguredResourceOutputPolicy(archives, buildLockBody) {
     buildStageId: stage.stageId,
     llvmTargetsToBuild: "WebAssembly",
     clangEnableHlsl: "OFF",
-    generatedVirtualPaths: Object.freeze([]),
+    generatedVirtualPaths: Object.freeze([
+      CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_VIRTUAL_PATH,
+    ]),
+    generatedHeaderProfiles: Object.freeze([
+      Object.freeze({
+        virtualPath:
+          CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_VIRTUAL_PATH,
+        profile: CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_PROFILE,
+        upstreamSha256:
+          CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_UPSTREAM_SHA256,
+        upstreamByteLength:
+          CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_UPSTREAM_BYTE_LENGTH,
+      }),
+    ]),
     omittedSourceVirtualPaths: Object.freeze([CLANG_RESOURCE_CMAKE_MANIFEST.virtualPath]),
   });
   return archives.map((archive) => Object.freeze({
@@ -712,7 +731,20 @@ function validateConfiguredResourceOutput(value, diagnosticPath) {
       value.upstreamBuildManifest !== CLANG_RESOURCE_CMAKE_MANIFEST ||
       value.buildStageId !== "clang-extractor-wasm" ||
       value.llvmTargetsToBuild !== "WebAssembly" || value.clangEnableHlsl !== "OFF" ||
-      !Array.isArray(value.generatedVirtualPaths) || value.generatedVirtualPaths.length !== 0 ||
+      !Array.isArray(value.generatedVirtualPaths) ||
+      value.generatedVirtualPaths.length !== 1 ||
+      value.generatedVirtualPaths[0] !==
+        CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_VIRTUAL_PATH ||
+      !Array.isArray(value.generatedHeaderProfiles) ||
+      value.generatedHeaderProfiles.length !== 1 ||
+      value.generatedHeaderProfiles[0]?.virtualPath !==
+        CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_VIRTUAL_PATH ||
+      value.generatedHeaderProfiles[0]?.profile !==
+        CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_PROFILE ||
+      value.generatedHeaderProfiles[0]?.upstreamSha256 !==
+        CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_UPSTREAM_SHA256 ||
+      value.generatedHeaderProfiles[0]?.upstreamByteLength !==
+        CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_UPSTREAM_BYTE_LENGTH ||
       !Array.isArray(value.omittedSourceVirtualPaths) ||
       value.omittedSourceVirtualPaths.length !== 1 ||
       value.omittedSourceVirtualPaths[0] !== CLANG_RESOURCE_CMAKE_MANIFEST.virtualPath) {

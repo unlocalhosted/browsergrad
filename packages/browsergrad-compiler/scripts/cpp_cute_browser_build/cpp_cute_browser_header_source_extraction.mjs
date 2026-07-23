@@ -18,6 +18,12 @@ import {
   parseCppCuteBrowserHeaderSourceArchiveArguments,
   requireCppCuteBrowserHeaderSourceArchiveAuthority,
 } from "./cpp_cute_browser_header_source_archive_admission.mjs";
+import {
+  CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_PROFILE,
+  CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_UPSTREAM_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_UPSTREAM_SHA256,
+  CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_VIRTUAL_PATH,
+} from "./cpp_cute_browser_clang_cuda_runtime_wrapper.mjs";
 import { prepareCppCuteBrowserHeaderSourcePlan } from "./cpp_cute_browser_header_source_plan.mjs";
 
 export const CPP_CUTE_BROWSER_HEADER_SOURCE_EXTRACTION_SCHEMA =
@@ -348,19 +354,44 @@ function verifyConfiguredResourceOutput(policy, observed, diagnosticPath) {
   if (policy === undefined) return;
   if (policy.buildStageId !== "clang-extractor-wasm" ||
       policy.llvmTargetsToBuild !== "WebAssembly" || policy.clangEnableHlsl !== "OFF" ||
-      !Array.isArray(policy.generatedVirtualPaths) || policy.generatedVirtualPaths.length !== 0 ||
+      !Array.isArray(policy.generatedVirtualPaths) ||
+      policy.generatedVirtualPaths.length !== 1 ||
+      policy.generatedVirtualPaths[0] !==
+        CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_VIRTUAL_PATH ||
+      !Array.isArray(policy.generatedHeaderProfiles) ||
+      policy.generatedHeaderProfiles.length !== 1 ||
       !Array.isArray(policy.omittedSourceVirtualPaths) ||
       policy.omittedSourceVirtualPaths.length !== 1) {
     invalid(diagnosticPath, "configured Clang resource-output policy is malformed");
   }
+  const generatedProfile = policy.generatedHeaderProfiles[0];
+  if (generatedProfile.virtualPath !==
+        CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_VIRTUAL_PATH ||
+      generatedProfile.profile !==
+        CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_PROFILE ||
+      generatedProfile.upstreamSha256 !==
+        CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_UPSTREAM_SHA256 ||
+      generatedProfile.upstreamByteLength !==
+        CPP_CUTE_BROWSER_CLANG_CUDA_RUNTIME_WRAPPER_UPSTREAM_BYTE_LENGTH) {
+    invalid(diagnosticPath, "configured Clang resource header profile differs");
+  }
   const manifest = observed.files.find(
     ({ relativePath }) => relativePath === policy.upstreamBuildManifest.virtualPath,
+  );
+  const generatedInput = observed.files.find(
+    ({ relativePath }) => relativePath === generatedProfile.virtualPath,
   );
   if (manifest === undefined ||
       manifest.contentSha256 !== policy.upstreamBuildManifest.sha256 ||
       manifest.byteLength !== policy.upstreamBuildManifest.byteLength ||
-      policy.omittedSourceVirtualPaths[0] !== manifest.relativePath) {
-    invalid(diagnosticPath, "configured Clang resource build manifest differs from the exact plan");
+      policy.omittedSourceVirtualPaths[0] !== manifest.relativePath ||
+      generatedInput === undefined ||
+      generatedInput.contentSha256 !== generatedProfile.upstreamSha256 ||
+      generatedInput.byteLength !== generatedProfile.upstreamByteLength) {
+    invalid(
+      diagnosticPath,
+      "configured Clang resource inputs differ from the exact plan",
+    );
   }
 }
 
