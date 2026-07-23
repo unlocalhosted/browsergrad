@@ -119,6 +119,7 @@ try {
   for (const exportName of [
     "BrowsergradError",
     "assignmentRequirementDefinitions",
+    "createProgramCapabilitySupportView",
     "createAssignmentRequirementResolutionEnvironment",
     "createSession",
     "isSemverCompatible",
@@ -144,6 +145,7 @@ try {
   assert(semanticCorePkg.exports?.["./kernel"], "semantic-core package missing ./kernel export");
   assert(semanticCorePkg.exports?.["./schedule"], "semantic-core package missing ./schedule export");
   assert(semanticCorePkg.exports?.["./requirement"], "semantic-core package missing ./requirement export");
+  assert(semanticCorePkg.exports?.["./capability"], "semantic-core package missing ./capability export");
   const densePermutationFixtureExport = "./fixtures/kernel-v1/dense-permutation-view-copy.cases.json";
   assert(
     semanticCorePkg.exports?.[densePermutationFixtureExport] === densePermutationFixtureExport,
@@ -162,6 +164,8 @@ try {
     "dist/schedule.d.ts",
     "dist/requirement.js",
     "dist/requirement.d.ts",
+    "dist/capability.js",
+    "dist/capability.d.ts",
     "python/browsergrad_semantic_core.py",
     "fixtures/layout-v1/row-major-rank2.input.json",
     "fixtures/layout-v1/symbolic-byte-rank3.input.json",
@@ -194,6 +198,7 @@ try {
   const semanticKernel = await import(pathToFileURL(join(semanticCore, "dist/kernel.js")));
   const semanticSchedule = await import(pathToFileURL(join(semanticCore, "dist/schedule.js")));
   const semanticRequirement = await import(pathToFileURL(join(semanticCore, "dist/requirement.js")));
+  const semanticCapability = await import(pathToFileURL(join(semanticCore, "dist/capability.js")));
   for (const exportName of ["canonicalizeJson", "hashSemanticArtifact", "SCHEDULE_DIAGNOSTIC_CODES", "validateWireEnvelope"]) {
     assert(exportName in semanticSchema, `semantic-core schema export missing ${exportName}`);
   }
@@ -234,6 +239,13 @@ try {
     "createAssignmentRequirementResolution",
   ]) {
     assert(exportName in semanticRequirement, `semantic-core requirement export missing ${exportName}`);
+  }
+  for (const exportName of [
+    "createLoweringDecision",
+    "createSemanticBackendDefinition",
+    "createSemanticCapabilityDefinition",
+  ]) {
+    assert(exportName in semanticCapability, `semantic-core capability export missing ${exportName}`);
   }
   const packedLogicalGemm = await semanticKernel.createVerifiedDenseLogicalGemmTileArtifacts({
     m: "16",
@@ -1249,6 +1261,7 @@ import {
   assignmentRequirementDefinitions,
   createAssignmentRequirementResolutionEnvironment,
   createAssignmentRunPlan,
+  createProgramCapabilitySupportView,
   createSession,
   isSemverCompatible,
   parseManifest,
@@ -1284,6 +1297,21 @@ const plan = createAssignmentRunPlan({
   datasets: [],
 }, requirementEnvironment);
 if (!plan.ok || plan.requirementResolutions?.[0]?.requirementId !== "pyodide" || plan.requirementResolutions[0].status !== "available") throw new Error("packed runtime direct requirement consumer invalid");
+const support = createProgramCapabilitySupportView({
+  viewId: "browsergrad.support.release-consumer",
+  subject: {
+    kind: "program",
+    programId: "browsergrad.program.release-consumer",
+  },
+  decisions: [{
+    capabilityId: "browsergrad.layout.index-map",
+    backendId: "browsergrad.compiler.semantic-reference",
+    executionTier: "semantic-reference",
+    state: "supported",
+    preservationLevel: "observable-equivalent",
+  }],
+});
+if (support.decisions.length !== 1 || support.decisions[0].state !== "supported") throw new Error("packed runtime program capability view invalid");
 if (!isSemverCompatible("^0.1.0", runtimePackage.version)) throw new Error("packed runtime semver export invalid");
 const parsed = parseManifest({
   id: "release-consumer",

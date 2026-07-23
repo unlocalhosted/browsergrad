@@ -690,6 +690,25 @@ The table currently covers typed migrations only; completing the remaining
 operation families and making runtime/profile UI consume these records remain
 Gate 6 work.
 
+ADR-0047 and ADR-0048 now make the separate assignment-requirement model
+executable. Semantic-core `/requirement` definitions are generated for all 53
+registered profile requirements, and runtime consumes complete provider-bound
+environments directly through run-plan, preflight, handoff, external-runner,
+matrix, and JavaScript profile paths while retaining the relevant resolution
+records. Definition presence alone never grants availability.
+
+ADR-0049 adds the program-scoped half of the support model. Semantic-core
+`/capability` now owns immutable capability/backend definitions and lowering
+decisions bound to one canonical program ID or semantic artifact hash. Runtime
+generates the one current capability and three registered backend definitions
+from the architecture vocabulary and constructs support views only from actual
+decisions for that subject. Positive decisions require a registered
+preservation level; conditional decisions retain exact feature, limit, or
+runtime-guard requirements; refusals cannot claim preservation. Static
+definitions and environment requirement resolutions therefore cannot become
+program-support claims. Generated cross-framework/platform views and terminal
+execution evidence remain separate work.
+
 Browser asset manifest v1.4 now binds one build-signature predicate, exact
 trust-store digest, and canonical builder allowlist into the profile-pinned
 asset-set identity. One strict DSSE/in-toto verifier rebinds a valid P-256

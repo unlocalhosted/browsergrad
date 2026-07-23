@@ -9,6 +9,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Generated semantic capability/backend definitions and deterministic
+  program-support views built only from actual program- or artifact-scoped
+  lowering decisions. Static vocabulary records never imply support, and
+  unknown or duplicate capability/backend decisions fail closed.
 - Provider-bound assignment requirement resolution environments generated from
   the architecture vocabulary. Every known definition resolves exactly once;
   availability requires one explicit provider/mode/evidence record, and a

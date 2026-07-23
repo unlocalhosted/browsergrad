@@ -1,7 +1,7 @@
 {
   "name": "@unlocalhosted/browsergrad-semantic-core",
   "version": "0.3.0",
-  "description": "Versioned BrowserGrad semantic schemas, canonical wire formats, and verified layout, kernel, schedule, and requirement protocols.",
+  "description": "Versioned BrowserGrad semantic schemas, canonical wire formats, and verified layout, kernel, schedule, capability, and requirement protocols.",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -29,6 +29,10 @@
     "./requirement": {
       "types": "./dist/requirement.d.ts",
       "import": "./dist/requirement.js"
+    },
+    "./capability": {
+      "types": "./dist/capability.d.ts",
+      "import": "./dist/capability.js"
     },
     "./fixtures/kernel-v1/dense-permutation-view-copy.cases.json": "./fixtures/kernel-v1/dense-permutation-view-copy.cases.json",
     "./package.json": "./package.json"

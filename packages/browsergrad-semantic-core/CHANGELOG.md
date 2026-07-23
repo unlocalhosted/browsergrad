@@ -9,6 +9,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Explicit `/capability` export with immutable versioned semantic capability
+  and backend definitions plus program/artifact-scoped lowering decisions.
+  Positive decisions require a registered preservation level; conditional
+  decisions retain exact feature, limit, and runtime-guard requirements;
+  refusals cannot claim preservation. Static definitions contain no support or
+  evidence outcome.
 - Explicit `/requirement` export with immutable versioned assignment
   requirement definitions and environment-scoped available/unavailable
   resolutions. Availability requires one named provider, one closed provider

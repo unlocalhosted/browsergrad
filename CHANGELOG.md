@@ -14,6 +14,11 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Adds the semantic-core `/capability` protocol and a generated runtime
+  registry for the current semantic capability and three registered backends.
+  Runtime program-support views require actual program- or artifact-scoped
+  lowering decisions; definitions, requirement availability, and test paths
+  cannot become support claims by themselves.
 - Adds the semantic-core `/requirement` protocol and a generated runtime
   registry for all 53 assignment requirements. Runtime environments now retain
   exact provider, mode, and evidence bindings; known definitions remain

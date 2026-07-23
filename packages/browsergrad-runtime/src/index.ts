@@ -61,6 +61,17 @@ export type {
 export { BrowsergradError } from "./types.js";
 export { createSession } from "./client.js";
 
+export {
+  PROGRAM_CAPABILITY_SUPPORT_VIEW_SCHEMA,
+  PROGRAM_CAPABILITY_SUPPORT_VIEW_SCHEMA_VERSION,
+  createProgramCapabilitySupportView,
+  semanticBackendDefinitions,
+  semanticCapabilityDefinitions,
+  type ProgramCapabilitySupportView,
+  type ProgramCapabilitySupportViewInput,
+  type ProgramLoweringDecisionRecord,
+} from "./program-capabilities.js";
+
 // Lab manifest + semver gate. For platforms that ship versioned content
 // units and want to refuse mismatched runtime pins at boot.
 export {

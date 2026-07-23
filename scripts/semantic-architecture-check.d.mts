@@ -77,6 +77,11 @@ export function validateAssignmentRequirementRegistrySource(
   vocabulary: unknown,
 ): string[];
 
+export function validateProgramCapabilityRegistrySource(
+  source: string,
+  vocabulary: unknown,
+): string[];
+
 export function checkFrozenCompilerPointerScalarMemorySource(
   typescript: typeof ts,
   source: string,

@@ -699,6 +699,7 @@
         "typesFile": "packages/browsergrad-runtime/src/assignment-types.ts",
         "vocabularyFile": "architecture/platform-vocabulary.json",
         "registryFile": "packages/browsergrad-runtime/src/assignment-requirement-registry.generated.ts",
+        "programRegistryFile": "packages/browsergrad-runtime/src/program-capability-registry.generated.ts",
         "usageInventoryFile": "architecture/assignment-requirement-usage.generated.json",
         "profileDirectory": "docs/internal",
         "profileSuffix": ".profile.json",

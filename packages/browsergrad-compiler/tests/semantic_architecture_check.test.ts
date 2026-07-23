@@ -25,6 +25,7 @@ import {
   validateJitOpaqueOperationInventory,
   validateAssignmentRequirementRegistrySource,
   validatePlatformVocabularySnapshot,
+  validateProgramCapabilityRegistrySource,
   validateSemanticFreezeManifest,
   validateSemanticArchitectureDeclarationParity,
   validateSharedSemanticFixtureContracts,
@@ -282,6 +283,46 @@ describe("semantic architecture guardrails", () => {
     expect(
       validateAssignmentRequirementRegistrySource(registrySource, duplicated),
     ).toContainEqual(expect.stringContaining("duplicate assignment requirement"));
+  });
+
+  it("rejects generated program capability registry drift", () => {
+    const registrySource = readFileSync(
+      join(
+        repoRoot,
+        "packages/browsergrad-runtime/src/program-capability-registry.generated.ts",
+      ),
+      "utf8",
+    );
+    const vocabulary = JSON.parse(
+      readFileSync(
+        join(repoRoot, "architecture/platform-vocabulary.json"),
+        "utf8",
+      ),
+    ) as {
+      semanticCapabilities: unknown[];
+      backends: unknown[];
+    };
+
+    expect(
+      validateProgramCapabilityRegistrySource(registrySource, vocabulary),
+    ).toEqual([]);
+    expect(
+      validateProgramCapabilityRegistrySource(
+        registrySource.replace(
+          '"backendId": "browsergrad.kernels.webgpu"',
+          '"backendId": "browsergrad.kernels.mutated"',
+        ),
+        vocabulary,
+      ),
+    ).toContainEqual(expect.stringContaining("registry is stale"));
+
+    const duplicated = structuredClone(vocabulary);
+    duplicated.backends.push(duplicated.backends[0]);
+    expect(
+      validateProgramCapabilityRegistrySource(registrySource, duplicated),
+    ).toContainEqual(
+      expect.stringContaining("duplicate platform vocabulary ID"),
+    );
   });
 
   it("rejects runtime readiness consumers that drop resolution records", () => {

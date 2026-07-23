@@ -1,9 +1,9 @@
 # `@unlocalhosted/browsergrad-semantic-core`
 
 Versioned `0.x` package for BrowserGrad's canonical semantic wire format,
-value/layout model, kernel/schedule meaning, and requirement protocol. The API
-remains intentionally narrow and unstable while the schemas prove themselves
-across two frontends and two backends.
+value/layout model, kernel/schedule meaning, and capability/requirement
+protocols. The API remains intentionally narrow and unstable while the schemas
+prove themselves across two frontends and two backends.
 
 Only explicit subpaths exist:
 
@@ -11,6 +11,7 @@ Only explicit subpaths exist:
 - `@unlocalhosted/browsergrad-semantic-core/layout`
 - `@unlocalhosted/browsergrad-semantic-core/kernel`
 - `@unlocalhosted/browsergrad-semantic-core/schedule`
+- `@unlocalhosted/browsergrad-semantic-core/capability`
 - `@unlocalhosted/browsergrad-semantic-core/requirement`
 
 There is no root barrel. The package must remain browser-safe and cannot import
@@ -24,6 +25,13 @@ one provider ID, one closed browser/simulated/external mode, and a deterministic
 evidence-ID set. An unavailable resolution carries no invented provider or
 evidence. The protocol records readiness facts only; it owns no semantic
 lowering or backend policy.
+
+`/capability` separates immutable semantic/backend definitions from
+program-or-artifact-scoped lowering decisions. A positive decision must name a
+backend-owned execution tier and a capability-owned preservation level;
+conditional decisions must retain their exact feature, limit, or runtime-guard
+requirements. Refusal/unknown records require a reason and cannot claim
+preservation. Static definitions contain no support state or evidence outcome.
 
 `/kernel` currently contains one concrete `browsergrad.kernel@1` operation: a
 verified, materializing view copy over a verified `browsergrad.layout@1`

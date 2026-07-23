@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildAssignmentRequirementRegistrySource } from "./assignment-requirement-registry.mjs";
+import { buildProgramCapabilityRegistrySource } from "./program-capability-registry.mjs";
 
 const defaultRepoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -306,6 +307,26 @@ export function validateAssignmentRequirementRegistrySource(
   } catch (error) {
     failures.push(
       `cannot generate assignment requirement registry: ${errorMessage(error)}`,
+    );
+  }
+  return failures;
+}
+
+export function validateProgramCapabilityRegistrySource(
+  source,
+  vocabulary,
+) {
+  const failures = [];
+  try {
+    const expected = buildProgramCapabilityRegistrySource(vocabulary);
+    if (source !== expected) {
+      failures.push(
+        "generated program capability registry is stale; run pnpm architecture:generate-requirements",
+      );
+    }
+  } catch (error) {
+    failures.push(
+      `cannot generate program capability registry: ${errorMessage(error)}`,
     );
   }
   return failures;
@@ -1841,6 +1862,12 @@ function checkRuntimeAssignmentRequirements(root, ts, freeze, failures) {
   const typesFile = resolveManifestFile(root, freeze.typesFile, "typesFile", failures);
   const vocabularyFile = resolveManifestFile(root, freeze.vocabularyFile, "vocabularyFile", failures);
   const registryFile = resolveManifestFile(root, freeze.registryFile, "registryFile", failures);
+  const programRegistryFile = resolveManifestFile(
+    root,
+    freeze.programRegistryFile,
+    "programRegistryFile",
+    failures,
+  );
   const behaviorFixture = resolveManifestFile(root, freeze.behaviorFixtureFile, "behaviorFixtureFile", failures);
   const usageInventoryFile = resolveManifestFile(root, freeze.usageInventoryFile, "usageInventoryFile", failures);
   const profileDirectory = resolveManifestFile(root, freeze.profileDirectory, "profileDirectory", failures);
@@ -1856,7 +1883,7 @@ function checkRuntimeAssignmentRequirements(root, ts, freeze, failures) {
       resolutionConsumerSources[consumer.file] = fs.readFileSync(file, "utf8");
     }
   }
-  if ([definitionFile, typesFile, vocabularyFile, registryFile, behaviorFixture, usageInventoryFile, profileDirectory].some((value) => value === undefined)) return;
+  if ([definitionFile, typesFile, vocabularyFile, registryFile, programRegistryFile, behaviorFixture, usageInventoryFile, profileDirectory].some((value) => value === undefined)) return;
 
   failures.push(...checkFrozenRuntimeAssignmentRequirementsSource(
     ts,
@@ -1895,6 +1922,10 @@ function checkRuntimeAssignmentRequirements(root, ts, freeze, failures) {
   const vocabulary = readJson(vocabularyFile, failures);
   failures.push(...validateAssignmentRequirementRegistrySource(
     fs.readFileSync(registryFile, "utf8"),
+    vocabulary,
+  ));
+  failures.push(...validateProgramCapabilityRegistrySource(
+    fs.readFileSync(programRegistryFile, "utf8"),
     vocabulary,
   ));
   validatePlatformVocabulary(root, vocabulary, profileIds, freeze.browserMappings, failures);
