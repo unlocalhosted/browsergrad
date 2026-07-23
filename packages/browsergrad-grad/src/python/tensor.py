@@ -1538,8 +1538,21 @@ class Tensor:
         return int(self.data.size)
 
     def contiguous(self) -> "Tensor":
-        """Compatibility no-op; does not make non-contiguous storage contiguous."""
-        return self
+        """Return self for C-contiguous storage, otherwise an owning C-order copy."""
+        if self.data.flags.c_contiguous:
+            return self
+        source_dtype = self.data.dtype
+        out = Tensor(
+            np.array(self.data, dtype=source_dtype, order="C", copy=True),
+            dtype=source_dtype,
+        )
+        return _build_ctx(
+            out,
+            (self,),
+            lambda gradient: (
+                np.asarray(gradient.data, dtype=source_dtype),
+            ),
+        )
 
     def flatten(self, start_dim: int = 0, end_dim: int = -1) -> "Tensor":
         """Merge dims from start_dim to end_dim into one. Matches torch.Tensor.flatten."""

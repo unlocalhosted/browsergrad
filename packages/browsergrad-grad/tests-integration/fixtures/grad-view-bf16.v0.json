@@ -224,12 +224,35 @@
       }
     },
     {
-      "id": "grad.materialization.contiguous-noncontiguous-noop.v0",
+      "id": "grad.materialization.contiguous-copy.v1",
+      "expected": {
+        "sameObject": false,
+        "sharesMemory": false,
+        "cContiguousBefore": false,
+        "cContiguousAfter": true,
+        "requiresGrad": true,
+        "graphEdge": true,
+        "parentIdentity": true,
+        "sourceMutationVisible": false,
+        "resultMutationVisible": false,
+        "backwardGradient": [[1, 1], [1, 1], [1, 1]]
+      }
+    },
+    {
+      "id": "grad.materialization.contiguous-identity.v1",
       "expected": {
         "sameObject": true,
-        "cContiguousBefore": false,
-        "cContiguousAfter": false,
+        "cContiguous": true,
         "graphPreserved": true
+      }
+    },
+    {
+      "id": "grad.materialization.contiguous-float16-copy.v1",
+      "expected": {
+        "sharesMemory": false,
+        "sourceDtype": "float16",
+        "resultDtype": "float16",
+        "cContiguous": true
       }
     },
     {

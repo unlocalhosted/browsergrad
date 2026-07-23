@@ -602,6 +602,11 @@ other dtype requests instead of ignoring `dtype`. Real
 bfloat16 remains unsupported until distinct storage, rounding, conversion,
 serialization, and backend contracts exist. Remaining Grad convergence is
 view/materialization and conversion behavior, not bfloat16 relabeling.
+ADR-0038 fixes the first remaining view/materialization boundary:
+`Tensor.contiguous()` preserves identity only for already C-contiguous storage;
+otherwise it returns an owning C-order, dtype-preserving copy with an
+identity-gradient edge. `contiguous().view(...)` therefore no longer depends
+on an implicit later reshape copy.
 
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
@@ -2669,8 +2674,8 @@ keeps `torch.bfloat16` distinct from float32, and rejects construction or
 conversion before allocation. It also records the remaining NumPy-dependent
 dtype fallback, the supported alias registry, Tensor versus torch constructor
 defaults, conditional reshape/index aliasing, copying expand/detach/numpy
-behavior, live NumPy array-protocol exposure, `contiguous()` as a
-non-materializing compatibility no-op, and cross-dtype `to()` graph
+behavior, live NumPy array-protocol exposure, conditional dtype-preserving
+`contiguous()` identity/materialization, and cross-dtype `to()` graph
 detachment.
 
 ### Adapter ledger
@@ -2685,7 +2690,7 @@ all five.
 | `cute_static_layout` parser path | Compiler | Existing parser integration and pinned regression fixtures only. | No new spellings, ranks, queries, or call sites. | Pinned real frontend handles its fixtures through layout semantics. | Compiler `1.0.0`. |
 | `TensorGpuPlan` shape-only/f32 assumptions | Kernels | Existing JIT plan serializer and kernels executor/bridge only. | No new operation, dtype, view, offset, or alias semantics may enter this schema. | New view/dtype features enter through shared schemas; plan has no unique semantics. | Kernels `1.0.0`. |
 | JIT `OP_CUSTOM` extension boundary | JIT | Explicit user-authored kernel code only; no embedded legacy framework wrappers remain. | No new core labels or constructor sites; only explicitly user-authored kernel IDs may extend. | Advertised core operations have typed IR, CPU/VJP decisions, and backend decisions; this gate is met, while the intentional extension boundary remains fail-closed. | JIT `1.0.0`. |
-| Eager view/materialization compatibility | Grad | Existing Tensor/torch compatibility adapters only where accurately documented; bfloat16 substitution has no permitted caller. | No new API may claim view aliasing or bf16 storage through these paths. | View/alias fixtures agree or reject; bfloat16 is already rejected until real storage/conversion exists. | Grad `1.0.0`. |
+| Eager view/materialization compatibility | Grad | Existing detach, conversion, and NumPy-interop adapters only where accurately documented; bfloat16 substitution and non-contiguous no-op have no permitted caller. | No new API may claim view aliasing or bf16 storage through these paths. | Remaining detach/conversion/interop fixtures agree or reject; bfloat16 and contiguous behavior already meet their narrowed contracts. | Grad `1.0.0`. |
 | `flashAttentionDirect` name | Kernels | Existing public export and realizer compatibility call only. | New APIs and docs use the accurate row-wise online-softmax name. | Real block-tiled implementation is proven and a normal major-removal window passes. | Kernels `1.0.0`. |
 | Generic runtime backend labels | Runtime | Existing assignment requirement compatibility mapping only. | New readiness features use canonical requirement definitions/resolutions; semantic lowering uses capability decisions only where an explicit link exists. | All readiness UI consumes requirement resolutions and program-specific lowering records. | Runtime `1.0.0`. |
 

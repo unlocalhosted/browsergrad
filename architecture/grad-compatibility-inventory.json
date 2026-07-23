@@ -313,25 +313,27 @@
       ]
     },
     {
-      "id": "grad.materialization.contiguous-noop.v0",
+      "id": "grad.materialization.contiguous.v1",
       "surface": "Tensor.contiguous()",
       "class": "materialization",
       "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
+      "targetConformance": "pytorch-compatible",
       "referenceContract": "pytorch-shaped-compatibility",
       "dtypeEffect": "preserves",
-      "condition": "all-inputs",
+      "condition": "input-layout-dependent",
       "failurePolicy": "no-dedicated-failure-path",
-      "aliasing": "same-object",
-      "contiguity": "preserved",
-      "materialization": "none",
-      "autograd": "preserved",
-      "truth": "contiguous() returns self even when the backing NumPy array is non-contiguous; the name does not guarantee contiguous storage.",
+      "aliasing": "conditional",
+      "contiguity": "contiguous",
+      "materialization": "conditional",
+      "autograd": "identity-or-graph-edge",
+      "truth": "contiguous() returns self for C-contiguous storage; otherwise it returns an independent owning C-order copy with preserved dtype and an identity-gradient edge.",
       "sourceDefinitions": [
         "tensor.py:Tensor.contiguous"
       ],
       "fixtureCaseIds": [
-        "grad.materialization.contiguous-noncontiguous-noop.v0"
+        "grad.materialization.contiguous-copy.v1",
+        "grad.materialization.contiguous-float16-copy.v1",
+        "grad.materialization.contiguous-identity.v1"
       ]
     },
     {

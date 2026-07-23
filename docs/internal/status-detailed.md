@@ -292,6 +292,8 @@ Current status across the 16 PRDs:
 Eager Grad now rejects `bf16`/`bfloat16` before allocation instead of renaming
 float32 storage. `torch.bfloat16` remains a distinct unsupported token;
 `nn.Linear` and `nn.Embedding` enforce their exact float32 parameter profile.
+`Tensor.contiguous()` preserves identity only for C-contiguous storage;
+otherwise it creates an owning C-order copy with dtype-preserving backward.
 | **Primitive/WebGPU ConvTranspose in `browsergrad-jit`** | Lazy `browsergrad-jit` now has primitive Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward IR with CPU handlers, symbolic VJPs, and generic tensor-plan WebGPU lowering. |
 | **torch.cuda.\*, torch.compile, torch.fx** | Out of scope for `install_torch_alias`. Raises `AttributeError`. |
 | **Cross-browser WGSL compile-error line/column parsing** | Vendor diagnostic formats differ; ship raw browser messages and call it honest. |

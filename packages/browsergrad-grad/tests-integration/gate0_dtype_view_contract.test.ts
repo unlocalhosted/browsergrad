@@ -275,12 +275,52 @@ cases["grad.view.basic-slice-int64-alias-preserves-dtype.v1"] = {
     "resultDtype": int64_slice.dtype,
 }
 
-contiguous_result = transposed_for_reshape.contiguous()
-cases["grad.materialization.contiguous-noncontiguous-noop.v0"] = {
-    "sameObject": bool(contiguous_result is transposed_for_reshape),
-    "cContiguousBefore": bool(transposed_for_reshape.data.flags.c_contiguous),
+contiguous_source = grad.Tensor(
+    np.arange(6, dtype=np.float32).reshape(2, 3).T,
+    dtype="float32",
+    requires_grad=True,
+)
+contiguous_result = contiguous_source.contiguous()
+contiguous_source.data[0, 0] = 17.0
+contiguous_source_mutation_visible = float(contiguous_result.data[0, 0]) == 17.0
+contiguous_result.data[1, 0] = 19.0
+contiguous_result_mutation_visible = float(contiguous_source.data[1, 0]) == 19.0
+contiguous_result.sum().backward()
+cases["grad.materialization.contiguous-copy.v1"] = {
+    "sameObject": bool(contiguous_result is contiguous_source),
+    "sharesMemory": bool(np.shares_memory(contiguous_source.data, contiguous_result.data)),
+    "cContiguousBefore": bool(contiguous_source.data.flags.c_contiguous),
     "cContiguousAfter": bool(contiguous_result.data.flags.c_contiguous),
-    "graphPreserved": bool(contiguous_result._ctx is transposed_for_reshape._ctx),
+    "requiresGrad": bool(contiguous_result.requires_grad),
+    "graphEdge": bool(contiguous_result._ctx is not None),
+    "parentIdentity": bool(contiguous_result._ctx[0][0] is contiguous_source),
+    "sourceMutationVisible": bool(contiguous_source_mutation_visible),
+    "resultMutationVisible": bool(contiguous_result_mutation_visible),
+    "backwardGradient": contiguous_source.grad.tolist(),
+}
+contiguous_identity_source = grad.Tensor(
+    np.arange(6, dtype=np.float32).reshape(2, 3),
+    requires_grad=True,
+)
+contiguous_identity = contiguous_identity_source.contiguous()
+cases["grad.materialization.contiguous-identity.v1"] = {
+    "sameObject": bool(contiguous_identity is contiguous_identity_source),
+    "cContiguous": bool(contiguous_identity.data.flags.c_contiguous),
+    "graphPreserved": bool(contiguous_identity._ctx is contiguous_identity_source._ctx),
+}
+float16_contiguous_source = grad.Tensor(
+    np.arange(6, dtype=np.float16).reshape(2, 3).T,
+    dtype="float16",
+)
+float16_contiguous = float16_contiguous_source.contiguous()
+cases["grad.materialization.contiguous-float16-copy.v1"] = {
+    "sharesMemory": bool(np.shares_memory(
+        float16_contiguous_source.data,
+        float16_contiguous.data,
+    )),
+    "sourceDtype": float16_contiguous_source.dtype,
+    "resultDtype": float16_contiguous.dtype,
+    "cContiguous": bool(float16_contiguous.data.flags.c_contiguous),
 }
 
 detached = base.detach()

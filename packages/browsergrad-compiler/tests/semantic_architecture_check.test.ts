@@ -232,12 +232,18 @@ describe("semantic architecture guardrails", () => {
       gradFreeze,
     )).toContainEqual(expect.stringContaining("Grad torch dtype tokens changed"));
     expect(checkFrozenGradCompatibilitySources(
-      tensorSource.replace('        return self\n\n    def flatten', '        return Tensor(self.data.copy())\n\n    def flatten'),
+      tensorSource.replace(
+        "        if self.data.flags.c_contiguous:",
+        "        if True:",
+      ),
       torchCompatSource,
       gradFreeze,
     )).toContainEqual(expect.stringContaining("Tensor.contiguous changed"));
     expect(checkFrozenGradCompatibilitySources(
-      tensorSource.replace('"""Compatibility no-op; does not make non-contiguous storage contiguous."""', '"""Equivalent compatibility wording."""'),
+      tensorSource.replace(
+        '"""Return self for C-contiguous storage, otherwise an owning C-order copy."""',
+        '"""Equivalent compatibility wording."""',
+      ),
       torchCompatSource,
       gradFreeze,
     )).toEqual([]);

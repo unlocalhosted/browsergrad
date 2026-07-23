@@ -435,7 +435,7 @@ export function validateGradCompatibilityInventory(inventory, fixture, freeze, f
   const aliasing = new Set(["conditional", "must-alias", "must-not-alias", "not-applicable", "same-object"]);
   const contiguity = new Set(["contiguous", "input-dependent", "not-applicable", "preserved"]);
   const materialization = new Set(["always", "conditional", "none", "not-applicable"]);
-  const autograd = new Set(["constructor-policy", "detached", "graph-edge", "not-applicable", "preserved"]);
+  const autograd = new Set(["constructor-policy", "detached", "graph-edge", "identity-or-graph-edge", "not-applicable", "preserved"]);
   const behaviorIds = [];
   const referencedFixtureIds = [];
   const referencedSourceDefinitions = [];

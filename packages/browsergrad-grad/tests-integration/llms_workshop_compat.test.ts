@@ -343,7 +343,7 @@ x = torch.randn(3, 4, 5)
 describe("Tensor.contiguous", () => {
   beforeAll(reset);
 
-  it("is a no-op that preserves shape (multi-head view pattern)", async () => {
+  it("materializes before view in the multi-head reshape pattern", async () => {
     const r = await target.run<{ shape: number[] }>(`
 ${PRELUDE}
 x = torch.randn(2, 4, 8)

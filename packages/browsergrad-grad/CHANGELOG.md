@@ -9,6 +9,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- `Tensor.contiguous()` now returns self only for already C-contiguous storage.
+  Non-contiguous inputs produce an independent owning C-order copy with exact
+  dtype preservation and an identity-gradient edge, so
+  `transpose(...).contiguous().view(...)` no longer relies on an implicit
+  later reshape copy.
 - `bf16`, `bfloat16`, and `torch.bfloat16` no longer silently allocate and
   compute as float32. The torch token remains distinct, while tensor
   construction, `Tensor.to`, and parameter construction fail before

@@ -14,6 +14,9 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Makes Grad `Tensor.contiguous()` truthful: already C-contiguous tensors keep
+  identity, while non-contiguous tensors produce an owning C-order,
+  dtype-preserving copy with an identity-gradient edge.
 - Removes Grad's silent `bf16`/`bfloat16` to float32 substitution.
   `torch.bfloat16` is now a distinct unsupported token, and tensor,
   conversion, and parameter-construction paths reject it before allocation.
