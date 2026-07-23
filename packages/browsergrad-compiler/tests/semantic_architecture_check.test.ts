@@ -295,6 +295,33 @@ describe("semantic architecture guardrails", () => {
       gradFreeze,
     )).toContainEqual(expect.stringContaining("Tensor.cuda changed"));
     expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace(
+        'return self.data.astype(target_dtype, order="K", copy=True)',
+        'return self.data.astype(target_dtype, order="K", copy=False)',
+      ),
+      torchCompatSource,
+      torchCompatLimitedSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("Tensor._numpy_snapshot changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace(
+        "if copy is False:",
+        "if False:",
+      ),
+      torchCompatSource,
+      torchCompatLimitedSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("Tensor.__array__ changed"));
+    expect(checkFrozenGradCompatibilitySources(
+      tensorSource.replace(
+        "if arr.dtype.name not in _EAGER_STORAGE_DTYPES:",
+        "if False:",
+      ),
+      torchCompatSource,
+      torchCompatLimitedSource,
+      gradFreeze,
+    )).toContainEqual(expect.stringContaining("tensor.py:from_numpy changed"));
+    expect(checkFrozenGradCompatibilitySources(
       tensorSource.replace("if _GRAD_ENABLED and any(p.requires_grad for p in parents):", "if True and any(p.requires_grad for p in parents):"),
       torchCompatSource,
       torchCompatLimitedSource,

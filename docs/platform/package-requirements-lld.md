@@ -629,6 +629,12 @@ constructor dtype/default behavior. `nn.Module.to(...)` admits only no request
 or CPU identity; non-CPU placement and non-null dtype conversion reject before
 parameter access or mutation. The Grad freeze now includes the limited shim
 source as well as the real torch factory.
+ADR-0043 makes NumPy ownership directional and explicit. `from_numpy`
+zero-copy wraps writable bool, float16/32/64, int8/16/32/64, and uint8 arrays
+with exact ndarray identity, dtype, strides, layout, and bidirectional
+mutation. `Tensor.numpy()` and the NumPy array protocol instead share one
+owning `order="K"` snapshot path; `copy=False` cannot bypass that export
+boundary.
 
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
@@ -2688,22 +2694,23 @@ source behavior, physical dtype, alias relation, autograd decision, or fixture
 result is an adapter-baseline change under ADR-0001, even when the public
 method signature does not change.
 
-The current Grad baseline, revised through ADR-0042, is
+The current Grad baseline, revised through ADR-0043, is
 `architecture/grad-compatibility-inventory.json`, with executable Pyodide
 evidence in `packages/browsergrad-grad/tests-integration/fixtures/grad-view-bf16.v0.json`.
 Schema version 2 records `bf16` and `bfloat16` as explicitly unsupported,
 keeps `torch.bfloat16` distinct from float32, and rejects construction or
 conversion before allocation. It also records the remaining NumPy-dependent
 dtype fallback, the supported alias registry, Tensor versus torch constructor
-defaults, conditional reshape/index aliasing, copying expand/numpy behavior,
-live NumPy array-protocol exposure, storage-sharing dtype/layout-preserving
-`detach()`, conditional dtype-preserving `contiguous()`
+defaults, conditional reshape/index aliasing, copying expand behavior,
+zero-copy supported writable NumPy input, owning NumPy output snapshots,
+storage-sharing dtype/layout-preserving `detach()`, conditional
+dtype-preserving `contiguous()`
 identity/materialization, differentiable floating `to()` casts, and detached
 bool/integer casts. Unrecognized positional `to()` strings are rejected rather
 than being treated as device no-ops. The remaining device
 entrypoints—`torch.tensor(device=...)` and `nn.Module.to(...)`—are also
-CPU-only and fail closed. NumPy interop is the remaining eager compatibility
-domain.
+CPU-only and fail closed. Remaining eager debt is the delegated dtype fallback,
+constructor-default classification, and owning expand materialization.
 
 ### Adapter ledger
 
@@ -2717,7 +2724,7 @@ all five.
 | `cute_static_layout` parser path | Compiler | Existing parser integration and pinned regression fixtures only. | No new spellings, ranks, queries, or call sites. | Pinned real frontend handles its fixtures through layout semantics. | Compiler `1.0.0`. |
 | `TensorGpuPlan` shape-only/f32 assumptions | Kernels | Existing JIT plan serializer and kernels executor/bridge only. | No new operation, dtype, view, offset, or alias semantics may enter this schema. | New view/dtype features enter through shared schemas; plan has no unique semantics. | Kernels `1.0.0`. |
 | JIT `OP_CUSTOM` extension boundary | JIT | Explicit user-authored kernel code only; no embedded legacy framework wrappers remain. | No new core labels or constructor sites; only explicitly user-authored kernel IDs may extend. | Advertised core operations have typed IR, CPU/VJP decisions, and backend decisions; this gate is met, while the intentional extension boundary remains fail-closed. | JIT `1.0.0`. |
-| Eager view/materialization compatibility | Grad | Existing NumPy-interop adapters only where accurately documented; bfloat16 substitution, non-contiguous no-op, copying detach, floating-cast graph loss, and fake tensor/constructor/module device transfer have no permitted caller. | No new API may claim view aliasing, differentiable casts, device transfer, or bf16 storage through these paths. | Remaining interop fixtures agree or reject; bfloat16, contiguous, detach, floating cast, and every exposed eager placement entrypoint already meet their narrowed contracts. | Grad `1.0.0`. |
+| Eager view/materialization compatibility | Grad | Existing NumPy-delegated dtype fallback, constructor-default classification, and owning expand adapter only where accurately documented; bfloat16 substitution, non-contiguous no-op, copying detach, floating-cast graph loss, fake device transfer, and inconsistent NumPy ownership have no permitted caller. | No new API may claim view aliasing, differentiable casts, device transfer, NumPy aliasing, or bf16 storage through these paths. | Remaining dtype/default and expand fixtures agree or reject; bfloat16, contiguous, detach, floating cast, placement, and NumPy interop already meet their narrowed contracts. | Grad `1.0.0`. |
 | `flashAttentionDirect` name | Kernels | Existing public export and realizer compatibility call only. | New APIs and docs use the accurate row-wise online-softmax name. | Real block-tiled implementation is proven and a normal major-removal window passes. | Kernels `1.0.0`. |
 | Generic runtime backend labels | Runtime | Existing assignment requirement compatibility mapping only. | New readiness features use canonical requirement definitions/resolutions; semantic lowering uses capability decisions only where an explicit link exists. | All readiness UI consumes requirement resolutions and program-specific lowering records. | Runtime `1.0.0`. |
 

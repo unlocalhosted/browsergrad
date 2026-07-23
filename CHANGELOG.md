@@ -14,6 +14,10 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+- Makes Grad NumPy interop one coherent ownership contract: writable arrays in
+  all nine supported eager dtypes wrap with exact zero-copy dtype/layout
+  preservation, while `.numpy()` and `np.asarray()` always export isolated
+  order-preserving snapshots.
 - Closes Grad's remaining fake placement seams: `torch.tensor(device=...)`
   accepts CPU only, and `nn.Module.to(...)` preserves CPU identity while
   rejecting unavailable devices or unimplemented parameter dtype conversion.

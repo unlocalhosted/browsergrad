@@ -159,27 +159,28 @@
       ]
     },
     {
-      "id": "grad.interop.from-numpy.v0",
+      "id": "grad.interop.from-numpy.v1",
       "surface": "from_numpy(ndarray)",
       "class": "interop",
       "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
-      "referenceContract": "pytorch-shaped-compatibility",
-      "dtypeEffect": "preserves-float32-otherwise-coerces-float32",
-      "condition": "input-dtype-dependent",
-      "failurePolicy": "delegate-invalid-input-to-python-or-numpy",
-      "aliasing": "conditional",
-      "contiguity": "input-dependent",
-      "materialization": "conditional",
+      "targetConformance": "browsergrad-defined",
+      "referenceContract": "browsergrad-grad-explicit",
+      "dtypeEffect": "preserves-supported-storage",
+      "condition": "supported-writable-numpy-array",
+      "failurePolicy": "reject-unsupported-or-readonly-numpy-before-wrapping",
+      "aliasing": "must-alias",
+      "contiguity": "preserved",
+      "materialization": "none",
       "autograd": "constructor-policy",
-      "truth": "float32 inputs share NumPy storage bidirectionally; non-float32 inputs are converted to a new float32 allocation and do not share storage.",
+      "truth": "Writable NumPy arrays with bool, float16/32/64, int8/16/32/64, or uint8 storage are wrapped without copying; exact dtype, ndarray identity, strides, layout, and bidirectional mutation are preserved. Non-arrays, read-only arrays, and unsupported dtypes reject before wrapping.",
       "sourceDefinitions": [
         "tensor.py:from_numpy",
         "tensor.py:Tensor.__init__"
       ],
       "fixtureCaseIds": [
-        "grad.interop.from-numpy-f32-alias.v0",
-        "grad.interop.from-numpy-f64-materializes.v0"
+        "grad.interop.from-numpy-alias.v1",
+        "grad.interop.from-numpy-invalid-rejected.v1",
+        "grad.interop.from-numpy-noncontiguous-alias.v1"
       ]
     },
     {
@@ -361,47 +362,27 @@
       ]
     },
     {
-      "id": "grad.interop.numpy-copy.v0",
-      "surface": "Tensor.numpy()",
+      "id": "grad.interop.numpy-export-snapshot.v1",
+      "surface": "Tensor.numpy() and numpy.asarray(Tensor)",
       "class": "interop",
       "observationStatus": "verified",
       "targetConformance": "browsergrad-defined",
       "referenceContract": "browsergrad-grad-explicit",
       "dtypeEffect": "preserves",
-      "condition": "all-inputs",
-      "failurePolicy": "no-dedicated-failure-path",
+      "condition": "numpy-export-request",
+      "failurePolicy": "reject-copy-false-before-export",
       "aliasing": "must-not-alias",
-      "contiguity": "contiguous",
+      "contiguity": "input-dependent",
       "materialization": "always",
       "autograd": "not-applicable",
-      "truth": "numpy() returns an independent NumPy copy; mutations do not propagate in either direction.",
+      "truth": "numpy() and the NumPy array protocol return owning order='K' snapshots with source dtype unless an explicit array-protocol dtype is requested; mutations never propagate. Array-protocol copy=False and malformed copy flags reject rather than exposing mutable tensor storage.",
       "sourceDefinitions": [
+        "tensor.py:Tensor.__array__",
+        "tensor.py:Tensor._numpy_snapshot",
         "tensor.py:Tensor.numpy"
       ],
       "fixtureCaseIds": [
-        "grad.interop.numpy-copy.v0"
-      ]
-    },
-    {
-      "id": "grad.interop.array-protocol-alias.v0",
-      "surface": "numpy.asarray(Tensor)",
-      "class": "interop",
-      "observationStatus": "verified",
-      "targetConformance": "compatibility-debt",
-      "referenceContract": "numpy-array-protocol",
-      "dtypeEffect": "preserves",
-      "condition": "no-requested-dtype",
-      "failurePolicy": "no-dedicated-failure-path",
-      "aliasing": "must-alias",
-      "contiguity": "preserved",
-      "materialization": "none",
-      "autograd": "not-applicable",
-      "truth": "The no-dtype NumPy array protocol exposes the live backing array, unlike Tensor.numpy(); mutations propagate bidirectionally.",
-      "sourceDefinitions": [
-        "tensor.py:Tensor.__array__"
-      ],
-      "fixtureCaseIds": [
-        "grad.interop.array-protocol-alias.v0"
+        "grad.interop.numpy-export-snapshot.v1"
       ]
     },
     {

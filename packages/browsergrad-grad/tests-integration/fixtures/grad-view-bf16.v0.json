@@ -60,20 +60,44 @@
       }
     },
     {
-      "id": "grad.interop.from-numpy-f32-alias.v0",
+      "id": "grad.interop.from-numpy-alias.v1",
       "expected": {
-        "sharesMemory": true,
+        "dtypes": {
+          "bool": "bool",
+          "float16": "float16",
+          "float32": "float32",
+          "float64": "float64",
+          "int8": "int8",
+          "int16": "int16",
+          "int32": "int32",
+          "int64": "int64",
+          "uint8": "uint8"
+        },
+        "allShareMemory": true,
         "sourceMutationVisible": true,
-        "tensorMutationVisible": true,
-        "dtype": "float32"
+        "tensorMutationVisible": true
       }
     },
     {
-      "id": "grad.interop.from-numpy-f64-materializes.v0",
+      "id": "grad.interop.from-numpy-noncontiguous-alias.v1",
       "expected": {
-        "sharesMemory": false,
-        "sourceMutationVisible": false,
-        "dtype": "float32"
+        "sameArrayObject": true,
+        "sharesMemory": true,
+        "dtype": "float16",
+        "stridesPreserved": true,
+        "cContiguous": false,
+        "fContiguous": false,
+        "sourceMutationVisible": true,
+        "tensorMutationVisible": true
+      }
+    },
+    {
+      "id": "grad.interop.from-numpy-invalid-rejected.v1",
+      "expected": {
+        "list": "TypeError: from_numpy requires a numpy.ndarray, got list",
+        "readonly": "ValueError: from_numpy requires writable storage because the Tensor aliases the exact NumPy array",
+        "complex64": "ValueError: from_numpy does not support dtype 'complex64'; supported storage dtypes: ['bool', 'float16', 'float32', 'float64', 'int16', 'int32', 'int64', 'int8', 'uint8']",
+        "object": "ValueError: from_numpy does not support dtype 'object'; supported storage dtypes: ['bool', 'float16', 'float32', 'float64', 'int16', 'int32', 'int64', 'int8', 'uint8']"
       }
     },
     {
@@ -286,19 +310,22 @@
       }
     },
     {
-      "id": "grad.interop.numpy-copy.v0",
+      "id": "grad.interop.numpy-export-snapshot.v1",
       "expected": {
-        "sharesMemory": false,
-        "sourceMutationVisible": false,
-        "arrayMutationVisible": false
-      }
-    },
-    {
-      "id": "grad.interop.array-protocol-alias.v0",
-      "expected": {
-        "sharesMemory": true,
-        "sourceMutationVisible": true,
-        "arrayMutationVisible": true
+        "numpySharesMemory": false,
+        "arraySharesMemory": false,
+        "sourceMutationReachedNumpy": false,
+        "sourceMutationReachedArray": false,
+        "numpyMutationReachedSource": false,
+        "arrayMutationReachedSource": false,
+        "sourceDtype": "float16",
+        "numpyDtype": "float16",
+        "arrayDtype": "float16",
+        "typedArrayDtype": "float64",
+        "numpyFContiguous": true,
+        "arrayFContiguous": true,
+        "copyFalseError": "ValueError: Tensor.__array__(copy=False) is unavailable: BrowserGrad exports owning snapshots rather than mutable storage aliases",
+        "invalidCopyError": "TypeError: Tensor.__array__ copy must be bool or None, got str"
       }
     },
     {

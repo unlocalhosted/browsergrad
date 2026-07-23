@@ -86,25 +86,75 @@ cases["grad.dtype.torch-bfloat16-token-distinct-unsupported.v1"] = {
     "constructor": error(lambda: torch.tensor([1.0], dtype=torch.bfloat16)),
 }
 
-source_f32 = np.array([1.0, 2.0], dtype=np.float32)
-from_f32 = grad.from_numpy(source_f32)
-source_f32[0] = 7.0
-source_mutation_visible = float(from_f32.data[0]) == 7.0
-from_f32.data[1] = 9.0
-cases["grad.interop.from-numpy-f32-alias.v0"] = {
-    "sharesMemory": bool(np.shares_memory(source_f32, from_f32.data)),
-    "sourceMutationVisible": bool(source_mutation_visible),
-    "tensorMutationVisible": bool(float(source_f32[1]) == 9.0),
-    "dtype": from_f32.dtype,
+from_numpy_sources = {
+    name: np.array([0, 1], dtype=np.dtype(name))
+    for name in [
+        "bool", "float16", "float32", "float64",
+        "int8", "int16", "int32", "int64", "uint8",
+    ]
 }
-
-source_f64 = np.array([1.0, 2.0], dtype=np.float64)
-from_f64 = grad.from_numpy(source_f64)
-source_f64[0] = 7.0
-cases["grad.interop.from-numpy-f64-materializes.v0"] = {
-    "sharesMemory": bool(np.shares_memory(source_f64, from_f64.data)),
-    "sourceMutationVisible": bool(float(from_f64.data[0]) == 7.0),
-    "dtype": from_f64.dtype,
+from_numpy_tensors = {
+    name: grad.from_numpy(source)
+    for name, source in from_numpy_sources.items()
+}
+from_numpy_sources["float64"][0] = 7.0
+from_numpy_tensors["int64"].data[1] = 9
+cases["grad.interop.from-numpy-alias.v1"] = {
+    "dtypes": {
+        name: tensor.dtype
+        for name, tensor in from_numpy_tensors.items()
+    },
+    "allShareMemory": bool(all(
+        np.shares_memory(from_numpy_sources[name], tensor.data)
+        for name, tensor in from_numpy_tensors.items()
+    )),
+    "sourceMutationVisible": bool(
+        float(from_numpy_tensors["float64"].data[0]) == 7.0
+    ),
+    "tensorMutationVisible": bool(
+        int(from_numpy_sources["int64"][1]) == 9
+    ),
+}
+noncontiguous_numpy_source = np.arange(
+    12,
+    dtype=np.float16,
+).reshape(3, 4).T[:, ::-1]
+noncontiguous_numpy_tensor = grad.from_numpy(noncontiguous_numpy_source)
+noncontiguous_numpy_source[0, 0] = 17.0
+noncontiguous_numpy_tensor.data[1, 1] = 19.0
+cases["grad.interop.from-numpy-noncontiguous-alias.v1"] = {
+    "sameArrayObject": bool(
+        noncontiguous_numpy_tensor.data is noncontiguous_numpy_source
+    ),
+    "sharesMemory": bool(np.shares_memory(
+        noncontiguous_numpy_source,
+        noncontiguous_numpy_tensor.data,
+    )),
+    "dtype": noncontiguous_numpy_tensor.dtype,
+    "stridesPreserved": bool(
+        noncontiguous_numpy_source.strides
+        == noncontiguous_numpy_tensor.data.strides
+    ),
+    "cContiguous": bool(noncontiguous_numpy_tensor.data.flags.c_contiguous),
+    "fContiguous": bool(noncontiguous_numpy_tensor.data.flags.f_contiguous),
+    "sourceMutationVisible": bool(
+        float(noncontiguous_numpy_tensor.data[0, 0]) == 17.0
+    ),
+    "tensorMutationVisible": bool(
+        float(noncontiguous_numpy_source[1, 1]) == 19.0
+    ),
+}
+readonly_numpy_source = np.array([1.0], dtype=np.float32)
+readonly_numpy_source.flags.writeable = False
+cases["grad.interop.from-numpy-invalid-rejected.v1"] = {
+    "list": error(lambda: grad.from_numpy([1.0])),
+    "readonly": error(lambda: grad.from_numpy(readonly_numpy_source)),
+    "complex64": error(
+        lambda: grad.from_numpy(np.array([1 + 2j], dtype=np.complex64))
+    ),
+    "object": error(
+        lambda: grad.from_numpy(np.array([object()], dtype=np.object_))
+    ),
 }
 
 base = grad.Tensor(np.arange(6, dtype=np.float32).reshape(2, 3), requires_grad=True)
@@ -376,26 +426,47 @@ cases["grad.view.detach-noncontiguous-alias.v1"] = {
     ),
 }
 
-numpy_source = grad.Tensor(np.array([1.0, 2.0], dtype=np.float32))
-numpy_copy = numpy_source.numpy()
-numpy_source.data[0] = 7.0
-source_mutation_reached_copy = float(numpy_copy[0]) == 7.0
-numpy_copy[1] = 9.0
-cases["grad.interop.numpy-copy.v0"] = {
-    "sharesMemory": bool(np.shares_memory(numpy_source.data, numpy_copy)),
-    "sourceMutationVisible": bool(source_mutation_reached_copy),
-    "arrayMutationVisible": bool(float(numpy_source.data[1]) == 9.0),
-}
-
-array_source = grad.Tensor(np.array([1.0, 2.0], dtype=np.float32))
-array_alias = np.asarray(array_source)
-array_source.data[0] = 7.0
-source_mutation_reached_alias = float(array_alias[0]) == 7.0
-array_alias[1] = 9.0
-cases["grad.interop.array-protocol-alias.v0"] = {
-    "sharesMemory": bool(np.shares_memory(array_source.data, array_alias)),
-    "sourceMutationVisible": bool(source_mutation_reached_alias),
-    "arrayMutationVisible": bool(float(array_source.data[1]) == 9.0),
+numpy_source = grad.Tensor(
+    np.arange(6, dtype=np.float16).reshape(2, 3).T,
+    dtype="float16",
+)
+numpy_snapshot = numpy_source.numpy()
+array_snapshot = np.asarray(numpy_source)
+typed_array_snapshot = np.asarray(numpy_source, dtype=np.float64)
+numpy_source.data[0, 0] = 17.0
+source_mutation_reached_numpy = float(numpy_snapshot[0, 0]) == 17.0
+source_mutation_reached_array = float(array_snapshot[0, 0]) == 17.0
+numpy_snapshot[1, 0] = 19.0
+array_snapshot[2, 0] = 23.0
+cases["grad.interop.numpy-export-snapshot.v1"] = {
+    "numpySharesMemory": bool(np.shares_memory(
+        numpy_source.data,
+        numpy_snapshot,
+    )),
+    "arraySharesMemory": bool(np.shares_memory(
+        numpy_source.data,
+        array_snapshot,
+    )),
+    "sourceMutationReachedNumpy": bool(source_mutation_reached_numpy),
+    "sourceMutationReachedArray": bool(source_mutation_reached_array),
+    "numpyMutationReachedSource": bool(
+        float(numpy_source.data[1, 0]) == 19.0
+    ),
+    "arrayMutationReachedSource": bool(
+        float(numpy_source.data[2, 0]) == 23.0
+    ),
+    "sourceDtype": numpy_source.dtype,
+    "numpyDtype": numpy_snapshot.dtype.name,
+    "arrayDtype": array_snapshot.dtype.name,
+    "typedArrayDtype": typed_array_snapshot.dtype.name,
+    "numpyFContiguous": bool(numpy_snapshot.flags.f_contiguous),
+    "arrayFContiguous": bool(array_snapshot.flags.f_contiguous),
+    "copyFalseError": error(
+        lambda: numpy_source.__array__(copy=False)
+    ),
+    "invalidCopyError": error(
+        lambda: numpy_source.__array__(copy="yes")
+    ),
 }
 
 same_dtype = base.to("float32")

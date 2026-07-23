@@ -44,10 +44,11 @@ _MASKED_FILL_VALUE_TYPES = (
     np.float32,
     np.float64,
 )
-_MASKED_FILL_DTYPES = frozenset({
+_EAGER_STORAGE_DTYPES = frozenset({
     "float16", "float32", "float64",
     "int8", "int16", "int32", "int64", "uint8", "bool",
 })
+_MASKED_FILL_DTYPES = _EAGER_STORAGE_DTYPES
 _TRIANGULAR_DTYPES = _MASKED_FILL_DTYPES
 _CUMSUM_DTYPES = _MASKED_FILL_DTYPES
 _CUMSUM_FLOATING_DTYPES = frozenset({"float16", "float32", "float64"})
@@ -1333,18 +1334,26 @@ class Tensor:
         """Return a storage-sharing tensor with autograd history removed."""
         return Tensor(self.data, dtype=self.data.dtype, requires_grad=False)
 
-    def numpy(self) -> np.ndarray:
-        """Return a copy of the underlying numpy array."""
-        return self.data.copy()
+    def _numpy_snapshot(self, dtype=None) -> np.ndarray:
+        target_dtype = self.data.dtype if dtype is None else np.dtype(dtype)
+        return self.data.astype(target_dtype, order="K", copy=True)
 
-    def __array__(self, dtype=None):
-        """Numpy array protocol. Lets np.asarray(tensor) and any code that
-        feeds Tensors into NumPy reductions just work, without callers needing
-        to reach for .data or .numpy().
-        """
-        if dtype is None:
-            return self.data
-        return self.data.astype(dtype, copy=False)
+    def numpy(self) -> np.ndarray:
+        """Return an owning NumPy snapshot of the current tensor values."""
+        return self._numpy_snapshot()
+
+    def __array__(self, dtype=None, copy=None):
+        """Return an owning NumPy snapshot through the array protocol."""
+        if copy is not None and type(copy) is not bool:
+            raise TypeError(
+                f"Tensor.__array__ copy must be bool or None, got {type(copy).__name__}"
+            )
+        if copy is False:
+            raise ValueError(
+                "Tensor.__array__(copy=False) is unavailable: BrowserGrad "
+                "exports owning snapshots rather than mutable storage aliases"
+            )
+        return self._numpy_snapshot(dtype)
 
     def tolist(self):
         return self.data.tolist()
@@ -2480,8 +2489,22 @@ def randn(*shape, dtype=None, requires_grad: bool = False, seed: Optional[int] =
 
 
 def from_numpy(arr) -> Tensor:
-    """Wrap a numpy array as a Tensor. Matches torch.from_numpy."""
-    return Tensor(arr)
+    """Wrap a supported writable NumPy array without copying."""
+    if not isinstance(arr, np.ndarray):
+        raise TypeError(
+            f"from_numpy requires a numpy.ndarray, got {type(arr).__name__}"
+        )
+    if not arr.flags.writeable:
+        raise ValueError(
+            "from_numpy requires writable storage because the Tensor aliases "
+            "the exact NumPy array"
+        )
+    if arr.dtype.name not in _EAGER_STORAGE_DTYPES:
+        raise ValueError(
+            f"from_numpy does not support dtype {arr.dtype.name!r}; supported "
+            f"storage dtypes: {sorted(_EAGER_STORAGE_DTYPES)}"
+        )
+    return Tensor(arr, dtype=arr.dtype)
 
 
 def manual_seed(seed: int) -> None:

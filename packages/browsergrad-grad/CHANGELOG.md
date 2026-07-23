@@ -9,6 +9,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- `from_numpy` now zero-copy wraps writable bool, float16/32/64,
+  int8/16/32/64, and uint8 arrays with exact dtype and stride preservation.
+  `.numpy()` and the NumPy array protocol now share one owning `order="K"`
+  snapshot policy; `copy=False`, read-only input, and unsupported input dtype
+  requests reject explicitly.
 - `torch.tensor(device=...)` now accepts CPU only and rejects unavailable
   storage before allocation. The `nn.Module.to(...)` compatibility shim keeps
   CPU identity but rejects non-CPU placement, dtype conversion, and malformed

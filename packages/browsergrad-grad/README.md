@@ -248,6 +248,10 @@ Remaining explicit limits:
   `torch.tensor(device=...)` follows the same CPU-only boundary.
   `nn.Module.to("cpu")` preserves identity, while module device or dtype
   conversion requests reject until recursive parameter conversion exists.
+- **NumPy ownership is directional.** `from_numpy` wraps supported writable
+  arrays with exact zero-copy dtype/stride preservation. `.numpy()` and
+  `np.asarray(tensor)` return owning snapshots so exported arrays cannot mutate
+  tensor storage behind autograd.
 - **Reverse-mode only.** No forward-mode, no functional transforms (vmap, etc.).
 - **`Tensor.__slots__`.** Slot-based attribute layout to keep memory predictable for tensors in long training loops.
 
