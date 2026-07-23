@@ -43,6 +43,8 @@ from ._ir import (
     OP_NLL_LOSS, OP_NLL_LOSS_VJP,
     OP_CROSS_ENTROPY, OP_CROSS_ENTROPY_VJP,
     OP_DROPOUT, OP_DROPOUT_VJP,
+    OP_BATCH_NORM_1D, OP_BATCH_NORM_1D_STATS_UPDATE,
+    OP_BATCH_NORM_1D_VJP,
     OP_WHERE, OP_INDEX, OP_VAR, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_NARROW, OP_TRIL, OP_TRIU, OP_MASK, OP_SCATTER_ADD, OP_BROADCAST_TO,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
@@ -76,6 +78,9 @@ from ._framework_contracts import (
     validate_cross_entropy_vjp_contract,
     validate_dropout_contract,
     validate_dropout_vjp_contract,
+    validate_batch_norm_1d_contract,
+    validate_batch_norm_1d_stats_update_contract,
+    validate_batch_norm_1d_vjp_contract,
     validate_gather_contract,
     validate_gather_scatter_add_contract,
     validate_narrow_contract,
@@ -323,6 +328,12 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
         validate_cross_entropy_contract(root)
     elif root.op == OP_DROPOUT:
         validate_dropout_contract(root)
+    elif root.op == OP_BATCH_NORM_1D:
+        validate_batch_norm_1d_contract(root)
+    elif root.op == OP_BATCH_NORM_1D_STATS_UPDATE:
+        validate_batch_norm_1d_stats_update_contract(root)
+    elif root.op == OP_BATCH_NORM_1D_VJP:
+        validate_batch_norm_1d_vjp_contract(root)
     step_index: Dict[int, int] = {id(node): i for i, node in enumerate(order)}
     last_use: Dict[int, int] = {id(node): i for i, node in enumerate(order)}
     for i, node in enumerate(order):
@@ -448,6 +459,24 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
             raise GpuPlanUnsupported(
                 "GPU tensor plan does not support DROPOUT_VJP. Add a canonical "
                 "keyed RNG replay lowering before GPU codegen."
+            )
+        elif node.op == OP_BATCH_NORM_1D:
+            validate_batch_norm_1d_contract(node)
+            raise GpuPlanUnsupported(
+                "GPU tensor plan does not support BATCH_NORM_1D. Add a "
+                "canonical batch-normalization lowering before GPU codegen."
+            )
+        elif node.op == OP_BATCH_NORM_1D_STATS_UPDATE:
+            validate_batch_norm_1d_stats_update_contract(node)
+            raise GpuPlanUnsupported(
+                "GPU tensor plan does not support stateful BatchNorm updates. "
+                "Add an ordered device-state effect contract first."
+            )
+        elif node.op == OP_BATCH_NORM_1D_VJP:
+            validate_batch_norm_1d_vjp_contract(node)
+            raise GpuPlanUnsupported(
+                "GPU tensor plan does not support BATCH_NORM_1D_VJP. Add a "
+                "canonical batch-normalization gradient lowering first."
             )
         elif node.op == OP_VAR:
             validate_var_contract(node)

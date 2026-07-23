@@ -9,6 +9,13 @@ contract in the README](README.md#compatibility-contract).
 
 ### Changed
 
+- `nn.BatchNorm1d` now emits typed float32 `BATCH_NORM_1D`,
+  `BATCH_NORM_1D_STATS_UPDATE`, and `BATCH_NORM_1D_VJP` IR. Training uses
+  biased batch variance while persistent state uses the unbiased estimator;
+  state updates are ordered and exactly once across repeated realization,
+  backward, functional gradients, and checkpoint recomputation.
+  `num_batches_tracked`, cumulative averaging, immutable eval snapshots,
+  strict bounds, and explicit transform/export/device refusals are included.
 - `torch.nn.functional.dropout` and `nn.Dropout` now emit typed keyed
   `DROPOUT`/`DROPOUT_VJP` IR instead of a mutable `CUSTOM` callback. Exact
   validation and bounded allocation cover identity, deterministic drop-all,

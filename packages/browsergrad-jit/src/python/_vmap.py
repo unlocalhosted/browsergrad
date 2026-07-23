@@ -78,6 +78,8 @@ from ._ir import (
     OP_NLL_LOSS, OP_NLL_LOSS_VJP,
     OP_CROSS_ENTROPY, OP_CROSS_ENTROPY_VJP,
     OP_DROPOUT, OP_DROPOUT_VJP,
+    OP_BATCH_NORM_1D, OP_BATCH_NORM_1D_STATS_UPDATE,
+    OP_BATCH_NORM_1D_VJP,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
     OP_STORE,
@@ -1586,6 +1588,23 @@ _VMAP_RULES[OP_CUSTOM] = _refuse(
     "OP_CUSTOM",
     "user-defined ops can have arbitrary semantics; provide a hand-"
     "written vmap rule via _vmap.register_vmap if you need it",
+)
+
+_VMAP_RULES[OP_BATCH_NORM_1D] = _refuse(
+    "OP_BATCH_NORM_1D",
+    "batch-statistics and running-state semantics require an explicit "
+    "mapped-axis and state-effects policy",
+)
+
+_VMAP_RULES[OP_BATCH_NORM_1D_STATS_UPDATE] = _refuse(
+    "OP_BATCH_NORM_1D_STATS_UPDATE",
+    "running-state mutation cannot be duplicated across mapped examples",
+)
+
+_VMAP_RULES[OP_BATCH_NORM_1D_VJP] = _refuse(
+    "OP_BATCH_NORM_1D_VJP",
+    "batch-normalization gradients require the same mapped-axis policy as "
+    "the forward operation",
 )
 
 _VMAP_RULES[OP_CONV1D] = _refuse(

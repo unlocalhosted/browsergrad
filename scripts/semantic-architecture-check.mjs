@@ -785,6 +785,28 @@ function checkJitFrameworkOperationContracts(root, manifest, failures) {
     "refused-training-dropout-in-inference-export",
   );
   allowed.tensorPlan.add("refused-no-canonical-keyed-rng-lowering");
+  allowed.shapeContract.add(
+    "preserve-rank-2-or-3-channel-normalized-input",
+  );
+  allowed.dtypeContract.add(
+    "exact-float32-input-affine-and-state",
+  );
+  allowed.cpu.add("supported-numpy-owning-batch-normalization");
+  allowed.closureAutograd.add(
+    "supported-batch-stat-or-running-stat-derivatives",
+  );
+  allowed.symbolicVjp.add(
+    "supported-batch-stat-or-running-stat-derivatives",
+  );
+  allowed.vmap.add(
+    "refused-state-and-batch-axis-contract-undefined",
+  );
+  allowed.onnxExport.add(
+    "refused-no-stable-running-stat-export-profile",
+  );
+  allowed.tensorPlan.add(
+    "refused-no-canonical-batch-normalization-lowering",
+  );
   const irSource = fs.readFileSync(
     path.join(root, "packages/browsergrad-jit/src/python/_ir.py"),
     "utf8",

@@ -55,7 +55,14 @@ How leaf rebinding works:
 from __future__ import annotations
 from typing import Any, Dict, Optional, Tuple
 
-from ._ir import UOp, OP_CUSTOM, OP_DROPOUT, OP_RANDOM, toposort
+from ._ir import (
+    UOp,
+    OP_CUSTOM,
+    OP_DROPOUT,
+    OP_RANDOM,
+    OP_BATCH_NORM_1D_STATS_UPDATE,
+    toposort,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -283,12 +290,18 @@ def record(
         # wrong values.
         return
     if any(
-        node.op in (OP_CUSTOM, OP_DROPOUT, OP_RANDOM)
+        node.op in (
+            OP_CUSTOM,
+            OP_DROPOUT,
+            OP_RANDOM,
+            OP_BATCH_NORM_1D_STATS_UPDATE,
+        )
         for node in toposort(output._uop)
     ):
         # CUSTOM has unknown effects; RANDOM and DROPOUT own per-operation
-        # stochastic state. Reusing their UOps would replay a prior key instead
-        # of tracing the next logical random operation.
+        # stochastic state. BatchNorm's state update owns an exactly-once
+        # effect id. Reusing any of these UOps would replay prior execution
+        # identity instead of tracing the next logical operation.
         return
     input_buffers = tuple(_input_buffer_uop(a) for a in args)
     if any(b is None for b in input_buffers):

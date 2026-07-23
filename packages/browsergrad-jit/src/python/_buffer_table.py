@@ -42,7 +42,13 @@ class BufferTable:
     purely opaque.
     """
 
-    __slots__ = ("_buffers", "_metadata", "_session_token")
+    __slots__ = (
+        "_buffers",
+        "_metadata",
+        "_session_token",
+        "_effect_streams",
+        "_effect_stream_tokens",
+    )
 
     def __init__(self) -> None:
         self._buffers: dict[str, Optional[np.ndarray]] = {}
@@ -52,6 +58,16 @@ class BufferTable:
         # tokens; if a UOp built against session A is realized in session B,
         # we can refuse rather than producing a wrong-array result.
         self._session_token: str = uuid.uuid4().hex[:12]
+        # Stateful typed operations use one ordered effect stream per exact
+        # (kind, target-buffer tuple). Only the reserved/applied sequence
+        # watermarks are retained, so a long-running training loop consumes
+        # O(stateful modules) memory rather than O(forward calls).
+        self._effect_streams: dict[
+            str, Tuple[str, Tuple[str, ...], int, int]
+        ] = {}
+        self._effect_stream_tokens: dict[
+            Tuple[str, Tuple[str, ...]], str
+        ] = {}
 
     @property
     def session_token(self) -> str:
@@ -179,6 +195,190 @@ class BufferTable:
                 f"existing {expected_dtype}, new {array.dtype}"
             )
         self._buffers[buffer_id] = array
+
+    def reserve_effect(
+        self,
+        kind: str,
+        target_buffer_ids: Tuple[str, ...],
+    ) -> str:
+        """Mint a session-owned, initially-unapplied effect identity.
+
+        ``kind`` is deliberately closed to a small canonical alphabet so an
+        effect id is safe to retain in IR, diagnostics, and serialized test
+        evidence without permitting caller-controlled formatting payloads.
+        """
+        if (
+            type(kind) is not str
+            or not kind
+            or len(kind) > 64
+            or any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789-" for ch in kind)
+        ):
+            raise BufferTableError(
+                "effect kind must be 1..64 lowercase ASCII letters, digits, or '-'"
+            )
+        if (
+            type(target_buffer_ids) is not tuple
+            or not target_buffer_ids
+            or len(target_buffer_ids) > 16
+            or len(set(target_buffer_ids)) != len(target_buffer_ids)
+        ):
+            raise BufferTableError(
+                "effect targets must be a tuple of 1..16 unique buffer ids"
+            )
+        for index, buffer_id in enumerate(target_buffer_ids):
+            if type(buffer_id) is not str:
+                raise BufferTableError(
+                    f"effect target {index} must be a buffer id string"
+                )
+            # Resolve now so a reservation can never carry an unknown,
+            # cross-session, or unmaterialized target.
+            self.get(buffer_id)
+        stream_key = (kind, target_buffer_ids)
+        token = self._effect_stream_tokens.get(stream_key)
+        if token is None:
+            token = uuid.uuid4().hex
+            self._effect_stream_tokens[stream_key] = token
+            self._effect_streams[token] = (
+                kind,
+                target_buffer_ids,
+                0,
+                0,
+            )
+        stream_kind, stream_targets, reserved, applied = (
+            self._effect_streams[token]
+        )
+        reserved += 1
+        self._effect_streams[token] = (
+            stream_kind,
+            stream_targets,
+            reserved,
+            applied,
+        )
+        return f"{self._session_token}:effect:{token}:{reserved}"
+
+    def _validate_effect(
+        self,
+        effect_id: str,
+        expected_kind: str,
+    ) -> Tuple[bool, Tuple[str, ...], str, int]:
+        prefix = self._session_token + ":effect:"
+        if type(effect_id) is not str or not effect_id.startswith(prefix):
+            raise BufferTableError(
+                f"effect_id {effect_id!r} does not belong to session "
+                f"{self._session_token!r}"
+            )
+        payload = effect_id[len(prefix):]
+        token, separator, sequence_text = payload.partition(":")
+        if (
+            separator != ":"
+            or len(token) != 32
+            or any(ch not in "0123456789abcdef" for ch in token)
+            or not sequence_text
+            or len(sequence_text) > 20
+            or not sequence_text.isascii()
+            or not sequence_text.isdigit()
+            or ":" in sequence_text
+        ):
+            raise BufferTableError(
+                f"effect_id {effect_id!r} is malformed"
+            )
+        sequence = int(sequence_text)
+        record = self._effect_streams.get(token)
+        if record is None:
+            raise BufferTableError(
+                f"effect_id {effect_id!r} was not reserved by this session"
+            )
+        kind, targets, reserved, applied = record
+        if kind != expected_kind:
+            raise BufferTableError(
+                f"effect_id {effect_id!r} has kind {kind!r}, expected "
+                f"{expected_kind!r}"
+            )
+        if sequence < 1 or sequence > reserved:
+            raise BufferTableError(
+                f"effect_id {effect_id!r} has unreserved sequence {sequence}"
+            )
+        return sequence <= applied, targets, token, sequence
+
+    def effect_applied(self, effect_id: str, expected_kind: str) -> bool:
+        """Return whether a reserved session effect has committed."""
+        applied, _, _, _ = self._validate_effect(effect_id, expected_kind)
+        return applied
+
+    def apply_updates_once(
+        self,
+        effect_id: str,
+        expected_kind: str,
+        updates: Tuple[Tuple[str, np.ndarray], ...],
+    ) -> bool:
+        """Atomically validate and apply in-place buffer updates once.
+
+        All target identities, shapes, and dtypes are checked before any
+        mutation. Updates preserve the registered ndarray objects so public
+        module-buffer identity and state-dict references remain stable.
+        Returns ``True`` only for the first successful commit.
+        """
+        applied, bound_targets, stream_token, sequence = self._validate_effect(
+            effect_id, expected_kind
+        )
+        if type(updates) is not tuple or not updates:
+            raise BufferTableError("effect updates must be a non-empty tuple")
+
+        validated: list[Tuple[np.ndarray, np.ndarray]] = []
+        seen: set[str] = set()
+        for index, update in enumerate(updates):
+            if type(update) is not tuple or len(update) != 2:
+                raise BufferTableError(
+                    f"effect updates[{index}] must be (buffer_id, ndarray)"
+                )
+            buffer_id, new_value = update
+            if type(buffer_id) is not str or buffer_id in seen:
+                raise BufferTableError(
+                    f"effect updates[{index}] has an invalid or duplicate buffer id"
+                )
+            seen.add(buffer_id)
+            if not isinstance(new_value, np.ndarray):
+                raise BufferTableError(
+                    f"effect updates[{index}] value must be np.ndarray"
+                )
+            target = self.get(buffer_id)
+            expected_shape, expected_dtype = self._metadata[buffer_id]
+            if tuple(new_value.shape) != expected_shape:
+                raise BufferTableError(
+                    f"shape mismatch on effect update of {buffer_id!r}: "
+                    f"existing {expected_shape}, new {new_value.shape}"
+                )
+            if new_value.dtype.name != expected_dtype:
+                raise BufferTableError(
+                    f"dtype mismatch on effect update of {buffer_id!r}: "
+                    f"existing {expected_dtype}, new {new_value.dtype}"
+                )
+            validated.append((target, new_value))
+
+        if tuple(seen_id for seen_id, _ in updates) != bound_targets:
+            raise BufferTableError(
+                f"effect_id {effect_id!r} is bound to targets "
+                f"{bound_targets!r}, not {tuple(seen_id for seen_id, _ in updates)!r}"
+            )
+        if applied:
+            return False
+        stream_kind, stream_targets, reserved, applied_sequence = (
+            self._effect_streams[stream_token]
+        )
+        if sequence != applied_sequence + 1:
+            raise BufferTableError(
+                f"effect_id {effect_id!r} is out of order: next sequence is "
+                f"{applied_sequence + 1}"
+            )
+        for target, new_value in validated:
+            target[...] = new_value
+        self._effect_streams[stream_token] = (
+            stream_kind,
+            stream_targets,
+            reserved,
+            sequence,
+        )
+        return True
 
     def evict(self, buffer_id: str) -> None:
         """Drop a buffer. Intended for tests and for gradient-checkpoint

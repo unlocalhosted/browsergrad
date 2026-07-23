@@ -215,7 +215,13 @@ loaded = torch.load("/tmp/bg_jit_state.pt")
     expect(result.bnEvalMean).toBeCloseTo(0, 5);
     expect(result.bnGradShapes).toEqual([[2, 2], [2], [2]]);
     expect(result.bn3dShape).toEqual([2, 2, 3]);
-    expect(result.bnStateKeys).toEqual(["bias", "running_mean", "running_var", "weight"]);
+    expect(result.bnStateKeys).toEqual([
+      "bias",
+      "num_batches_tracked",
+      "running_mean",
+      "running_var",
+      "weight",
+    ]);
     expect(result.loadedKeys).toEqual(["weight"]);
   });
 

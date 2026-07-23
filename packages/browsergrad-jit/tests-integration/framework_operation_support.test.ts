@@ -175,6 +175,27 @@ const FRAMEWORK_SUPPORT = {
       retiredOpaqueOperationId: "jit.custom.smooth-l1-loss.v0",
     },
     {
+      contractId: "browsergrad.jit.framework.module.batch-norm-1d.v1",
+      publicSurface: "torch.nn.BatchNorm1d",
+      opcode: "BATCH_NORM_1D",
+      semanticState: "typed",
+      shapeContract: "preserve-rank-2-or-3-channel-normalized-input",
+      dtypeContract: "exact-float32-input-affine-and-state",
+      decisions: {
+        cpu: "supported-numpy-owning-batch-normalization",
+        closureAutograd: "supported-batch-stat-or-running-stat-derivatives",
+        symbolicVjp: "supported-batch-stat-or-running-stat-derivatives",
+        functionalGrad: "supported-for-floating-input-via-symbolic-vjp",
+        vmap: "refused-state-and-batch-axis-contract-undefined",
+        onnxExport: "refused-no-stable-running-stat-export-profile",
+        tensorPlan: "refused-no-canonical-batch-normalization-lowering",
+        webgpu: "refused-no-tensor-plan-kernel",
+        residency: "host-materialized",
+        materialization: "cpu-owning-copy",
+      },
+      retiredOpaqueOperationId: "jit.custom.batch-norm-1d.v0",
+    },
+    {
       contractId: "browsergrad.jit.framework.tensor.abs.v1",
       publicSurface: "Tensor.abs",
       opcode: "ABS",
@@ -740,7 +761,7 @@ second = bg.framework_operation_support()
 }
 `);
 
-    expect(result.first.operations).toHaveLength(34);
+    expect(result.first.operations).toHaveLength(35);
     expect(result.first.operations[0]?.decisions.cpu).toBe("forged");
     expect(result.second).toEqual(FRAMEWORK_SUPPORT);
     expect(result.validatedContractId).toBe("browsergrad.jit.framework.tensor.expand.v1");

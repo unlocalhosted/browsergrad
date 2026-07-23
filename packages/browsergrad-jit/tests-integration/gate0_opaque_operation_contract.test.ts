@@ -109,46 +109,6 @@ except Exception as exc:
     expect(result).toEqual(expected("jit.custom.conditional-backward-refusal.v0"));
   });
 
-  it("records the remaining stateful BatchNorm callback replay", async () => {
-    const target = await getJitTarget();
-    const result = await target.run<Record<string, unknown>>(`
-import browsergrad_jit as bg
-import browsergrad_jit.nn.functional as F
-import numpy as np
-
-bn = bg.nn.BatchNorm1d(2, affine=False, track_running_stats=True)
-bn.train()
-bn_input = bg.from_numpy(np.array([[1.0, 3.0], [5.0, 7.0]], dtype=np.float32), requires_grad=True)
-bn_output = bn(bn_input)
-bn_output.numpy()
-before_backward = bn.running_mean.copy()
-bn_output.sum().backward()
-
-bn_affine_eval = bg.nn.BatchNorm1d(2, affine=True, track_running_stats=True)
-bn_affine_eval.eval()
-affine_eval_before = bn_affine_eval.running_mean.copy()
-bn_affine_eval_output = bn_affine_eval(bn_input)
-bn_affine_eval_output.numpy()
-
-bn_untracked_eval = bg.nn.BatchNorm1d(2, affine=False, track_running_stats=False)
-bn_untracked_eval.eval()
-bn_untracked_output = bn_untracked_eval(bn_input)
-untracked_values = bn_untracked_output.numpy()
-
-{
-    "batchNormRunningMeanChangedDuringBackward": bool(not np.array_equal(before_backward, bn.running_mean)),
-    "batchNormBranches": {
-        "trackedTrainingInputArity": len(bn_output._uop.inputs),
-        "affineEvalInputArity": len(bn_affine_eval_output._uop.inputs),
-        "trackedEvalStatsChanged": bool(not np.array_equal(affine_eval_before, bn_affine_eval.running_mean)),
-        "untrackedEvalHasRunningStats": bn_untracked_eval.running_mean is not None,
-        "untrackedEvalUsesBatchStats": bool(abs(float(untracked_values.mean())) < 1e-6),
-    },
-}
-`);
-    expect(result).toEqual(expected("jit.custom.stateful-replay.v0"));
-  });
-
   it("separates accelerator-only routes from constructor-only labels", async () => {
     const target = await getJitTarget();
     const result = await target.run<Record<string, unknown>>(`
@@ -243,7 +203,6 @@ def check(label, output, source):
     output.sum().backward()
     gradient_present[label] = source.grad is not None
 
-a = leaf([[1.0, 3.0], [5.0, 7.0]]); check("batch_norm1d", bg.nn.BatchNorm1d(2, affine=False)(a), a)
 a = leaf([[[[2.0]]]]); check("interpolate", F.interpolate(a, size=(2, 2), mode="nearest"), a)
 {
     "environment": {"pyodide": pyodide.__version__, "numpy": np.__version__},

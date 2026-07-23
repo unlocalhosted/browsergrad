@@ -118,12 +118,41 @@ class BatchNorm1d(Module):
     """1D batch normalization. Accepts (N, C) or (N, C, L) input."""
 
     def __init__(self, num_features: int, eps: float = 1e-5,
-                 momentum: float = 0.1, affine: bool = True,
+                 momentum: Optional[float] = 0.1, affine: bool = True,
                  track_running_stats: bool = True):
         super().__init__()
+        if type(num_features) is not int or type(num_features) is bool:
+            raise TypeError("BatchNorm1d: num_features must be an exact integer")
+        if num_features <= 0 or num_features > (1 << 28):
+            raise ValueError("BatchNorm1d: num_features must be in [1, 2**28]")
+        if type(eps) not in (int, float, np.int8, np.int16, np.int32,
+                             np.int64, np.uint8, np.uint16, np.uint32,
+                             np.uint64, np.float16, np.float32, np.float64) or type(eps) is bool:
+            raise TypeError("BatchNorm1d: eps must be an exact real scalar")
+        eps = float(eps)
+        if not math.isfinite(eps) or eps < 0.0:
+            raise ValueError("BatchNorm1d: eps must be finite and non-negative")
+        if momentum is not None:
+            if type(momentum) not in (int, float, np.int8, np.int16, np.int32,
+                                      np.int64, np.uint8, np.uint16, np.uint32,
+                                      np.uint64, np.float16, np.float32, np.float64) or type(momentum) is bool:
+                raise TypeError(
+                    "BatchNorm1d: momentum must be None or an exact real scalar"
+                )
+            momentum = float(momentum)
+            if not math.isfinite(momentum) or momentum < 0.0 or momentum > 1.0:
+                raise ValueError(
+                    "BatchNorm1d: momentum must be None or finite and in [0, 1]"
+                )
+        if type(affine) is not bool:
+            raise TypeError("BatchNorm1d: affine must be an exact bool")
+        if type(track_running_stats) is not bool:
+            raise TypeError(
+                "BatchNorm1d: track_running_stats must be an exact bool"
+            )
         self.num_features = num_features
-        self.eps = float(eps)
-        self.momentum = float(momentum)
+        self.eps = eps
+        self.momentum = momentum
         self.affine = affine
         self.track_running_stats = track_running_stats
         if affine:
@@ -133,17 +162,51 @@ class BatchNorm1d(Module):
             self.weight = None
             self.bias = None
         if track_running_stats:
-            self.running_mean = np.zeros(num_features, dtype=np.float32)
-            self.running_var = np.ones(num_features, dtype=np.float32)
+            self.register_buffer(
+                "running_mean",
+                Tensor(np.zeros(num_features, dtype=np.float32)),
+            )
+            self.register_buffer(
+                "running_var",
+                Tensor(np.ones(num_features, dtype=np.float32)),
+            )
+            self.register_buffer(
+                "num_batches_tracked",
+                Tensor(np.asarray(0, dtype=np.int64)),
+            )
         else:
-            self.running_mean = None
-            self.running_var = None
+            self.register_buffer("running_mean", None)
+            self.register_buffer("running_var", None)
+            self.register_buffer("num_batches_tracked", None)
+
+    def reset_running_stats(self) -> None:
+        if not self.track_running_stats:
+            return
+        self.running_mean.data[...] = np.float32(0.0)
+        self.running_var.data[...] = np.float32(1.0)
+        self.num_batches_tracked.data[...] = np.int64(0)
+
+    def reset_parameters(self) -> None:
+        self.reset_running_stats()
+        if self.affine:
+            self.weight.data[...] = np.float32(1.0)
+            self.bias.data[...] = np.float32(0.0)
 
     def forward(self, x: Tensor) -> Tensor:
+        if not isinstance(x, Tensor):
+            raise TypeError("BatchNorm1d input must be a Tensor")
         xd = x.data
         C = self.num_features
         if xd.ndim not in (2, 3):
             raise ValueError(f"BatchNorm1d expects 2D (N, C) or 3D (N, C, L); got {xd.ndim}D")
+        if xd.shape[1] != C:
+            raise ValueError(
+                f"BatchNorm1d expected {C} channels, got {xd.shape[1]}"
+            )
+        if xd.dtype.name != "float32":
+            raise TypeError(
+                f"BatchNorm1d v1 requires float32 input, got {xd.dtype.name}"
+            )
         # Reduction axes: (0,) for 2D, (0, 2) for 3D — everything except channel
         if xd.ndim == 2:
             reduce_axes = (0,)
@@ -153,16 +216,50 @@ class BatchNorm1d(Module):
             stat_shape = (1, C, 1)
         is_training_batch = self.training or not self.track_running_stats
         if is_training_batch:
-            mean = xd.mean(axis=reduce_axes)
-            var = xd.var(axis=reduce_axes)
+            sample_count = int(np.prod([xd.shape[axis] for axis in reduce_axes]))
+            if sample_count <= 1:
+                raise ValueError(
+                    "BatchNorm1d batch-statistics mode requires more than "
+                    f"one value per channel, got {sample_count}"
+                )
+            mean = xd.mean(axis=reduce_axes, dtype=np.float32)
+            centered = xd - mean.reshape(stat_shape)
+            var = (centered * centered).mean(
+                axis=reduce_axes, dtype=np.float32
+            )
             if self.training and self.track_running_stats:
-                m = self.momentum
-                self.running_mean = (1.0 - m) * self.running_mean + m * mean
-                self.running_var = (1.0 - m) * self.running_var + m * var
+                tracked = int(self.num_batches_tracked.data)
+                if tracked < 0 or tracked >= (1 << 63) - 1:
+                    raise OverflowError(
+                        "BatchNorm1d num_batches_tracked reached int64 limit"
+                    )
+                tracked += 1
+                factor = (
+                    1.0 / float(tracked)
+                    if self.momentum is None
+                    else self.momentum
+                )
+                unbiased_var = var * np.float32(
+                    sample_count / float(sample_count - 1)
+                )
+                self.running_mean.data[...] = np.asarray(
+                    (1.0 - factor) * self.running_mean.data + factor * mean,
+                    dtype=np.float32,
+                )
+                self.running_var.data[...] = np.asarray(
+                    (1.0 - factor) * self.running_var.data
+                    + factor * unbiased_var,
+                    dtype=np.float32,
+                )
+                self.num_batches_tracked.data[...] = np.int64(tracked)
         else:
-            mean = self.running_mean
-            var = self.running_var
-        inv_std = 1.0 / np.sqrt(var + self.eps)
+            mean = self.running_mean.data
+            var = self.running_var.data
+            sample_count = int(np.prod([xd.shape[axis] for axis in reduce_axes]))
+        inv_std = np.asarray(
+            1.0 / np.sqrt(np.asarray(var + self.eps, dtype=np.float32)),
+            dtype=np.float32,
+        )
         mean_b = mean.reshape(stat_shape)
         inv_std_b = inv_std.reshape(stat_shape)
         x_hat = (xd - mean_b) * inv_std_b
@@ -177,25 +274,31 @@ class BatchNorm1d(Module):
         else:
             parents = (x,)
         affine_capture = self.affine
-        weight_data = self.weight.data if self.affine else None
-        N_total = float(np.prod([xd.shape[a] for a in reduce_axes]))
-        x_hat_cap = x_hat
-        inv_std_cap = inv_std
+        weight_data = self.weight.data.copy() if self.affine else None
+        N_total = float(sample_count)
+        x_hat_cap = np.array(x_hat, dtype=np.float32, copy=True)
+        inv_std_cap = np.array(inv_std, dtype=np.float32, copy=True)
         training_pass = is_training_batch
 
         def backward(g):
             grad_out = g.data
             if affine_capture:
                 grad_x_hat = grad_out * weight_data.reshape(stat_shape)
-                grad_weight = (grad_out * x_hat_cap).sum(axis=reduce_axes)
-                grad_bias = grad_out.sum(axis=reduce_axes)
+                grad_weight = (grad_out * x_hat_cap).sum(
+                    axis=reduce_axes, dtype=np.float32
+                )
+                grad_bias = grad_out.sum(axis=reduce_axes, dtype=np.float32)
             else:
                 grad_x_hat = grad_out
                 grad_weight = None
                 grad_bias = None
             if training_pass:
-                sum_g = grad_x_hat.sum(axis=reduce_axes, keepdims=True)
-                sum_g_xhat = (grad_x_hat * x_hat_cap).sum(axis=reduce_axes, keepdims=True)
+                sum_g = grad_x_hat.sum(
+                    axis=reduce_axes, keepdims=True, dtype=np.float32
+                )
+                sum_g_xhat = (grad_x_hat * x_hat_cap).sum(
+                    axis=reduce_axes, keepdims=True, dtype=np.float32
+                )
                 grad_x = inv_std_cap.reshape(stat_shape) * (
                     grad_x_hat - sum_g / N_total - x_hat_cap * sum_g_xhat / N_total
                 )
@@ -208,7 +311,11 @@ class BatchNorm1d(Module):
         return _build_ctx(out, parents, backward)
 
     def __repr__(self):
-        return f"BatchNorm1d({self.num_features}, eps={self.eps}, momentum={self.momentum})"
+        return (
+            f"BatchNorm1d({self.num_features}, eps={self.eps}, "
+            f"momentum={self.momentum}, affine={self.affine}, "
+            f"track_running_stats={self.track_running_stats})"
+        )
 
 
 # ─── Flatten ───────────────────────────────────────────────

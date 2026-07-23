@@ -93,7 +93,9 @@ back to CPU. `loss.backward(device="webgpu", resident=True)` stores leaf grads
 as GPUBuffer-backed TensorProxy values until explicit `.numpy()` / `.item()`.
 Default `.backward()` keeps CPU semantics for CPU-owned graphs, but selects the
 resident WebGPU path when the graph already reads GPU-owned buffers.
-`BatchNorm1d` remains a `CUSTOM` realization path with explicit NumPy VJPs.
+`BatchNorm1d` uses typed forward, VJP, and exactly-once running-state IR. Its
+v1 profile is float32 CPU execution with explicit vmap, ONNX, tensor-plan, and
+WebGPU refusals until those boundaries own normalization/state semantics.
 `bg.optim.sgd_update(...)`, `bg.optim.adam_update(...)`, and
 `bg.optim.adamw_update(...)` are functional optimizer/update IR nodes and lower
 through the same tensor-plan WebGPU path. They return updated tensors/state;

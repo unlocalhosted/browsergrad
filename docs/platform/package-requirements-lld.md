@@ -186,8 +186,8 @@ finite optional bounds, floating dtype preservation, inclusive-bound closure
 and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
 lowering. Hostile scalar coercion and integer dtype drift fail before UOp
 construction; tensor-plan/WebGPU remain explicit refusals. The opaque baseline
-is therefore narrowed to 6 constructor calls and 6 operations under ADR-0002
-and ADR-0004 through ADR-0031. Flip now emits typed `FLIP` with one strictly
+is therefore narrowed to 5 constructor calls and 5 operations under ADR-0002
+and ADR-0004 through ADR-0032. Flip now emits typed `FLIP` with one strictly
 normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
 leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
 float32/int32/int64/bool exporter profile. It rejects bool,
@@ -552,7 +552,20 @@ same/different randomness policy exists; ONNX inference export and
 tensor-plan/WebGPU execution also refuse rather than weakening the keyed
 contract. Trace caching excludes stochastic/effect-opaque graphs. Rank,
 output, work, and RNG/mask workspace are bounded before key consumption. This
-is thirty-three migrated operation records, not Gate 6 completion.
+typed `BatchNorm1d` owns exact float32 rank-2/rank-3 normalization,
+`num_batches_tracked`, biased batch variance, unbiased persistent variance,
+fixed or cumulative momentum, and immutable eval snapshots. Session-owned,
+target-bound effect streams use reserved/applied sequence watermarks to order
+lazy state updates in constant memory per module and commit all three running
+buffers atomically and exactly once across repeated realization, backward,
+functional gradient, checkpoint recomputation, and state inspection. Minted
+module storage tokens prevent recyclable Python object IDs from colliding in
+long-lived sessions. Closure and symbolic
+VJPs share runtime array validation and bounded work/storage contracts with
+Grad. Vmap, ONNX, tensor-plan, and WebGPU routes validate then refuse until
+their batch-axis, export-snapshot, normalization, and ordered device-state
+contracts exist. This is thirty-four migrated operation records, not Gate 6
+completion.
 
 The first executable framework-operation registry now removes the hand-written
 support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
@@ -566,6 +579,7 @@ records bind `Tensor.abs`, `torch.cat`, `Tensor.clamp`, `Tensor.cos`, `Tensor.ex
 `torch.nn.functional.nll_loss`,
 `torch.nn.functional.cross_entropy`,
 `torch.nn.functional.dropout`,
+`torch.nn.BatchNorm1d`,
 `torch.nn.functional.smooth_l1_loss`,
 `torch.sort.indices`, `torch.sort.values`, `torch.stack`,
 `torch.topk.indices`, `torch.topk.values`,
@@ -580,7 +594,7 @@ explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
 residency, and materialization decisions. A WebGPU profile is eligibility, not
 device availability or execution evidence. The architecture gate independently
 checks the registry and preserves the exact partition of the original 39
-opaque IDs into 6 still-opaque and thirty-three typed retirements. ADR-0003 records
+opaque IDs into 5 still-opaque and thirty-four typed retirements. ADR-0003 records
 this public contract. The table currently covers typed migrations only;
 completing the remaining operation families and making runtime/profile UI
 consume these records remain Gate 6 work.

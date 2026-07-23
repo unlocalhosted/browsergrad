@@ -488,7 +488,8 @@ def op(x):
       .toContainEqual(expect.stringContaining("opaque-operation IDs changed"));
 
     const changedField = structuredClone(inventory);
-    changedField.operations[0]!.labelField = "op";
+    changedField.operations[0]!.labelField =
+      changedField.operations[0]!.labelField === "op" ? "name" : "op";
     expect(validateJitOpaqueOperationInventory(changedField, fixture, jitFreeze))
       .toContainEqual(expect.stringContaining("labelField disagrees"));
 

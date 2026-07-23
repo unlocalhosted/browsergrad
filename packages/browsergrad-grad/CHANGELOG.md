@@ -9,6 +9,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- `nn.BatchNorm1d` now shares JIT's exact float32 constructor, shape, batch
+  statistics, affine-gradient, and state contract. Running variance uses the
+  unbiased estimator, `num_batches_tracked` is persistent, `momentum=None`
+  performs cumulative averaging, buffer identities remain stable, and
+  backward snapshots cannot be corrupted by later parameter mutation.
 - `torch.nn.functional.dropout` and `nn.Dropout` now share JIT's strict
   probability, mode, dtype, and bounded-resource contract. Identity branches
   preserve tensor identity without consuming RNG state, deterministic

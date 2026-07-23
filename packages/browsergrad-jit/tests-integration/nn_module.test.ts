@@ -82,6 +82,7 @@ ok
       keys: string[];
       mean: number[];
       var: number[];
+      tracked: number;
       evalClose: boolean;
       bufferIdentityStable: boolean;
       extraKeyError: string;
@@ -118,15 +119,23 @@ except KeyError as e:
     "keys": sorted(src.state_dict().keys()),
     "mean": dst.running_mean.round(6).tolist(),
     "var": dst.running_var.round(6).tolist(),
+    "tracked": int(dst.num_batches_tracked),
     "evalClose": bool(np.allclose(ys, yd)),
     "bufferIdentityStable": buffer_identity_stable,
     "extraKeyError": extra_key_error,
     "missingKeyError": missing_key_error,
 }
 `);
-    expect(result.keys).toEqual(["bias", "running_mean", "running_var", "weight"]);
+    expect(result.keys).toEqual([
+      "bias",
+      "num_batches_tracked",
+      "running_mean",
+      "running_var",
+      "weight",
+    ]);
     expect(result.mean).toEqual([2, 4]);
-    expect(result.var).toEqual([1, 4]);
+    expect(result.var).toEqual([2, 8]);
+    expect(result.tracked).toBe(1);
     expect(result.evalClose).toBe(true);
     expect(result.bufferIdentityStable).toBe(true);
     expect(result.extraKeyError).toContain("unexpected keys");

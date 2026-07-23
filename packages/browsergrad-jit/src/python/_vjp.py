@@ -73,6 +73,8 @@ from ._ir import (
     OP_NLL_LOSS, OP_NLL_LOSS_VJP,
     OP_CROSS_ENTROPY, OP_CROSS_ENTROPY_VJP,
     OP_DROPOUT, OP_DROPOUT_VJP,
+    OP_BATCH_NORM_1D, OP_BATCH_NORM_1D_STATS_UPDATE,
+    OP_BATCH_NORM_1D_VJP,
     OP_CONST, OP_BROADCAST_TO, OP_WHERE, OP_INDEX, OP_SCATTER_ADD,
     OP_ISNAN,
 )
@@ -95,6 +97,8 @@ from ._framework_contracts import (
     validate_nll_loss_contract,
     validate_cross_entropy_contract,
     validate_dropout_contract,
+    validate_batch_norm_1d_contract,
+    validate_batch_norm_1d_stats_update_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -1573,6 +1577,70 @@ def _vjp_dropout(
             "seed_key": contract.seed_key,
         },
     ),)
+
+
+@register_vjp(OP_BATCH_NORM_1D)
+def _vjp_batch_norm_1d(
+    output: UOp,
+    inputs: Tuple[UOp, ...],
+    dy: UOp,
+) -> Tuple[Optional[UOp], ...]:
+    contract = validate_batch_norm_1d_contract(output)
+    if (
+        len(inputs) != len(output.inputs)
+        or any(actual is not expected for actual, expected in zip(inputs, output.inputs))
+    ):
+        raise ShapeError(
+            "BATCH_NORM_1D VJP inputs must equal the exact forward operands"
+        )
+    if dy.shape != output.shape or dy.dtype != output.dtype:
+        raise ShapeError(
+            "BATCH_NORM_1D VJP upstream gradient must match the forward output"
+        )
+
+    def gradient(operand: str, shape: Tuple[int, ...]) -> UOp:
+        return _vjp_uop(
+            OP_BATCH_NORM_1D_VJP,
+            (dy,) + inputs,
+            shape,
+            "float32",
+            output,
+            arg={
+                "eps": contract.eps,
+                "affine": contract.affine,
+                "stats_mode": contract.stats_mode,
+                "operand": operand,
+            },
+        )
+
+    emitted: list[Optional[UOp]] = [
+        gradient("input", contract.input_shape)
+    ]
+    if contract.stats_input_index is not None:
+        emitted.append(None)
+    if contract.affine:
+        emitted.extend((
+            gradient("weight", (contract.channel_count,)),
+            gradient("bias", (contract.channel_count,)),
+        ))
+    return tuple(emitted)
+
+
+@register_vjp(OP_BATCH_NORM_1D_STATS_UPDATE)
+def _vjp_batch_norm_1d_stats_update(
+    output: UOp,
+    inputs: Tuple[UOp, ...],
+    dy: UOp,
+) -> Tuple[Optional[UOp], ...]:
+    validate_batch_norm_1d_stats_update_contract(output)
+    if (
+        len(inputs) != len(output.inputs)
+        or any(actual is not expected for actual, expected in zip(inputs, output.inputs))
+    ):
+        raise ShapeError(
+            "BATCH_NORM_1D_STATS_UPDATE VJP inputs must equal its operands"
+        )
+    return tuple(None for _ in inputs)
 
 
 def _broadcast_batch_shape(

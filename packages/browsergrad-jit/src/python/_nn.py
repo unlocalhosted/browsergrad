@@ -3,7 +3,7 @@ nn.Dropout. The 0.1.0 MVP scope per PRD-005's revised plan.
 
 INTERNAL module. Users import as `browsergrad_jit.nn`.
 
-Conv/LayerNorm use primitive IR. BatchNorm/MultiHeadAttention/Embedding/RNN
+Conv/LayerNorm and BatchNorm1d use typed IR. MultiHeadAttention/Embedding/RNN
 remain module-level coverage that can be promoted as GPU-native demand lands.
 """
 
@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Iterator, Optional, Tuple
 from collections import OrderedDict
 import math
+import uuid
 
 import numpy as np
 
@@ -22,9 +23,23 @@ from ._tensor_proxy import (
     zeros,
     randn,
 )
-from ._ir import UOp, OP_BUFFER, OP_CUSTOM
+from ._ir import (
+    UOp,
+    OP_BUFFER,
+    OP_BATCH_NORM_1D,
+    OP_BATCH_NORM_1D_STATS_UPDATE,
+)
 from ._errors import JitNotImplementedError, ShapeError
-from ._framework_contracts import normalize_dropout_probability
+from ._framework_contracts import (
+    BATCH_NORM_1D_STATE_EFFECT_KIND,
+    execute_batch_norm_1d_vjp_array,
+    infer_batch_norm_1d_contract,
+    normalize_dropout_probability,
+    normalize_batch_norm_1d_eps,
+    normalize_batch_norm_1d_flag,
+    normalize_batch_norm_1d_momentum,
+    normalize_batch_norm_1d_num_features,
+)
 from . import _functional as F
 
 
@@ -205,12 +220,14 @@ class Module:
         return self.train(False)
 
     def state_dict(self) -> dict:
+        self._synchronize_pending_state()
         state = {name: p.numpy() for name, p in self.named_parameters()}
         for name, b in self.named_buffers():
             state[name] = np.array(b, copy=True)
         return state
 
     def load_state_dict(self, state: dict, strict: bool = True) -> None:
+        self._synchronize_pending_state()
         expected = {name for name, _ in self.named_parameters()}
         expected.update(name for name, _ in self.named_buffers())
         if strict:
@@ -244,6 +261,11 @@ class Module:
                     f"state_dict[{name!r}] shape {arr.shape} != buffer shape {b.shape}"
                 )
             b[...] = arr.astype(b.dtype, copy=False)
+
+    def _synchronize_pending_state(self) -> None:
+        """Commit lazy state effects before externally observing state."""
+        for module in self._modules.values():
+            module._synchronize_pending_state()
 
     def zero_grad(self) -> None:
         """Reset all parameter gradients. Mirrors optimizer.zero_grad()."""
@@ -656,16 +678,24 @@ class BatchNorm1d(Module):
         self,
         num_features: int,
         eps: float = 1e-5,
-        momentum: float = 0.1,
+        momentum: Optional[float] = 0.1,
         affine: bool = True,
         track_running_stats: bool = True,
     ) -> None:
         super().__init__()
-        self.num_features = int(num_features)
-        self.eps = float(eps)
-        self.momentum = float(momentum)
-        self.affine = bool(affine)
-        self.track_running_stats = bool(track_running_stats)
+        self.num_features = normalize_batch_norm_1d_num_features(num_features)
+        self.eps = normalize_batch_norm_1d_eps(eps)
+        self.momentum = normalize_batch_norm_1d_momentum(momentum)
+        self.affine = normalize_batch_norm_1d_flag(affine, "affine")
+        self.track_running_stats = normalize_batch_norm_1d_flag(
+            track_running_stats, "track_running_stats"
+        )
+        self._state_buffer_table = None
+        self._state_session_token = None
+        self._state_buffer_uops = None
+        self._last_state_update = None
+        self._last_state_effect_id = None
+        self._state_name_token = uuid.uuid4().hex
         if self.affine:
             self.weight = Parameter(from_numpy(
                 np.ones((self.num_features,), dtype=np.float32),
@@ -687,9 +717,105 @@ class BatchNorm1d(Module):
                 "running_var",
                 np.ones((self.num_features,), dtype=np.float32),
             )
+            self.register_buffer(
+                "num_batches_tracked",
+                np.asarray(0, dtype=np.int64),
+            )
         else:
             self.running_mean = None
             self.running_var = None
+            self.num_batches_tracked = None
+
+    def _ensure_state_buffers(self, session: Any) -> Tuple[UOp, UOp, UOp]:
+        table = session.buffer_table
+        if self._state_buffer_table is None:
+            prefix = f"batch-norm-1d-{self._state_name_token}"
+            mean_id = table.new_buffer(
+                self.running_mean, name=f"{prefix}-running-mean"
+            )
+            var_id = table.new_buffer(
+                self.running_var, name=f"{prefix}-running-var"
+            )
+            tracked_id = table.new_buffer(
+                self.num_batches_tracked,
+                name=f"{prefix}-num-batches-tracked",
+            )
+            self._state_buffer_table = table
+            self._state_session_token = table.session_token
+            self._state_buffer_uops = (
+                UOp(
+                    op=OP_BUFFER,
+                    inputs=(),
+                    shape=(self.num_features,),
+                    dtype="float32",
+                    arg=mean_id,
+                ),
+                UOp(
+                    op=OP_BUFFER,
+                    inputs=(),
+                    shape=(self.num_features,),
+                    dtype="float32",
+                    arg=var_id,
+                ),
+                UOp(
+                    op=OP_BUFFER,
+                    inputs=(),
+                    shape=(),
+                    dtype="int64",
+                    arg=tracked_id,
+                ),
+            )
+        elif self._state_buffer_table is not table:
+            raise ShapeError(
+                "BatchNorm1d running state is bound to session "
+                f"{self._state_session_token!r}; rebuild or load a state_dict "
+                "into a module owned by the current session"
+            )
+        return self._state_buffer_uops
+
+    def _drop_applied_state_tail(self) -> None:
+        if (
+            self._last_state_effect_id is not None
+            and self._state_buffer_table is not None
+            and self._state_buffer_table.effect_applied(
+                self._last_state_effect_id,
+                BATCH_NORM_1D_STATE_EFFECT_KIND,
+            )
+        ):
+            self._last_state_update = None
+            self._last_state_effect_id = None
+
+    def _synchronize_pending_state(self) -> None:
+        if (
+            self._last_state_update is not None
+            and self._last_state_effect_id is not None
+        ):
+            from ._realize import realize
+            realize(self._last_state_update, self._state_buffer_table)
+            self._drop_applied_state_tail()
+        super()._synchronize_pending_state()
+
+    def reset_running_stats(self) -> None:
+        if not self.track_running_stats:
+            return
+        self._synchronize_pending_state()
+        self.running_mean[...] = np.float32(0.0)
+        self.running_var[...] = np.float32(1.0)
+        self.num_batches_tracked[...] = np.int64(0)
+
+    def reset_parameters(self) -> None:
+        self.reset_running_stats()
+        if self.affine:
+            weight_session = self.weight._get_session()
+            bias_session = self.bias._get_session()
+            weight_session.buffer_table.update(
+                self.weight._uop.inputs[0].arg,
+                np.ones((self.num_features,), dtype=np.float32),
+            )
+            bias_session.buffer_table.update(
+                self.bias._uop.inputs[0].arg,
+                np.zeros((self.num_features,), dtype=np.float32),
+            )
 
     def forward(self, x: TensorProxy) -> TensorProxy:
         if x.ndim not in (2, 3):
@@ -700,72 +826,109 @@ class BatchNorm1d(Module):
             raise ShapeError(
                 f"BatchNorm1d expected {self.num_features} channels, got {x.shape[1]}"
             )
-        reduce_axes = (0,) if x.ndim == 2 else (0, 2)
-        stat_shape = (1, self.num_features) if x.ndim == 2 else (1, self.num_features, 1)
-        training_pass = self.training or not self.track_running_stats
+        if x.dtype != "float32":
+            raise ShapeError(
+                f"BatchNorm1d v1 requires float32 input, got {x.dtype!r}"
+            )
         sess = x._get_session()
+        if self.affine and any(
+            parameter._get_session().buffer_table is not sess.buffer_table
+            for parameter in (self.weight, self.bias)
+        ):
+            raise ShapeError(
+                "BatchNorm1d input and affine parameters must belong to the "
+                "same session"
+            )
 
-        captured: dict = {}
+        stats_proxy = None
+        if self.training and self.track_running_stats:
+            state_buffers = self._ensure_state_buffers(sess)
+            self._drop_applied_state_tail()
+            effect_id = sess.buffer_table.reserve_effect(
+                BATCH_NORM_1D_STATE_EFFECT_KIND,
+                tuple(buffer.arg for buffer in state_buffers),
+            )
+            state_inputs = []
+            has_prior = self._last_state_update is not None
+            if has_prior:
+                state_inputs.append(self._last_state_update)
+            state_inputs.extend((x._uop,) + state_buffers)
+            state_update = UOp(
+                op=OP_BATCH_NORM_1D_STATS_UPDATE,
+                inputs=tuple(state_inputs),
+                shape=(2, self.num_features),
+                dtype="float32",
+                arg={
+                    "effect_id": effect_id,
+                    "momentum": self.momentum,
+                    "has_prior": has_prior,
+                },
+            )
+            stats_proxy = TensorProxy(
+                state_update,
+                session=sess,
+                requires_grad=False,
+            )
+            self._last_state_update = state_update
+            self._last_state_effect_id = effect_id
+            stats_mode = "batch-state"
+        elif not self.training and self.track_running_stats:
+            self._ensure_state_buffers(sess)
+            self._synchronize_pending_state()
+            snapshot = np.stack(
+                (
+                    np.array(self.running_mean, dtype=np.float32, copy=True),
+                    np.array(self.running_var, dtype=np.float32, copy=True),
+                ),
+                axis=0,
+            )
+            stats_proxy = from_numpy(snapshot, session=sess)
+            stats_mode = "running"
+        else:
+            stats_mode = "batch"
 
-        def _forward(x_arr: np.ndarray, *affine_arrays: np.ndarray) -> np.ndarray:
-            if training_pass:
-                mean = x_arr.mean(axis=reduce_axes)
-                var = x_arr.var(axis=reduce_axes)
-                if self.training and self.track_running_stats:
-                    m = self.momentum
-                    self.running_mean[...] = (1.0 - m) * self.running_mean + m * mean
-                    self.running_var[...] = (1.0 - m) * self.running_var + m * var
-            else:
-                mean = self.running_mean
-                var = self.running_var
-            inv_std = 1.0 / np.sqrt(var + self.eps)
-            x_hat = (x_arr - mean.reshape(stat_shape)) * inv_std.reshape(stat_shape)
-            captured["x_hat"] = x_hat
-            captured["inv_std"] = inv_std
-            out = x_hat
-            if self.affine:
-                weight_arr, bias_arr = affine_arrays
-                out = out * weight_arr.reshape(stat_shape) + bias_arr.reshape(stat_shape)
-            return out.astype(np.dtype(x.dtype), copy=False)
-
-        input_uops = [x._uop]
         input_proxies = [x]
+        if stats_proxy is not None:
+            input_proxies.append(stats_proxy)
         if self.affine:
-            input_uops.extend([self.weight._uop, self.bias._uop])
             input_proxies.extend([self.weight, self.bias])
+        input_uops = tuple(proxy._uop for proxy in input_proxies)
+        contract = infer_batch_norm_1d_contract(
+            input_uops,
+            self.eps,
+            self.affine,
+            stats_mode,
+        )
         uop = UOp(
-            op=OP_CUSTOM,
-            inputs=tuple(input_uops),
+            op=OP_BATCH_NORM_1D,
+            inputs=input_uops,
             shape=x.shape,
-            dtype=x.dtype,
-            arg={"fn": _forward, "captures": (), "name": "batch_norm1d"},
+            dtype="float32",
+            arg={
+                "eps": contract.eps,
+                "affine": contract.affine,
+                "stats_mode": contract.stats_mode,
+            },
         )
 
         def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]):
-            x_arr = ins[0]
-            x_hat = captured["x_hat"]
-            inv_std = captured["inv_std"]
-            if self.affine:
-                weight_arr = ins[1]
-                grad_x_hat = dy * weight_arr.reshape(stat_shape)
-                grad_weight = (dy * x_hat).sum(axis=reduce_axes)
-                grad_bias = dy.sum(axis=reduce_axes)
-            else:
-                grad_x_hat = dy
-                grad_weight = None
-                grad_bias = None
-            if training_pass:
-                n_total = float(np.prod([x_arr.shape[a] for a in reduce_axes]))
-                sum_g = grad_x_hat.sum(axis=reduce_axes, keepdims=True)
-                sum_g_xhat = (grad_x_hat * x_hat).sum(axis=reduce_axes, keepdims=True)
-                grad_x = inv_std.reshape(stat_shape) * (
-                    grad_x_hat - sum_g / n_total - x_hat * sum_g_xhat / n_total
+            gradients = [
+                execute_batch_norm_1d_vjp_array(
+                    contract, ins, dy, "input"
                 )
-            else:
-                grad_x = grad_x_hat * inv_std.reshape(stat_shape)
-            if self.affine:
-                return (grad_x, grad_weight, grad_bias)
-            return (grad_x,)
+            ]
+            if contract.stats_input_index is not None:
+                gradients.append(None)
+            if contract.affine:
+                gradients.extend((
+                    execute_batch_norm_1d_vjp_array(
+                        contract, ins, dy, "weight"
+                    ),
+                    execute_batch_norm_1d_vjp_array(
+                        contract, ins, dy, "bias"
+                    ),
+                ))
+            return tuple(gradients)
 
         requires = _should_track(*input_proxies)
         ctx = _BackwardCtx(fn=_bw, input_proxies=tuple(input_proxies)) if requires else None
@@ -774,7 +937,8 @@ class BatchNorm1d(Module):
     def __repr__(self) -> str:
         return (
             f"BatchNorm1d({self.num_features}, eps={self.eps}, "
-            f"momentum={self.momentum}, affine={self.affine})"
+            f"momentum={self.momentum}, affine={self.affine}, "
+            f"track_running_stats={self.track_running_stats})"
         )
 
 

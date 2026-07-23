@@ -30,19 +30,6 @@
       }
     },
     {
-      "id": "jit.custom.stateful-replay.v0",
-      "expected": {
-        "batchNormRunningMeanChangedDuringBackward": true,
-        "batchNormBranches": {
-          "trackedTrainingInputArity": 1,
-          "affineEvalInputArity": 3,
-          "trackedEvalStatsChanged": false,
-          "untrackedEvalHasRunningStats": false,
-          "untrackedEvalUsesBatchStats": true
-        }
-      }
-    },
-    {
       "id": "jit.custom.accelerator-and-constructor-only.v0",
       "expected": {
         "labels": ["flash_attention", "transformer_block", "user", "webnn_matmul"],
@@ -59,15 +46,9 @@
       "id": "jit.custom.all-callback-labels-and-dtypes.v0",
       "expected": {
         "environment": {"pyodide": "0.26.4", "numpy": "1.26.4"},
-        "observedLabels": [
-          "batch_norm1d",
-          "interpolate"
-        ],
+        "observedLabels": ["interpolate"],
         "allLabelsMatch": true,
-        "closureGradientLabels": [
-          "batch_norm1d",
-          "interpolate"
-        ],
+        "closureGradientLabels": ["interpolate"],
         "allClosureGradientsPresent": true,
         "realizedDtypeDrift": {}
       }

@@ -55,6 +55,8 @@ from ._ir import (
     OP_NLL_LOSS,
     OP_CROSS_ENTROPY,
     OP_DROPOUT,
+    OP_BATCH_NORM_1D,
+    OP_BATCH_NORM_1D_STATS_UPDATE,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_BROADCAST_TO, OP_EINSUM_VJP, OP_L1_LOSS_VJP,
@@ -64,12 +66,13 @@ from ._ir import (
     OP_NLL_LOSS_VJP,
     OP_CROSS_ENTROPY_VJP,
     OP_DROPOUT_VJP,
+    OP_BATCH_NORM_1D_VJP,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 )
 from ._buffer_table import BufferTable
-from ._errors import RealizationError
+from ._errors import RealizationError, ShapeError
 from ._framework_contracts import (
     validate_broadcast_to_contract,
     validate_cat_contract,
@@ -98,6 +101,9 @@ from ._framework_contracts import (
     validate_cross_entropy_vjp_contract,
     validate_dropout_contract,
     validate_dropout_vjp_contract,
+    validate_batch_norm_1d_contract,
+    validate_batch_norm_1d_stats_update_contract,
+    validate_batch_norm_1d_vjp_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -134,6 +140,11 @@ from ._framework_contracts import (
     execute_cross_entropy_vjp_array,
     execute_dropout_array,
     execute_dropout_vjp_array,
+    infer_batch_norm_1d_contract,
+    batch_norm_1d_batch_stats_array,
+    execute_batch_norm_1d_array,
+    execute_batch_norm_1d_vjp_array,
+    BATCH_NORM_1D_STATE_EFFECT_KIND,
 )
 
 
@@ -1307,6 +1318,94 @@ def _h_dropout_vjp(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     )
 
 
+def _h_batch_norm_1d(
+    node: UOp,
+    vt: dict,
+    bt: BufferTable,
+) -> np.ndarray:
+    contract = validate_batch_norm_1d_contract(node)
+    arrays = tuple(vt[id(source)] for source in node.inputs)
+    return execute_batch_norm_1d_array(contract, arrays)
+
+
+def _h_batch_norm_1d_stats_update(
+    node: UOp,
+    vt: dict,
+    bt: BufferTable,
+) -> np.ndarray:
+    contract = validate_batch_norm_1d_stats_update_contract(node)
+    source = vt[id(node.inputs[contract.source_input_index])]
+    source_contract = infer_batch_norm_1d_contract(
+        (node.inputs[contract.source_input_index],),
+        0.0,
+        False,
+        "batch",
+    )
+    mean, biased_var = batch_norm_1d_batch_stats_array(
+        source, source_contract
+    )
+    running_mean = bt.get(contract.running_mean_buffer_id)
+    running_var = bt.get(contract.running_var_buffer_id)
+    tracked = bt.get(contract.num_batches_tracked_buffer_id)
+    if (
+        tracked.shape != ()
+        or tracked.dtype.name != "int64"
+        or int(tracked) < 0
+        or int(tracked) >= (1 << 63) - 1
+    ):
+        raise ShapeError(
+            "BatchNorm1d num_batches_tracked must be a non-negative int64 "
+            "below its overflow boundary"
+        )
+    next_count = int(tracked) + 1
+    factor = (
+        1.0 / float(next_count)
+        if contract.momentum is None
+        else contract.momentum
+    )
+    unbiased_var = np.asarray(
+        biased_var
+        * np.float32(
+            contract.sample_count / float(contract.sample_count - 1)
+        ),
+        dtype=np.float32,
+    )
+    next_mean = np.asarray(
+        (1.0 - factor) * running_mean + factor * mean,
+        dtype=np.float32,
+    )
+    next_var = np.asarray(
+        (1.0 - factor) * running_var + factor * unbiased_var,
+        dtype=np.float32,
+    )
+    next_tracked = np.asarray(next_count, dtype=np.int64)
+    bt.apply_updates_once(
+        contract.effect_id,
+        BATCH_NORM_1D_STATE_EFFECT_KIND,
+        (
+            (contract.running_mean_buffer_id, next_mean),
+            (contract.running_var_buffer_id, next_var),
+            (contract.num_batches_tracked_buffer_id, next_tracked),
+        ),
+    )
+    return np.stack((mean, biased_var), axis=0).astype(
+        np.float32, copy=False
+    )
+
+
+def _h_batch_norm_1d_vjp(
+    node: UOp,
+    vt: dict,
+    bt: BufferTable,
+) -> np.ndarray:
+    contract, operand = validate_batch_norm_1d_vjp_contract(node)
+    dy = vt[id(node.inputs[0])]
+    arrays = tuple(vt[id(source)] for source in node.inputs[1:])
+    return execute_batch_norm_1d_vjp_array(
+        contract, arrays, dy, operand
+    )
+
+
 def _h_where(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     validate_where_contract(node)
     cond = vt[id(node.inputs[0])]
@@ -1651,6 +1750,8 @@ _DISPATCH: dict[str, Handler] = {
     OP_NLL_LOSS: _h_nll_loss,
     OP_CROSS_ENTROPY: _h_cross_entropy,
     OP_DROPOUT: _h_dropout,
+    OP_BATCH_NORM_1D: _h_batch_norm_1d,
+    OP_BATCH_NORM_1D_STATS_UPDATE: _h_batch_norm_1d_stats_update,
     OP_WHERE:   _h_where,
     OP_INDEX:   _h_index,
     OP_MASK:    _h_mask,
@@ -1670,6 +1771,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_NLL_LOSS_VJP: _h_nll_loss_vjp,
     OP_CROSS_ENTROPY_VJP: _h_cross_entropy_vjp,
     OP_DROPOUT_VJP: _h_dropout_vjp,
+    OP_BATCH_NORM_1D_VJP: _h_batch_norm_1d_vjp,
     # Mixed precision (PRD-010)
     OP_ISNAN:             _h_isnan,
     # Optimizer/update IR

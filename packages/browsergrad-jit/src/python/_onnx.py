@@ -84,6 +84,9 @@ from ._ir import (
     OP_NLL_LOSS,
     OP_CROSS_ENTROPY,
     OP_DROPOUT,
+    OP_BATCH_NORM_1D,
+    OP_BATCH_NORM_1D_STATS_UPDATE,
+    OP_BATCH_NORM_1D_VJP,
     OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
@@ -108,6 +111,9 @@ from ._framework_contracts import (
     validate_nll_loss_contract,
     validate_cross_entropy_contract,
     validate_dropout_contract,
+    validate_batch_norm_1d_contract,
+    validate_batch_norm_1d_stats_update_contract,
+    validate_batch_norm_1d_vjp_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -522,6 +528,24 @@ def export_inference(
                 "export_inference: training DROPOUT is not exportable because "
                 "the inference graph cannot preserve its keyed stochastic "
                 "execution contract"
+            )
+        if node.op == OP_BATCH_NORM_1D:
+            validate_batch_norm_1d_contract(node)
+            raise OnnxUnmappableOp(
+                "export_inference: BATCH_NORM_1D has no admitted stable "
+                "running-stat snapshot export profile"
+            )
+        if node.op == OP_BATCH_NORM_1D_STATS_UPDATE:
+            validate_batch_norm_1d_stats_update_contract(node)
+            raise OnnxUnmappableOp(
+                "export_inference: BatchNorm running-state effects are not "
+                "representable in the inference graph"
+            )
+        if node.op == OP_BATCH_NORM_1D_VJP:
+            validate_batch_norm_1d_vjp_contract(node)
+            raise OnnxUnmappableOp(
+                "export_inference: BatchNorm training gradients are outside "
+                "the inference export contract"
             )
         if node.op not in (
             OP_EINSUM,

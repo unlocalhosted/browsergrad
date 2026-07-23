@@ -241,10 +241,25 @@ def apply_checkpoint_rewrite(grad_uop: UOp) -> UOp:
             inputs=new_inputs,
             shape=u.shape,
             dtype=u.dtype,
-            arg=u.arg,
+            arg=_remap_vjp_source(u.arg),
         )
         clone_cache[id(u)] = clone
         return clone
+
+    def _remap_vjp_source(arg: Any) -> Any:
+        """Retarget backward metadata to the cloned forward node.
+
+        Typed VJP validators bind their operands to ``arg.vjp_of``. Keeping
+        the original forward reference while replacing the VJP inputs with
+        checkpoint clones creates a mixed-authority node and defeats those
+        validators. Preserve every other arg field verbatim.
+        """
+        if type(arg) is not dict or "vjp_of" not in arg:
+            return arg
+        source = arg["vjp_of"]
+        if not isinstance(source, UOp) or id(source) not in interior:
+            return arg
+        return {**arg, "vjp_of": _clone_if_interior(source)}
 
     # Now walk the grad graph and rebuild any UOp whose input set
     # touches an interior node. Same algorithm as _fusion._substitute.
@@ -270,7 +285,7 @@ def apply_checkpoint_rewrite(grad_uop: UOp) -> UOp:
             inputs=new_inputs,
             shape=node.shape,
             dtype=node.dtype,
-            arg=node.arg,
+            arg=_remap_vjp_source(node.arg),
         )
         rebuilt[id(node)] = rebuilt_node
         return rebuilt_node

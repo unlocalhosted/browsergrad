@@ -74,6 +74,12 @@ DROPOUT_OUTPUT_EXTENT_MAX = DROPOUT_OUTPUT_BYTE_MAX
 DROPOUT_WORK_ELEMENT_MAX = 1 << 28
 DROPOUT_WORKSPACE_BYTE_MAX = 1 << 28
 DROPOUT_WORK_VISIT_FACTOR = 8
+BATCH_NORM_1D_OUTPUT_BYTE_MAX = 1 << 28
+BATCH_NORM_1D_OUTPUT_EXTENT_MAX = BATCH_NORM_1D_OUTPUT_BYTE_MAX
+BATCH_NORM_1D_WORK_ELEMENT_MAX = 1 << 28
+BATCH_NORM_1D_WORKSPACE_BYTE_MAX = 1 << 28
+BATCH_NORM_1D_WORK_VISIT_FACTOR = 32
+BATCH_NORM_1D_STATE_EFFECT_KIND = "batch-norm-1d-running-stats"
 MASKED_FILL_CONTRACT_ID = "browsergrad.jit.framework.tensor.masked-fill.v1"
 _REGISTRY_FILENAME = "framework-operation-contracts.v1.json"
 _REGISTRY_BYTE_LIMIT = 64 * 1024
@@ -123,6 +129,7 @@ _ENUMS = {
         "class-axis-index-loss-with-batched-reduction",
         "class-axis-logits-loss-with-index-or-probability-target-and-batched-reduction",
         "preserve-input-with-elementwise-bernoulli-mask",
+        "preserve-rank-2-or-3-channel-normalized-input",
         "static-broadcast-with-existing-dim-minus-one",
         "selected-axis-times-repeat-count",
         "static-product-reduction",
@@ -145,6 +152,7 @@ _ENUMS = {
         "promote-integral-default-or-explicit-scan-dtype",
         "pytorch-dimensioned-tensor-promotion",
         "preserve-input-with-floating-stochastic-profile",
+        "exact-float32-input-affine-and-state",
     }),
     "cpu": frozenset({
         "supported-numpy-dtype-preserving",
@@ -167,6 +175,7 @@ _ENUMS = {
         "supported-numpy-owning-bounded-nll-reduction",
         "supported-numpy-owning-stable-cross-entropy-reduction",
         "supported-numpy-owning-keyed-inverted-dropout",
+        "supported-numpy-owning-batch-normalization",
     }),
     "closureAutograd": frozenset({
         "supported-cos-derivative",
@@ -199,6 +208,7 @@ _ENUMS = {
         "supported-selected-class-negative-weight-gradient",
         "supported-stable-logits-and-probability-target-gradients",
         "supported-keyed-mask-replay",
+        "supported-batch-stat-or-running-stat-derivatives",
     }),
     "symbolicVjp": frozenset({
         "supported-cos-derivative",
@@ -231,6 +241,7 @@ _ENUMS = {
         "supported-selected-class-negative-weight-gradient",
         "supported-stable-logits-and-probability-target-gradients",
         "supported-keyed-mask-replay",
+        "supported-batch-stat-or-running-stat-derivatives",
     }),
     "functionalGrad": frozenset({
         "supported-via-symbolic-vjp",
@@ -258,6 +269,7 @@ _ENUMS = {
         "supported-leading-batch-axis-with-target-mode-class-axis-shift-and-captured-weight",
         "supported-leading-batch-axis-preserving-pad",
         "supported-deterministic-drop-all-refuses-stochastic-without-randomness-policy",
+        "refused-state-and-batch-axis-contract-undefined",
     }),
     "onnxExport": frozenset({
         "supported-opset17-clip-export-dtypes",
@@ -287,6 +299,7 @@ _ENUMS = {
         "supported-opset17-negative-log-likelihood-loss-unmapped-profile",
         "supported-opset17-softmax-cross-entropy-loss-unmapped-index-profile",
         "refused-training-dropout-in-inference-export",
+        "refused-no-stable-running-stat-export-profile",
     }),
     "tensorPlan": frozenset({
         "refused-negative-stride-profile",
@@ -305,6 +318,7 @@ _ENUMS = {
         "refused-no-portable-lowering",
         "supported-primitive",
         "refused-no-canonical-keyed-rng-lowering",
+        "refused-no-canonical-batch-normalization-lowering",
     }),
     "webgpu": frozenset({
         "profile-nonempty-f32-rank-at-most-4",
@@ -841,6 +855,40 @@ class DropoutContract:
     input_elements: int
     work_elements: int
     workspace_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class BatchNorm1dContract:
+    input_shape: Tuple[int, ...]
+    output_shape: Tuple[int, ...]
+    output_dtype: str
+    channel_count: int
+    reduce_axes: Tuple[int, ...]
+    stat_shape: Tuple[int, ...]
+    sample_count: int
+    eps: float
+    affine: bool
+    stats_mode: str
+    stats_input_index: Optional[int]
+    weight_input_index: Optional[int]
+    bias_input_index: Optional[int]
+    work_elements: int
+    workspace_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class BatchNorm1dStatsUpdateContract:
+    input_shape: Tuple[int, ...]
+    channel_count: int
+    reduce_axes: Tuple[int, ...]
+    sample_count: int
+    momentum: Optional[float]
+    effect_id: str
+    has_prior: bool
+    source_input_index: int
+    running_mean_buffer_id: str
+    running_var_buffer_id: str
+    num_batches_tracked_buffer_id: str
 
 
 def _elementwise_loss_checked_product(extents: Tuple[int, ...], ceiling: int) -> int:
@@ -1753,6 +1801,376 @@ def execute_dropout_vjp_array(
     scale = np.asarray(1.0 / (1.0 - contract.p), dtype=gradient.dtype)
     np.multiply(dy, scale, out=gradient, where=mask)
     return gradient
+
+
+def normalize_batch_norm_1d_num_features(value: Any) -> int:
+    if type(value) is not int or type(value) is bool:
+        raise ShapeError("BatchNorm1d: num_features must be an exact integer")
+    if value <= 0 or value > BATCH_NORM_1D_OUTPUT_EXTENT_MAX:
+        raise ShapeError(
+            "BatchNorm1d: num_features must be in "
+            f"[1, {BATCH_NORM_1D_OUTPUT_EXTENT_MAX}], got {value!r}"
+        )
+    return value
+
+
+def normalize_batch_norm_1d_eps(value: Any) -> float:
+    if type(value) not in _PAD_VALUE_TYPES or type(value) is bool:
+        raise ShapeError("BatchNorm1d: eps must be an exact real scalar")
+    normalized = float(value)
+    if not math.isfinite(normalized) or normalized < 0.0:
+        raise ShapeError(
+            f"BatchNorm1d: eps must be finite and non-negative, got {normalized!r}"
+        )
+    return normalized
+
+
+def normalize_batch_norm_1d_momentum(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if type(value) not in _PAD_VALUE_TYPES or type(value) is bool:
+        raise ShapeError(
+            "BatchNorm1d: momentum must be None or an exact real scalar"
+        )
+    normalized = float(value)
+    if (
+        not math.isfinite(normalized)
+        or normalized < 0.0
+        or normalized > 1.0
+    ):
+        raise ShapeError(
+            "BatchNorm1d: momentum must be None or finite and in [0, 1], "
+            f"got {normalized!r}"
+        )
+    return normalized
+
+
+def normalize_batch_norm_1d_flag(value: Any, name: str) -> bool:
+    if type(name) is not str or name not in ("affine", "track_running_stats"):
+        raise ShapeError("BatchNorm1d: internal flag name is invalid")
+    if type(value) is not bool:
+        raise ShapeError(f"BatchNorm1d: {name} must be an exact bool")
+    return value
+
+
+def infer_batch_norm_1d_contract(
+    inputs: tuple[Any, ...],
+    eps: Any,
+    affine: Any,
+    stats_mode: Any,
+) -> BatchNorm1dContract:
+    normalized_eps = normalize_batch_norm_1d_eps(eps)
+    if type(affine) is not bool:
+        raise ShapeError("BatchNorm1d: affine must be an exact bool")
+    if stats_mode not in ("batch", "batch-state", "running"):
+        raise ShapeError(
+            "BatchNorm1d: stats_mode must be 'batch', 'batch-state', or "
+            f"'running', got {stats_mode!r}"
+        )
+    if type(inputs) is not tuple:
+        raise ShapeError("BATCH_NORM_1D inputs must be a plain tuple")
+
+    has_stats = stats_mode in ("batch-state", "running")
+    expected_inputs = 1 + int(has_stats) + (2 if affine else 0)
+    if len(inputs) != expected_inputs:
+        raise ShapeError(
+            f"BATCH_NORM_1D requires {expected_inputs} inputs for "
+            f"stats_mode={stats_mode!r}, affine={affine}, got {len(inputs)}"
+        )
+    source = inputs[0]
+    input_shape = getattr(source, "shape", None)
+    input_dtype = getattr(source, "dtype", None)
+    if type(input_shape) is not tuple or len(input_shape) not in (2, 3):
+        raise ShapeError(
+            "BatchNorm1d expects shape (N, C) or (N, C, L)"
+        )
+    for axis, extent in enumerate(input_shape):
+        if type(extent) is not int or extent < 0:
+            raise ShapeError(
+                f"BatchNorm1d input shape[{axis}] must be a non-negative integer"
+            )
+        if extent > BATCH_NORM_1D_OUTPUT_EXTENT_MAX:
+            raise ShapeError(
+                f"BatchNorm1d input extent {extent} on axis {axis} exceeds "
+                f"the {BATCH_NORM_1D_OUTPUT_EXTENT_MAX}-element ceiling"
+            )
+    if input_dtype != "float32":
+        raise ShapeError(
+            "BatchNorm1d v1 requires exact float32 input, "
+            f"got {input_dtype!r}"
+        )
+    channel_count = normalize_batch_norm_1d_num_features(input_shape[1])
+    reduce_axes = (0,) if len(input_shape) == 2 else (0, 2)
+    stat_shape = (
+        (1, channel_count)
+        if len(input_shape) == 2
+        else (1, channel_count, 1)
+    )
+    sample_count = input_shape[0] * (
+        input_shape[2] if len(input_shape) == 3 else 1
+    )
+    if stats_mode != "running" and sample_count <= 1:
+        raise ShapeError(
+            "BatchNorm1d batch-statistics mode requires more than one "
+            f"value per channel, got {sample_count}"
+        )
+
+    stats_input_index: Optional[int] = 1 if has_stats else None
+    next_index = 2 if has_stats else 1
+    if has_stats:
+        stats = inputs[1]
+        if (
+            getattr(stats, "shape", None) != (2, channel_count)
+            or getattr(stats, "dtype", None) != "float32"
+        ):
+            raise ShapeError(
+                "BatchNorm1d stats input must have shape (2, C) and dtype float32"
+            )
+        if stats_mode == "batch-state" and getattr(stats, "op", None) != (
+            "BATCH_NORM_1D_STATS_UPDATE"
+        ):
+            raise ShapeError(
+                "BatchNorm1d batch-state mode requires a typed stats-update input"
+            )
+
+    weight_input_index: Optional[int] = None
+    bias_input_index: Optional[int] = None
+    if affine:
+        weight_input_index = next_index
+        bias_input_index = next_index + 1
+        for role, index in (
+            ("weight", weight_input_index),
+            ("bias", bias_input_index),
+        ):
+            value = inputs[index]
+            if (
+                getattr(value, "shape", None) != (channel_count,)
+                or getattr(value, "dtype", None) != "float32"
+            ):
+                raise ShapeError(
+                    f"BatchNorm1d {role} must have shape ({channel_count},) "
+                    "and dtype float32"
+                )
+
+    input_elements = _elementwise_loss_checked_product(
+        input_shape, BATCH_NORM_1D_WORK_ELEMENT_MAX
+    )
+    output_bytes = input_elements * 4
+    if output_bytes > BATCH_NORM_1D_OUTPUT_BYTE_MAX:
+        raise ShapeError(
+            f"BatchNorm1d output requires {output_bytes} bytes, exceeding the "
+            f"{BATCH_NORM_1D_OUTPUT_BYTE_MAX}-byte ceiling"
+        )
+    if (
+        input_elements
+        > BATCH_NORM_1D_WORK_ELEMENT_MAX // BATCH_NORM_1D_WORK_VISIT_FACTOR
+    ):
+        work_elements = BATCH_NORM_1D_WORK_ELEMENT_MAX + 1
+    else:
+        work_elements = input_elements * BATCH_NORM_1D_WORK_VISIT_FACTOR
+    if work_elements > BATCH_NORM_1D_WORK_ELEMENT_MAX:
+        raise ShapeError(
+            "BatchNorm1d projected work exceeds the "
+            f"{BATCH_NORM_1D_WORK_ELEMENT_MAX}-element-visit ceiling"
+        )
+    workspace_bytes = output_bytes * 3 + channel_count * 24
+    if workspace_bytes > BATCH_NORM_1D_WORKSPACE_BYTE_MAX:
+        raise ShapeError(
+            f"BatchNorm1d projected workspace requires {workspace_bytes} bytes, "
+            f"exceeding the {BATCH_NORM_1D_WORKSPACE_BYTE_MAX}-byte ceiling"
+        )
+    return BatchNorm1dContract(
+        input_shape=input_shape,
+        output_shape=input_shape,
+        output_dtype="float32",
+        channel_count=channel_count,
+        reduce_axes=reduce_axes,
+        stat_shape=stat_shape,
+        sample_count=sample_count,
+        eps=normalized_eps,
+        affine=affine,
+        stats_mode=stats_mode,
+        stats_input_index=stats_input_index,
+        weight_input_index=weight_input_index,
+        bias_input_index=bias_input_index,
+        work_elements=work_elements,
+        workspace_bytes=workspace_bytes,
+    )
+
+
+def _validate_batch_norm_1d_runtime_arrays(
+    contract: BatchNorm1dContract,
+    arrays: tuple[np.ndarray, ...],
+) -> None:
+    if type(arrays) is not tuple:
+        raise ShapeError("BatchNorm1d runtime inputs must be a tuple")
+    expected = 1 + int(contract.stats_input_index is not None) + (
+        2 if contract.affine else 0
+    )
+    if len(arrays) != expected:
+        raise ShapeError(
+            f"BatchNorm1d runtime expected {expected} arrays, got {len(arrays)}"
+        )
+    source = arrays[0]
+    if (
+        type(source) is not np.ndarray
+        or tuple(source.shape) != contract.input_shape
+        or source.dtype.name != "float32"
+    ):
+        raise ShapeError(
+            "BatchNorm1d runtime input must match the declared float32 shape"
+        )
+    if contract.stats_input_index is not None:
+        stats = arrays[contract.stats_input_index]
+        if (
+            type(stats) is not np.ndarray
+            or tuple(stats.shape) != (2, contract.channel_count)
+            or stats.dtype.name != "float32"
+        ):
+            raise ShapeError(
+                "BatchNorm1d runtime stats must have shape (2, C) and dtype float32"
+            )
+    if contract.affine:
+        assert contract.weight_input_index is not None
+        assert contract.bias_input_index is not None
+        for role, index in (
+            ("weight", contract.weight_input_index),
+            ("bias", contract.bias_input_index),
+        ):
+            value = arrays[index]
+            if (
+                type(value) is not np.ndarray
+                or tuple(value.shape) != (contract.channel_count,)
+                or value.dtype.name != "float32"
+            ):
+                raise ShapeError(
+                    f"BatchNorm1d runtime {role} must match the declared float32 shape"
+                )
+
+
+def batch_norm_1d_batch_stats_array(
+    source: np.ndarray,
+    contract: BatchNorm1dContract,
+) -> tuple[np.ndarray, np.ndarray]:
+    if (
+        type(source) is not np.ndarray
+        or tuple(source.shape) != contract.input_shape
+        or source.dtype.name != "float32"
+    ):
+        raise ShapeError("BatchNorm1d batch-stat input does not match its contract")
+    mean = source.mean(axis=contract.reduce_axes, dtype=np.float32)
+    centered = source - mean.reshape(contract.stat_shape)
+    variance = (centered * centered).mean(
+        axis=contract.reduce_axes, dtype=np.float32
+    )
+    return (
+        np.asarray(mean, dtype=np.float32),
+        np.asarray(variance, dtype=np.float32),
+    )
+
+
+def _batch_norm_1d_stats_for_execution(
+    contract: BatchNorm1dContract,
+    arrays: tuple[np.ndarray, ...],
+) -> tuple[np.ndarray, np.ndarray]:
+    if contract.stats_mode == "batch":
+        return batch_norm_1d_batch_stats_array(arrays[0], contract)
+    assert contract.stats_input_index is not None
+    stats = arrays[contract.stats_input_index]
+    return stats[0], stats[1]
+
+
+def execute_batch_norm_1d_array(
+    contract: BatchNorm1dContract,
+    arrays: tuple[np.ndarray, ...],
+) -> np.ndarray:
+    _validate_batch_norm_1d_runtime_arrays(contract, arrays)
+    source = arrays[0]
+    mean, variance = _batch_norm_1d_stats_for_execution(contract, arrays)
+    inv_std = np.asarray(
+        1.0 / np.sqrt(np.asarray(variance + contract.eps, dtype=np.float32)),
+        dtype=np.float32,
+    )
+    result = (
+        (source - mean.reshape(contract.stat_shape))
+        * inv_std.reshape(contract.stat_shape)
+    )
+    if contract.affine:
+        assert contract.weight_input_index is not None
+        assert contract.bias_input_index is not None
+        result = (
+            result
+            * arrays[contract.weight_input_index].reshape(contract.stat_shape)
+            + arrays[contract.bias_input_index].reshape(contract.stat_shape)
+        )
+    return np.array(result, dtype=np.float32, copy=True)
+
+
+def execute_batch_norm_1d_vjp_array(
+    contract: BatchNorm1dContract,
+    arrays: tuple[np.ndarray, ...],
+    dy: np.ndarray,
+    operand: str,
+) -> np.ndarray:
+    _validate_batch_norm_1d_runtime_arrays(contract, arrays)
+    if (
+        type(dy) is not np.ndarray
+        or tuple(dy.shape) != contract.output_shape
+        or dy.dtype.name != "float32"
+    ):
+        raise ShapeError(
+            "BatchNorm1d upstream gradient must match the float32 output"
+        )
+    source = arrays[0]
+    mean, variance = _batch_norm_1d_stats_for_execution(contract, arrays)
+    inv_std = np.asarray(
+        1.0 / np.sqrt(np.asarray(variance + contract.eps, dtype=np.float32)),
+        dtype=np.float32,
+    )
+    x_hat = (
+        (source - mean.reshape(contract.stat_shape))
+        * inv_std.reshape(contract.stat_shape)
+    )
+    if operand == "weight":
+        if not contract.affine:
+            raise ShapeError("BatchNorm1d non-affine mode has no weight gradient")
+        return np.asarray(
+            (dy * x_hat).sum(axis=contract.reduce_axes, dtype=np.float32),
+            dtype=np.float32,
+        )
+    if operand == "bias":
+        if not contract.affine:
+            raise ShapeError("BatchNorm1d non-affine mode has no bias gradient")
+        return np.asarray(
+            dy.sum(axis=contract.reduce_axes, dtype=np.float32),
+            dtype=np.float32,
+        )
+    if operand != "input":
+        raise ShapeError(f"BatchNorm1d unknown VJP operand {operand!r}")
+
+    grad_x_hat = dy
+    if contract.affine:
+        assert contract.weight_input_index is not None
+        grad_x_hat = (
+            dy
+            * arrays[contract.weight_input_index].reshape(contract.stat_shape)
+        )
+    if contract.stats_mode == "running":
+        grad_x = grad_x_hat * inv_std.reshape(contract.stat_shape)
+    else:
+        count = np.float32(contract.sample_count)
+        sum_grad = grad_x_hat.sum(
+            axis=contract.reduce_axes, keepdims=True, dtype=np.float32
+        )
+        sum_grad_xhat = (grad_x_hat * x_hat).sum(
+            axis=contract.reduce_axes, keepdims=True, dtype=np.float32
+        )
+        grad_x = inv_std.reshape(contract.stat_shape) * (
+            grad_x_hat
+            - sum_grad / count
+            - x_hat * sum_grad_xhat / count
+        )
+    return np.array(grad_x, dtype=np.float32, copy=True)
 
 
 def _validate_elementwise_loss_runtime_arrays(
@@ -5723,6 +6141,219 @@ def _validate_dropout_vjp(node: Any) -> DropoutContract:
     return normalized
 
 
+def _validate_batch_norm_1d(
+    node: Any,
+    contract: FrameworkOperationContract,
+) -> BatchNorm1dContract:
+    if getattr(node, "op", None) != contract.opcode:
+        raise ShapeError(
+            f"{contract.contract_id} validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    arg = getattr(node, "arg", None)
+    required = {"eps", "affine", "stats_mode"}
+    if type(arg) is not dict or set(arg) != required:
+        raise ShapeError(
+            "BATCH_NORM_1D arg fields must be exactly 'eps', 'affine', "
+            "and 'stats_mode'"
+        )
+    normalized = infer_batch_norm_1d_contract(
+        getattr(node, "inputs", None),
+        arg["eps"],
+        arg["affine"],
+        arg["stats_mode"],
+    )
+    if getattr(node, "shape", None) != normalized.output_shape:
+        raise ShapeError(
+            "BATCH_NORM_1D declared shape must preserve the input shape"
+        )
+    if getattr(node, "dtype", None) != normalized.output_dtype:
+        raise ShapeError("BATCH_NORM_1D declared dtype must be float32")
+    return normalized
+
+
+def _validate_batch_norm_1d_stats_update(
+    node: Any,
+) -> BatchNorm1dStatsUpdateContract:
+    if getattr(node, "op", None) != "BATCH_NORM_1D_STATS_UPDATE":
+        raise ShapeError(
+            "BATCH_NORM_1D_STATS_UPDATE validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    arg = getattr(node, "arg", None)
+    required = {"effect_id", "momentum", "has_prior"}
+    if type(arg) is not dict or set(arg) != required:
+        raise ShapeError(
+            "BATCH_NORM_1D_STATS_UPDATE arg fields must be exactly "
+            "'effect_id', 'momentum', and 'has_prior'"
+        )
+    if type(arg["has_prior"]) is not bool:
+        raise ShapeError(
+            "BATCH_NORM_1D_STATS_UPDATE arg.has_prior must be an exact bool"
+        )
+    effect_id = arg["effect_id"]
+    if (
+        type(effect_id) is not str
+        or not effect_id
+        or len(effect_id) > 256
+        or any(ord(ch) < 33 or ord(ch) > 126 for ch in effect_id)
+    ):
+        raise ShapeError(
+            "BATCH_NORM_1D_STATS_UPDATE effect_id must be bounded printable ASCII"
+        )
+    momentum = normalize_batch_norm_1d_momentum(arg["momentum"])
+    inputs = getattr(node, "inputs", None)
+    expected = 5 if arg["has_prior"] else 4
+    if type(inputs) is not tuple or len(inputs) != expected:
+        raise ShapeError(
+            f"BATCH_NORM_1D_STATS_UPDATE requires {expected} inputs, "
+            f"got {len(inputs) if type(inputs) is tuple else 'non-tuple'}"
+        )
+    source_index = 1 if arg["has_prior"] else 0
+    if arg["has_prior"]:
+        prior = inputs[0]
+        if getattr(prior, "op", None) != "BATCH_NORM_1D_STATS_UPDATE":
+            raise ShapeError(
+                "BATCH_NORM_1D_STATS_UPDATE prior input must be another "
+                "typed stats update"
+            )
+    source = inputs[source_index]
+    source_contract = infer_batch_norm_1d_contract(
+        (source,), 0.0, False, "batch"
+    )
+    if arg["has_prior"]:
+        prior = inputs[0]
+        if (
+            getattr(prior, "shape", None)
+            != (2, source_contract.channel_count)
+            or getattr(prior, "dtype", None) != "float32"
+        ):
+            raise ShapeError(
+                "BATCH_NORM_1D_STATS_UPDATE prior stats geometry must match"
+            )
+    buffer_inputs = inputs[source_index + 1:]
+    expected_buffers = (
+        ((source_contract.channel_count,), "float32", "running_mean"),
+        ((source_contract.channel_count,), "float32", "running_var"),
+        ((), "int64", "num_batches_tracked"),
+    )
+    buffer_ids = []
+    for buffer_node, (shape, dtype, role) in zip(
+        buffer_inputs, expected_buffers
+    ):
+        if (
+            getattr(buffer_node, "op", None) != "BUFFER"
+            or getattr(buffer_node, "inputs", None) != ()
+            or getattr(buffer_node, "shape", None) != shape
+            or getattr(buffer_node, "dtype", None) != dtype
+            or type(getattr(buffer_node, "arg", None)) is not str
+        ):
+            raise ShapeError(
+                f"BATCH_NORM_1D_STATS_UPDATE {role} must be a direct "
+                f"{dtype} BUFFER with shape {shape}"
+            )
+        buffer_ids.append(buffer_node.arg)
+    expected_shape = (2, source_contract.channel_count)
+    if (
+        getattr(node, "shape", None) != expected_shape
+        or getattr(node, "dtype", None) != "float32"
+    ):
+        raise ShapeError(
+            "BATCH_NORM_1D_STATS_UPDATE output must have shape (2, C) "
+            "and dtype float32"
+        )
+    return BatchNorm1dStatsUpdateContract(
+        input_shape=source_contract.input_shape,
+        channel_count=source_contract.channel_count,
+        reduce_axes=source_contract.reduce_axes,
+        sample_count=source_contract.sample_count,
+        momentum=momentum,
+        effect_id=effect_id,
+        has_prior=arg["has_prior"],
+        source_input_index=source_index,
+        running_mean_buffer_id=buffer_ids[0],
+        running_var_buffer_id=buffer_ids[1],
+        num_batches_tracked_buffer_id=buffer_ids[2],
+    )
+
+
+def _validate_batch_norm_1d_vjp(
+    node: Any,
+) -> tuple[BatchNorm1dContract, str]:
+    if getattr(node, "op", None) != "BATCH_NORM_1D_VJP":
+        raise ShapeError(
+            "BATCH_NORM_1D_VJP validator received opcode "
+            f"{getattr(node, 'op', None)!r}"
+        )
+    arg = getattr(node, "arg", None)
+    required = {"eps", "affine", "stats_mode", "operand", "vjp_of"}
+    if type(arg) is not dict or set(arg) != required:
+        raise ShapeError(
+            "BATCH_NORM_1D_VJP arg fields must be exactly the forward "
+            "contract plus 'operand' and 'vjp_of'"
+        )
+    forward = arg["vjp_of"]
+    if getattr(forward, "op", None) != "BATCH_NORM_1D":
+        raise ShapeError(
+            "BATCH_NORM_1D_VJP arg.vjp_of must reference BATCH_NORM_1D"
+        )
+    forward_contract = _validate_batch_norm_1d(
+        forward,
+        _BY_OPCODE["BATCH_NORM_1D"].record,
+    )
+    if (
+        arg["eps"] != forward_contract.eps
+        or arg["affine"] is not forward_contract.affine
+        or arg["stats_mode"] != forward_contract.stats_mode
+    ):
+        raise ShapeError(
+            "BATCH_NORM_1D_VJP contract fields must match its forward node"
+        )
+    inputs = getattr(node, "inputs", None)
+    if (
+        type(inputs) is not tuple
+        or len(inputs) != len(forward.inputs) + 1
+        or any(
+            actual is not expected
+            for actual, expected in zip(inputs[1:], forward.inputs)
+        )
+    ):
+        raise ShapeError(
+            "BATCH_NORM_1D_VJP inputs must be upstream gradient followed "
+            "by the exact forward inputs"
+        )
+    dy = inputs[0]
+    if (
+        getattr(dy, "shape", None) != forward.shape
+        or getattr(dy, "dtype", None) != "float32"
+    ):
+        raise ShapeError(
+            "BATCH_NORM_1D_VJP upstream gradient must match the forward output"
+        )
+    operand = arg["operand"]
+    if operand not in ("input", "weight", "bias"):
+        raise ShapeError(
+            "BATCH_NORM_1D_VJP operand must be 'input', 'weight', or 'bias'"
+        )
+    if operand != "input" and not forward_contract.affine:
+        raise ShapeError(
+            "BATCH_NORM_1D_VJP cannot request affine gradients in non-affine mode"
+        )
+    expected_shape = (
+        forward_contract.input_shape
+        if operand == "input"
+        else (forward_contract.channel_count,)
+    )
+    if (
+        getattr(node, "shape", None) != expected_shape
+        or getattr(node, "dtype", None) != "float32"
+    ):
+        raise ShapeError(
+            f"BATCH_NORM_1D_VJP {operand} output metadata does not match"
+        )
+    return forward_contract, operand
+
+
 _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = MappingProxyType({
     "browsergrad.jit.framework.tensor.abs.v1": _validate_typed_unary,
     "browsergrad.jit.framework.tensor.cat.v1": _validate_cat,
@@ -5741,6 +6372,7 @@ _VALIDATORS: Mapping[str, Callable[[Any, FrameworkOperationContract], Any]] = Ma
     "browsergrad.jit.framework.functional.nll-loss.v1": _validate_nll_loss,
     "browsergrad.jit.framework.functional.cross-entropy.v1": _validate_cross_entropy,
     "browsergrad.jit.framework.functional.dropout.v1": _validate_dropout,
+    "browsergrad.jit.framework.module.batch-norm-1d.v1": _validate_batch_norm_1d,
     "browsergrad.jit.framework.tensor.masked-fill.v1": _validate_masked_fill,
     "browsergrad.jit.framework.tensor.pad.v1": _validate_pad,
     "browsergrad.jit.framework.tensor.prod.v1": _validate_prod,
@@ -5779,6 +6411,8 @@ _INTERNAL_VALIDATORS: Mapping[str, Callable[[Any], Any]] = MappingProxyType({
     "NLL_LOSS_VJP": _validate_nll_loss_vjp,
     "CROSS_ENTROPY_VJP": _validate_cross_entropy_vjp,
     "DROPOUT_VJP": _validate_dropout_vjp,
+    "BATCH_NORM_1D_STATS_UPDATE": _validate_batch_norm_1d_stats_update,
+    "BATCH_NORM_1D_VJP": _validate_batch_norm_1d_vjp,
 })
 
 
@@ -6039,6 +6673,30 @@ def validate_dropout_vjp_contract(node: Any) -> DropoutContract:
     return validate_internal_operation_contract(node)
 
 
+def validate_batch_norm_1d_contract(node: Any) -> BatchNorm1dContract:
+    record, normalized = validate_framework_operation_contract(node)
+    if (
+        record.contract_id
+        != "browsergrad.jit.framework.module.batch-norm-1d.v1"
+    ):
+        raise ShapeError(
+            "BATCH_NORM_1D resolved to the wrong framework-operation contract"
+        )
+    return normalized
+
+
+def validate_batch_norm_1d_stats_update_contract(
+    node: Any,
+) -> BatchNorm1dStatsUpdateContract:
+    return validate_internal_operation_contract(node)
+
+
+def validate_batch_norm_1d_vjp_contract(
+    node: Any,
+) -> tuple[BatchNorm1dContract, str]:
+    return validate_internal_operation_contract(node)
+
+
 def validate_tril_contract(node: Any) -> int:
     record, normalized = validate_framework_operation_contract(node)
     if record.contract_id != "browsergrad.jit.framework.tensor.tril.v1":
@@ -6202,6 +6860,12 @@ __all__ = [
     "DROPOUT_WORK_ELEMENT_MAX",
     "DROPOUT_WORKSPACE_BYTE_MAX",
     "DROPOUT_WORK_VISIT_FACTOR",
+    "BATCH_NORM_1D_OUTPUT_BYTE_MAX",
+    "BATCH_NORM_1D_OUTPUT_EXTENT_MAX",
+    "BATCH_NORM_1D_WORK_ELEMENT_MAX",
+    "BATCH_NORM_1D_WORKSPACE_BYTE_MAX",
+    "BATCH_NORM_1D_WORK_VISIT_FACTOR",
+    "BATCH_NORM_1D_STATE_EFFECT_KIND",
     "MASKED_FILL_CONTRACT_ID",
     "FrameworkOperationContract",
     "EinsumContract",
@@ -6213,6 +6877,8 @@ __all__ = [
     "NllLossContract",
     "CrossEntropyContract",
     "DropoutContract",
+    "BatchNorm1dContract",
+    "BatchNorm1dStatsUpdateContract",
     "framework_operation_support",
     "has_framework_operation_contract",
     "has_internal_operation_contract",
@@ -6231,7 +6897,12 @@ __all__ = [
     "infer_nll_loss_contract",
     "infer_cross_entropy_contract",
     "infer_dropout_contract",
+    "infer_batch_norm_1d_contract",
     "normalize_dropout_probability",
+    "normalize_batch_norm_1d_num_features",
+    "normalize_batch_norm_1d_eps",
+    "normalize_batch_norm_1d_momentum",
+    "normalize_batch_norm_1d_flag",
     "normalize_smooth_l1_beta",
     "normalize_pad_request",
     "normalize_pad_value",
@@ -6257,6 +6928,9 @@ __all__ = [
     "execute_cross_entropy_vjp_array",
     "execute_dropout_array",
     "execute_dropout_vjp_array",
+    "batch_norm_1d_batch_stats_array",
+    "execute_batch_norm_1d_array",
+    "execute_batch_norm_1d_vjp_array",
     "einsum_onnx_equation",
     "stable_sort_indices_array",
     "partial_topk_indices_array",
@@ -6294,6 +6968,9 @@ __all__ = [
     "validate_cross_entropy_vjp_contract",
     "validate_dropout_contract",
     "validate_dropout_vjp_contract",
+    "validate_batch_norm_1d_contract",
+    "validate_batch_norm_1d_stats_update_contract",
+    "validate_batch_norm_1d_vjp_contract",
     "validate_gather_scatter_add_contract",
     "validate_tril_contract",
     "validate_triu_contract",
