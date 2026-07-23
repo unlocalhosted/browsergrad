@@ -144,6 +144,7 @@ interface RuntimeOptions {
   readonly stdout?: readonly string[];
   readonly stderr?: readonly string[];
   readonly failedFrontendWork?: FrontendWorkCounters;
+  readonly lastDiagnosticCode?: number;
 }
 
 interface RuntimeFixture {
@@ -285,6 +286,7 @@ describe("C++/CuTe local Wasm C ABI compiler execution", () => {
     const fixture = runtimeFixture({
       compileReturn: 106,
       readableCompileStatus: 106,
+      lastDiagnosticCode: 13,
       stdout: [`${"x".repeat(3_000)}\nlast-line`],
       stderr: ["failure\u0000detail"],
     });
@@ -301,10 +303,29 @@ describe("C++/CuTe local Wasm C ABI compiler execution", () => {
 
     expect(observed).toBeInstanceOf(CppCuteBrowserWasmCompilerError);
     const message = (observed as Error).message;
+    expect(message).toContain(
+      "nativeDiagnosticCode=13,nativeDiagnosticName=artifact-writer-internal",
+    );
     expect(message).toContain("bounded module log:");
     expect(message).toContain("last-line");
     expect(message).not.toMatch(/[\u0000-\u001f\u007f]/u);
     expect(message.length).toBeLessThan(2_800);
+  });
+
+  it("fails closed when the native diagnostic getter leaves the pinned ABI", () => {
+    const fixture = runtimeFixture({
+      compileReturn: 106,
+      readableCompileStatus: 106,
+      lastDiagnosticCode: 33,
+    });
+    expect(() => executeCppCuteBrowserWasmCompiler({
+      factory: fixture.factory,
+      profile,
+      inputFrameBytes: FRAME_BYTES,
+    })).toThrow(expect.objectContaining({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-WASM-COMPILER-MISMATCH",
+      path: "$.runtime.compile.nativeDiagnostic",
+    }));
   });
 
   it("fails closed on status disagreement, result aliasing, and traps", () => {
@@ -404,6 +425,7 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
   let inputByteLength = 0;
   let resultPointer = 0;
   let resultByteLength = 0;
+  let lastDiagnosticCode = 0;
 
   const allocate = (byteLength: number): void => {
     counters.current += BigInt(byteLength);
@@ -420,7 +442,7 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
   };
 
   const facade = Object.freeze({
-    _bg_cpp_cute_abi_version: () => 65_538,
+    _bg_cpp_cute_abi_version: () => 65_539,
     _bg_cpp_cute_alloc: (byteLength: number) => {
       calls.alloc += 1;
       inputByteLength = byteLength;
@@ -439,6 +461,9 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
       expect(new Uint8Array(memory.buffer, pointer, byteLength)).toEqual(FRAME_BYTES);
       const compileReturn = options.compileReturn ?? 0;
       status = options.readableCompileStatus ?? compileReturn;
+      lastDiagnosticCode = compileReturn === 0
+        ? 0
+        : options.lastDiagnosticCode ?? 0;
       if (compileReturn === 0) {
         resultPointer = options.resultPointer ?? RESULT_POINTER;
         resultByteLength = options.resultByteLength ?? ARTIFACT_BYTES.byteLength;
@@ -473,11 +498,13 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
       resultByteLength = 0;
       inputByteLength = 0;
       status = 1;
+      lastDiagnosticCode = 0;
       writeFrontendWorkRecord(memory, 0, 1, 1n, zeroFrontendWork());
     },
     _bg_cpp_cute_result_length: () => resultByteLength,
     _bg_cpp_cute_result_pointer: () => resultPointer,
     _bg_cpp_cute_status: () => status,
+    _bg_cpp_cute_last_diagnostic_code: () => lastDiagnosticCode,
   });
   const session = Object.freeze({
     profileHash: profile.profileHash,
@@ -503,7 +530,7 @@ function runtimeFixture(options: RuntimeOptions = {}): RuntimeFixture {
     protocol: "browsergrad.compiler.cpp-cute.emscripten-factory-binding@1",
     wasmSha256: WASM_SHA256,
     wasmByteLength: 1024,
-    cAbiVersion: 65_538,
+    cAbiVersion: 65_539,
     allocatorMetricsPointer: ALLOCATOR_RECORD_POINTER,
     frontendWorkMetricsPointer: FRONTEND_WORK_RECORD_POINTER,
     generatedImportCount: 66,

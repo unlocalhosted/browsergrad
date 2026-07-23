@@ -32,6 +32,10 @@ bg_cpp_cute_frontend_work_metrics_pointer(void) {
   return browsergrad::cpp_cute::frontend_work_metrics_pointer();
 }
 
+BG_CPP_CUTE_EXPORT std::uint32_t bg_cpp_cute_last_diagnostic_code(void) {
+  return browsergrad::cpp_cute::runtime_last_diagnostic_code();
+}
+
 BG_CPP_CUTE_EXPORT std::int32_t bg_cpp_cute_compile(
     std::uint32_t input_pointer, std::uint32_t input_length) {
   return browsergrad::cpp_cute::runtime_compile(

@@ -13,7 +13,7 @@
 namespace browsergrad::cpp_cute {
 namespace {
 
-constexpr std::uint32_t kRuntimeAbiVersion = 0x0001'0002U;
+constexpr std::uint32_t kRuntimeAbiVersion = 0x0001'0003U;
 constexpr std::uint32_t kInputFrameMaximumByteLength = 4U * 1024U * 1024U;
 constexpr std::uint32_t kInputFrameHeaderByteLength = 64U;
 constexpr std::uint32_t kInputFrameAlignment = 8U;
@@ -54,6 +54,8 @@ struct RuntimeState {
 };
 
 RuntimeState g_runtime;
+constinit NativeDiagnosticCode g_native_diagnostic_code =
+    NativeDiagnosticCode::kNone;
 
 std::uint16_t read_u16_le(const std::uint8_t* bytes) {
   return static_cast<std::uint16_t>(bytes[0]) |
@@ -289,7 +291,13 @@ void report_allocator_metrics_failure() noexcept {
 }  // namespace
 
 void report_native_diagnostic(const NativeDiagnosticCode code) noexcept {
+  if (code == NativeDiagnosticCode::kNone) return;
+  if (g_native_diagnostic_code == NativeDiagnosticCode::kNone) {
+    g_native_diagnostic_code = code;
+  }
   switch (code) {
+    case NativeDiagnosticCode::kNone:
+      return;
     case NativeDiagnosticCode::kProducerPolicyInstallFailure:
       write_native_diagnostic(
           "BG-CPP-CUTE-DIAGNOSTIC:producer-policy-install-failure\n");
@@ -501,8 +509,13 @@ ArtifactV3ResultSink::~ArtifactV3ResultSink() { discard(); }
 
 std::uint32_t runtime_abi_version() { return kRuntimeAbiVersion; }
 
+std::uint32_t runtime_last_diagnostic_code() noexcept {
+  return static_cast<std::uint32_t>(g_native_diagnostic_code);
+}
+
 std::uint32_t runtime_allocate(std::uint32_t byte_length) {
   if (!allocator_metrics_healthy()) {
+    report_allocator_metrics_failure();
     g_runtime.status = WireCompileStatus::kInternalError;
     g_runtime.phase = RuntimePhase::kFailed;
     return 0U;
@@ -515,6 +528,9 @@ std::uint32_t runtime_allocate(std::uint32_t byte_length) {
   }
   auto* allocation = static_cast<std::uint8_t*>(allocate_bytes(byte_length));
   if (allocation == nullptr) {
+    if (!allocator_metrics_healthy()) {
+      report_allocator_metrics_failure();
+    }
     g_runtime.status = allocator_metrics_healthy()
                            ? WireCompileStatus::kResourceLimit
                            : WireCompileStatus::kInternalError;
@@ -525,6 +541,9 @@ std::uint32_t runtime_allocate(std::uint32_t byte_length) {
   if (!encode_wire_pointer(allocation, byte_length, &wire_pointer) ||
       !allocator_metrics_healthy()) {
     release_bytes(allocation);
+    if (!allocator_metrics_healthy()) {
+      report_allocator_metrics_failure();
+    }
     g_runtime.status = WireCompileStatus::kInternalError;
     g_runtime.phase = RuntimePhase::kFailed;
     return 0U;
@@ -541,6 +560,7 @@ std::int32_t runtime_compile(std::uint32_t input_pointer,
                              std::uint32_t input_length,
                              ArtifactV3Compile compile_artifact) {
   if (!allocator_metrics_healthy()) {
+    report_allocator_metrics_failure();
     g_runtime.status = WireCompileStatus::kInternalError;
     g_runtime.phase = RuntimePhase::kFailed;
     return wire_status(g_runtime.status);
@@ -693,8 +713,10 @@ void runtime_reset() {
   release_input();
   release_result();
   g_runtime = RuntimeState{};
+  g_native_diagnostic_code = NativeDiagnosticCode::kNone;
   reset_frontend_work_metrics();
   if (!allocator_metrics_healthy()) {
+    report_allocator_metrics_failure();
     g_runtime.phase = RuntimePhase::kFailed;
     g_runtime.status = WireCompileStatus::kInternalError;
   }

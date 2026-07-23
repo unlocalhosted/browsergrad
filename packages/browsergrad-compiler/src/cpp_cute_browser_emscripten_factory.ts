@@ -32,6 +32,7 @@ const REQUIRED_FACADE_EXPORTS = Object.freeze([
   "_bg_cpp_cute_result_length",
   "_bg_cpp_cute_result_pointer",
   "_bg_cpp_cute_status",
+  "_bg_cpp_cute_last_diagnostic_code",
 ] as const);
 const REQUIRED_WASM_EXPORTS = Object.freeze(
   REQUIRED_FACADE_EXPORTS.map((name) => name.slice(1)),

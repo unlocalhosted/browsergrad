@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.9b088b98ad8d50ac5065cc31870531f667572428cd7a0325345a9f34371cd5d6",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.1a422f24908f07f7911d65b313667d79a4ca81ff192128000426f5e288aa702e",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -30,9 +30,9 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
       outputPath: "assets/browsergrad-cpp-cute/runtime-abi-manifest.json",
       mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
       runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
-      manifestId: "bg.cpp.browser-runtime-abi.sha256.e999550eaf9e5f7957d7e3a91b654c8b5ed172560d2799803f75bba1c6188d1b",
-      resourceSha256: "1f6ee44a5a34570070b53a0e9129d5073737cc418b6f6bb0718a54f703e78a86",
-      resourceByteLength: "40579",
+      manifestId: "bg.cpp.browser-runtime-abi.sha256.6bad7781cb496d7ccf6c5381a4807053618d27adb6d456dfdfef98a829813207",
+      resourceSha256: "68b17d0fa99259b0f5fb5d5d313ad8346aa48f29f76df5f3202b535a03cab5a6",
+      resourceByteLength: "42912",
       byteIdentity: "must-equal-package-canonical-resource",
       authority: "design-reference-only-no-wasm-conformance-worker-or-release-authority",
     },
@@ -246,14 +246,14 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
             "-sEMIT_PRODUCERS_SECTION=0",
             "-sINCOMING_MODULE_JS_API=['instantiateWasm','onAbort','print','printErr']",
             "-sEXPORTED_RUNTIME_METHODS=[]",
-            "-sEXPORTED_FUNCTIONS=['_bg_cpp_cute_abi_version','_bg_cpp_cute_alloc','_bg_cpp_cute_allocator_metrics_pointer','_bg_cpp_cute_frontend_work_metrics_pointer','_bg_cpp_cute_compile','_bg_cpp_cute_free','_bg_cpp_cute_reset','_bg_cpp_cute_result_length','_bg_cpp_cute_result_pointer','_bg_cpp_cute_status']",
+            "-sEXPORTED_FUNCTIONS=['_bg_cpp_cute_abi_version','_bg_cpp_cute_alloc','_bg_cpp_cute_allocator_metrics_pointer','_bg_cpp_cute_frontend_work_metrics_pointer','_bg_cpp_cute_compile','_bg_cpp_cute_free','_bg_cpp_cute_reset','_bg_cpp_cute_result_length','_bg_cpp_cute_result_pointer','_bg_cpp_cute_status','_bg_cpp_cute_last_diagnostic_code']",
             "-Wl,--Map=@BUILD_EVIDENCE@/clang-extractor.link.map",
           ],
           targets: ["browsergrad-cpp-cute-extractor"],
         },
       ],
       extractorSource: {
-        sourceSetSha256: "f90a1413e9f15b722a68a732e54af740313156ee90bef076646ebb6097936b08",
+        sourceSetSha256: "78d21343993669f41da0568c9fcc7174ce4bc8292347ef8df0d8bf78723fd82e",
         hashDomain: "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1",
         files: [
           {
@@ -333,7 +333,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteCompileSession.cpp",
-            sha256: "13ab0a34d9caccbcd9b8f3a205e2ac6719d01647efc2b86da6b3d9f911bfc564",
+            sha256: "ab381d75dd320cb4b28d0b020b71681e7a57eeb6810c39d0bce17323128cc8cc",
             byteLength: "98092",
           },
           {
@@ -358,8 +358,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteExtractor.cpp",
-            sha256: "e867f2953b1e51b6c4eb1e9e15bf91687350241a30fd82b8c00bb410b9e313d1",
-            byteLength: "1841",
+            sha256: "506e13afc5956f145176ce126167a0a7b1fd56ef334850aebcee8af118779f62",
+            byteLength: "1982",
           },
           {
             path: "BrowserGradCppCuteImportedVfs.cpp",
@@ -413,13 +413,13 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteRuntime.cpp",
-            sha256: "44d7d823a205c1497f53a2da4d97e203702e8ffa7ffc856dad6bb714ca5e4ec8",
-            byteLength: "26921",
+            sha256: "894dcdd0bc5ae2992851a600fdfa59cbc835b0e66858b334674ed241a5ca53e4",
+            byteLength: "27697",
           },
           {
             path: "BrowserGradCppCuteRuntime.h",
-            sha256: "09c2c38c2d7021279dd0f872f1b2b17499e87e2dfa8b1f406c772b6f78e077ea",
-            byteLength: "6324",
+            sha256: "b07b846ae35246bd06c8f10d722db751a1bcbe565039ceb980313a82cc2da351",
+            byteLength: "6592",
           },
           {
             path: "BrowserGradCppCuteSha256.cpp",

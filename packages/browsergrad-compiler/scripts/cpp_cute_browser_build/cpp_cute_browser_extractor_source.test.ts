@@ -258,6 +258,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
         "bg_cpp_cute_alloc",
         "bg_cpp_cute_allocator_metrics_pointer",
         "bg_cpp_cute_frontend_work_metrics_pointer",
+        "bg_cpp_cute_last_diagnostic_code",
         "bg_cpp_cute_compile",
         "bg_cpp_cute_free",
         "bg_cpp_cute_reset",
@@ -270,7 +271,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
   it("owns frame validation and the bounded module-owned result lifecycle", async () => {
     const header = await extractorSource("BrowserGradCppCuteRuntime.h");
     const source = await extractorSource("BrowserGradCppCuteRuntime.cpp");
-    expect(source).toContain("kRuntimeAbiVersion = 0x0001'0002U");
+    expect(source).toContain("kRuntimeAbiVersion = 0x0001'0003U");
     expect(source).toContain("validate_frame_envelope");
     expect(source).toContain("RuntimeState g_runtime");
     expect(source).toContain("ArtifactV3ResultSink::allocate");
@@ -279,6 +280,8 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect(source).toContain("result.blocker.has_value()");
     expect(source).toContain("ranges_overlap");
     expect(source).toContain("report_allocator_metrics_failure");
+    expect(source).toContain("g_native_diagnostic_code");
+    expect(source).toContain("runtime_last_diagnostic_code");
     expect(source).toContain("BG-CPP-CUTE-DIAGNOSTIC:");
     expect(source).toContain("::write(STDERR_FILENO");
     expect(source).not.toMatch(
