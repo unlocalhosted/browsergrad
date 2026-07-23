@@ -4,6 +4,11 @@ import { lstat, open, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  cppCuteBrowserReproducibilityResourceBytes,
+  verifyCppCuteBrowserReproducibilityResource,
+} from "../../dist/cpp_cute_browser_reproducibility.js";
+
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-REAL-COMPILE-RUNNER";
 const EVIDENCE_MARKER = "BROWSERGRAD_CPP_CUTE_REAL_COMPILE_EVIDENCE=";
 const ANSI_COLOR_PATTERN = new RegExp(
@@ -11,10 +16,6 @@ const ANSI_COLOR_PATTERN = new RegExp(
   "gu",
 );
 const MAX_CAPTURED_OUTPUT_BYTES = 8 * 1024 * 1024;
-const PINNED_REPRODUCIBLE_WASM = Object.freeze({
-  sha256: "5fc425bbc051a2f5be588c2acbb164efb5e43f949afb48a373f3ed022c3b8758",
-  byteLength: 31_641_377,
-});
 const PACK_FILES = Object.freeze({
   "clang-resource": "clang-resource.headers.bgvfs",
   cuda: "cuda-12.6.3.headers.bgvfs",
@@ -36,6 +37,9 @@ export class CppCuteBrowserRealCompileRunnerError extends Error {
 
 export async function preflightCppCuteBrowserRealCompileInputs(input) {
   const values = exactInput(input);
+  const reproducibility = await verifyCppCuteBrowserReproducibilityResource(
+    cppCuteBrowserReproducibilityResourceBytes(),
+  );
   const wasmPath = await canonicalRegularFile(values.wasmPath, "$.wasmPath");
   const packRoot = await canonicalDirectory(values.packRoot, "$.packRoot");
   const packAssetRoot = join(packRoot, "assets", "browsergrad-cpp-cute");
@@ -64,8 +68,8 @@ export async function preflightCppCuteBrowserRealCompileInputs(input) {
     invalid("$.assets[0]", "Clang-Wasm observation is missing");
   }
   const pinnedReproducibleWasmMatched =
-    wasm.sha256 === PINNED_REPRODUCIBLE_WASM.sha256 &&
-    wasm.byteLength === PINNED_REPRODUCIBLE_WASM.byteLength;
+    wasm.sha256 === reproducibility.wasmSha256 &&
+    wasm.byteLength === reproducibility.wasmByteLength;
   if (!pinnedReproducibleWasmMatched && values.requireCompiled) {
     invalid(
       "$.assets[0]",
