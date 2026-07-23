@@ -196,7 +196,7 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
   const vfsInstallation = await installCppCuteBrowserVfs(assetSet);
   expect(vfsInstallation).toMatchObject({
     packCount: 5,
-    fileCount: 5_768,
+    fileCount: 5_771,
   });
 
   const independentWasmConformance =
@@ -843,9 +843,10 @@ function requestLimits(
   return {
     maxSourceFiles: limits.maxSourceFiles,
     maxSourceBytes: limits.maxSourceBytes,
-    // The unchanged CuTe source opens 520 distinct headers. Keep bounded
-    // headroom while remaining well below Artifact V3's 4,096-file ceiling.
-    maxHeaderFiles: 1_024,
+    // The configured libc++ pass opens just over 1,024 distinct files. Keep a
+    // deterministic 2x ceiling while Artifact V3 still caps the complete
+    // source-plus-header observation at 4,096 files.
+    maxHeaderFiles: 2_048,
     maxHeaderBytes: limits.maxHeaderBytes,
     maxIncludeDepth: limits.maxIncludeDepth,
     maxMacroExpansions: limits.maxMacroExpansions,

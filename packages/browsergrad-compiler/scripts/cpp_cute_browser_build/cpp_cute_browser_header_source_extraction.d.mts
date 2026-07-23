@@ -7,6 +7,7 @@ import type {
 import type {
   CppCuteBrowserHeaderSourceBlocker,
   CppCuteBrowserHeaderSourceSelection,
+  CppCuteBrowserHeaderSourceSupplementalFile,
 } from "./cpp_cute_browser_header_source_plan.mjs";
 import type {
   CppCuteBrowserSourceArchiveInput,
@@ -36,6 +37,9 @@ export interface CppCuteBrowserExtractedHeaderSourceArchive {
   readonly licensePolicy: string;
   readonly normalizationId: string;
   readonly selections: readonly CppCuteBrowserExtractedHeaderSourceSelection[];
+  readonly supplementalFiles: readonly (CppCuteBrowserHeaderSourceSupplementalFile & Readonly<{
+    sourceTreeId: string;
+  }>)[];
   readonly licenseEvidence: readonly Readonly<{
     evidenceId: string;
     archivePath: string;
@@ -49,7 +53,7 @@ export interface CppCuteBrowserExtractedHeaderSourceArchive {
 
 export interface CppCuteBrowserHeaderSourceExtraction {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_SOURCE_EXTRACTION_SCHEMA;
-  readonly version: 2;
+  readonly version: 3;
   readonly extractionId: string;
   readonly authority: "exact-plan-host-tool-source-materialization-observation-only";
   readonly buildInputLockId: string;
@@ -68,6 +72,8 @@ export interface CppCuteBrowserHeaderSourceExtraction {
   readonly totals: Readonly<{
     archiveCount: number;
     selectedSubtreeCount: number;
+    supplementalFileCount: number;
+    supplementalFileByteLength: string;
     fileCount: number;
     fileContentByteLength: string;
     licenseEvidenceFileCount: number;
@@ -139,6 +145,12 @@ export function copyCppCuteBrowserExtractedHeaderLicenseEvidence(
   extraction: CppCuteBrowserHeaderSourceExtraction,
   sourceId: string,
   evidenceId: string,
+): Promise<Uint8Array>;
+
+export function copyCppCuteBrowserExtractedHeaderSupplementalFile(
+  extraction: CppCuteBrowserHeaderSourceExtraction,
+  sourceId: string,
+  supplementalFileId: string,
 ): Promise<Uint8Array>;
 
 export function cppCuteBrowserExtractedHeaderSourceFiles(

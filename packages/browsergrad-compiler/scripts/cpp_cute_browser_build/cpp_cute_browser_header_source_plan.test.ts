@@ -43,6 +43,8 @@ describe("browser header-source plan", () => {
       archiveByteLength: "252406685",
       includeRootCount: 5,
       selectedSubtreeCount: 8,
+      supplementalFileCount: 1,
+      supplementalFileByteLength: "2399",
       licenseEvidenceFileCount: 8,
       licenseEvidenceByteLength: "250207",
     });
@@ -71,6 +73,20 @@ describe("browser header-source plan", () => {
       contribution: "complete-configured-libcxx-header-output",
       archiveSubtree: "llvm-project-22.1.8.src/libcxx/include",
     });
+    expect(plan.body.archives
+      .find(({ sourceId }) => sourceId === "llvm-project")?.supplementalFiles)
+      .toEqual([expect.objectContaining({
+        supplementalFileId: "libcxx-default-assertion-handler",
+        includeRootId: "cxx-stdlib",
+        archivePath:
+          "llvm-project-22.1.8.src/libcxx/vendor/llvm/default_assertion_handler.in",
+        virtualPath: "__assertion_handler",
+        intendedAsset: "dependency-header-pack:cxx-stdlib",
+        licenseComponentIds: ["libcxx"],
+        contribution: "copy-configured-libcxx-header",
+        sha256: "f898f23fcba22ccc511c7e7c8675abc08cb63f4fdc4c79cadb45a13d8c349129",
+        byteLength: "2399",
+      })]);
   });
 
   it("binds official CUDA component identities and Ubuntu cross sysroot packages", async () => {

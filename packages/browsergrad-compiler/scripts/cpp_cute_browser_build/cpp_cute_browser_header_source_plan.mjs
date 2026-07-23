@@ -13,7 +13,7 @@ export const CPP_CUTE_BROWSER_HEADER_SOURCE_PLAN_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-header-source-plan";
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-SOURCE-PLAN";
-const PLAN_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-source-plan.v2";
+const PLAN_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-source-plan.v3";
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SOURCE_ID = /^[a-z][a-z0-9-]*$/u;
 const LICENSE_COMPONENT_ID = /^[a-z][a-z0-9._-]*$/u;
@@ -282,7 +282,7 @@ export async function prepareCppCuteBrowserHeaderSourcePlan() {
   const planHash = sha256(canonicalJsonBytes({ domain: PLAN_HASH_DOMAIN, body: planBody }));
   const plan = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_SOURCE_PLAN_SCHEMA,
-    version: 2,
+    version: 3,
     planId: `bg.cpp.browser-header-source-plan.sha256.${planHash}`,
     authority: "exact-header-source-selection-policy-only",
     body: planBody,
@@ -297,6 +297,17 @@ export async function prepareCppCuteBrowserHeaderSourcePlan() {
         (total, archive) => total + archive.selections.length,
         0,
       ),
+      supplementalFileCount: archives.reduce(
+        (total, archive) => total + archive.supplementalFiles.length,
+        0,
+      ),
+      supplementalFileByteLength: archives.reduce(
+        (total, archive) => total + archive.supplementalFiles.reduce(
+          (archiveTotal, file) => archiveTotal + BigInt(file.byteLength),
+          0n,
+        ),
+        0n,
+      ).toString(),
       licenseEvidenceFileCount: archives.reduce(
         (total, archive) => total + archive.licenseEvidence.length,
         0,
@@ -384,6 +395,27 @@ function bindSelectionLicensePolicies(archives, buildLockBody) {
       }
       return Object.freeze({
         ...selection,
+        intendedAsset,
+        licenseComponentIds: Object.freeze(licenseComponentIds),
+      });
+    })),
+    supplementalFiles: Object.freeze((archive.supplementalFiles ?? []).map((file) => {
+      const intendedAsset = INCLUDE_ROOT_ASSETS.get(file.includeRootId);
+      if (intendedAsset === undefined) {
+        invalid("$.archives.supplementalFiles", "supplemental file has no header-pack asset policy");
+      }
+      const licenseComponentIds = [
+        ...approved.filter((notice) => notice.appliesTo.includes(intendedAsset))
+          .map((notice) => notice.componentId),
+        ...unresolved.filter((notice) => notice.intendedAsset === intendedAsset)
+          .map((notice) => notice.componentId),
+      ].sort(compareUtf8);
+      if (licenseComponentIds.length === 0 ||
+          new Set(licenseComponentIds).size !== licenseComponentIds.length) {
+        invalid("$.buildInputLock.notices", "supplemental-file license policy is incomplete");
+      }
+      return Object.freeze({
+        ...file,
         intendedAsset,
         licenseComponentIds: Object.freeze(licenseComponentIds),
       });
@@ -487,6 +519,18 @@ function currentGitSourceArchives(sources, notices) {
           contribution: "complete-configured-libcxx-header-output",
         }),
       ]),
+      supplementalFiles: Object.freeze([
+        Object.freeze({
+          supplementalFileId: "libcxx-default-assertion-handler",
+          includeRootId: "cxx-stdlib",
+          archivePath:
+            "llvm-project-22.1.8.src/libcxx/vendor/llvm/default_assertion_handler.in",
+          virtualPath: "__assertion_handler",
+          contribution: "copy-configured-libcxx-header",
+          sha256: "f898f23fcba22ccc511c7e7c8675abc08cb63f4fdc4c79cadb45a13d8c349129",
+          byteLength: "2399",
+        }),
+      ]),
     }),
   ]);
 }
@@ -517,6 +561,7 @@ function validateArchiveSet(archives) {
         !/^[1-9][0-9]*$/u.test(archive.archiveByteLength) ||
         BigInt(archive.archiveByteLength) > 512n * 1024n * 1024n ||
         !archive.acquisitionUrl.startsWith("https://") || archive.selections.length === 0 ||
+        !Array.isArray(archive.supplementalFiles) ||
         !Array.isArray(archive.licenseEvidence) || archive.licenseEvidence.length === 0) {
       invalid(path, "archive record is outside the exact source-plan contract");
     }
@@ -537,6 +582,41 @@ function validateArchiveSet(archives) {
         invalid(path, "only the Clang resource selection may define configured output policy");
       }
     }
+    const supplementalIds = new Set();
+    const supplementalArchivePaths = new Set();
+    const supplementalVirtualPaths = new Set();
+    for (const [fileIndex, file] of archive.supplementalFiles.entries()) {
+      const filePath = `${path}.supplementalFiles[${fileIndex}]`;
+      const archivePath = normalizedReviewEvidencePath(archive.archiveFormat, file.archivePath);
+      const virtualPath = portableArchiveMemberPath(file.virtualPath, `${filePath}.virtualPath`);
+      if (!SOURCE_ID.test(file.supplementalFileId) ||
+          !INCLUDE_ROOT_IDS.includes(file.includeRootId) ||
+          file.intendedAsset !== INCLUDE_ROOT_ASSETS.get(file.includeRootId) ||
+          file.contribution !== "copy-configured-libcxx-header" ||
+          !SHA256.test(file.sha256) || !/^[1-9][0-9]*$/u.test(file.byteLength) ||
+          BigInt(file.byteLength) > 1024n * 1024n ||
+          !Array.isArray(file.licenseComponentIds) || file.licenseComponentIds.length === 0 ||
+          file.licenseComponentIds.some((componentId) => !LICENSE_COMPONENT_ID.test(componentId))) {
+        invalid(filePath, "supplemental file is outside the exact source-plan contract");
+      }
+      if (supplementalIds.has(file.supplementalFileId) ||
+          supplementalArchivePaths.has(archivePath) ||
+          supplementalVirtualPaths.has(virtualPath)) {
+        invalid(filePath, "supplemental file IDs and paths must be unique per source");
+      }
+      for (const selection of archive.selections) {
+        const selectionPath = normalizedReviewEvidencePath(
+          archive.archiveFormat,
+          selection.archiveSubtree,
+        );
+        if (archivePath === selectionPath || archivePath.startsWith(`${selectionPath}/`)) {
+          invalid(filePath, "supplemental file must be disjoint from selected source subtrees");
+        }
+      }
+      supplementalIds.add(file.supplementalFileId);
+      supplementalArchivePaths.add(archivePath);
+      supplementalVirtualPaths.add(virtualPath);
+    }
     const evidenceIds = new Set();
     const evidencePaths = new Set();
     for (const [evidenceIndex, evidence] of archive.licenseEvidence.entries()) {
@@ -552,6 +632,9 @@ function validateArchiveSet(archives) {
       }
       if (evidenceIds.has(evidence.evidenceId) || evidencePaths.has(archivePath)) {
         invalid(evidencePath, "license evidence IDs and archive paths must be unique per source");
+      }
+      if (supplementalArchivePaths.has(archivePath)) {
+        invalid(evidencePath, "license evidence must be disjoint from supplemental source files");
       }
       evidenceIds.add(evidence.evidenceId);
       evidencePaths.add(archivePath);
@@ -575,10 +658,14 @@ function normalizedReviewEvidencePath(archiveFormat, value) {
     if (match === null) invalid("$.archives.licenseEvidence.archivePath", "Debian path must name data.tar.zst");
     path = match[1];
   }
+  return portableArchiveMemberPath(path, "$.archives.licenseEvidence.archivePath");
+}
+
+function portableArchiveMemberPath(path, diagnosticPath) {
   if (typeof path !== "string" || path === "" || path.startsWith("/") ||
       path.includes("\\") || path.includes("\0") ||
       path.split("/").some((segment) => !ARCHIVE_SEGMENT.test(segment) || segment === "." || segment === "..")) {
-    invalid("$.archives.licenseEvidence.archivePath", "expected one portable archive member path");
+    invalid(diagnosticPath, "expected one portable archive member path");
   }
   return path;
 }

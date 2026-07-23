@@ -25,7 +25,7 @@ export const CPP_CUTE_BROWSER_HEADER_SOURCE_EXTRACTION_SCHEMA =
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-SOURCE-EXTRACTION";
 const EXTRACTION_HASH_DOMAIN =
-  "browsergrad.compiler.cpp-cute.browser-header-source-extraction.v2";
+  "browsergrad.compiler.cpp-cute.browser-header-source-extraction.v3";
 const EVIDENCE_ID = /^[a-z][a-z0-9-]*$/u;
 const SOURCE_EXTRACTIONS = new WeakMap();
 
@@ -40,10 +40,11 @@ export class CppCuteBrowserHeaderSourceExtractionError extends Error {
 
 /**
  * Copies the seven exact admitted archives into a private staging directory,
- * normalizes their eight selected header subtrees and exact upstream
- * license/copyright review files, then removes all archive copies. The output
- * is a collision-free virtual-path-backed source store, not a
- * host-filesystem-shaped include tree or a license-review conclusion.
+ * normalizes their eight selected header subtrees, exact supplemental
+ * configured-header inputs, and upstream license/copyright review files, then
+ * removes all archive copies. The output is a collision-free
+ * virtual-path-backed source store, not a host-filesystem-shaped include tree
+ * or a license-review conclusion.
  */
 export async function extractCppCuteBrowserHeaderSourcePlan(input) {
   const object = exactObject(
@@ -120,6 +121,12 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
               archiveSubtree: normalizedArchiveSubtree(source.archiveFormat, evidence.archivePath),
               outputSubdirectory: licenseEvidenceSelectionId(evidence.evidenceId),
             })),
+            ...source.supplementalFiles.map((file) => Object.freeze({
+              selectionId: supplementalFileSelectionId(file.supplementalFileId),
+              selectionKind: "file",
+              archiveSubtree: normalizedArchiveSubtree(source.archiveFormat, file.archivePath),
+              outputSubdirectory: supplementalFileSelectionId(file.supplementalFileId),
+            })),
           ],
           tool: object.bsdtarTool,
         });
@@ -182,9 +189,38 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
             sourceTreeId: observed.sourceTreeId,
           });
         });
-        fileCount += selections.reduce((total, selection) => total + selection.fileCount, 0);
+        const supplementalFiles = source.supplementalFiles.map((file) => {
+          const selectionId = supplementalFileSelectionId(file.supplementalFileId);
+          const observed = normalization.selections.find(
+            (selection) => selection.selectionId === selectionId,
+          );
+          const expectedRelativePath = basename(normalizedArchiveSubtree(
+            source.archiveFormat,
+            file.archivePath,
+          ));
+          if (observed === undefined || observed.selectionKind !== "file" ||
+              observed.fileCount !== 1 || observed.files.length !== 1 ||
+              observed.files[0]?.relativePath !== expectedRelativePath ||
+              observed.files[0]?.contentSha256 !== file.sha256 ||
+              observed.files[0]?.byteLength !== file.byteLength ||
+              observed.fileContentByteLength !== file.byteLength) {
+            invalid(
+              `$.archives.${source.sourceId}.supplementalFiles.${file.supplementalFileId}`,
+              "exact supplemental configured-header input differs from the source plan",
+            );
+          }
+          return Object.freeze({
+            ...file,
+            sourceTreeId: observed.sourceTreeId,
+          });
+        });
+        fileCount += selections.reduce((total, selection) => total + selection.fileCount, 0) +
+          supplementalFiles.length;
         fileContentBytes += selections.reduce(
           (total, selection) => total + BigInt(selection.fileContentByteLength),
+          0n,
+        ) + supplementalFiles.reduce(
+          (total, file) => total + BigInt(file.byteLength),
           0n,
         );
         archives.push(Object.freeze({
@@ -196,6 +232,7 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
           licensePolicy: source.licensePolicy,
           normalizationId: normalization.normalizationId,
           selections: Object.freeze(selections),
+          supplementalFiles: Object.freeze(supplementalFiles),
           licenseEvidence: Object.freeze(licenseEvidence),
         }));
         normalizations.set(source.sourceId, normalization);
@@ -224,7 +261,7 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
     }));
     const extraction = Object.freeze({
       schema: CPP_CUTE_BROWSER_HEADER_SOURCE_EXTRACTION_SCHEMA,
-      version: 2,
+      version: 3,
       extractionId: `bg.cpp.browser-header-source-extraction.sha256.${extractionHash}`,
       authority: "exact-plan-host-tool-source-materialization-observation-only",
       buildInputLockId: plan.body.buildInputLockId,
@@ -245,6 +282,17 @@ export async function extractCppCuteBrowserHeaderSourcePlan(input) {
       totals: Object.freeze({
         archiveCount: archives.length,
         selectedSubtreeCount: archives.reduce((total, source) => total + source.selections.length, 0),
+        supplementalFileCount: archives.reduce(
+          (total, source) => total + source.supplementalFiles.length,
+          0,
+        ),
+        supplementalFileByteLength: archives.reduce(
+          (total, source) => total + source.supplementalFiles.reduce(
+            (sourceTotal, file) => sourceTotal + BigInt(file.byteLength),
+            0n,
+          ),
+          0n,
+        ).toString(),
         fileCount,
         fileContentByteLength: String(fileContentBytes),
         licenseEvidenceFileCount: archives.reduce(
@@ -407,6 +455,41 @@ export async function copyCppCuteBrowserExtractedHeaderLicenseEvidence(
   return bytes;
 }
 
+export async function copyCppCuteBrowserExtractedHeaderSupplementalFile(
+  extraction,
+  sourceId,
+  supplementalFileId,
+) {
+  const stored = SOURCE_EXTRACTIONS.get(extraction);
+  if (stored === undefined) invalid("$.extraction", "expected extractor-issued header-source authority");
+  if (typeof supplementalFileId !== "string" || !EVIDENCE_ID.test(supplementalFileId)) {
+    invalid("$.supplementalFileId", "expected one portable supplemental file ID");
+  }
+  const source = extraction.archives.find((archive) => archive.sourceId === sourceId);
+  const file = source?.supplementalFiles.find(
+    (item) => item.supplementalFileId === supplementalFileId,
+  );
+  const normalization = stored.normalizations.get(sourceId);
+  if (source === undefined || file === undefined || normalization === undefined) {
+    invalid("$.supplementalFileId", "supplemental file is absent from the extraction");
+  }
+  const relativePath = basename(normalizedArchiveSubtree(source.archiveFormat, file.archivePath));
+  let bytes;
+  try {
+    bytes = await copyCppCuteBrowserArchiveNormalizationFile(
+      normalization,
+      supplementalFileSelectionId(supplementalFileId),
+      relativePath,
+    );
+  } catch (cause) {
+    invalid("$.supplementalFileId", "failed to copy exact supplemental file", { cause });
+  }
+  if (String(bytes.byteLength) !== file.byteLength || sha256(bytes) !== file.sha256) {
+    invalid("$.supplementalFileId", "copied supplemental file differs from extraction evidence");
+  }
+  return bytes;
+}
+
 export function cppCuteBrowserExtractedHeaderSourceFiles(
   extraction,
   sourceId,
@@ -480,6 +563,13 @@ function licenseEvidenceSelectionId(evidenceId) {
     invalid("$.plan.licenseEvidence.evidenceId", "expected one portable evidence ID");
   }
   return `license-${evidenceId}`;
+}
+
+function supplementalFileSelectionId(supplementalFileId) {
+  if (typeof supplementalFileId !== "string" || !EVIDENCE_ID.test(supplementalFileId)) {
+    invalid("$.plan.supplementalFiles.supplementalFileId", "expected one portable file ID");
+  }
+  return `supplemental-${supplementalFileId}`;
 }
 
 async function admitPrivateCanonicalDirectory(path, diagnosticPath) {

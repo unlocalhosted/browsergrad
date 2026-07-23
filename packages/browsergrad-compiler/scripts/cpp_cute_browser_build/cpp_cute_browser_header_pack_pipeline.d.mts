@@ -35,7 +35,7 @@ export interface CppCuteBrowserHeaderPackPipelineInput {
 
 export interface CppCuteBrowserHeaderPackPipeline {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA;
-  readonly version: 4;
+  readonly version: 5;
   readonly pipelineId: string;
   readonly authority: "exact-source-host-tool-vfs-pack-pipeline-observation-only";
   readonly buildInputLockId: string;
@@ -55,6 +55,8 @@ export interface CppCuteBrowserHeaderPackPipeline {
   readonly sourceTotals: Readonly<{
     archiveCount: number;
     selectedSubtreeCount: number;
+    supplementalFileCount: number;
+    supplementalFileByteLength: string;
     fileCount: number;
     fileContentByteLength: string;
     licenseEvidenceFileCount: number;

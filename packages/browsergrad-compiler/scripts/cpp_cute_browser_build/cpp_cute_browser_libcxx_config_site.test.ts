@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   CPP_CUTE_BROWSER_LIBCXX_CONFIG_SITE_PROFILE,
+  CPP_CUTE_BROWSER_LIBCXX_MODULE_MAP_PROFILE,
   CppCuteBrowserLibcxxConfigSiteError,
   materializeCppCuteBrowserLibcxxConfigSite,
+  materializeCppCuteBrowserLibcxxModuleMap,
 } from "./cpp_cute_browser_libcxx_config_site.mjs";
 
 describe("configured libc++ header materialization", () => {
@@ -29,6 +31,36 @@ describe("configured libc++ header materialization", () => {
         "#cmakedefine01 _LIBCPP_HAS_THREADS",
         "#cmakedefine01 _LIBCPP_HAS_FUTURE_CAPABILITY",
       )),
+    )).toThrow(CppCuteBrowserLibcxxConfigSiteError);
+  });
+
+  it("materializes the exact configured libc++ module-map entry", () => {
+    const configured = materializeCppCuteBrowserLibcxxModuleMap(
+      new TextEncoder().encode([
+        "// module fixture",
+        "module std_config [system] {",
+        "  @LIBCXX_CONFIG_SITE_MODULE_ENTRY@ // generated via CMake",
+        '  textual header "__config"',
+        "}",
+        "",
+      ].join("\n")),
+    );
+    const text = new TextDecoder().decode(configured.bytes);
+
+    expect(configured.profile).toBe(CPP_CUTE_BROWSER_LIBCXX_MODULE_MAP_PROFILE);
+    expect(text).toContain('  textual header "__config_site" // generated via CMake');
+    expect(text).not.toContain("@LIBCXX_");
+  });
+
+  it("fails closed when the libc++ module-map template contract drifts", () => {
+    expect(() => materializeCppCuteBrowserLibcxxModuleMap(
+      new TextEncoder().encode([
+        "module std_config [system] {",
+        "  @LIBCXX_CONFIG_SITE_MODULE_ENTRY@ // generated via CMake",
+        "  @LIBCXX_FUTURE_MODULE_ENTRY@",
+        "}",
+        "",
+      ].join("\n")),
     )).toThrow(CppCuteBrowserLibcxxConfigSiteError);
   });
 });

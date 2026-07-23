@@ -30,6 +30,18 @@ export interface CppCuteBrowserHeaderSourceSelection {
   }>;
 }
 
+export interface CppCuteBrowserHeaderSourceSupplementalFile {
+  readonly supplementalFileId: string;
+  readonly includeRootId: string;
+  readonly archivePath: string;
+  readonly virtualPath: string;
+  readonly intendedAsset: string;
+  readonly licenseComponentIds: readonly string[];
+  readonly contribution: "copy-configured-libcxx-header";
+  readonly sha256: string;
+  readonly byteLength: string;
+}
+
 export interface CppCuteBrowserHeaderSourceArchive {
   readonly sourceId: string;
   readonly sourceKind:
@@ -60,6 +72,7 @@ export interface CppCuteBrowserHeaderSourceArchive {
     byteLength: string;
   }>[];
   readonly selections: readonly CppCuteBrowserHeaderSourceSelection[];
+  readonly supplementalFiles: readonly CppCuteBrowserHeaderSourceSupplementalFile[];
 }
 
 export interface CppCuteBrowserHeaderSourceContributor
@@ -82,7 +95,7 @@ export interface CppCuteBrowserHeaderSourceBlocker {
 
 export interface CppCuteBrowserHeaderSourcePlan {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_SOURCE_PLAN_SCHEMA;
-  readonly version: 2;
+  readonly version: 3;
   readonly planId: string;
   readonly authority: "exact-header-source-selection-policy-only";
   readonly body: Readonly<{
@@ -97,6 +110,8 @@ export interface CppCuteBrowserHeaderSourcePlan {
     archiveByteLength: string;
     includeRootCount: number;
     selectedSubtreeCount: number;
+    supplementalFileCount: number;
+    supplementalFileByteLength: string;
     licenseEvidenceFileCount: number;
     licenseEvidenceByteLength: string;
   }>;

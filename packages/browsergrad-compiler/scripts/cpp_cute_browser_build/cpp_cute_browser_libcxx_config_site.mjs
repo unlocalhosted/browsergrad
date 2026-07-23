@@ -2,12 +2,17 @@ import { createHash } from "node:crypto";
 
 export const CPP_CUTE_BROWSER_LIBCXX_CONFIG_SITE_PROFILE =
   "browsergrad.compiler.cpp-cute.libcxx-config-site.linux-x86_64-glibc@1";
+export const CPP_CUTE_BROWSER_LIBCXX_MODULE_MAP_PROFILE =
+  "browsergrad.compiler.cpp-cute.libcxx-module-map.config-site@1";
 
 const ERROR_CODE =
   "BG-COMPILER-CPP-CUTE-BROWSER-LIBCXX-CONFIG-SITE";
 const TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 const TEXT_ENCODER = new TextEncoder();
 const MAX_TEMPLATE_BYTES = 16 * 1024;
+const MAX_MODULE_MAP_TEMPLATE_BYTES = 128 * 1024;
+const MODULE_MAP_PLACEHOLDER = "@LIBCXX_CONFIG_SITE_MODULE_ENTRY@";
+const MODULE_MAP_REPLACEMENT = 'textual header "__config_site"';
 const REPLACEMENTS = new Map([
   ["#cmakedefine _LIBCPP_ABI_VERSION @_LIBCPP_ABI_VERSION@", "#define _LIBCPP_ABI_VERSION 1"],
   ["#cmakedefine _LIBCPP_ABI_NAMESPACE @_LIBCPP_ABI_NAMESPACE@", "#define _LIBCPP_ABI_NAMESPACE __1"],
@@ -102,6 +107,45 @@ export function materializeCppCuteBrowserLibcxxConfigSite(templateBytes) {
   const bytes = TEXT_ENCODER.encode(configured);
   return Object.freeze({
     profile: CPP_CUTE_BROWSER_LIBCXX_CONFIG_SITE_PROFILE,
+    templateSha256: sha256(templateBytes),
+    configuredSha256: sha256(bytes),
+    bytes,
+  });
+}
+
+/**
+ * Applies libc++ 22's exact CMake substitution for the configured module map.
+ * The profile requires a generated __config_site entry and fails closed if
+ * the upstream template adds another CMake input.
+ *
+ * @param {Uint8Array} templateBytes
+ */
+export function materializeCppCuteBrowserLibcxxModuleMap(templateBytes) {
+  if (!(templateBytes instanceof Uint8Array) ||
+      templateBytes.byteLength === 0 ||
+      templateBytes.byteLength > MAX_MODULE_MAP_TEMPLATE_BYTES) {
+    invalid("expected one bounded Uint8Array libc++ module-map template");
+  }
+  /** @type {string} */
+  let template;
+  try {
+    template = TEXT_DECODER.decode(templateBytes);
+  } catch (cause) {
+    invalid("libc++ module-map template is not strict UTF-8", { cause });
+  }
+  if (!template.endsWith("\n") ||
+      !template.includes("module std_config [system] {\n") ||
+      !template.includes(`  ${MODULE_MAP_PLACEHOLDER} // generated via CMake\n`) ||
+      template.indexOf(MODULE_MAP_PLACEHOLDER) !== template.lastIndexOf(MODULE_MAP_PLACEHOLDER)) {
+    invalid("libc++ module-map template structure or placeholder differs");
+  }
+  const configured = template.replace(MODULE_MAP_PLACEHOLDER, MODULE_MAP_REPLACEMENT);
+  if (configured.includes("@LIBCXX_") || configured.includes(MODULE_MAP_PLACEHOLDER)) {
+    invalid("libc++ module-map template has an unknown CMake placeholder");
+  }
+  const bytes = TEXT_ENCODER.encode(configured);
+  return Object.freeze({
+    profile: CPP_CUTE_BROWSER_LIBCXX_MODULE_MAP_PROFILE,
     templateSha256: sha256(templateBytes),
     configuredSha256: sha256(bytes),
     bytes,

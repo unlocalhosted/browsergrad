@@ -27,6 +27,17 @@ vi.mock("./cpp_cute_browser_header_source_extraction.mjs", () => ({
     if (bytes === undefined) throw new Error("missing fixture bytes");
     return new Uint8Array(bytes);
   },
+  async copyCppCuteBrowserExtractedHeaderSupplementalFile(
+    extraction: FixtureExtraction,
+    sourceId: string,
+    supplementalFileId: string,
+  ) {
+    const bytes = extraction.fixtureContents.get(
+      key(sourceId, "supplemental", supplementalFileId),
+    );
+    if (bytes === undefined) throw new Error("missing supplemental fixture bytes");
+    return new Uint8Array(bytes);
+  },
 }));
 
 import {
@@ -36,6 +47,7 @@ import {
 } from "./cpp_cute_browser_header_pack_inventory.mjs";
 import {
   materializeCppCuteBrowserLibcxxConfigSite,
+  materializeCppCuteBrowserLibcxxModuleMap,
 } from "./cpp_cute_browser_libcxx_config_site.mjs";
 
 describe("extracted header-source inventory", () => {
@@ -48,11 +60,22 @@ describe("extracted header-source inventory", () => {
     const templateBytes = Buffer.from(configSiteTemplate(), "utf8");
     const configuredBytes =
       materializeCppCuteBrowserLibcxxConfigSite(templateBytes).bytes;
+    const moduleTemplateBytes = Buffer.from(moduleMapTemplate(), "utf8");
+    const configuredModuleBytes =
+      materializeCppCuteBrowserLibcxxModuleMap(moduleTemplateBytes).bytes;
+    const assertionHandlerBytes = Buffer.from("// assertion handler\n", "utf8");
     expect(inventory.totals).toEqual({
       packCount: 5,
       sourceCount: 8,
-      fileCount: 8,
-      fileContentByteLength: String(77 + templateBytes.byteLength + configuredBytes.byteLength),
+      fileCount: 11,
+      fileContentByteLength: String(
+        77 +
+        templateBytes.byteLength +
+        configuredBytes.byteLength +
+        moduleTemplateBytes.byteLength +
+        configuredModuleBytes.byteLength +
+        assertionHandlerBytes.byteLength,
+      ),
     });
     expect(inventory.packs.find(({ includeRootId }) => includeRootId === "cuda"))
       .toMatchObject({ fileCount: 1, fileContentByteLength: "12" });
@@ -65,6 +88,16 @@ describe("extracted header-source inventory", () => {
       "cxx-stdlib",
       "__config_site",
     )).toString("utf8")).toContain("#define _LIBCPP_HAS_THREADS 1");
+    expect(Buffer.from(await copyCppCuteBrowserHeaderPackInventorySourceFile(
+      inventory,
+      "cxx-stdlib",
+      "module.modulemap",
+    )).toString("utf8")).toContain('textual header "__config_site"');
+    expect(Buffer.from(await copyCppCuteBrowserHeaderPackInventorySourceFile(
+      inventory,
+      "cxx-stdlib",
+      "__assertion_handler",
+    )).toString("utf8")).toBe("// assertion handler\n");
     expect(Buffer.from(await copyCppCuteBrowserHeaderPackInventorySourceFile(
       inventory,
       "cuda",
@@ -118,6 +151,15 @@ interface FixtureExtraction {
         omittedSourceVirtualPaths: readonly string[];
       };
     }>;
+    supplementalFiles: Array<{
+      supplementalFileId: string;
+      includeRootId: string;
+      virtualPath: string;
+      intendedAsset: string;
+      licenseComponentIds: readonly string[];
+      sha256: string;
+      byteLength: string;
+    }>;
   }>;
   totals: { selectedSubtreeCount: number };
   fixtureFiles: Map<string, Array<{
@@ -165,6 +207,29 @@ async function fixtureExtraction(): Promise<FixtureExtraction> {
     "cxx-stdlib",
     "__config_site.in",
     configSiteTemplate(),
+  );
+  setFile(
+    extraction,
+    "llvm-project",
+    "cxx-stdlib",
+    "module.modulemap.in",
+    moduleMapTemplate(),
+  );
+  const assertionHandlerBytes = Buffer.from("// assertion handler\n", "utf8");
+  const llvm = extraction.archives.find(({ sourceId }) => sourceId === "llvm-project");
+  if (llvm === undefined) throw new Error("missing LLVM fixture source");
+  llvm.supplementalFiles.push({
+    supplementalFileId: "libcxx-default-assertion-handler",
+    includeRootId: "cxx-stdlib",
+    virtualPath: "__assertion_handler",
+    intendedAsset: "dependency-header-pack:cxx-stdlib",
+    licenseComponentIds: ["libcxx"],
+    sha256: createHash("sha256").update(assertionHandlerBytes).digest("hex"),
+    byteLength: String(assertionHandlerBytes.byteLength),
+  });
+  extraction.fixtureContents.set(
+    key("llvm-project", "supplemental", "libcxx-default-assertion-handler"),
+    assertionHandlerBytes,
   );
   setFile(
     extraction,
@@ -224,10 +289,22 @@ function configSiteTemplate(): string {
   ].join("\n");
 }
 
+function moduleMapTemplate(): string {
+  return [
+    "// module fixture",
+    "module std_config [system] {",
+    "  @LIBCXX_CONFIG_SITE_MODULE_ENTRY@ // generated via CMake",
+    '  textual header "__config"',
+    "}",
+    "",
+  ].join("\n");
+}
+
 function source(sourceId: string, licenseComponentId: string, includeRootIds: string[]) {
   return {
     sourceId,
     licenseComponentId,
+    supplementalFiles: [],
     selections: includeRootIds.map((includeRootId) => ({
       includeRootId,
       virtualPrefix: "" as const,

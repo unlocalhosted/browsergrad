@@ -34,7 +34,7 @@ export const CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline";
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-HEADER-PACK-PIPELINE";
-const PIPELINE_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline.v4";
+const PIPELINE_HASH_DOMAIN = "browsergrad.compiler.cpp-cute.browser-header-pack-pipeline.v5";
 const PIPELINES = new WeakSet();
 
 export class CppCuteBrowserHeaderPackPipelineError extends Error {
@@ -136,7 +136,7 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
   }));
   const report = Object.freeze({
     schema: CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA,
-    version: 4,
+    version: 5,
     pipelineId: `bg.cpp.browser-header-pack-pipeline.sha256.${pipelineHash}`,
     authority: "exact-source-host-tool-vfs-pack-pipeline-observation-only",
     buildInputLockId: extraction.buildInputLockId,
