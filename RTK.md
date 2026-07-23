@@ -86,8 +86,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler run verify:browser-clang-wasm:
 
 It builds once, runs the no-rebuild lock check, and exercises the build-plan,
 runtime-ABI, browser-profile, and browser-asset identity chain sequentially.
-At the current 2026-07-24 checkpoint it passes 736 tests across 84 files in
-about 14 seconds end to end on Node 25.
+At the current 2026-07-24 checkpoint it passes 738 tests across 85 files in
+about 12.5 seconds end to end on Node 25.
 The set includes package invocation,
 Worker entry, production-controller lifecycle, eight-archive admission, strict
 tar/Debian normalization, collision-free source extraction, exact header-tree
@@ -144,19 +144,26 @@ and emits either `compiled` or the exact authenticated blocker. Use
 Artifact V3 gate; it rejects a `blocked` observation. At the 2026-07-24
 checkpoint, preflight takes under one second and an unchanged CuTe layout
 compile takes about 21 seconds inside the Worker and about 25 seconds end to
-end.
+end. The current strict run matched the package-pinned two-clean-build Wasm,
+accepted Artifact V3
+`bg.artifact.cpp-cute-frontend.sha256.4489656ea0da6faef2a37164fd73e36e201e15f4fba640fa88395a46deb81991`,
+and emitted Worker evidence
+`bg.cpp.browser-worker-execution.sha256.fbff539a3f5a3ad532e21d24ab07665f1f7b5b434b8aec74d57b7ba5e3b69019`.
+Its exact 2,886-byte observation is package-pinned at SHA-256
+`bf4d378a92eda260a120da15651deac8d42c7324de490ad1009224a3e7761496`.
 
 For source-iteration only, an exact locally hashed fast-build Wasm may be
 observed by adding `--allow-untrusted-diagnostic-wasm`. Its evidence explicitly
 records `untrustedDiagnosticWasm=true` and
 `pinnedReproducibleWasmMatched=false`; strict verification refuses it even if
 compilation succeeds. Worker protocol v2 failure details report bounded
-frontend-work, allocator, and VFS state before cleanup. The current diagnostic
-Wasm completes both CUDA semantic passes over the closed five-pack VFS and
-returns one accepted Artifact V3 for unchanged C++17/CuTe layout source. That
-observation proves real browser Worker execution and source-derived layout
-semantics only; producer trust, header-license approval, lowering authority,
-backend execution, and release authority remain false.
+frontend-work, allocator, and VFS state before cleanup. A diagnostic Wasm can
+complete both CUDA semantic passes over the closed five-pack VFS and return an
+accepted Artifact V3 for unchanged C++17/CuTe layout source, but only the
+package-pinned strict observation is current reproducible execution evidence.
+Neither observation proves externally rooted producer trust, header-license
+approval, dynamic Tensor/view-copy semantics, lowering authority, backend
+execution, or release authority.
 
 To turn the eight exact locked archives into the five source-derived VFS packs,
 use the one-process command so its opaque authorities remain live:

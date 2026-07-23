@@ -23,7 +23,7 @@ isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
 are implemented on `main`. The current source additionally owns exact
 frontend-work instrumentation, the local Wasm C-ABI runner, and a canonical
 Worker result-control encoder. It now pins the current 27,285-byte generated
-factory inside one exact 582,465-byte package-owned compiler Worker module and
+factory inside one exact 582,580-byte package-owned compiler Worker module and
 a separate exact 157,378-byte package-owned raw-Wasm verifier Worker;
 both have zero static or dynamic imports. The production controller captures
 browser effects at module evaluation, runs the exact verifier before preparing
@@ -51,11 +51,16 @@ that candidate plus the independently admitted exact producer may converge
 into the existing canonical authorized frontend artifact. Candidate and
 authorization identities exclude allocation sizes and byte offsets; explicit
 storage remains a later lowering fact and is never inferred from CuTe
-`cosize`. Current browser tests use a synthetic authority fixture, and the
-producer tests use a synthetic key and policy, so no real production producer
-or valid production browser-Worker compile has been observed. Hostile
-view-copy graphs are checked with non-recursive, target-intrinsic cycle
-detection before any semantic authority can be minted. The resulting exact
+`cosize`. Current view-copy browser tests use a synthetic authority fixture,
+and the producer tests use a synthetic key and policy, so no externally
+trusted production producer or real source-produced browser `view-copy`
+compile has been observed. The package-pinned two-clean-build Wasm has,
+however, now repeated the accepted layout-only compile in the real browser
+Worker. That strict observation remains execution-only: producer trust,
+header-license approval, lowering, backend execution, distribution, and
+release are false. Hostile view-copy graphs are checked with non-recursive,
+target-intrinsic cycle detection before any semantic authority can be minted.
+The resulting exact
 producer-neutral authorized `view-copy` entry can lower genuine f32 ABI,
 tensor-engine, affine-layout, copy-effect, and explicit runtime-allocation
 facts into the canonical Gate 2 layout/kernel artifacts. The initial profile
@@ -984,6 +989,22 @@ admitted the existing immutable artifacts in 1 minute 7 seconds. Its exact
 and is package-pinned. This proves extractor-output reproducibility only, not
 headers, provenance, the complete distribution, Worker execution, or release.
 
+Current-lock two-clean-build run `30047077419` at `c41ab6a8` then produced
+byte-identical 31,653,752-byte Wasm and 27,285-byte factories. The locked build
+steps took 35 minutes 22 seconds and 45 minutes 14 seconds. The Wasm SHA-256 is
+`7950c52270fdac4ea8cae36fbaafbde56cb61720242e10ea5881becf2fe4cfd4`;
+the factory SHA-256 is
+`f64d5239d5c258f44e859834b57e1ea330b7efdf7a405dead3126b53330a5534`.
+The run's overall failure came from an independent native test that lacked
+`<array>`; both clean producer jobs and their strict raw-Wasm reviews
+succeeded. Detached verifier-only run `30049923259` at `2d3cd52b` reused those
+immutable trees, required exact interface conformance, and emitted the exact
+3,470-byte package-pinned reproducibility resource with SHA-256
+`974bcaae92e88522f2a8ed91874c50269fbe0a84ec00823508495e3f034ac047`.
+This authority proves exact extractor-output reproducibility only. It does not
+attest the producer, approve the header distribution, authorize lowering or
+backend execution, or make the release ready.
+
 Every admitted build runs the independent production-scale raw-Wasm inspector
 and uploads its exact report. The original 98-function import surface contained
 92 generated Emscripten imports, including forbidden clock, random, process,
@@ -1057,8 +1078,8 @@ release evidence. The Worker-local runtime executes the generated factory and
 C ABI, verifies exact frontend-work/VFS/runtime observations, and emits
 canonical control plus artifact bytes. The package-owned Worker graph is pinned
 at SHA-256
-`18476bc79b05054e5064be45d051cbe9d84f7bb1861e40e20ba90b7d0e532155`
-and 582,465 bytes. Worker controller protocol v2 preserves one bounded,
+`eb7df701054a82f59486c011e9a861e1565525c688e402fc1d3fe1724f2530f6`
+and 582,580 bytes. Worker controller protocol v2 preserves one bounded,
 sanitized deepest failure detail. Failed C-ABI invocations snapshot exact
 frontend-work, allocator, and VFS state before cleanup without minting Worker
 execution or lowering authority.
@@ -1068,15 +1089,22 @@ capability. Allocator-integrity state retains the first poison reason for the
 module lifetime. These codes do not change the C ABI, contain no caller source,
 path, or rendered diagnostic text, and cannot authorize an artifact or mask
 the fail-closed status.
-The clean diagnostic host path now consumes those bytes through the captured
+The clean diagnostic host path first consumed those bytes through the captured
 platform and package invocation. Chromium compiled unchanged C++17/CuTe source
 in 22.369 seconds and authenticated accepted Artifact V3
 `bg.artifact.cpp-cute-frontend.sha256.4489656ea0da6faef2a37164fd73e36e201e15f4fba640fa88395a46deb81991`.
-That observation proves real browser Worker execution and a shared rank-2
-layout semantic candidate, but its exact Wasm remains explicitly untrusted
-diagnostic output. Lowering therefore remains blocked on the current
-two-clean-build producer pin plus the independent producer-trust transition;
-license approval, backend execution, and release stay false.
+The package-pinned two-clean-build Wasm then repeated that same accepted
+Artifact V3 in Chromium: compilation took 21.133 seconds and total browser
+execution took 24.331 seconds. Strict Worker evidence is
+`bg.cpp.browser-worker-execution.sha256.fbff539a3f5a3ad532e21d24ab07665f1f7b5b434b8aec74d57b7ba5e3b69019`;
+the shared rank-2 candidate is
+`bg.cpp.browser-worker-layout-candidate.sha256.72f3b5933de96569359767f19fdaaed3eaadadc56ca5c297238abcc149c0d34d`.
+The exact 2,886-byte observation is package-pinned at SHA-256
+`bf4d378a92eda260a120da15651deac8d42c7324de490ad1009224a3e7761496`.
+This closes strict reproducible layout-only browser execution, but it does not
+establish an externally trusted producer, approve header redistribution,
+produce dynamic Tensor/view-copy semantics, authorize lowering or backend
+execution, or make the release ready.
 Use the linked implementation ledger
 for exact chronology, failures, and evidence. This checkpoint is informational: the
 remainder of this document continues to define the normative target and does
