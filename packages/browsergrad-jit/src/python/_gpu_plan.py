@@ -39,6 +39,7 @@ from ._ir import (
     OP_SMOOTH_L1_LOSS, OP_SMOOTH_L1_LOSS_VJP,
     OP_BINARY_CROSS_ENTROPY, OP_BINARY_CROSS_ENTROPY_VJP,
     OP_BINARY_CROSS_ENTROPY_WITH_LOGITS, OP_BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP,
+    OP_KL_DIV, OP_KL_DIV_VJP,
     OP_WHERE, OP_INDEX, OP_VAR, OP_CUMSUM, OP_CONCAT, OP_STACK, OP_NARROW, OP_TRIL, OP_TRIU, OP_MASK, OP_SCATTER_ADD, OP_BROADCAST_TO,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
@@ -64,6 +65,8 @@ from ._framework_contracts import (
     validate_binary_cross_entropy_vjp_contract,
     validate_binary_cross_entropy_with_logits_contract,
     validate_binary_cross_entropy_with_logits_vjp_contract,
+    validate_kl_div_contract,
+    validate_kl_div_vjp_contract,
     validate_gather_contract,
     validate_gather_scatter_add_contract,
     validate_narrow_contract,
@@ -303,6 +306,8 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
         validate_binary_cross_entropy_contract(root)
     elif root.op == OP_BINARY_CROSS_ENTROPY_WITH_LOGITS:
         validate_binary_cross_entropy_with_logits_contract(root)
+    elif root.op == OP_KL_DIV:
+        validate_kl_div_contract(root)
     step_index: Dict[int, int] = {id(node): i for i, node in enumerate(order)}
     last_use: Dict[int, int] = {id(node): i for i, node in enumerate(order)}
     for i, node in enumerate(order):
@@ -378,6 +383,18 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
                 "GPU tensor plan does not support "
                 "BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP. Add a canonical stable "
                 "loss-gradient lowering before GPU codegen."
+            )
+        elif node.op == OP_KL_DIV:
+            validate_kl_div_contract(node)
+            raise GpuPlanUnsupported(
+                "GPU tensor plan does not support KL_DIV. Add a canonical "
+                "KL-divergence reduction lowering before GPU codegen."
+            )
+        elif node.op == OP_KL_DIV_VJP:
+            validate_kl_div_vjp_contract(node)
+            raise GpuPlanUnsupported(
+                "GPU tensor plan does not support KL_DIV_VJP. Add a canonical "
+                "KL-divergence gradient lowering before GPU codegen."
             )
         elif node.op == OP_VAR:
             validate_var_contract(node)

@@ -129,13 +129,19 @@ contract in the README](README.md#compatibility-contract).
   opset-17 `Neg`/`Softplus` decomposition, explicit unsupported-weight
   signatures, and explicit tensor-plan/WebGPU refusal until canonical stable
   loss lowering exists.
+- `torch.nn.functional.kl_div` now emits typed `KL_DIV` with exact probability
+  or logarithmic targets, native zero-target behavior, all four reductions
+  including scalar/empty `batchmean`, bounded work/workspace, promoted owning
+  results, both-input closure and symbolic VJP, nested per-example vmap, exact
+  opset-17 decompositions, strict deprecated-argument refusal, and explicit
+  tensor-plan/WebGPU refusal until canonical loss lowering exists.
 
 ### Added
 
 - Added the bounded v1 executable framework-operation registry and detached
   `framework_operation_support()` table. Typed-operation support decisions now
   come from the same validator bindings used by execution boundaries; the
-  current table contains `ABS`, `BINARY_CROSS_ENTROPY`, `BINARY_CROSS_ENTROPY_WITH_LOGITS`, `CLAMP`, `CONCAT`, `COS`, `CUMSUM`, `BROADCAST_TO`, `EINSUM`, `L1_LOSS`, `SMOOTH_L1_LOSS`, `FLIP`,
+  current table contains `ABS`, `BINARY_CROSS_ENTROPY`, `BINARY_CROSS_ENTROPY_WITH_LOGITS`, `CLAMP`, `CONCAT`, `COS`, `CUMSUM`, `BROADCAST_TO`, `EINSUM`, `KL_DIV`, `L1_LOSS`, `SMOOTH_L1_LOSS`, `FLIP`,
   `INDEX`, `PAD`, `PROD`, `REPEAT_INTERLEAVE`, `REPEAT`, `SIGN`, `SIN`,
   `SCATTER`, `SORT_INDICES`, `SORT_VALUES`, `STACK`, `TOPK_INDICES`, `TOPK_VALUES`,
   `TRIL`, `TRIU`, `VAR`, and masked-fill `WHERE`.

@@ -325,6 +325,7 @@ _BINARY_CROSS_ENTROPY_WORK_VISIT_FACTOR = 48
 _BINARY_CROSS_ENTROPY_LOG_FLOOR = -100.0
 _BINARY_CROSS_ENTROPY_GRAD_EPSILON = 1e-12
 _BINARY_CROSS_ENTROPY_WITH_LOGITS_WORK_VISIT_FACTOR = 36
+_KL_DIV_WORK_VISIT_FACTOR = 48
 _SMOOTH_L1_BETA_TYPES = (
     int,
     float,
@@ -361,6 +362,7 @@ def _elementwise_loss_contract(
     work_visit_factor: int,
     compute_buffers: int = 3,
     mask_buffers: int = 1,
+    allow_batchmean: bool = False,
 ):
     if type(compute_buffers) is not int or compute_buffers < 0:
         raise ValueError(f"{operation}: compute buffer count must be non-negative")
@@ -382,9 +384,19 @@ def _elementwise_loss_contract(
         raise ValueError(
             f"{operation}: reduction must be a string, got {type(reduction).__name__}"
         )
-    if reduction not in ("none", "sum", "mean"):
+    valid_reductions = (
+        ("none", "sum", "mean", "batchmean")
+        if allow_batchmean
+        else ("none", "sum", "mean")
+    )
+    if reduction not in valid_reductions:
+        expected = (
+            "'none', 'sum', 'mean', or 'batchmean'"
+            if allow_batchmean
+            else "'none', 'sum', or 'mean'"
+        )
         raise ValueError(
-            f"{operation}: reduction must be 'none', 'sum', or 'mean', got {reduction!r}"
+            f"{operation}: reduction must be {expected}, got {reduction!r}"
         )
     if input.data.shape != target.data.shape:
         raise ValueError(
@@ -497,6 +509,8 @@ def _finish_typed_elementwise_loss(
     per_element: np.ndarray,
     input_derivative: np.ndarray,
     target_derivative: np.ndarray | None = None,
+    *,
+    batch_denominator: int | None = None,
 ) -> Tensor:
     (
         shape,
@@ -510,10 +524,16 @@ def _finish_typed_elementwise_loss(
         result = per_element
     elif reduction == "sum":
         result = per_element.sum(dtype=np.dtype(compute_dtype))
-    elif input_elements == 0:
+    elif reduction == "mean" and input_elements == 0:
         result = np.asarray(np.nan, dtype=np.dtype(compute_dtype))
-    else:
+    elif reduction == "mean":
         result = per_element.sum(dtype=np.dtype(compute_dtype)) / float(input_elements)
+    else:
+        if batch_denominator is None:
+            raise ValueError("batchmean loss requires an exact batch denominator")
+        numerator = per_element.sum(dtype=np.dtype(compute_dtype))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            result = np.divide(numerator, float(batch_denominator))
     out = Tensor(
         np.array(result, dtype=np.dtype(output_dtype), copy=True),
         dtype=output_dtype,
@@ -530,6 +550,13 @@ def _finish_typed_elementwise_loss(
             upstream = np.broadcast_to(upstream, shape)
             if reduction == "mean":
                 upstream = upstream / float(input_elements)
+            elif reduction == "batchmean":
+                if batch_denominator is None:
+                    raise ValueError(
+                        "batchmean loss requires an exact batch denominator"
+                    )
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    upstream = upstream / float(batch_denominator)
         working_gradient = np.empty(shape, dtype=np.dtype(compute_dtype))
         np.multiply(input_derivative, upstream, out=working_gradient)
         input_gradient = working_gradient.astype(np.dtype(input_dtype), copy=True)
@@ -707,26 +734,67 @@ def smooth_l1_loss(input: Tensor, target: Tensor, beta: float = 1.0, reduction: 
     )
 
 
-def kl_div_loss(input: Tensor, target: Tensor, reduction: str = "mean", log_target: bool = False) -> Tensor:
-    """KL divergence. input is expected to be a log-probability (output of log_softmax).
-    target is a probability by default; pass log_target=True if you pre-logged it.
-
-    Per element: target * (log(target) - input)
-    """
-    if input.data.shape != target.data.shape:
-        raise ValueError(f"kl_div_loss: shape mismatch {input.data.shape} vs {target.data.shape}")
+def kl_div_loss(
+    input: Tensor,
+    target: Tensor,
+    reduction: str = "mean",
+    log_target: bool = False,
+) -> Tensor:
+    """Typed KL divergence with native zero-target and derivative semantics."""
+    if type(log_target) is not bool:
+        raise ValueError(
+            "kl_div: log_target must be an exact bool, got "
+            f"{type(log_target).__name__}"
+        )
+    contract = _elementwise_loss_contract(
+        input,
+        target,
+        reduction,
+        "kl_div",
+        _KL_DIV_WORK_VISIT_FACTOR,
+        compute_buffers=4,
+        mask_buffers=1,
+        allow_batchmean=True,
+    )
+    shape, _, _, _, compute_dtype, _ = contract
+    dtype = np.dtype(compute_dtype)
+    input_array = input.data.astype(dtype, copy=False)
+    target_array = target.data.astype(dtype, copy=False)
+    per_element = np.empty(shape, dtype=dtype)
+    target_derivative = np.empty(shape, dtype=dtype)
+    input_derivative = np.empty(shape, dtype=dtype)
     if log_target:
-        log_t = target.data.astype(np.float64)
-        t = np.exp(log_t)
+        with np.errstate(over="ignore", invalid="ignore"):
+            np.exp(target_array, out=input_derivative)
+        np.subtract(target_array, input_array, out=per_element)
+        np.multiply(input_derivative, per_element, out=per_element)
+        np.add(per_element, input_derivative, out=target_derivative)
+        np.negative(input_derivative, out=input_derivative)
     else:
-        t = target.data.astype(np.float64)
-        # target * log(target), with the convention 0 * log(0) = 0
         with np.errstate(divide="ignore", invalid="ignore"):
-            log_t = np.where(t > 0, np.log(t), 0.0)
-    per_elem = t * (log_t - input.data.astype(np.float64))
-    grad_per_elem = (-t).astype(np.float32)
-    mean_denom = float(input.data.shape[0]) if reduction == "batchmean" else None
-    return _reduce_loss(per_elem, grad_per_elem, input, reduction, "kl_div_loss", mean_denom=mean_denom)
+            np.log(target_array, out=target_derivative)
+            np.multiply(target_array, target_derivative, out=per_element)
+        np.copyto(per_element, 0.0, where=target_array == 0.0)
+        np.multiply(target_array, input_array, out=input_derivative)
+        np.subtract(per_element, input_derivative, out=per_element)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            np.divide(target_array, target_array, out=input_derivative)
+        np.copyto(target_derivative, 0.0, where=target_array == 0.0)
+        np.add(target_derivative, input_derivative, out=target_derivative)
+        np.subtract(target_derivative, input_array, out=target_derivative)
+        np.negative(target_array, out=input_derivative)
+    per_element[per_element == 0.0] = 0.0
+    batch_denominator = 1 if len(shape) == 0 else shape[0]
+    return _finish_typed_elementwise_loss(
+        input,
+        target,
+        reduction,
+        contract,
+        per_element,
+        input_derivative,
+        target_derivative,
+        batch_denominator=batch_denominator,
+    )
 
 
 # ─── Spatial / shape ops ───────────────────────────────────
@@ -986,3 +1054,4 @@ cross_entropy = cross_entropy_loss
 nll = nll_loss
 bce_with_logits = bce_with_logits_loss
 binary_cross_entropy_with_logits = bce_with_logits_loss
+kl_div = kl_div_loss

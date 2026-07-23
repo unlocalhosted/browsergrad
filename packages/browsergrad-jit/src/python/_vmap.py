@@ -74,6 +74,7 @@ from ._ir import (
     OP_SMOOTH_L1_LOSS, OP_SMOOTH_L1_LOSS_VJP,
     OP_BINARY_CROSS_ENTROPY, OP_BINARY_CROSS_ENTROPY_VJP,
     OP_BINARY_CROSS_ENTROPY_WITH_LOGITS, OP_BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP,
+    OP_KL_DIV, OP_KL_DIV_VJP,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
     OP_STORE,
@@ -100,6 +101,8 @@ from ._framework_contracts import (
     validate_binary_cross_entropy_vjp_contract,
     validate_binary_cross_entropy_with_logits_contract,
     validate_binary_cross_entropy_with_logits_vjp_contract,
+    validate_kl_div_contract,
+    validate_kl_div_vjp_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -119,6 +122,7 @@ from ._framework_contracts import (
     infer_smooth_l1_loss_contract,
     infer_binary_cross_entropy_contract,
     infer_binary_cross_entropy_with_logits_contract,
+    infer_kl_div_contract,
 )
 
 
@@ -628,6 +632,68 @@ def _vmap_binary_cross_entropy_with_logits_vjp(
         arg["vjp_of"] = node.arg["vjp_of"]
     return UOp(
         op=OP_BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP,
+        inputs=mapped_inputs,
+        shape=mapped_inputs[operand + 1].shape,
+        dtype=mapped_inputs[operand + 1].dtype,
+        arg=arg,
+    )
+
+
+@register_vmap(OP_KL_DIV)
+def _vmap_kl_div(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    contract = validate_kl_div_contract(node)
+    mapped_inputs = _vmap_variadic_inputs(
+        node.inputs,
+        batched,
+        B,
+        "kl_div",
+        (True, True),
+    )
+    mapped_contract = infer_kl_div_contract(
+        mapped_inputs,
+        contract.reduction,
+        contract.log_target,
+        contract.batch_rank + 1,
+    )
+    return UOp(
+        op=OP_KL_DIV,
+        inputs=mapped_inputs,
+        shape=mapped_contract.output_shape,
+        dtype=mapped_contract.output_dtype,
+        arg={
+            "reduction": mapped_contract.reduction,
+            "batch_rank": mapped_contract.batch_rank,
+            "log_target": mapped_contract.log_target,
+        },
+    )
+
+
+@register_vmap(OP_KL_DIV_VJP)
+def _vmap_kl_div_vjp(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    contract, operand = validate_kl_div_vjp_contract(node)
+    mapped_inputs = _vmap_variadic_inputs(
+        node.inputs,
+        batched,
+        B,
+        "kl_div_vjp",
+        (True, True, True),
+    )
+    mapped_contract = infer_kl_div_contract(
+        mapped_inputs[1:],
+        contract.reduction,
+        contract.log_target,
+        contract.batch_rank + 1,
+    )
+    arg = {
+        "reduction": mapped_contract.reduction,
+        "batch_rank": mapped_contract.batch_rank,
+        "log_target": mapped_contract.log_target,
+        "operand": operand,
+    }
+    if "vjp_of" in node.arg:
+        arg["vjp_of"] = node.arg["vjp_of"]
+    return UOp(
+        op=OP_KL_DIV_VJP,
         inputs=mapped_inputs,
         shape=mapped_inputs[operand + 1].shape,
         dtype=mapped_inputs[operand + 1].dtype,

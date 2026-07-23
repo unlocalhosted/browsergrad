@@ -42,7 +42,7 @@ list(list_registered())
     // explicit backward UOps.
     const expected = [
       "ABS", "ADD", "BINARY_CROSS_ENTROPY", "BINARY_CROSS_ENTROPY_WITH_LOGITS", "BROADCAST_TO", "CAST", "CLAMP", "CONCAT", "CONV1D", "CONV2D", "CONV3D", "CONV_TRANSPOSE2D", "COS",
-      "CUMSUM", "DIV", "EINSUM", "EXP", "FLIP", "INDEX", "ISNAN", "L1_LOSS", "LAYER_NORM", "LOG", "MATMUL", "MUL",
+      "CUMSUM", "DIV", "EINSUM", "EXP", "FLIP", "INDEX", "ISNAN", "KL_DIV", "L1_LOSS", "LAYER_NORM", "LOG", "MATMUL", "MUL",
       "NEG", "PAD", "PERMUTE", "PROD", "REDUCE", "REPEAT", "REPEAT_INTERLEAVE", "RESHAPE", "SCATTER", "SIGN", "SIN", "SMOOTH_L1_LOSS", "SORT_INDICES", "SORT_VALUES", "STACK", "TOPK_INDICES", "TOPK_VALUES", "TRIL", "TRIU", "VAR", "WHERE",
     ];
     expect(registered).toEqual(expected);

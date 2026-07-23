@@ -111,6 +111,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   logits and exact target derivatives, preserve both source dtypes, and reject
   unsupported weighting explicitly. `nn.BCEWithLogitsLoss` now carries its
   reduction, and the exact PyTorch functional alias is installed.
+- `functional.kl_div_loss` and `functional.kl_div` now share JIT's strict
+  same-shape floating promotion, exact probability/log-target algebra, native
+  zero-target behavior, all four reductions including scalar and empty
+  `batchmean`, and bounded work/workspace contract. They snapshot and preserve
+  both source-dtype gradients, reject deprecated reduction aliases explicitly,
+  and back `nn.KLDivLoss` plus the installed PyTorch functional alias.
 
 ## [0.5.2] — 2026-07-15
 

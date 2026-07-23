@@ -51,11 +51,13 @@ from ._ir import (
     OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_L1_LOSS,
     OP_SMOOTH_L1_LOSS, OP_BINARY_CROSS_ENTROPY,
     OP_BINARY_CROSS_ENTROPY_WITH_LOGITS,
+    OP_KL_DIV,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_BROADCAST_TO, OP_EINSUM_VJP, OP_L1_LOSS_VJP,
     OP_SMOOTH_L1_LOSS_VJP, OP_BINARY_CROSS_ENTROPY_VJP,
     OP_BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP,
+    OP_KL_DIV_VJP,
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
@@ -82,6 +84,8 @@ from ._framework_contracts import (
     validate_binary_cross_entropy_vjp_contract,
     validate_binary_cross_entropy_with_logits_contract,
     validate_binary_cross_entropy_with_logits_vjp_contract,
+    validate_kl_div_contract,
+    validate_kl_div_vjp_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -110,6 +114,8 @@ from ._framework_contracts import (
     execute_binary_cross_entropy_vjp_array,
     execute_binary_cross_entropy_with_logits_arrays,
     execute_binary_cross_entropy_with_logits_vjp_array,
+    execute_kl_div_arrays,
+    execute_kl_div_vjp_array,
 )
 
 
@@ -1224,6 +1230,19 @@ def _h_binary_cross_entropy_with_logits_vjp(
     )
 
 
+def _h_kl_div(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    contract = validate_kl_div_contract(node)
+    arrays = tuple(vt[id(source)] for source in node.inputs)
+    return execute_kl_div_arrays(contract, arrays)
+
+
+def _h_kl_div_vjp(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    contract, operand = validate_kl_div_vjp_contract(node)
+    dy = vt[id(node.inputs[0])]
+    arrays = tuple(vt[id(source)] for source in node.inputs[1:])
+    return execute_kl_div_vjp_array(contract, operand, dy, arrays)
+
+
 def _h_where(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     validate_where_contract(node)
     cond = vt[id(node.inputs[0])]
@@ -1564,6 +1583,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_SMOOTH_L1_LOSS: _h_smooth_l1_loss,
     OP_BINARY_CROSS_ENTROPY: _h_binary_cross_entropy,
     OP_BINARY_CROSS_ENTROPY_WITH_LOGITS: _h_binary_cross_entropy_with_logits,
+    OP_KL_DIV: _h_kl_div,
     OP_WHERE:   _h_where,
     OP_INDEX:   _h_index,
     OP_MASK:    _h_mask,
@@ -1579,6 +1599,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_SMOOTH_L1_LOSS_VJP: _h_smooth_l1_loss_vjp,
     OP_BINARY_CROSS_ENTROPY_VJP: _h_binary_cross_entropy_vjp,
     OP_BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP: _h_binary_cross_entropy_with_logits_vjp,
+    OP_KL_DIV_VJP: _h_kl_div_vjp,
     # Mixed precision (PRD-010)
     OP_ISNAN:             _h_isnan,
     # Optimizer/update IR

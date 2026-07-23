@@ -492,11 +492,11 @@ def op(x):
     expect(validateJitOpaqueOperationInventory(changedField, fixture, jitFreeze))
       .toContainEqual(expect.stringContaining("labelField disagrees"));
 
-    const extraDynamicCaller = structuredClone(inventory);
-    const helper = extraDynamicCaller.constructorSites.find((site) => site.id === "functional.elementwise-loss-helper");
-    if (helper === undefined || !Array.isArray(helper.operationIds)) throw new Error("missing elementwise helper fixture");
-    helper.operationIds.push("jit.custom.unreviewed-loss.v0");
-    expect(validateJitOpaqueOperationInventory(extraDynamicCaller, fixture, jitFreeze))
+    const extraOperationIdentity = structuredClone(inventory);
+    const nllSite = extraOperationIdentity.constructorSites.find((site) => site.id === "functional.nll-loss");
+    if (nllSite === undefined || !Array.isArray(nllSite.operationIds)) throw new Error("missing NLL constructor fixture");
+    nllSite.operationIds.push("jit.custom.unreviewed-loss.v0");
+    expect(validateJitOpaqueOperationInventory(extraOperationIdentity, fixture, jitFreeze))
       .toContainEqual(expect.stringContaining("constructor-site operation coverage changed"));
 
     const groupedCalls = structuredClone(inventory);

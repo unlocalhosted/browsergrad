@@ -23,7 +23,8 @@ Scope (v0):
     SCATTER (→ScatterElements), EINSUM (→Einsum), L1_LOSS
     (→Sub/Abs/ReduceSum or ReduceMean), SMOOTH_L1_LOSS
     (→Sub/Abs/Less/Mul/Where/reduce), BCE with logits
-    (→Neg/Softplus/Sub/Mul/Add/reduce), and paired sort and selected top-k
+    (→Neg/Softplus/Sub/Mul/Add/reduce), KL divergence
+    (→Log/Exp/Equal/Where/Mul/Sub/reduce), and paired sort and selected top-k
     indices/values (→TopK/GatherElements).
     Plus lifecycle
     (BUFFER/LOAD/CONST).
@@ -78,6 +79,7 @@ from ._ir import (
     OP_TOPK_INDICES, OP_TOPK_VALUES, OP_SCATTER, OP_EINSUM, OP_L1_LOSS,
     OP_SMOOTH_L1_LOSS, OP_BINARY_CROSS_ENTROPY,
     OP_BINARY_CROSS_ENTROPY_WITH_LOGITS,
+    OP_KL_DIV,
     OP_WHERE, OP_BROADCAST_TO, OP_INDEX, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
     OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
@@ -98,6 +100,7 @@ from ._framework_contracts import (
     validate_smooth_l1_loss_contract,
     validate_binary_cross_entropy_contract,
     validate_binary_cross_entropy_with_logits_contract,
+    validate_kl_div_contract,
     validate_clamp_contract,
     validate_cumsum_contract,
     validate_flip_contract,
@@ -512,6 +515,7 @@ def export_inference(
             OP_SMOOTH_L1_LOSS,
             OP_BINARY_CROSS_ENTROPY,
             OP_BINARY_CROSS_ENTROPY_WITH_LOGITS,
+            OP_KL_DIV,
         ) and node.dtype not in _LEGACY_GRAPH_DTYPES:
             raise OnnxUnmappableOp(
                 f"export_inference: {node.op} dtype {node.dtype!r} is not "
@@ -955,6 +959,160 @@ def export_inference(
                     [compute_result_name],
                     f"{nm}_identity",
                     "Identity",
+                ))
+            if compute_dtype != node.dtype:
+                nodes.append(_emit_node(
+                    [compute_result_name],
+                    [out_name],
+                    f"{nm}_output_cast",
+                    "Cast",
+                    [_emit_attr_int("to", _dtype_or_die(node.dtype))],
+                ))
+        elif node.op == OP_KL_DIV:
+            contract = validate_kl_div_contract(node)
+            suffix = next_node_id - 1
+            compute_dtype = "float32" if node.dtype == "float16" else node.dtype
+            loss_inputs = []
+            for index, (source, source_name) in enumerate(zip(node.inputs, input_names)):
+                loss_input = source_name
+                if source.dtype != compute_dtype:
+                    cast_name = f"kl_div_cast_{suffix}_{index}"
+                    nodes.append(_emit_node(
+                        [source_name],
+                        [cast_name],
+                        f"{nm}_cast_{index}",
+                        "Cast",
+                        [_emit_attr_int("to", _dtype_or_die(compute_dtype))],
+                    ))
+                    loss_input = cast_name
+                loss_inputs.append(loss_input)
+
+            if contract.log_target:
+                probability_name = f"kl_div_probability_{suffix}"
+                difference_name = f"kl_div_difference_{suffix}"
+                per_element_name = f"kl_div_per_element_{suffix}"
+                nodes.append(_emit_node(
+                    [loss_inputs[1]],
+                    [probability_name],
+                    f"{nm}_target_exp",
+                    "Exp",
+                ))
+                nodes.append(_emit_node(
+                    [loss_inputs[1], loss_inputs[0]],
+                    [difference_name],
+                    f"{nm}_difference",
+                    "Sub",
+                ))
+                nodes.append(_emit_node(
+                    [probability_name, difference_name],
+                    [per_element_name],
+                    f"{nm}_per_element",
+                    "Mul",
+                ))
+            else:
+                zero_name = f"kl_div_zero_{suffix}"
+                initializers.append(_emit_tensor_proto(
+                    zero_name,
+                    _dtype_or_die(compute_dtype),
+                    (),
+                    _initializer_bytes_for_scalar(0.0, compute_dtype),
+                ))
+                log_name = f"kl_div_target_log_{suffix}"
+                xlogy_raw_name = f"kl_div_xlogy_raw_{suffix}"
+                zero_mask_name = f"kl_div_zero_mask_{suffix}"
+                xlogy_name = f"kl_div_xlogy_{suffix}"
+                input_product_name = f"kl_div_input_product_{suffix}"
+                per_element_name = f"kl_div_per_element_{suffix}"
+                nodes.append(_emit_node(
+                    [loss_inputs[1]],
+                    [log_name],
+                    f"{nm}_target_log",
+                    "Log",
+                ))
+                nodes.append(_emit_node(
+                    [loss_inputs[1], log_name],
+                    [xlogy_raw_name],
+                    f"{nm}_xlogy_raw",
+                    "Mul",
+                ))
+                nodes.append(_emit_node(
+                    [loss_inputs[1], zero_name],
+                    [zero_mask_name],
+                    f"{nm}_zero_mask",
+                    "Equal",
+                ))
+                nodes.append(_emit_node(
+                    [zero_mask_name, zero_name, xlogy_raw_name],
+                    [xlogy_name],
+                    f"{nm}_xlogy",
+                    "Where",
+                ))
+                nodes.append(_emit_node(
+                    [loss_inputs[1], loss_inputs[0]],
+                    [input_product_name],
+                    f"{nm}_input_product",
+                    "Mul",
+                ))
+                nodes.append(_emit_node(
+                    [xlogy_name, input_product_name],
+                    [per_element_name],
+                    f"{nm}_per_element",
+                    "Sub",
+                ))
+
+            reduction_axes = tuple(range(contract.batch_rank, len(contract.input_shape)))
+            compute_result_name = (
+                out_name
+                if compute_dtype == node.dtype
+                else f"kl_div_compute_result_{suffix}"
+            )
+            if contract.reduction == "none" or not reduction_axes:
+                nodes.append(_emit_node(
+                    [per_element_name],
+                    [compute_result_name],
+                    f"{nm}_identity",
+                    "Identity",
+                ))
+            elif contract.reduction in ("sum", "mean"):
+                reduction_op = (
+                    "ReduceSum" if contract.reduction == "sum" else "ReduceMean"
+                )
+                nodes.append(_emit_node(
+                    [per_element_name],
+                    [compute_result_name],
+                    f"{nm}_reduce",
+                    reduction_op,
+                    [
+                        _emit_attr_ints("axes", reduction_axes),
+                        _emit_attr_int("keepdims", 0),
+                    ],
+                ))
+            else:
+                sum_name = f"kl_div_batch_sum_{suffix}"
+                denominator_name = f"kl_div_batch_denominator_{suffix}"
+                initializers.append(_emit_tensor_proto(
+                    denominator_name,
+                    _dtype_or_die(compute_dtype),
+                    (),
+                    _initializer_bytes_for_scalar(
+                        float(contract.batch_denominator), compute_dtype
+                    ),
+                ))
+                nodes.append(_emit_node(
+                    [per_element_name],
+                    [sum_name],
+                    f"{nm}_batch_sum",
+                    "ReduceSum",
+                    [
+                        _emit_attr_ints("axes", reduction_axes),
+                        _emit_attr_int("keepdims", 0),
+                    ],
+                ))
+                nodes.append(_emit_node(
+                    [sum_name, denominator_name],
+                    [compute_result_name],
+                    f"{nm}_batchmean",
+                    "Div",
                 ))
             if compute_dtype != node.dtype:
                 nodes.append(_emit_node(

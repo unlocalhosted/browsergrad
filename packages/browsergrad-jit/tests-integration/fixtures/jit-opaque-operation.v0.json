@@ -5,10 +5,10 @@
     {
       "id": "jit.custom.shared-refusals.v0",
       "expected": {
-        "label": "kl_div",
+        "label": "nll_loss",
         "labelField": "name",
-        "cpuValues": [[0, 0], [0, 0]],
-        "cpuGradient": [[-1, -1], [-1, -1]],
+        "cpuValues": [-0, -0],
+        "cpuGradient": [[-1, 0], [0, -1]],
         "symbolicVjpRegistered": false,
         "functionalGradError": "JitNotImplementedError",
         "vmapError": "JitNotImplementedError",
@@ -71,7 +71,6 @@
           "cross_entropy",
           "dropout",
           "interpolate",
-          "kl_div",
           "nll_loss"
         ],
         "allLabelsMatch": true,
@@ -80,7 +79,6 @@
           "cross_entropy",
           "dropout",
           "interpolate",
-          "kl_div",
           "nll_loss"
         ],
         "allClosureGradientsPresent": true,

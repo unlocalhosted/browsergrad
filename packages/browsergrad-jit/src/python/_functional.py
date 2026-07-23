@@ -24,6 +24,7 @@ from ._ir import (
     OP_LAYER_NORM, OP_REDUCE, OP_DIV, OP_PAD, OP_L1_LOSS, OP_SMOOTH_L1_LOSS,
     OP_BINARY_CROSS_ENTROPY,
     OP_BINARY_CROSS_ENTROPY_WITH_LOGITS,
+    OP_KL_DIV,
 )
 from ._tensor_proxy import (
     TensorProxy, _BackwardCtx, _should_track, _to_proxy, from_numpy, where,
@@ -34,10 +35,12 @@ from ._framework_contracts import (
     execute_smooth_l1_loss_vjp_array,
     execute_binary_cross_entropy_vjp_array,
     execute_binary_cross_entropy_with_logits_vjp_array,
+    execute_kl_div_vjp_array,
     infer_l1_loss_contract,
     infer_smooth_l1_loss_contract,
     infer_binary_cross_entropy_contract,
     infer_binary_cross_entropy_with_logits_contract,
+    infer_kl_div_contract,
     normalize_pad_request,
 )
 
@@ -304,63 +307,6 @@ def nll_loss(log_probs: TensorProxy, targets: TensorProxy,
     return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
 
 
-def _custom_elementwise_loss(
-    input: TensorProxy,
-    target: TensorProxy,
-    reduction: str,
-    op_name: str,
-    forward_fn: Any,
-    grad_fn: Any,
-    *,
-    allow_batchmean: bool = False,
-) -> TensorProxy:
-    target = _to_proxy(target, input._get_session())
-    if input.shape != target.shape:
-        raise ShapeError(f"{op_name}: shape mismatch {input.shape} vs {target.shape}")
-    valid_reductions = ("mean", "sum", "none", "batchmean") if allow_batchmean else (
-        "mean", "sum", "none"
-    )
-    if reduction not in valid_reductions:
-        raise ValueError(f"{op_name}: unknown reduction {reduction!r}")
-
-    sess = input._get_session()
-    out_shape: Tuple[int, ...] = () if reduction != "none" else input.shape
-
-    def _forward(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
-        per_elem = forward_fn(input_arr, target_arr).astype(np.float32, copy=False)
-        if reduction == "none":
-            return per_elem.astype(np.dtype(input.dtype), copy=False)
-        if reduction == "sum":
-            return np.asarray(per_elem.sum(), dtype=np.dtype(input.dtype))
-        denom = float(input_arr.shape[0]) if reduction == "batchmean" else float(per_elem.size)
-        return np.asarray(per_elem.sum() / denom, dtype=np.dtype(input.dtype))
-
-    uop = UOp(
-        op=OP_CUSTOM,
-        inputs=(input._uop, target._uop),
-        shape=out_shape,
-        dtype=input.dtype,
-        arg={"fn": _forward, "captures": (), "name": op_name},
-    )
-
-    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
-        input_arr, target_arr = ins
-        grad = grad_fn(input_arr, target_arr).astype(np.float32, copy=False)
-        if reduction == "mean":
-            grad *= dy / float(input_arr.size)
-        elif reduction == "sum":
-            grad *= dy
-        elif reduction == "batchmean":
-            grad *= dy / float(input_arr.shape[0])
-        else:
-            grad *= dy
-        return (grad.astype(input_arr.dtype, copy=False), None)
-
-    requires = _should_track(input)
-    ctx = _BackwardCtx(fn=_bw, input_proxies=(input, target)) if requires else None
-    return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
-
-
 def l1_loss(
     input: TensorProxy,
     target: TensorProxy,
@@ -523,29 +469,51 @@ def kl_div(
     reduction: str = "mean",
     log_target: bool = False,
 ) -> TensorProxy:
-    def _forward(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
-        if log_target:
-            log_t = target_arr.astype(np.float64, copy=False)
-            t = np.exp(log_t)
-        else:
-            t = target_arr.astype(np.float64, copy=False)
-            with np.errstate(divide="ignore", invalid="ignore"):
-                log_t = np.where(t > 0, np.log(t), 0.0)
-        return t * (log_t - input_arr.astype(np.float64, copy=False))
-
-    def _grad(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
-        if log_target:
-            return -np.exp(target_arr.astype(np.float64, copy=False))
-        return -target_arr
-
-    return _custom_elementwise_loss(
-        input,
-        target,
+    if not isinstance(input, TensorProxy):
+        raise TypeError(
+            f"kl_div: input must be a TensorProxy, got {type(input).__name__}"
+        )
+    if not isinstance(target, TensorProxy):
+        raise TypeError(
+            f"kl_div: target must be a TensorProxy, got {type(target).__name__}"
+        )
+    if target._get_session() is not input._get_session():
+        raise ShapeError("kl_div: input and target must belong to the same session")
+    contract = infer_kl_div_contract(
+        (input._uop, target._uop),
         reduction,
-        "kl_div",
-        _forward,
-        _grad,
-        allow_batchmean=True,
+        log_target,
+        0,
+    )
+    uop = UOp(
+        op=OP_KL_DIV,
+        inputs=(input._uop, target._uop),
+        shape=contract.output_shape,
+        dtype=contract.output_dtype,
+        arg={
+            "reduction": contract.reduction,
+            "batch_rank": contract.batch_rank,
+            "log_target": contract.log_target,
+        },
+    )
+
+    def _bw(
+        dy: np.ndarray,
+        ins: Tuple[np.ndarray, ...],
+    ) -> Tuple[Optional[np.ndarray], ...]:
+        arrays = (ins[0], ins[1])
+        return (
+            execute_kl_div_vjp_array(contract, 0, dy, arrays),
+            execute_kl_div_vjp_array(contract, 1, dy, arrays),
+        )
+
+    requires = _should_track(input, target)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(input, target)) if requires else None
+    return TensorProxy(
+        uop,
+        session=input._get_session(),
+        requires_grad=requires,
+        ctx=ctx,
     )
 
 

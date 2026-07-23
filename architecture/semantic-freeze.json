@@ -365,13 +365,13 @@
       "newUseProhibition": "No new core label or constructor site; only the explicit user-authored kernel API may supply user kernel names.",
       "retirementGate": "Advertised core operations have typed IR plus explicit CPU, VJP, transform, export, and backend decisions.",
       "compatibilityRemovalVersion": "@unlocalhosted/browsergrad-jit@1.0.0",
-      "baselineDecision": "docs/adr/0027-migrate-jit-bce-with-logits-to-typed-stable-loss.md",
+      "baselineDecision": "docs/adr/0028-migrate-jit-kl-div-to-typed-native-loss.md",
       "freeze": {
         "kind": "jit-op-custom",
         "inventoryFile": "architecture/jit-opaque-operation-inventory.json",
-        "inventorySha256": "ed97500e767ab8143d7d2e52241f65b5a728455a0def65ec54060b41646fe790",
+        "inventorySha256": "477d1d2166a6fb968fa7ff50df4194cf0258f58943142dbfbd1789abdd762e50",
         "behaviorFixtureFile": "packages/browsergrad-jit/tests-integration/fixtures/jit-opaque-operation.v0.json",
-        "behaviorFixtureSha256": "6f3c0f03a552df027930346db3621fa32b268e0db4100e3716645d36324829d4",
+        "behaviorFixtureSha256": "85ced38b4ac81b8d379e75176d242e3d974a6ccab47de642f10d0bd6985a35da",
         "behaviorFixtureIds": [
           "jit.custom.accelerator-and-constructor-only.v0",
           "jit.custom.all-callback-labels-and-dtypes.v0",
@@ -380,18 +380,13 @@
           "jit.custom.stateful-replay.v0"
         ],
         "behaviorTestFile": "packages/browsergrad-jit/tests-integration/gate0_opaque_operation_contract.test.ts",
-        "behaviorTestSha256": "73b8c0a93702b3c4d2786cba2944e932bc534745936f21ccd707c8de3f2463d6",
+        "behaviorTestSha256": "ebfa8c6403016d6ac11843586cdff375fe033fdb08e50ee83847fb4c9318cda6",
         "constructorCounts": {
           "packages/browsergrad-jit/src/python/_custom_kernel.py": 1,
-          "packages/browsergrad-jit/src/python/_functional.py": 5,
+          "packages/browsergrad-jit/src/python/_functional.py": 4,
           "packages/browsergrad-jit/src/python/_nn.py": 1,
           "packages/browsergrad-jit/src/python/_webnn.py": 1,
           "packages/browsergrad-jit/src/python/index.ts": 2
-        },
-        "exactTokenCounts": {
-          "packages/browsergrad-jit/src/python/_functional.py": {
-            "_custom_elementwise_loss": 2
-          }
         },
         "labelFieldsByFile": {
           "packages/browsergrad-jit/src/python/_custom_kernel.py": {
@@ -405,11 +400,10 @@
               "cross_entropy",
               "dropout",
               "interpolate",
-              "kl_div",
               "nll_loss"
             ],
             "op": [],
-            "dynamicName": ["op_name"],
+            "dynamicName": [],
             "dynamicOp": []
           },
           "packages/browsergrad-jit/src/python/_nn.py": {
@@ -437,7 +431,6 @@
           "dropout",
           "flash_attention",
           "interpolate",
-          "kl_div",
           "nll_loss",
           "transformer_block",
           "user",
@@ -455,7 +448,6 @@
           "embedded.transformer-block",
           "functional.cross-entropy",
           "functional.dropout",
-          "functional.elementwise-loss-helper",
           "functional.interpolate",
           "functional.nll-loss",
           "nn.batch-norm-1d-forward",
@@ -467,7 +459,6 @@
           "jit.custom.dropout.v0",
           "jit.custom.flash-attention.v0",
           "jit.custom.interpolate.v0",
-          "jit.custom.kl-div.v0",
           "jit.custom.nll-loss.v0",
           "jit.custom.transformer-block.v0",
           "jit.custom.user.v0",
@@ -533,11 +524,9 @@
             "builder": ["d854e3eac2368c21f08505f94253c086a0f4ee5611c7227c5350570364b59af0"]
           },
           "packages/browsergrad-jit/src/python/_functional.py": {
-            "_custom_elementwise_loss": ["fd19a2af8fba89f39450727298f167a1da68b36c7021f89795007dd16d85fe22"],
             "cross_entropy": ["e4d4c3ee6dedfd9e5d0e7a7c4ee02468c36ef61bc8c9851486919ee530368401"],
             "dropout": ["d2c4e5933ad2ff32e7a2f3a1ece653c3ba15bc2e0f428fdd0bebecace2f53fac"],
             "interpolate": ["36a841391a32e753815e12ebc3ceedf99a4ef145dcf9c60c2c381d2a8679a326"],
-            "kl_div": ["baa69ada39c36e25eb0360d97af4be2807289e0c4110bdebb40e67fa68033228"],
             "nll_loss": ["538a0f1a61ee2994e40b4f5f9f8bf7269e59e9a2eaae72268e278305423d1169"]
           },
           "packages/browsergrad-jit/src/python/_nn.py": {
@@ -562,7 +551,7 @@
             "realize_webgpu": ["c8bb56f6665b8071d800ba3c035f97a83cc5c0334d2133315fd024693c91e774"]
           },
           "packages/browsergrad-jit/src/python/_gpu_plan.py": {
-            "build_gpu_execution_plan": ["813287c42ac7764e82da8004aa796a331b80f0117747d0f1724f403af82b609c"]
+            "build_gpu_execution_plan": ["4cc5cce2efb84709ddb98a95ee676555854fc61c6d9ce40c567ccd04da5a3dd3"]
           },
           "packages/browsergrad-jit/src/python/_vjp.py": {
             "get_rule": ["b851b98e25bc8ae27bc0c88b0caf3080e1604f2880ffaea8d0fb3f4100f5e976"],
