@@ -15,6 +15,9 @@ import {
   CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_RESOURCE,
 } from "../../dist/resources/cpp_cute_browser_build_lock_v1.js";
 import {
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+} from "../../dist/cpp_cute_browser_runtime_abi.js";
+import {
   CPP_CUTE_BROWSER_EXTRACTOR_SOURCE_PATHS,
 } from "./cpp_cute_browser_build_plan.mjs";
 
@@ -49,6 +52,7 @@ export async function projectCppCuteBrowserBuildInputLock() {
   const projected = structuredClone(current);
   const source = projected.body.recipe.extractorSource;
   const files = [];
+  let compileSessionSource;
   for (const [index, path] of CPP_CUTE_BROWSER_EXTRACTOR_SOURCE_PATHS.entries()) {
     let bytes;
     try {
@@ -61,7 +65,12 @@ export async function projectCppCuteBrowserBuildInputLock() {
       sha256: createHash("sha256").update(bytes).digest("hex"),
       byteLength: String(bytes.byteLength),
     });
+    if (path === "BrowserGradCppCuteCompileSession.cpp") {
+      compileSessionSource = bytes.toString("utf8");
+    }
   }
+  const nativeRuntimeAbiResourceSha256 =
+    exactNativeRuntimeAbiResourceSha256(compileSessionSource);
   source.files = files;
   source.sourceSetSha256 = await hashCanonicalJson({
     domain: source.hashDomain,
@@ -84,9 +93,30 @@ export async function projectCppCuteBrowserBuildInputLock() {
       recipe: projected.body.recipe,
     }),
     extractorSourceSetSha256: source.sourceSetSha256,
+    nativeRuntimeAbiResourceSha256,
     files: Object.freeze(files.map((file) => Object.freeze(file))),
   });
   return report;
+}
+
+function exactNativeRuntimeAbiResourceSha256(source) {
+  if (typeof source !== "string") {
+    invalid(
+      "$.nativeRuntimeAbiResourceSha256",
+      "owned compile-session source is unavailable",
+    );
+  }
+  const matches = [...source.matchAll(
+    /constexpr std::string_view kRuntimeAbiManifestSha256 =\s*"([0-9a-f]{64})";/gu,
+  )];
+  if (matches.length !== 1 ||
+      matches[0]?.[1] !== CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256) {
+    invalid(
+      "$.nativeRuntimeAbiResourceSha256",
+      "native profile admission does not bind the exact package runtime-ABI resource",
+    );
+  }
+  return matches[0][1];
 }
 
 function sameFiles(left, right) {

@@ -4,6 +4,9 @@ import {
   parseCppCuteBrowserBuildLockAuthoringArguments,
   projectCppCuteBrowserBuildInputLock,
 } from "./cpp_cute_browser_build_lock_authoring.mjs";
+import {
+  CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+} from "../../dist/cpp_cute_browser_runtime_abi.js";
 
 describe("Clang-Wasm build-lock authoring projection", () => {
   it("derives the complete checked-in source and lock identity without editing it", async () => {
@@ -22,6 +25,9 @@ describe("Clang-Wasm build-lock authoring projection", () => {
     expect(report.resourceSha256).toMatch(/^[0-9a-f]{64}$/u);
     expect(report.recipeSha256).toMatch(/^[0-9a-f]{64}$/u);
     expect(report.extractorSourceSetSha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(report.nativeRuntimeAbiResourceSha256).toBe(
+      CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+    );
   });
 
   it("admits only print and check modes", () => {

@@ -163,6 +163,7 @@ describe("Clang-Wasm evidence workflow", () => {
     const buildJob = workflow.slice(buildStart, reproducibilityStart);
     const reproducibilityJob = workflow.slice(reproducibilityStart);
     expect(buildJob).toContain("Materialize the exact JavaScript runtime closure");
+    expect(buildJob).toContain("check:browser-clang-wasm-build-lock:run");
     expect(buildJob).not.toContain("test:browser-clang-wasm-build-plan:");
     expect(buildJob).not.toContain("needs: verification-boundary");
     expect(reproducibilityJob).toContain("needs: [build]");

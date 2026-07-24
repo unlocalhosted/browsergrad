@@ -77,6 +77,8 @@ jobs:
           set -euo pipefail
           pnpm install --frozen-lockfile
           pnpm --filter @unlocalhosted/browsergrad-compiler... build
+          pnpm --filter @unlocalhosted/browsergrad-compiler \
+            check:browser-clang-wasm-build-lock:run
 
       - name: Project the diagnostic toolchain cache key
         id: toolchain-cache-key
