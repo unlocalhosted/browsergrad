@@ -26,7 +26,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
 | 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. |
-| 3 — real browser-local C++/CuTe | in progress | Real Clang-Wasm Worker compilation exists; current extractor promotion, external trust, legal approval, and release authority remain open. |
+| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor and strict eight-case Worker matrix are package-pinned; externally rooted trust, legal approval, exact-payload lowering/backend convergence, and release authority remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
@@ -43,9 +43,10 @@ The 90-minute build is no longer an engineering iteration loop:
 - `verify:changed` is the default edit loop and routes changed files to owning
   tests.
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
-  exact build lock, verifies both zero-import Worker bundles, and passes 86
-  files/748 tests. Its recent Vitest portions take 13–19 seconds.
-- The complete compiler unit suite passes 97 files/1,623 tests in 15.96
+  exact build lock, verifies both zero-import Worker bundles, verifies that the
+  checked-in strict matrix matches its deterministic authoring projection, and
+  passes 87 files/751 tests. Its latest Vitest portion took 15.67 seconds.
+- The complete compiler unit suite passes 97 files/1,624 tests in 16.79
   seconds.
 - The required native boundary passes 50 files/267 tests with nine explicit
   platform skips in 67.62 seconds. It intentionally includes optimized, UBSan,
@@ -78,22 +79,31 @@ The current extractor build lock is
 `bg.cpp.browser-build-input-lock.sha256.5a96def9bac1db052108142dfe4c82e729f4b41f450d459406a4f3c5227daad7`.
 The package factory remains 27,884 bytes with SHA-256
 `2eaa4ce31951cd5eff989679fd8d63c4ae74df0293f8f727209a3ce0f681764d`.
-Before the current reproducibility promotion, the compiler Worker is 584,660
-bytes and the raw-Wasm verifier Worker is 158,314 bytes; both have zero static
-or dynamic imports. Updating package-pinned reproducibility identity requires a
-deterministic Worker re-author and repin.
+Workflow run `30069614333` produced two byte-identical 31,841,008-byte
+extractors with SHA-256
+`19edd5622461b2308e83f10fb90f9f029241a5ba706e4c1741b194cb52a82138`.
+The cache-free build steps took 40 minutes 30 seconds and 45 minutes 55 seconds
+concurrently; the complete jobs took 41 minutes 45 seconds and 47 minutes 28
+seconds. The exact 3,470-byte reproducibility resource has SHA-256
+`b8ab918d667d68a8effcdcd14a79691a92e7d3466e9041906e5039c9993e028d`.
+The compiler Worker is 584,660 bytes with SHA-256
+`a3b8610fc116c7b4949379dbcdcdd55e06ce5f9f59f11bf692abd689b0f17916`;
+the 158,314-byte raw-Wasm verifier Worker has SHA-256
+`06ffb66e4e808e9df030cc3fe2981fa3adddf13d03780680abb091cbcbd4b9eb`.
+Both have zero static or dynamic imports.
 
-The prior package-pinned strict browser observation records unchanged C++17/CuTe
-f32 rank-2, rank-3, positive strided-slice, and read-only broadcast execution,
-but now fails closed against the current regenerated Worker. Workflow run
-`30067229885` compiled the expanded extractor, and the exact ABI review rejected
-its exception-dispatch table shrinking from 15,304 to 15,301 entries. Runtime
-ABI 1.17 pins that smaller table with no import, export, memory, tag, or ambient
-authority expansion. The current source additionally recognizes exact `float`,
-`int`, and `unsigned int` 32-bit device ABI facts; the next strict eight-case
-promotion adds rank-1, rank-4, i32 rank-2, and u32 broadcast. Until the new lock
-has matching clean builds and that matrix is rerun, these cases remain
-implementation plus diagnostic evidence rather than promoted package authority.
+The package-pinned strict browser observation now records eight unchanged
+C++17/CuTe compilations: f32 ranks 1 through 4, positive strided-slice,
+read-only broadcast, i32 rank-2, and u32 broadcast. Every case installs the
+same five exact header packs, executes the current reproducible Wasm through
+the verifier and compiler Workers, emits one accepted Artifact V3, and prepares
+one distinct semantic view-copy candidate. The canonical 26,213-byte matrix
+has SHA-256
+`5d60c80c5aec6b2164b80769f800a6fda931efabf43859c7a22db06910f0768d`
+and binds source revision `6691bde4137efd6f0522e5f86f2863e46461549f`.
+Compilation took 23.869–26.319 seconds per isolated browser case. The matrix
+deliberately retains producer trust, license approval, lowering authority,
+backend execution, and release readiness as false.
 
 ### Shared dtype and layout execution
 
@@ -147,18 +157,16 @@ operation uses an opaque callback.
 Gate 3 cannot become verified until all of the following are independently
 satisfied:
 
-1. The current extractor Wasm and factory match across two clean builds, their
-   canonical reproducibility observation is package-pinned, and the exact
-   package Worker is regenerated and verified.
-2. The promoted Wasm compiles the strict eight-case unchanged C++17/CuTe matrix
-   in the real browser Worker and the resulting candidates converge through
-   shared CPU and required real-WebGPU execution.
-3. A package-controlled production policy admits an externally controlled key
+1. The exact candidates from the promoted strict eight-case C++17/CuTe matrix
+   are admitted by the independent producer-trust transition and converge
+   through shared CPU and required real-WebGPU execution without a
+   source-shaped bypass.
+2. A package-controlled production policy admits an externally controlled key
    and an externally issued exact-build statement for the exact build subject.
-4. An external reviewer approves the exact file-level header-pack map, notices,
+3. An external reviewer approves the exact file-level header-pack map, notices,
    CUDA index, and upstream evidence; package-generated hashes and license text
    cannot self-approve redistribution.
-5. The complete distributed output set is reproducible and final release
+4. The complete distributed output set is reproducible and final release
    authority is issued without collapsing build, legal, trust, execution, or
    backend evidence into one claim.
 

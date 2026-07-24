@@ -165,9 +165,10 @@ not reasons to weaken the semantic or real-device gates.
 
 The 90-minute compiler feedback loop is closed. On current `main`,
 `verify:browser-clang-wasm:fast` builds the package, verifies the exact build
-lock, verifies both zero-import Worker bundles, and passes 86 files/748 tests;
-the Vitest portion takes 13.47 seconds. The complete compiler unit suite passes
-97 files/1,624 tests in 17.05 seconds. The intentionally broader native
+lock, verifies both zero-import Worker bundles, verifies the deterministic
+strict-observation authoring projection, and passes 87 files/751 tests; the
+latest Vitest portion takes 15.67 seconds. The complete compiler unit suite
+passes 97 files/1,624 tests in 16.79 seconds. The intentionally broader native
 boundary, including optimized, UBSan, and platform-gated ASan work, passes 50
 files/267 tests with nine explicit skips in 67.62 seconds. Cache-free LLVM/Clang
 reproducibility remains an evidence-production lane and runs as two concurrent
@@ -182,25 +183,28 @@ semantic-core and kernels seams. Required headed Chromium on Apple Metal 3
 passes a 13-case bit-exact CPU/WebGPU matrix under
 `browsergrad.webgpu.view-copy.word32@2`.
 
-This does not erase the remaining production boundaries. The current extractor
-change still requires exact two-clean-build package admission and a strict
-eight-case real-browser source matrix. Externally rooted producer signing,
-file-level redistribution approval, full distributed-output reproducibility,
-and final release authority remain separate and false. The large compiler
-modules and native producer files also remain maintainability debt even though
-their line ratchets, dependency-cycle checks, and single-path architecture
-prevent further ungoverned growth.
+Current-lock run `30069614333` closes the producer promotion that was open at
+the start of this follow-up. Its two cache-free build steps ran concurrently
+for 40 minutes 30 seconds and 45 minutes 55 seconds and produced byte-identical
+31,841,008-byte Wasm. The 46-second comparison job verified exact Wasm,
+factory, canonical linker-map, native TableGen, runtime closure, and ABI-review
+identity. The resulting package Worker was deterministically re-authored.
 
-Run `30067229885` demonstrates the current fail-closed behavior. Both clean
-builders compiled byte-identical 31,841,010-byte Wasm, taking about 39.6 and
-46.7 minutes, but the post-build ABI review rejected the exception-dispatch
-table shrinking from 15,304 to 15,301 entries. No import, export, memory, tag,
-or ambient capability changed. Runtime ABI 1.17 now pins the independently
-reviewed smaller table, the downloaded Wasm passes exact local review with zero
-mismatches, and both zero-import Worker resources were deterministically
-regenerated. The previous four-case strict browser observation fails closed
-against that Worker change. Current-lock run `30069614333` is producing the new
-clean-build authority before any strict observation is repinned.
+The strict Chromium lane then compiled eight unchanged C++17/CuTe cases with
+the promoted Wasm: f32 ranks 1 through 4, positive strided-slice, read-only
+broadcast, i32 rank-2, and u32 broadcast. Individual compilation took
+23.869–26.319 seconds. The canonical matrix is package-pinned, cross-binds both
+Worker identities and its exact source revision, and is re-derived by the fast
+gate. This is a real current-source proof, not a parser or diagnostic
+substitute.
+
+This does not erase the remaining production boundaries. Externally rooted
+producer signing, file-level redistribution approval, exact-candidate CPU/
+real-WebGPU convergence, full distributed-output reproducibility, and final
+release authority remain separate and false. The large compiler modules and
+native producer files also remain maintainability debt even though exact line
+ratchets, dependency-cycle checks, and single-path architecture prevent further
+ungoverned growth.
 
 ## Why feedback was slow
 
@@ -315,13 +319,13 @@ build to discover.
 
 | Area | Rating | Evidence | Required improvement |
 | --- | --- | --- | --- |
-| Locked input integrity | Good but incomplete | Exact LLVM archive, builder manifest/config, recipe, ABI, extractor source, and 26-file harness runtime closure are checked and content-bound in build evidence v2. Successful factory/Wasm identities and reviewed ABI projections remain unproven. | Complete a build under the v2 boundary, then bind reviewed outputs before distribution. |
-| Build isolation | Strong containment; new boundary not yet exercised by a completed build | No network, read-only root and declared inputs, private work mount, zero capabilities, and no-new-privileges are observed. Future runs mount only the sealed exact runtime/extractor closure instead of checkout or package trees. | Preserve the same closure in a successful validation and both reproducibility builds. |
-| Native semantic coverage | Good but incomplete | Exact Clang 22 pass integration plus native behavioral, UBSan, and ASan lanes are required in CI. | Keep the exact-version lane blocking and add executed-Wasm coverage. |
-| Evidence quality | Good for narrow authorities; release incomplete | Bounded immutable logs, raw-Wasm inspection, build and subset-reproducibility records, host-observed verifier evidence, exact corpus admission, per-stage timing records, and failure-only observations remain separate. Full release-output reproducibility, producer trust, legal approval, valid compiler-Worker execution, and release are still false. | Complete only the missing independent authorities; do not collapse build, verifier, compiler-Worker, legal, producer-trust, backend, or release evidence. |
-| Feedback speed | Good for local harness work; browser corpus remains minutes | The current fast harness passes 65 files/597 tests in 10.92 seconds. Main CI `29768391553` passed eight concurrent jobs in 4 minutes 4 seconds; workspace builds took 16–18 seconds and the source/distribution real-world gates took 2 minutes 26 seconds and 2 minutes 35 seconds. Exact-primary Clang validation remains a separate roughly four-minute evidence lane; clean/reproducibility gates stay cache-free and authoritative. | Shard the 112–118-second browser case phase with aggregate coverage evidence. Keep ordinary edits on focused/fast paths and reserve cache-free proof for evidence checkpoints. |
-| Maintainability | Weak but improving | The build executor is down to 2,198 lines; native compile session is 2,121 lines; artifact writer is 1,784 lines; corpus provisioning is 1,870 lines with embedded helpers. Existing compiler-core modules range from roughly 5,400 to 8,000 lines. Exact per-module ratchets prevent the named compiler monoliths from growing. | Extract corpus filesystem/tool helpers and existing compiler effect/semantic boundaries without creating parallel execution paths, lowering each ratchet as code moves out. |
-| Delivery truthfulness | Good | The production verifier Worker is enabled only for exact package assets; the compiler Worker accepts only its hash-bound derivative evidence. Raw-Wasm verification, compiler execution, semantic lowering, producer trust, legal approval, and real-WebGPU evidence remain distinct claims. | Do not mint compiler/lowering authority until one valid exact request passes the retained host-verifier, Artifact V3, shared-semantic, and trust boundaries. |
+| Locked input integrity | Strong for the promoted extractor; release incomplete | Exact LLVM archive, builder image/config, recipe, ABI, extractor source, runtime closure, factory, Wasm, and canonical reproducibility record are content-bound. Run `30069614333` reproduced the current extractor across two clean roots. | Extend reproducibility to the complete distributed output set and retain independent external approval. |
+| Build isolation | Strong and exercised | Both current clean builds ran networkless with a read-only root and declared inputs, private work mounts, zero capabilities, and no-new-privileges; source and build paths were distinct. | Keep diagnostic caches outside clean/reproducibility authority and preserve the sealed closure as the recipe evolves. |
+| Native and browser semantic coverage | Good for the declared word32 slice | Exact Clang 22 native behavioral/UBSan/ASan lanes coexist with eight real compiler-Worker C++/CuTe cases and 13 bit-exact CPU/WebGPU word32 cases. | Bind exact promoted candidates through the externally rooted producer transition and shared CPU/WebGPU seam; add new dtype/layout profiles only with matching proof. |
+| Evidence quality | Strong for narrow authorities; release incomplete | Bounded build records, exact ABI reviews, two-build reproducibility, separate Worker identities, strict source observations, artifacts, semantic candidates, and real-device evidence remain distinct. Trust, legal approval, lowering, backend authorization for the exact source payload, complete-output reproducibility, and release remain false. | Complete only the missing independent authorities; do not collapse build, verifier, compiler-Worker, legal, producer-trust, backend, or release evidence. |
+| Feedback speed | Strong engineering loop; intentionally expensive proof lane | The fast gate passes 87 files/751 tests with a 15.67-second Vitest portion; the complete compiler unit suite passes 97 files/1,624 tests in 16.79 seconds. Two cache-free clean builds take 40.5 and 45.9 minutes concurrently, while the strict eight-case browser matrix takes about four minutes. | Keep ordinary edits on focused/fast paths; run clean builds and the complete matrix only when output identities or producer semantics change. |
+| Maintainability | Fair with controlled high-risk debt | Architecture checks report zero dependency cycles, legacy-backend leaks, semantic-IR leaks, or C++/CuTe frontend legacy leaks. Exact ratchets contain the 7,972-line WGSL lowerer, 7,178-line semantic IR, 6,999-line reference, 2,235-line build executor, 2,162-line native session, and 1,829-line artifact writer. | Extract existing semantic/effect and harness seams without creating parallel paths, and lower each ratchet as modules split. |
+| Delivery truthfulness | Strong | Package admission authenticates exact reproducibility, header, compiler-Worker, verifier-Worker, source, artifact, and candidate identities while explicitly retaining trust, legal, lowering, backend, and release flags as false. | Preserve the separated authority model through external signing, legal approval, exact-payload execution, and final release. |
 
 ## Findings closed during this audit
 

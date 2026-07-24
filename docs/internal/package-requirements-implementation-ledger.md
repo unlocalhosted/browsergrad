@@ -6432,6 +6432,47 @@ whether any files may be left partially changed.
   those bytes become the exact package-pinned reproducibility authority; the
   runner correctly rejected an attempted diagnostic substitution.
 
+### 2026-07-24 — Current extractor promotion and strict eight-case source proof
+
+- Workflow run `30069614333` at exact source
+  `9479fcdfba172f56fff93498f72ea33bd449ac7e` is green. Its two cache-free,
+  distinct-path builds produced byte-identical 31,841,008-byte Wasm with
+  SHA-256
+  `19edd5622461b2308e83f10fb90f9f029241a5ba706e4c1741b194cb52a82138`.
+  The isolated build steps took 40 minutes 30 seconds and 45 minutes 55
+  seconds concurrently; complete job durations were 41 minutes 45 seconds and
+  47 minutes 28 seconds. The 46-second comparison job verified Wasm, factory,
+  canonical linker-map projection, native TableGen tools, runtime closure, and
+  exact runtime-ABI review identity across both builds.
+- Commit `6691bde4` package-pins the canonical 3,470-byte reproducibility
+  resource at SHA-256
+  `b8ab918d667d68a8effcdcd14a79691a92e7d3466e9041906e5039c9993e028d`.
+  It regenerates the zero-import 584,660-byte compiler Worker at SHA-256
+  `a3b8610fc116c7b4949379dbcdcdd55e06ce5f9f59f11bf692abd689b0f17916`.
+  The separate 158,314-byte verifier Worker remains SHA-256
+  `06ffb66e4e808e9df030cc3fe2981fa3adddf13d03780680abb091cbcbd4b9eb`.
+- The strict Chromium matrix then compiled eight unchanged C++17/CuTe sources
+  with that exact Wasm and the five package-pinned header packs: f32 ranks 1,
+  2, 3, and 4; positive f32 strided-slice; read-only f32 broadcast; i32 rank-2;
+  and u32 broadcast. Per-case compile time was 23.869–26.319 seconds and total
+  browser time was 26.988–29.587 seconds. Every case opened one source and
+  1,168 headers, produced one accepted Artifact V3, and prepared a distinct
+  view-copy candidate.
+- Commit `9ce2d5b0` package-pins the canonical 26,213-byte matrix at SHA-256
+  `5d60c80c5aec6b2164b80769f800a6fda931efabf43859c7a22db06910f0768d`
+  and source revision `6691bde4137efd6f0522e5f86f2863e46461549f`. Admission
+  re-verifies the exact resource bytes, current reproducibility authority,
+  complete header distribution, both Worker identities, eight source/dtype/
+  layout facts, and unique evidence/artifact/candidate identities. A
+  deterministic authoring check is now part of the fast gate.
+- Final local verification passes the 87-file/751-test fast gate in 15.67
+  seconds, compiler typecheck, the 97-file/1,624-test suite in 16.79 seconds,
+  and the no-cycle/no-leak architecture guard. This closes current extractor
+  promotion and strict source compilation. It does not self-approve producer
+  trust or redistribution, authorize lowering/backend execution, prove the
+  complete distributed output set, or mint release authority; those claims
+  remain false.
+
 ## Quick Resume Checklist
 
 1. Read this ledger, then the relevant gate and exit criteria in the normative
@@ -6468,15 +6509,13 @@ The controller, package invocation, and package-owned raw-Wasm verifier are
 wired. The compiler-Worker invocation binds the exact canonical derivative
 evidence region, while the execution-evidence boundary re-authenticates both
 the original host verifier authority and the exact protocol-issued result
-authority rather than accepting structural copies. That exact lineage can
-prepare an accepted view-copy through shared semantics as an observed
-candidate; the exact candidate plus exact independently admitted producer can
-authorize the existing canonical local lowering seam. The previous four-case
-strict observation is now intentionally stale because ABI 1.17 regenerated the
-Worker. The next Worker proof is the current eight-case f32/i32/u32 rank-1
-through rank-4 matrix after current-lock two-clean-build promotion. Externally
-rooted producer admission and production-path CPU plus required real-WebGPU
-convergence must follow over that exact payload.
+authority rather than accepting structural copies. The package now admits the
+current eight-case f32/i32/u32 rank-1-through-rank-4 matrix from the promoted
+reproducible extractor. That exact lineage prepares accepted view copies
+through shared semantics as observed candidates, but candidate preparation is
+not lowering authority. The next execution checkpoint is externally rooted
+producer admission followed by production-path CPU plus required real-WebGPU
+convergence over those exact candidates.
 
 The producer-neutral authorized artifact seam lowers exact f32/i32/u32
 same-dtype view copies at ranks 1 through 4 into the canonical layout/kernel
@@ -6519,10 +6558,9 @@ reread approved output identities into the asset/provenance chain and mount
 only those exact packs in the package Worker.
 No ambient builder header may enter the parsed-program sysroot.
 
-The next executable product checkpoint is current-lock two-clean-build
-admission followed by the strict eight-case source matrix. It must preserve
-exact source spans, diagnostics, selected-entry identity, the closed VFS, and
-package-pinned reproducibility; diagnostic bytes cannot substitute. Once the
-independent external signer transition exists, that exact observed payload
-must lower through the shared word32 seam and match CPU plus required real
-WebGPU.
+The next executable product checkpoint is the independent external signer
+transition over the exact promoted build subject. Once that authority exists,
+the exact package-pinned eight-case observed payload must lower through the
+shared word32 seam and match CPU plus required real WebGPU. The external
+file-level redistribution decision and complete distributed-output
+reproducibility remain separate release prerequisites.
