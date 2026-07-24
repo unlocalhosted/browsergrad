@@ -3,5 +3,5 @@
  * the current two-clean-build reproducibility resource.
  */
 export const CPP_CUTE_BROWSER_REVIEWED_FACTORY_SHA256 =
-  "f64d5239d5c258f44e859834b57e1ea330b7efdf7a405dead3126b53330a5534";
-export const CPP_CUTE_BROWSER_REVIEWED_FACTORY_BYTE_LENGTH = 27_285;
+  "2eaa4ce31951cd5eff989679fd8d63c4ae74df0293f8f727209a3ce0f681764d";
+export const CPP_CUTE_BROWSER_REVIEWED_FACTORY_BYTE_LENGTH = 27_884;

@@ -44,7 +44,7 @@ const harness = vi.hoisted(() => {
     byteLength: workerBytes.byteLength,
     entry: "src/cpp_cute_browser_worker_module.ts",
     factorySha256: "c".repeat(64),
-    factoryByteLength: 27_285,
+    factoryByteLength: 27_884,
     staticImportCount: 0,
     dynamicImportCount: 0,
     packageOwned: true,

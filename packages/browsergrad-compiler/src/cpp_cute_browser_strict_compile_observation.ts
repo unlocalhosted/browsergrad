@@ -187,7 +187,8 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
       CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256) {
     mismatch("$.workerBundle", "observation does not bind the current package Worker");
   }
-  if (resource.inputs.wasmSha256 !== wasm.wasmSha256 ||
+  const observedWasmSha256: string = resource.inputs.wasmSha256;
+  if (observedWasmSha256 !== wasm.wasmSha256 ||
       resource.inputs.wasmAuthority !==
         "package-pinned-two-clean-build-output" ||
       !resource.inputs.pinnedReproducibleWasmMatched ||
