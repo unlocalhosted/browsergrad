@@ -138,6 +138,18 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("clang-extractor-wasm/lib/libclangTooling.a");
     expect(workflow).toContain("--execution-mode=\"${{ inputs.mode == 'fast-validation' && 'cached-diagnostic' || 'clean' }}\"");
     expect(workflow).toContain("fast-validation-observation.v1.json");
+    expect(workflow).toContain("name: Upload compact fast compiler binary");
+    expect(workflow).toContain(
+      "if: ${{ success() && inputs.mode == 'fast-validation' }}",
+    );
+    expect(workflow).toContain(
+      "name: clang-wasm-fast-binary-${{ github.run_id }}-${{ matrix.buildOrdinal }}",
+    );
+    expect(workflow).toContain(
+      "${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/output/browsergrad-cpp-cute/clang-extractor.wasm",
+    );
+    expect(workflow).toContain("if-no-files-found: error");
+    expect(workflow).toContain("retention-days: 3");
     expect(workflow).toContain("test:browser-clang-wasm-build-plan:fast");
     expect(workflow).toContain("test:browser-clang-wasm-build-plan:run");
     expect(workflow.match(/restore-keys:/gu)).toHaveLength(1);

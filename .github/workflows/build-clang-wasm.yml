@@ -290,6 +290,20 @@ jobs:
             "${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/output" \
             "${BG_CLANG_BUILD_ROOT}/work/build-${BG_CLANG_BUILD_ORDINAL}/state/evidence"
 
+      - name: Upload compact fast compiler binary
+        if: ${{ success() && inputs.mode == 'fast-validation' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: clang-wasm-fast-binary-${{ github.run_id }}-${{ matrix.buildOrdinal }}
+          path: |
+            ${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/output/browsergrad-cpp-cute/clang-extractor.wasm
+            ${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/output/clang-wasm-runtime-abi-review.v1.json
+            ${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/output/fast-validation-context.v1.json
+            ${{ env.BG_CLANG_BUILD_ROOT }}/work/build-${{ matrix.buildOrdinal }}/output/fast-validation-observation.v1.json
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 6
+
       - name: Upload bounded build evidence
         if: ${{ always() && env.BG_CLANG_BUILD_ROOT != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
