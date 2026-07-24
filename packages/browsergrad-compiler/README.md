@@ -20,6 +20,18 @@ native-companion execution tiers. See
 [`docs/platform/package-requirements-lld.md`](../../docs/platform/package-requirements-lld.md)
 for the normative requirements and the exact distinction between frontend,
 semantic, reference, and backend support.
+
+The browser-local Clang-Wasm profile is now a real Worker execution path, not a
+source normalizer. Package-pinned evidence covers unchanged C++17/CuTe f32
+rank-2/rank-3, positive strided-slice, and read-only broadcast view copies.
+Current extractor source also emits exact 32-bit `float`, `int`, and
+`unsigned int` ABI facts and lowers equal-rank 1–4 positive-affine views
+through semantic-core and the kernels `word32@2` CPU/WebGPU path. The expanded
+eight-case source matrix remains pre-release until its current two-clean-build
+Wasm is package-pinned and replayed in strict browser mode. External producer
+signing, header redistribution approval, and release authority remain separate
+requirements; successful local compilation does not imply any of them.
+
 Install the compiler and kernels together from npm:
 
 ```sh
@@ -223,12 +235,16 @@ Simple C++ intake accepts scalar/vector `typedef` and `using` aliases,
 arguments, `static` kernel qualifiers, late `__launch_bounds__` placement, and
 `static_assert` statements. This is bounded CUDA/C++ normalization, not full
 C++ template compatibility.
-CuTe support includes compile-time rank-one affine layouts declared with
+The legacy CUDA-lite source normalizer's CuTe compatibility surface includes
+compile-time rank-one affine layouts declared with
 `make_layout(make_shape(...), make_stride(...))` or `Layout<_N, _Stride>{}`.
 Their `size`, `rank`, and `cosize` queries plus one-coordinate application
-lower to scalar Kernel IR expressions. Tensors, multi-rank layouts, dynamic
-layout objects, and tiled MMA remain explicit unsupported diagnostics rather
-than partially modeled C++ objects.
+lower to scalar Kernel IR expressions. In that legacy normalizer path, tensors,
+multi-rank layouts, dynamic layout objects, and tiled MMA remain explicit
+unsupported diagnostics rather than partially modeled C++ objects. The
+browser-local Clang-Wasm profile described above is a separate frontend that
+converges on the same semantic artifacts, not an extension of this
+source-pattern normalizer.
 
 The producer-neutral typed-artifact reader also has a closed artifact 3.1 /
 request 1.1 representation for one dense f32 `logical-gemm-tile`. An exact
