@@ -22,11 +22,11 @@ import {
 } from "./resources/cpp_cute_browser_strict_compile_observation_v1.js";
 
 export const CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_SHA256 =
-  "4796018356bae285feb4b67b33139b38467d71e95807d706290821f5817bb6be";
+  "853b0c1007049ba0a22141c481565d90bbe64f333edd163215f050522b6c1d07";
 export const CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_BYTE_LENGTH =
-  6_823;
+  13_151;
 export const CPP_CUTE_BROWSER_STRICT_COMPILE_SOURCE_REVISION =
-  "d1509e96970ebb0137941c18b9cca97b91e41102";
+  "bf337adf89219489ec46b4e72e463bba9cd06268";
 export const CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256 =
   "8c47f72a003cb1d420c1920d67bee2c3c9482134dda54a08c0ef6d57b9feb0a2";
 const STRICT_OBSERVATION_HEADER_REPRODUCIBILITY_ID =
@@ -64,7 +64,8 @@ const EXPECTED_CASES = Object.freeze([
   Object.freeze({
     caseId: "rank2",
     rank: 2,
-    spanElements: "6",
+    sourceSpanElements: "6",
+    destinationSpanElements: "6",
     sourceSha256:
       "4134804a9892ed1f0a2778fae305e957b5a981afccf2a096f1585f3b1d4e6f06",
     virtualPath: "/workspace/src/real-view-copy-rank2.cu",
@@ -72,10 +73,29 @@ const EXPECTED_CASES = Object.freeze([
   Object.freeze({
     caseId: "rank3",
     rank: 3,
-    spanElements: "24",
+    sourceSpanElements: "24",
+    destinationSpanElements: "24",
     sourceSha256:
       "6a7beae44e88d7fe8749cb5b485dc7d51d30ed285d33314895be461d428550dd",
     virtualPath: "/workspace/src/real-view-copy-rank3.cu",
+  }),
+  Object.freeze({
+    caseId: "strided-slice",
+    rank: 2,
+    sourceSpanElements: "12",
+    destinationSpanElements: "6",
+    sourceSha256:
+      "55f4f5fcf55093a05cb977e3b83479098f6ddc42b830ec63f44b97f27fe3264a",
+    virtualPath: "/workspace/src/real-view-copy-strided-slice.cu",
+  }),
+  Object.freeze({
+    caseId: "broadcast",
+    rank: 2,
+    sourceSpanElements: "2",
+    destinationSpanElements: "6",
+    sourceSha256:
+      "bfd91bdaac57ef7314570a8de56f26165a7b263593f319d728c53c13ef7c6376",
+    virtualPath: "/workspace/src/real-view-copy-broadcast.cu",
   }),
 ]);
 
@@ -88,9 +108,10 @@ declare const verifiedCppCuteBrowserStrictCompileObservationBrand:
   unique symbol;
 
 /**
- * Exact package authority for the strict rank-2/rank-3 browser compilation
- * matrix. It proves source execution and candidate preparation only. Producer
- * trust, licensing, lowering, backend execution, and release stay false.
+ * Exact package authority for the strict rank-2/rank-3/strided/broadcast
+ * browser compilation matrix. It proves source execution and candidate
+ * preparation only. Producer trust, licensing, lowering, backend execution,
+ * and release stay false.
  */
 export interface VerifiedCppCuteBrowserStrictCompileObservation {
   readonly [verifiedCppCuteBrowserStrictCompileObservationBrand]: true;
@@ -108,16 +129,30 @@ export interface VerifiedCppCuteBrowserStrictCompileObservation {
     typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[0]["execution"]["evidenceId"];
   readonly rank3EvidenceId:
     typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[1]["execution"]["evidenceId"];
+  readonly stridedSliceEvidenceId:
+    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[2]["execution"]["evidenceId"];
+  readonly broadcastEvidenceId:
+    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[3]["execution"]["evidenceId"];
   readonly rank2ArtifactId:
     typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[0]["execution"]["artifactId"];
   readonly rank3ArtifactId:
     typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[1]["execution"]["artifactId"];
+  readonly stridedSliceArtifactId:
+    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[2]["execution"]["artifactId"];
+  readonly broadcastArtifactId:
+    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[3]["execution"]["artifactId"];
   readonly rank2CandidateId:
     typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[0]["semanticCandidate"]["candidateId"];
   readonly rank3CandidateId:
     typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[1]["semanticCandidate"]["candidateId"];
+  readonly stridedSliceCandidateId:
+    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[2]["semanticCandidate"]["candidateId"];
+  readonly broadcastCandidateId:
+    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[3]["semanticCandidate"]["candidateId"];
   readonly unchangedCpp17CuteRank2Compiled: true;
   readonly unchangedCpp17CuteRank3Compiled: true;
+  readonly unchangedCpp17CuteStridedSliceCompiled: true;
+  readonly unchangedCpp17CuteBroadcastCompiled: true;
   readonly canonicalGate2LayoutFixturesMatched: true;
   readonly reproducibleWasmMatched: true;
   readonly packagePinnedHeaderPacksMatched: true;
@@ -158,7 +193,7 @@ Uint8Array {
 
 /**
  * Admits only the exact package resource and independently cross-binds its
- * extractor, complete header-pack set, Worker module, two artifacts, and
+ * extractor, complete header-pack set, Worker module, four artifacts, and
  * retained false authority claims.
  */
 export async function verifyCppCuteBrowserStrictCompileObservationResource(
@@ -277,9 +312,10 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
     }
     if (observed.semanticCandidate.sourceCoordinateRank !== expected.rank ||
         observed.semanticCandidate.destinationCoordinateRank !== expected.rank ||
-        observed.semanticCandidate.sourceSpanElements !== expected.spanElements ||
+        observed.semanticCandidate.sourceSpanElements !==
+          expected.sourceSpanElements ||
         observed.semanticCandidate.destinationSpanElements !==
-          expected.spanElements ||
+          expected.destinationSpanElements ||
         !observed.semanticCandidate.sharedViewCopySemanticsPrepared) {
       mismatch(
         `$.cases[${index}].semanticCandidate`,
@@ -299,12 +335,16 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
     candidateIds.add(observed.semanticCandidate.candidateId);
     assetSetIds.add(observed.inputs.assetSetSha256);
   }
-  if (evidenceIds.size !== 2 || artifactIds.size !== 2 ||
-      candidateIds.size !== 2 || assetSetIds.size !== 1) {
+  if (evidenceIds.size !== EXPECTED_CASES.length ||
+      artifactIds.size !== EXPECTED_CASES.length ||
+      candidateIds.size !== EXPECTED_CASES.length ||
+      assetSetIds.size !== 1) {
     mismatch("$.cases", "strict matrix identities are reused or divergent");
   }
   if (!resource.claims.unchangedCpp17CuteRank2Compiled ||
       !resource.claims.unchangedCpp17CuteRank3Compiled ||
+      !resource.claims.unchangedCpp17CuteStridedSliceCompiled ||
+      !resource.claims.unchangedCpp17CuteBroadcastCompiled ||
       !resource.claims.canonicalGate2LayoutFixturesMatched ||
       !resource.claims.packagePinnedHeaderPacksMatched ||
       !resource.claims.pinnedReproducibleWasmMatched ||
@@ -320,6 +360,8 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
 
   const rank2 = resource.cases[0];
   const rank3 = resource.cases[1];
+  const stridedSlice = resource.cases[2];
+  const broadcast = resource.cases[3];
   const authority = Object.freeze({
     authority:
       "package-pinned-strict-browser-compile-matrix-observation-only",
@@ -332,12 +374,20 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
       CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256,
     rank2EvidenceId: rank2.execution.evidenceId,
     rank3EvidenceId: rank3.execution.evidenceId,
+    stridedSliceEvidenceId: stridedSlice.execution.evidenceId,
+    broadcastEvidenceId: broadcast.execution.evidenceId,
     rank2ArtifactId: rank2.execution.artifactId,
     rank3ArtifactId: rank3.execution.artifactId,
+    stridedSliceArtifactId: stridedSlice.execution.artifactId,
+    broadcastArtifactId: broadcast.execution.artifactId,
     rank2CandidateId: rank2.semanticCandidate.candidateId,
     rank3CandidateId: rank3.semanticCandidate.candidateId,
+    stridedSliceCandidateId: stridedSlice.semanticCandidate.candidateId,
+    broadcastCandidateId: broadcast.semanticCandidate.candidateId,
     unchangedCpp17CuteRank2Compiled: true,
     unchangedCpp17CuteRank3Compiled: true,
+    unchangedCpp17CuteStridedSliceCompiled: true,
+    unchangedCpp17CuteBroadcastCompiled: true,
     canonicalGate2LayoutFixturesMatched: true,
     reproducibleWasmMatched: true,
     packagePinnedHeaderPacksMatched: true,
