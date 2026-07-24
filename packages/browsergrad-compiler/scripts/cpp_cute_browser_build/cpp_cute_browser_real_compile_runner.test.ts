@@ -33,6 +33,14 @@ describe("real browser C++/CuTe compile runner", () => {
       code: "BG-COMPILER-CPP-CUTE-BROWSER-REAL-COMPILE-RUNNER",
       path: "$.input",
     });
+    await expect(preflightCppCuteBrowserRealCompileInputs({
+      wasmPath: "/clang-extractor.wasm",
+      packRoot: "/packs",
+      caseId: "rank4",
+    } as never)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REAL-COMPILE-RUNNER",
+      path: "$.caseId",
+    });
   });
 
   it("rejects a symbolic Wasm path before reading external assets", async () => {

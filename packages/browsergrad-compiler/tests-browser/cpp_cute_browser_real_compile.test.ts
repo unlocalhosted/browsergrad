@@ -106,8 +106,9 @@ interface ExternalAssetInput {
 
 interface BrowserExternalInputs {
   readonly schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs";
-  readonly version: 2;
+  readonly version: 3;
   readonly authority: "local-exact-byte-preflight-only";
+  readonly caseId: "rank2" | "rank3";
   readonly assets: readonly ExternalAssetInput[];
   readonly wasmAuthority:
     | "package-pinned-two-clean-build-output"
@@ -129,22 +130,54 @@ declare const __BG_CPP_CUTE_REAL_COMPILE_ROUTE_PREFIX__: string;
 const BUILD_PROVENANCE_POLICY_BUILDER =
   "https://browsergrad.dev/local-observation/untrusted-builder";
 const EVIDENCE_MARKER = "BROWSERGRAD_CPP_CUTE_REAL_COMPILE_EVIDENCE=";
-const MAIN_PATH = "/workspace/src/real-view-copy.cu";
-const MAIN_SOURCE = [
-  "#include <cute/tensor.hpp>",
-  "using SourceLayout = cute::Layout<",
-  "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
-  "  cute::Stride<cute::Int<1>, cute::Int<3>>>;",
-  "using DestinationLayout = cute::Layout<",
-  "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
-  "  cute::Stride<cute::Int<2>, cute::Int<1>>>;",
-  "__device__ void copy_views(const float* source, float* destination) {",
-  "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
-  "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
-  "  cute::copy(source_tensor, destination_tensor);",
-  "}",
-  "",
-].join("\n");
+const REAL_COMPILE_CASES = Object.freeze({
+  rank2: Object.freeze({
+    caseId: "rank2" as const,
+    virtualPath: "/workspace/src/real-view-copy-rank2.cu",
+    coordinateRank: 2,
+    spanElements: 6n,
+    source: [
+      "#include <cute/tensor.hpp>",
+      "using SourceLayout = cute::Layout<",
+      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
+      "  cute::Stride<cute::Int<1>, cute::Int<3>>>;",
+      "using DestinationLayout = cute::Layout<",
+      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
+      "  cute::Stride<cute::Int<2>, cute::Int<1>>>;",
+      "__device__ void copy_views(const float* source, float* destination) {",
+      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
+      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
+      "  cute::copy(source_tensor, destination_tensor);",
+      "}",
+      "",
+    ].join("\n"),
+  }),
+  rank3: Object.freeze({
+    caseId: "rank3" as const,
+    virtualPath: "/workspace/src/real-view-copy-rank3.cu",
+    coordinateRank: 3,
+    spanElements: 24n,
+    source: [
+      "#include <cute/tensor.hpp>",
+      "using SourceLayout = cute::Layout<",
+      "  cute::Shape<cute::Int<2>, cute::Int<3>, cute::Int<4>>,",
+      "  cute::Stride<cute::Int<12>, cute::Int<4>, cute::Int<1>>>;",
+      "using DestinationLayout = cute::Layout<",
+      "  cute::Shape<cute::Int<2>, cute::Int<3>, cute::Int<4>>,",
+      "  cute::Stride<cute::Int<1>, cute::Int<2>, cute::Int<6>>>;",
+      "__device__ void copy_views(const float* source, float* destination) {",
+      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
+      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
+      "  cute::copy(source_tensor, destination_tensor);",
+      "}",
+      "",
+    ].join("\n"),
+  }),
+});
+const REAL_COMPILE_CASE =
+  REAL_COMPILE_CASES[__BG_CPP_CUTE_REAL_COMPILE_INPUTS__.caseId];
+const MAIN_PATH = REAL_COMPILE_CASE.virtualPath;
+const MAIN_SOURCE = REAL_COMPILE_CASE.source;
 const MAIN_BYTES = new TextEncoder().encode(MAIN_SOURCE);
 const PACK_ROOT_IDS = Object.freeze([
   "clang-resource",
@@ -262,10 +295,11 @@ it("observes unchanged CuTe view-copy source in the exact package Worker", async
     });
     const evidence = Object.freeze({
       schema: "browsergrad.compiler.cpp-cute.browser-real-compile-observation",
-      version: 1,
+      version: 2,
       outcome: "blocked",
       authority: "local-real-browser-worker-terminal-observation-only",
       source: {
+        caseId: REAL_COMPILE_CASE.caseId,
         virtualPath: MAIN_PATH,
         sourceSha256: await sha256Hex(MAIN_BYTES),
         syntax: "unchanged-cpp17-cute",
@@ -323,10 +357,11 @@ it("observes unchanged CuTe view-copy source in the exact package Worker", async
   if (payload.outcome.kind === "rejected") {
     const evidence = Object.freeze({
       schema: "browsergrad.compiler.cpp-cute.browser-real-compile-observation",
-      version: 1,
+      version: 2,
       outcome: "rejected",
       authority: "local-real-browser-worker-execution-observation-only",
       source: {
+        caseId: REAL_COMPILE_CASE.caseId,
         virtualPath: MAIN_PATH,
         sourceSha256: await sha256Hex(MAIN_BYTES),
         syntax: "unchanged-cpp17-cute",
@@ -397,16 +432,20 @@ it("observes unchanged CuTe view-copy source in the exact package Worker", async
   });
   expect(candidateRecord.semantics.sourceLayoutFact).toMatchObject({
     kind: "affine-layout",
-    rank: 2,
-    leafRank: 2,
+    rank: REAL_COMPILE_CASE.coordinateRank,
+    leafRank: REAL_COMPILE_CASE.coordinateRank,
   });
   expect(candidateRecord.semantics.destinationLayoutFact).toMatchObject({
     kind: "affine-layout",
-    rank: 2,
-    leafRank: 2,
+    rank: REAL_COMPILE_CASE.coordinateRank,
+    leafRank: REAL_COMPILE_CASE.coordinateRank,
   });
-  expect(candidateRecord.semantics.sourceSpanElements).toBe(6n);
-  expect(candidateRecord.semantics.destinationSpanElements).toBe(6n);
+  expect(candidateRecord.semantics.sourceSpanElements).toBe(
+    REAL_COMPILE_CASE.spanElements,
+  );
+  expect(candidateRecord.semantics.destinationSpanElements).toBe(
+    REAL_COMPILE_CASE.spanElements,
+  );
   const wasmConformance = inspectObservedCppCuteBrowserPackageWasmConformance(
     executionRecord.packageInvocationLineage.observedWasmConformance,
   );
@@ -420,10 +459,11 @@ it("observes unchanged CuTe view-copy source in the exact package Worker", async
 
   const evidence = Object.freeze({
     schema: "browsergrad.compiler.cpp-cute.browser-real-compile-observation",
-    version: 1,
+    version: 2,
     outcome: "compiled",
     authority: "local-real-browser-worker-execution-observation-only",
     source: {
+      caseId: REAL_COMPILE_CASE.caseId,
       virtualPath: MAIN_PATH,
       sourceSha256: await sha256Hex(MAIN_BYTES),
       syntax: "unchanged-cpp17-cute",

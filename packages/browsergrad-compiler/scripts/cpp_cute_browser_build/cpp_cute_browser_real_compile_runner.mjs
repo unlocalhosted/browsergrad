@@ -20,6 +20,7 @@ const ANSI_COLOR_PATTERN = new RegExp(
   "gu",
 );
 const MAX_CAPTURED_OUTPUT_BYTES = 8 * 1024 * 1024;
+const REAL_COMPILE_CASE_IDS = new Set(["rank2", "rank3"]);
 const PACK_FILES = Object.freeze({
   "clang-resource": "clang-resource.headers.bgvfs",
   cuda: "cuda-12.6.3.headers.bgvfs",
@@ -95,8 +96,9 @@ export async function preflightCppCuteBrowserRealCompileInputs(input) {
   requirePackagePinnedHeaderPacks(assets, headerReproducibility);
   return Object.freeze({
     schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs",
-    version: 2,
+    version: 3,
     authority: "local-exact-byte-preflight-only",
+    caseId: values.caseId,
     wasmPath,
     packRoot,
     assets: Object.freeze(assets),
@@ -253,6 +255,7 @@ function parseArguments(argv) {
     if (name === "wasm") values.wasmPath = value;
     else if (name === "pack-root") values.packRoot = value;
     else if (name === "evidence-output") values.evidenceOutput = value;
+    else if (name === "case") values.caseId = value;
     else invalid("$.argv", `unsupported option --${name}`);
   }
   return exactInput(values);
@@ -270,6 +273,7 @@ function exactInput(value) {
     "preflightOnly",
     "requireCompiled",
     "allowUntrustedDiagnosticWasm",
+    "caseId",
   ]);
   for (const key of Reflect.ownKeys(descriptors)) {
     if (typeof key !== "string" || !allowed.has(key)) {
@@ -297,6 +301,10 @@ function exactInput(value) {
   if (typeof allowUntrustedDiagnosticWasm !== "boolean") {
     invalid("$.allowUntrustedDiagnosticWasm", "expected boolean");
   }
+  const caseId = descriptors.caseId?.value ?? "rank2";
+  if (typeof caseId !== "string" || !REAL_COMPILE_CASE_IDS.has(caseId)) {
+    invalid("$.caseId", "expected rank2 or rank3");
+  }
   return {
     wasmPath,
     packRoot,
@@ -304,6 +312,7 @@ function exactInput(value) {
     preflightOnly,
     requireCompiled,
     allowUntrustedDiagnosticWasm,
+    caseId,
   };
 }
 
@@ -406,8 +415,9 @@ function parseEvidence(output, preflight) {
       0,
     );
     if (evidence?.schema !== "browsergrad.compiler.cpp-cute.browser-real-compile-observation" ||
-        evidence?.version !== 1 ||
+        evidence?.version !== 2 ||
         (!workerExecuted && !blocked) ||
+        evidence?.source?.caseId !== preflight.caseId ||
         evidence?.workerExecutionObserved !== workerExecuted ||
         evidence?.authority !== (workerExecuted
           ? "local-real-browser-worker-execution-observation-only"

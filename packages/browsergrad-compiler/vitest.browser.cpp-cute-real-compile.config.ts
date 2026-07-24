@@ -14,8 +14,9 @@ interface ExternalAsset {
 
 interface ExternalInputs {
   readonly schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs";
-  readonly version: 2;
+  readonly version: 3;
   readonly authority: "local-exact-byte-preflight-only";
+  readonly caseId: "rank2" | "rank3";
   readonly assets: readonly ExternalAsset[];
   readonly wasmAuthority:
     | "package-pinned-two-clean-build-output"
@@ -41,6 +42,7 @@ const browserInputs = {
   schema: inputs.schema,
   version: inputs.version,
   authority: inputs.authority,
+  caseId: inputs.caseId,
   assets: inputs.assets.map(({ path: _path, ...asset }) => asset),
   wasmAuthority: inputs.wasmAuthority,
   pinnedReproducibleWasmMatched: inputs.pinnedReproducibleWasmMatched,
@@ -108,8 +110,9 @@ function parseInputs(value: string | undefined): ExternalInputs {
     parsed.untrustedDiagnosticWasm === true &&
     parsed.wasmAuthority === "untrusted-diagnostic-local-byte-observation-only";
   if (parsed.schema !== "browsergrad.compiler.cpp-cute.browser-real-compile-inputs" ||
-      parsed.version !== 2 ||
+      parsed.version !== 3 ||
       parsed.authority !== "local-exact-byte-preflight-only" ||
+      (parsed.caseId !== "rank2" && parsed.caseId !== "rank3") ||
       (!pinned && !diagnostic) ||
       !/^bg\.cpp\.browser-header-distribution-reproducibility\.sha256\.[0-9a-f]{64}$/u
         .test(parsed.headerDistributionReproducibilityId ?? "") ||
