@@ -29,9 +29,9 @@ import {
   type PreparedCppCuteBrowserAssetManifest,
 } from "../src/cpp_cute_browser_assets.js";
 import {
-  prepareObservedCppCuteBrowserLayoutCandidate,
-  unwrapObservedCppCuteBrowserLayoutCandidate,
-} from "../src/cpp_cute_browser_layout_candidate.js";
+  prepareObservedCppCuteBrowserViewCopyCandidate,
+  unwrapObservedCppCuteBrowserViewCopyCandidate,
+} from "../src/cpp_cute_browser_view_copy_candidate.js";
 import {
   cppCuteBrowserReproducibilityResourceBytes,
   verifyCppCuteBrowserReproducibilityResource,
@@ -129,14 +129,20 @@ declare const __BG_CPP_CUTE_REAL_COMPILE_ROUTE_PREFIX__: string;
 const BUILD_PROVENANCE_POLICY_BUILDER =
   "https://browsergrad.dev/local-observation/untrusted-builder";
 const EVIDENCE_MARKER = "BROWSERGRAD_CPP_CUTE_REAL_COMPILE_EVIDENCE=";
-const MAIN_PATH = "/workspace/src/real-layout.cu";
+const MAIN_PATH = "/workspace/src/real-view-copy.cu";
 const MAIN_SOURCE = [
-  "#include <cute/layout.hpp>",
-  "using namespace cute;",
-  "auto layout = make_layout(",
-  "  make_shape(Int<4>{}, Int<2>{}),",
-  "  make_stride(Int<1>{}, Int<4>{})",
-  ");",
+  "#include <cute/tensor.hpp>",
+  "using SourceLayout = cute::Layout<",
+  "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
+  "  cute::Stride<cute::Int<1>, cute::Int<3>>>;",
+  "using DestinationLayout = cute::Layout<",
+  "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
+  "  cute::Stride<cute::Int<2>, cute::Int<1>>>;",
+  "__device__ void copy_views(const float* source, float* destination) {",
+  "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
+  "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
+  "  cute::copy(source_tensor, destination_tensor);",
+  "}",
   "",
 ].join("\n");
 const MAIN_BYTES = new TextEncoder().encode(MAIN_SOURCE);
@@ -159,11 +165,11 @@ interface RealCompileEnvironment {
   readonly totalExternalByteLength: number;
 }
 
-it("observes unchanged CuTe layout source in the exact package Worker", async () => {
+it("observes unchanged CuTe view-copy source in the exact package Worker", async () => {
   const started = performance.now();
   const externalAssets = await fetchExternalAssets();
   const environment = await prepareRealCompileEnvironment(externalAssets);
-  const request = await prepareRealLayoutRequest(environment.profile);
+  const request = await prepareRealViewCopyRequest(environment.profile);
   const transferable = environment.transferredAssets.map((entry) => ({
     assetId: entry.assetId,
     bytes: new Uint8Array(entry.bytes),
@@ -263,7 +269,7 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
         virtualPath: MAIN_PATH,
         sourceSha256: await sha256Hex(MAIN_BYTES),
         syntax: "unchanged-cpp17-cute",
-        selectedDeclaration: "layout",
+        selectedDeclaration: "copy_views",
       },
       inputs: evidenceInputs,
       execution: {
@@ -324,7 +330,7 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
         virtualPath: MAIN_PATH,
         sourceSha256: await sha256Hex(MAIN_BYTES),
         syntax: "unchanged-cpp17-cute",
-        selectedDeclaration: "layout",
+        selectedDeclaration: "copy_views",
       },
       inputs: evidenceInputs,
       execution: {
@@ -370,29 +376,37 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
   }
   if (payload.outcome.selectedEntryIds.length !== 1 ||
       payload.outcome.selectedEntryIds[0] === undefined) {
-    throw new Error("real browser Clang-Wasm compile did not accept exactly one selected layout");
+    throw new Error(
+      "real browser Clang-Wasm compile did not accept exactly one selected view-copy",
+    );
   }
   const entryId = payload.outcome.selectedEntryIds[0];
-  const candidate = await prepareObservedCppCuteBrowserLayoutCandidate(
+  const candidate = await prepareObservedCppCuteBrowserViewCopyCandidate(
     execution,
     { entryId },
   );
-  const candidateRecord = unwrapObservedCppCuteBrowserLayoutCandidate(candidate);
+  const candidateRecord = unwrapObservedCppCuteBrowserViewCopyCandidate(candidate);
   expect(candidate).toMatchObject({
-    coordinateRank: 2,
     workerExecutionObserved: true,
     artifactOutcome: "accepted",
-    sharedLayoutSemanticsPrepared: true,
+    sharedViewCopySemanticsPrepared: true,
     producerTrusted: false,
     loweringAuthorityMinted: false,
     backendExecutionAuthorized: false,
     releaseReady: false,
   });
-  expect(candidateRecord.semantics.fact).toMatchObject({
+  expect(candidateRecord.semantics.sourceLayoutFact).toMatchObject({
     kind: "affine-layout",
     rank: 2,
     leafRank: 2,
   });
+  expect(candidateRecord.semantics.destinationLayoutFact).toMatchObject({
+    kind: "affine-layout",
+    rank: 2,
+    leafRank: 2,
+  });
+  expect(candidateRecord.semantics.sourceSpanElements).toBe(6n);
+  expect(candidateRecord.semantics.destinationSpanElements).toBe(6n);
   const wasmConformance = inspectObservedCppCuteBrowserPackageWasmConformance(
     executionRecord.packageInvocationLineage.observedWasmConformance,
   );
@@ -413,7 +427,7 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
       virtualPath: MAIN_PATH,
       sourceSha256: await sha256Hex(MAIN_BYTES),
       syntax: "unchanged-cpp17-cute",
-      selectedDeclaration: "layout",
+      selectedDeclaration: "copy_views",
     },
     inputs: evidenceInputs,
     execution: {
@@ -440,10 +454,18 @@ it("observes unchanged CuTe layout source in the exact package Worker", async ()
     semanticCandidate: {
       candidateId: candidate.candidateId,
       entryId: candidate.entryId,
-      layoutSemanticHash: candidate.layoutSemanticHash,
-      indexMapId: candidate.indexMapId,
-      coordinateRank: candidate.coordinateRank,
-      sharedLayoutSemanticsPrepared: true,
+      entrySubjectHash: candidate.entrySubjectHash,
+      sourceLayoutFactId: candidateRecord.semantics.sourceLayoutFact.factId,
+      destinationLayoutFactId:
+        candidateRecord.semantics.destinationLayoutFact.factId,
+      sourceCoordinateRank: candidateRecord.semantics.sourceLayoutFact.rank,
+      destinationCoordinateRank:
+        candidateRecord.semantics.destinationLayoutFact.rank,
+      sourceSpanElements:
+        candidateRecord.semantics.sourceSpanElements.toString(10),
+      destinationSpanElements:
+        candidateRecord.semantics.destinationSpanElements.toString(10),
+      sharedViewCopySemanticsPrepared: true,
     },
     headerDistributionLicenseApproved: false,
     producerTrusted: false,
@@ -756,24 +778,26 @@ async function prepareRealCompileEnvironment(
   });
 }
 
-async function prepareRealLayoutRequest(
+async function prepareRealViewCopyRequest(
   profile: PreparedCppCuteFrontendProfile,
 ): Promise<PreparedCppCuteFrontendRequest> {
   const source = await sourceFile();
-  const tokenBegin = MAIN_SOURCE.indexOf("layout =");
-  if (tokenBegin < 0) throw new Error("pinned real source lost its layout declaration");
+  const tokenBegin = MAIN_SOURCE.indexOf("copy_views");
+  if (tokenBegin < 0) {
+    throw new Error("pinned real source lost its view-copy declaration");
+  }
   const anchor = {
     virtualPath: MAIN_PATH,
     beginByte: encodeWireU64(BigInt(tokenBegin)),
-    endByte: encodeWireU64(BigInt(tokenBegin + "layout".length)),
+    endByte: encodeWireU64(BigInt(tokenBegin + "copy_views".length)),
     tokenSha256: await sha256Hex(
-      MAIN_BYTES.subarray(tokenBegin, tokenBegin + "layout".length),
+      MAIN_BYTES.subarray(tokenBegin, tokenBegin + "copy_views".length),
     ),
   };
   const entryBody = {
     requestId: `bg.cpp.entry-request.sha256.${"0".repeat(64)}`,
-    kind: "layout" as const,
-    declarationKind: "variable" as const,
+    kind: "view-copy" as const,
+    declarationKind: "function" as const,
     anchor,
   };
   const entryRequest: CppCuteFrontendEntryRequestV1 = {
