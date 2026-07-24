@@ -51,15 +51,19 @@ that candidate plus the independently admitted exact producer may converge
 into the existing canonical authorized frontend artifact. Candidate and
 authorization identities exclude allocation sizes and byte offsets; explicit
 storage remains a later lowering fact and is never inferred from CuTe
-`cosize`. Current view-copy browser tests use a synthetic authority fixture,
-and the producer tests use a synthetic key and policy, so no externally
-trusted production producer or real source-produced browser `view-copy`
-compile has been observed. The package-pinned two-clean-build Wasm has,
-however, now repeated the accepted layout-only compile in the real browser
-Worker. That strict observation remains execution-only: producer trust,
-header-license approval, lowering, backend execution, distribution, and
-release are false. Hostile view-copy graphs are checked with non-recursive,
-target-intrinsic cycle detection before any semantic authority can be minted.
+`cosize`. Current authorization tests use a synthetic producer authority, and
+the producer tests use a synthetic key and policy, so no externally trusted
+production producer has been admitted. Exact-source run `30062037424` built
+the current runtime-ABI 1.16 extractor at commit `6d5c8bca`; its untrusted
+diagnostic bytes then compiled unchanged C++17/CuTe source in the real browser
+Worker and emitted one accepted source-derived rank-2 `view-copy` Artifact V3
+candidate. This proves browser-local source compatibility and semantic
+preparation, but remains diagnostic execution evidence until the exact bytes
+are admitted through two-clean-build package reproducibility. Producer trust,
+header-license approval, lowering authority, backend execution, distribution,
+and release remain false. Hostile view-copy graphs are checked with
+non-recursive, target-intrinsic cycle detection before any semantic authority
+can be minted.
 The resulting exact
 producer-neutral authorized `view-copy` entry can lower genuine f32 ABI,
 tensor-engine, affine-layout, copy-effect, and explicit runtime-allocation
@@ -1107,24 +1111,32 @@ the shared rank-2 candidate is
 `bg.cpp.browser-worker-layout-candidate.sha256.72f3b5933de96569359767f19fdaaed3eaadadc56ca5c297238abcc149c0d34d`.
 The exact 2,886-byte observation is package-pinned at SHA-256
 `bf4d378a92eda260a120da15651deac8d42c7324de490ad1009224a3e7761496`.
-Runtime ABI 1.14 and the exact Worker bundle have since changed. The package
+Runtime ABI 1.16 and the exact Worker bundle have since changed. The package
 verifier therefore rejects that prior observation rather than treating it as
-current authority. Diagnostic build `30053246445` completed isolated
-compile/link in about 3 minutes 18 seconds and produced a 31,835,141-byte Wasm
-with SHA-256
-`7939cb244b1d02346dbd511c61b4bdaf4d58c9321dfd62dba20bf7c57558cc8f`;
-detached local review against ABI 1.14 reports zero mismatches. Two-clean-build
-reproducibility run `30054873849` then exposed a stale native
-`kRuntimeAbiManifestSha256` profile-admission binding before it could certify
-the run. That binding is now cross-checked by the fast source-closure gate and
-the current build lock is
-`bg.cpp.browser-build-input-lock.sha256.2ba2736bfd84e2243f6f019bbabc0c7b9ce486df714cef9b6b2ba9035ee48b22`.
-The complete local build-plan boundary passes 49 files/262 tests after the
-correction. A fresh build, two-clean reproducibility, detached package
-evidence, and strict Chromium execution remain required before the
-source-derived Tensor/view-copy result can become current browser authority.
-Externally trusted producer, header redistribution, lowering, backend
-execution, and release authorities remain separate and false.
+current authority. Successive exact first-cause diagnostics closed declaration
+identity and proved that the remaining rejection was the 8 MiB Artifact V3
+serialization/result ceiling rather than Clang, VFS, Wasm heap growth, or
+allocation. Runtime ABI 1.16 raises only that closed result ceiling to 32 MiB,
+retains the independent 8 MiB normalized-diagnostic cap, and accounts for an
+exact 564 MiB maximum Worker reservation. The fast gate passes 85 files/742
+tests and the required native boundary passes 49 files/263 tests with 9
+explicit platform skips. Exact-source run `30062037424` completed the cached
+isolated build in 4 minutes 23 seconds and produced a 31,839,835-byte Wasm with
+SHA-256
+`c5e40d131c4ab004a1b70fb7a0ba56c2f0379afd65da5add47ec4330e5bc6ae8`.
+That diagnostic module opened 1,168 headers from the five package-matched
+packs and compiled unchanged source SHA-256
+`4134804a9892ed1f0a2778fae305e957b5a981afccf2a096f1585f3b1d4e6f06`
+in 18.774 seconds. The real Worker accepted Artifact V3
+`bg.artifact.cpp-cute-frontend.sha256.9586262a68581d0c1bcddcc8eea50f5499a5fc3cfd2c5eee819cfc3788a745ee`
+and prepared source-derived candidate
+`bg.cpp.browser-worker-view-copy-candidate.sha256.a5c97510863338b8a2fe70f77caf5f1c1129450dbe7af736f3c19d7f598fe432`.
+The current build lock is
+`bg.cpp.browser-build-input-lock.sha256.3e6742cde1fd6fa984d70af6b6b818e901696e666d4490475cd65f00dd53ca9c`.
+Two-clean reproducibility run `30062294974` is the remaining package-promotion
+gate for these exact extractor bytes. Externally trusted producer, header
+redistribution approval, lowering authority, backend execution, and release
+authorities remain separate and false.
 Use the linked implementation ledger
 for exact chronology, failures, and evidence. This checkpoint is informational: the
 remainder of this document continues to define the normative target and does
