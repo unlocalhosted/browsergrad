@@ -718,7 +718,7 @@ export function validateObservation(observation: CaseObservation): void {
     || observation.kernelInvocationCount !== 1
     || observation.dispatchProfileCount !== 1
     || observation.actualPreparationMatchesManifest !== true
-    || observation.backendProfile !== "browsergrad.webgpu.view-copy.i32@1"
+    || observation.backendProfile !== "browsergrad.webgpu.view-copy.word32@2"
     || observation.backendVersion !== SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION
     || !Number.isSafeInteger(observation.permuteValueId)
     || observation.permuteValueId < 0

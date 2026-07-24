@@ -38,8 +38,9 @@ import {
   type IntegerRange,
 } from "./semantic_view_copy_wgsl.js";
 
-export const SEMANTIC_VIEW_COPY_WEBGPU_PROFILE = "browsergrad.webgpu.view-copy.i32@1";
-export const SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION = "1.2.0";
+export const SEMANTIC_VIEW_COPY_WEBGPU_PROFILE =
+  "browsergrad.webgpu.view-copy.word32@2";
+export const SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION = "2.0.0";
 const DEFAULT_WORKGROUP_SIZE = 64;
 const MAX_CONFIGURABLE_WORKGROUP_SIZE = 256;
 const DEFAULT_MAX_WGSL_BYTES = 64 * 1024;

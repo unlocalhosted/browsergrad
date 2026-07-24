@@ -30,7 +30,7 @@ interface LoweringContext {
   readonly path: string;
 }
 
-/** Lowers only the already verified and specialized initial i32 WGSL profile. */
+/** Lowers only an already verified and specialized exact 32-bit word profile. */
 export function emitSemanticViewCopyWgsl(
   layout: LayoutArtifactPayloadV1,
   prepared: PreparedViewCopySpecialization,
@@ -158,7 +158,10 @@ function lowerIndex(expression: IndexExpr, context: LoweringContext): LoweredInt
     case "mod":
     case "min":
     case "max":
-      return unsupported(context.path, `${expression.kind} is outside browsergrad.webgpu.view-copy.i32@1`);
+      return unsupported(
+        context.path,
+        `${expression.kind} is outside browsergrad.webgpu.view-copy.word32@2`,
+      );
   }
 }
 
@@ -191,7 +194,12 @@ function lowerWordAddress(
   viewByteOffset: bigint,
   path: string,
 ): LoweredInteger {
-  if (viewByteOffset % 4n !== 0n) unsupported(`${path}.viewByteOffset`, "f32 view byte offset must be word aligned");
+  if (viewByteOffset % 4n !== 0n) {
+    unsupported(
+      `${path}.viewByteOffset`,
+      "32-bit view byte offset must be word aligned",
+    );
+  }
   const byteScale = unit === "element" ? 4n : 1n;
   const scaledMinimum = location.minimum * byteScale;
   const scaledMaximum = location.maximum * byteScale;
