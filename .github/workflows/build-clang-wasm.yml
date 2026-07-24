@@ -304,7 +304,7 @@ jobs:
 
   reproducibility:
     name: Verify two clean extractor builds
-    needs: [build]
+    needs: [verification-boundary, build]
     if: ${{ inputs.mode == 'reproducibility' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30

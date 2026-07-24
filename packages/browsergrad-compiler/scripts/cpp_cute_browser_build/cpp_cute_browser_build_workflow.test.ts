@@ -90,8 +90,7 @@ describe("Clang-Wasm evidence workflow", () => {
     );
     expect(workflow).toContain("work/build-${BG_CLANG_BUILD_ORDINAL}");
     expect(workflow).toContain("inputs/build-${BG_CLANG_BUILD_ORDINAL}");
-    expect(workflow).toContain("needs: [build]");
-    expect(workflow).not.toContain("needs: [verification-boundary, build]");
+    expect(workflow).toContain("needs: [verification-boundary, build]");
     expect(workflow).toContain("if: ${{ inputs.mode == 'reproducibility' }}");
     expect(workflow).toContain("cpp_cute_browser_build_reproducibility.mjs");
     expect(workflow).toContain("clang-wasm-reproducibility.v3.json");
@@ -166,8 +165,9 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(buildJob).toContain("check:browser-clang-wasm-build-lock:run");
     expect(buildJob).not.toContain("test:browser-clang-wasm-build-plan:");
     expect(buildJob).not.toContain("needs: verification-boundary");
-    expect(reproducibilityJob).toContain("needs: [build]");
-    expect(reproducibilityJob).not.toContain("verification-boundary");
+    expect(reproducibilityJob).toContain(
+      "needs: [verification-boundary, build]",
+    );
   });
 
   it("does not queue fast feedback behind independent clean evidence modes", () => {
