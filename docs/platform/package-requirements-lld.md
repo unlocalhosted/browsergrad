@@ -45,8 +45,8 @@ The 90-minute build is no longer an engineering iteration loop:
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
   exact build lock, verifies both zero-import Worker bundles, verifies that the
   checked-in strict matrix matches its deterministic authoring projection, and
-  passes 87 files/751 tests. Its latest Vitest portion took 15.67 seconds.
-- The complete compiler unit suite passes 97 files/1,624 tests in 16.79
+  passes 89 files/754 tests. Its latest Vitest portion took 13.74 seconds.
+- The complete compiler unit suite passes 99 files/1,627 tests in 14.42
   seconds.
 - The required native boundary passes 50 files/267 tests with nine explicit
   platform skips in 67.62 seconds. It intentionally includes optimized, UBSan,
@@ -97,11 +97,14 @@ C++17/CuTe compilations: f32 ranks 1 through 4, positive strided-slice,
 read-only broadcast, i32 rank-2, and u32 broadcast. Every case installs the
 same five exact header packs, executes the current reproducible Wasm through
 the verifier and compiler Workers, emits one accepted Artifact V3, and prepares
-one distinct semantic view-copy candidate. The canonical 26,213-byte matrix
-has SHA-256
-`5d60c80c5aec6b2164b80769f800a6fda931efabf43859c7a22db06910f0768d`
-and binds source revision `6691bde4137efd6f0522e5f86f2863e46461549f`.
-Compilation took 23.869–26.319 seconds per isolated browser case. The matrix
+one distinct semantic view-copy candidate. The browser test now constructs its
+profile through the package-owned exact Clang 22.1.8, CUDA 12.6.3, CUTLASS
+3.7.0, libc++ 22.1.8, source-root, header-content, Worker, Wasm, and runtime-ABI
+contract; it no longer imports the synthetic test-profile fixture. The
+canonical 26,213-byte matrix has SHA-256
+`4d8b956050834e550405b15f1c7d52b16927ee3e8d4bc7b7da4035d430edc80a`
+and binds source revision `e9062c20f2a070774743e4d839c275c05df47225`.
+Compilation took 23.228–24.768 seconds per isolated browser case. The matrix
 deliberately retains producer trust, license approval, lowering authority,
 backend execution, and release readiness as false.
 

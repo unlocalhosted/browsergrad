@@ -166,9 +166,9 @@ not reasons to weaken the semantic or real-device gates.
 The 90-minute compiler feedback loop is closed. On current `main`,
 `verify:browser-clang-wasm:fast` builds the package, verifies the exact build
 lock, verifies both zero-import Worker bundles, verifies the deterministic
-strict-observation authoring projection, and passes 87 files/751 tests; the
-latest Vitest portion takes 15.67 seconds. The complete compiler unit suite
-passes 97 files/1,624 tests in 16.79 seconds. The intentionally broader native
+strict-observation authoring projection, and passes 89 files/754 tests; the
+latest Vitest portion takes 13.74 seconds. The complete compiler unit suite
+passes 99 files/1,627 tests in 14.42 seconds. The intentionally broader native
 boundary, including optimized, UBSan, and platform-gated ASan work, passes 50
 files/267 tests with nine explicit skips in 67.62 seconds. Cache-free LLVM/Clang
 reproducibility remains an evidence-production lane and runs as two concurrent
@@ -323,7 +323,7 @@ build to discover.
 | Build isolation | Strong and exercised | Both current clean builds ran networkless with a read-only root and declared inputs, private work mounts, zero capabilities, and no-new-privileges; source and build paths were distinct. | Keep diagnostic caches outside clean/reproducibility authority and preserve the sealed closure as the recipe evolves. |
 | Native and browser semantic coverage | Good for the declared word32 slice | Exact Clang 22 native behavioral/UBSan/ASan lanes coexist with eight real compiler-Worker C++/CuTe cases and 13 bit-exact CPU/WebGPU word32 cases. | Bind exact promoted candidates through the externally rooted producer transition and shared CPU/WebGPU seam; add new dtype/layout profiles only with matching proof. |
 | Evidence quality | Strong for narrow authorities; release incomplete | Bounded build records, exact ABI reviews, two-build reproducibility, separate Worker identities, strict source observations, artifacts, semantic candidates, and real-device evidence remain distinct. Trust, legal approval, lowering, backend authorization for the exact source payload, complete-output reproducibility, and release remain false. | Complete only the missing independent authorities; do not collapse build, verifier, compiler-Worker, legal, producer-trust, backend, or release evidence. |
-| Feedback speed | Strong engineering loop; intentionally expensive proof lane | The fast gate passes 87 files/751 tests with a 15.67-second Vitest portion; the complete compiler unit suite passes 97 files/1,624 tests in 16.79 seconds. Two cache-free clean builds take 40.5 and 45.9 minutes concurrently, while the strict eight-case browser matrix takes about four minutes. | Keep ordinary edits on focused/fast paths; run clean builds and the complete matrix only when output identities or producer semantics change. |
+| Feedback speed | Strong engineering loop; intentionally expensive proof lane | The fast gate passes 89 files/754 tests with a 13.74-second Vitest portion; the complete compiler unit suite passes 99 files/1,627 tests in 14.42 seconds. Two cache-free clean builds take 40.5 and 45.9 minutes concurrently, while the strict eight-case browser matrix takes about four minutes. | Keep ordinary edits on focused/fast paths; run clean builds and the complete matrix only when output identities or producer semantics change. |
 | Maintainability | Fair with controlled high-risk debt | Architecture checks report zero dependency cycles, legacy-backend leaks, semantic-IR leaks, or C++/CuTe frontend legacy leaks. Exact ratchets contain the 7,972-line WGSL lowerer, 7,178-line semantic IR, 6,999-line reference, 2,235-line build executor, 2,162-line native session, and 1,829-line artifact writer. | Extract existing semantic/effect and harness seams without creating parallel paths, and lower each ratchet as modules split. |
 | Delivery truthfulness | Strong | Package admission authenticates exact reproducibility, header, compiler-Worker, verifier-Worker, source, artifact, and candidate identities while explicitly retaining trust, legal, lowering, backend, and release flags as false. | Preserve the separated authority model through external signing, legal approval, exact-payload execution, and final release. |
 
