@@ -80,6 +80,8 @@
     "preflight:browser-cpp-cute-real-compile": "node scripts/cpp_cute_browser_build/cpp_cute_browser_real_compile_runner.mjs --preflight-only",
     "observe:browser-cpp-cute-real-compile": "node scripts/cpp_cute_browser_build/cpp_cute_browser_real_compile_runner.mjs",
     "verify:browser-cpp-cute-real-compile": "node scripts/cpp_cute_browser_build/cpp_cute_browser_real_compile_runner.mjs --require-compiled",
+    "observe:browser-cpp-cute-real-compile-matrix": "node scripts/cpp_cute_browser_build/cpp_cute_browser_real_compile_matrix.mjs",
+    "verify:browser-cpp-cute-real-compile-matrix": "node scripts/cpp_cute_browser_build/cpp_cute_browser_real_compile_matrix.mjs --require-compiled",
     "test:audit-corpus": "pnpm --dir ../.. --filter @unlocalhosted/browsergrad-kernels run build && pnpm run build && pnpm run test:audit-corpus:run",
     "test:audit-corpus:run": "node ../../scripts/test-cuda-lite-corpus-audit.mjs",
     "test:corpus-provisioning:run": "node ../../scripts/test-cuda-lite-corpus-provisioning.mjs",
