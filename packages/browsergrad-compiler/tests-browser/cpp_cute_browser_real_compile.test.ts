@@ -37,6 +37,9 @@ import {
   verifyCppCuteBrowserReproducibilityResource,
 } from "../src/cpp_cute_browser_reproducibility.js";
 import {
+  createCppCuteBrowserCompileProfileInput,
+} from "../src/cpp_cute_browser_compile_profile.js";
+import {
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
   cppCuteBrowserRuntimeAbiManifestResourceBytes,
@@ -100,9 +103,6 @@ import {
   executeCppCuteBrowserPackageWasmVerifier,
   inspectObservedCppCuteBrowserPackageWasmConformance,
 } from "../src/cpp_cute_browser_wasm_verifier_controller.js";
-import {
-  createCppCuteBrowserProfileInput,
-} from "../tests/compiler/support/cpp_cute_frontend_fixtures.js";
 
 interface ExternalAssetInput {
   readonly assetId: string;
@@ -110,6 +110,9 @@ interface ExternalAssetInput {
   readonly sha256: string;
   readonly byteLength: number;
 }
+
+type PackInspection =
+  Awaited<ReturnType<typeof inspectCppCuteBrowserVfsPack>>;
 
 interface BrowserExternalInputs {
   readonly schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs";
@@ -531,7 +534,7 @@ async function prepareRealCompileEnvironment(
       __BG_CPP_CUTE_REAL_COMPILE_INPUTS__.pinnedReproducibleWasmMatched) {
     throw new Error("external Clang-Wasm differs from package reproducibility evidence");
   }
-  const packInspections = new Map<string, Awaited<ReturnType<typeof inspectCppCuteBrowserVfsPack>>>();
+  const packInspections = new Map<string, PackInspection>();
   for (const includeRootId of PACK_ROOT_IDS) {
     const asset = requireExternalAsset(externalAssets, includeRootId);
     const inspection = await inspectCppCuteBrowserVfsPack(asset.bytes);
@@ -553,58 +556,47 @@ async function prepareRealCompileEnvironment(
       byteLength: workerBundle.byteLength,
     },
   });
-  const profileInput = structuredClone(createCppCuteBrowserProfileInput({
+  const sourceRootManifestSha256 = await hashCanonicalJson({
+    domain: "browsergrad.compiler.cpp-cute.real-compile-source-root.v1",
+    files: [{
+      virtualPath: MAIN_PATH,
+      sourceSha256: REAL_COMPILE_CASE.sourceSha256,
+      byteLength: String(MAIN_BYTES.byteLength),
+    }],
+  });
+  const provisionalAssetSetSha256 = await hashCanonicalJson({
+    domain:
+      "browsergrad.compiler.cpp-cute.real-compile-provisional-asset-set.v1",
+    buildProvenanceLockSha256,
+    sourceRootManifestSha256,
+  });
+  const profileInput = structuredClone(createCppCuteBrowserCompileProfileInput({
+    assetSetSha256: provisionalAssetSetSha256,
+    buildProvenanceLockSha256,
+    extractorWasmSha256: wasm.sha256,
+    runtimeAbiManifestSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
+    semanticAdapterManifestSha256:
+      CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256,
+    sourceRootManifestSha256,
     workerModuleSha256: workerBundle.sha256,
     workerModuleByteLength: workerBundle.byteLength,
-    runtimeAbiManifestSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
-    buildProvenanceLockSha256,
+    headerContentSets: {
+      clangResource: requirePackInspection(
+        packInspections,
+        "clang-resource",
+      ).contentSetSha256,
+      cuda: requirePackInspection(packInspections, "cuda").contentSetSha256,
+      cutlass:
+        requirePackInspection(packInspections, "cutlass").contentSetSha256,
+      cxxStdlib:
+        requirePackInspection(packInspections, "cxx-stdlib").contentSetSha256,
+      linuxSysroot:
+        requirePackInspection(
+          packInspections,
+          "linux-sysroot",
+        ).contentSetSha256,
+    },
   }));
-  (profileInput.toolchain.compiler as {
-    binarySha256: string;
-    resourceDirectorySha256: string;
-  }).binarySha256 = wasm.sha256;
-  (profileInput.deployment.extractor as {
-    binarySha256: string;
-    semanticAdapterManifestSha256: string;
-  }).binarySha256 = wasm.sha256;
-  (profileInput.deployment.extractor as {
-    binarySha256: string;
-    semanticAdapterManifestSha256: string;
-  }).semanticAdapterManifestSha256 =
-      CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256;
-  for (const root of profileInput.virtualFileSystem.includeRoots) {
-    if (root.owner.kind === "source") continue;
-    const inspection = packInspections.get(root.includeRootId);
-    if (inspection === undefined) {
-      throw new Error(`prepared profile has no exact ${root.includeRootId} pack`);
-    }
-    (root as { manifestSha256: string }).manifestSha256 =
-      inspection.contentSetSha256;
-    if (root.owner.kind === "compiler-resource-directory") {
-      (profileInput.toolchain.compiler as {
-        resourceDirectorySha256: string;
-      }).resourceDirectorySha256 = inspection.contentSetSha256;
-    } else {
-      const dependency = profileInput.toolchain.dependencies.find(
-        (entry) => entry.dependencyId === root.owner.dependencyId,
-      );
-      if (dependency === undefined) {
-        throw new Error(`prepared profile lost ${root.owner.dependencyId}`);
-      }
-      (dependency as { headerSetSha256: string }).headerSetSha256 =
-        inspection.contentSetSha256;
-      if (dependency.dependencyId === "cxx-stdlib") {
-        (dependency as {
-          version: string;
-          revision: string;
-        }).version = "22.1.8";
-        (dependency as {
-          version: string;
-          revision: string;
-        }).revision = "llvmorg-22.1.8";
-      }
-    }
-  }
 
   const provisional = await prepareCppCuteFrontendProfile(profileInput);
   const provisionalProfile = unwrapPreparedCppCuteBrowserFrontendProfile(provisional).profile;
@@ -893,6 +885,17 @@ function requireExternalAsset(
   const asset = assets.find((candidate) => candidate.assetId === assetId);
   if (asset === undefined) throw new Error(`missing preflight asset ${assetId}`);
   return asset;
+}
+
+function requirePackInspection(
+  inspections: ReadonlyMap<string, PackInspection>,
+  includeRootId: string,
+): PackInspection {
+  const inspection = inspections.get(includeRootId);
+  if (inspection === undefined) {
+    throw new Error(`missing ${includeRootId} pack inspection`);
+  }
+  return inspection;
 }
 
 function wire(value: number): WireU64 {
