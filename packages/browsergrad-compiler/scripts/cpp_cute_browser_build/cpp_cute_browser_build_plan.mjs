@@ -138,6 +138,8 @@ export const CPP_CUTE_BROWSER_EXTRACTOR_SOURCE_PATHS = Object.freeze([
   "BrowserGradCppCutePreprocessorPolicy.h",
   "BrowserGradCppCuteProducer.cpp",
   "BrowserGradCppCuteProducer.h",
+  "BrowserGradCppCuteProducerObservation.cpp",
+  "BrowserGradCppCuteProducerObservation.h",
   "BrowserGradCppCuteRuntime.cpp",
   "BrowserGradCppCuteRuntime.h",
   "BrowserGradCppCuteSha256.cpp",

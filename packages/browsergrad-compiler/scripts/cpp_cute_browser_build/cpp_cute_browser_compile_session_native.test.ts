@@ -316,6 +316,7 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
       join(extractorRoot, "BrowserGradCppCuteArtifactV3.cpp"),
       join(extractorRoot, "BrowserGradCppCuteArtifactJson.cpp"),
       join(extractorRoot, "BrowserGradCppCuteArtifactWriter.cpp"),
+      join(extractorRoot, "BrowserGradCppCuteProducerObservation.cpp"),
       join(extractorRoot, "BrowserGradCppCuteViewCopyArtifact.cpp"),
       join(extractorRoot, "BrowserGradCppCuteDiagnostics.cpp"),
       join(extractorRoot, "BrowserGradCppCuteInvocation.cpp"),

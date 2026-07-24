@@ -124,6 +124,8 @@ add_llvm_executable(browsergrad-cpp-cute-extractor
   BrowserGradCppCutePreprocessorPolicy.h
   BrowserGradCppCuteProducer.cpp
   BrowserGradCppCuteProducer.h
+  BrowserGradCppCuteProducerObservation.cpp
+  BrowserGradCppCuteProducerObservation.h
   BrowserGradCppCuteRuntime.cpp
   BrowserGradCppCuteRuntime.h
   BrowserGradCppCuteSha256.cpp

@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.3e6742cde1fd6fa984d70af6b6b818e901696e666d4490475cd65f00dd53ca9c",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.7665a086c8c4fec19241efb1f74ab1f04f6dc44847af81a08dea3bae3a81c494",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -253,7 +253,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
         },
       ],
       extractorSource: {
-        sourceSetSha256: "00eeade403122cbec5213429df2311d5968db4f55d0d861956e195dff51d422e",
+        sourceSetSha256: "28ef01749af71203417bd2cc375510d4245f2bf2f544ae74d53367f7dba0e4d1",
         hashDomain: "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1",
         files: [
           {
@@ -278,8 +278,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteArtifactWriter.cpp",
-            sha256: "f713f3bf15eb4c9848d31b9b83bb9c54779e62834c84c8ae8789a994ba821f0e",
-            byteLength: "84812",
+            sha256: "a526d68933637fabcb9214b66a39e9f1ea617c0fd08d64fdc3aed5dd9f281178",
+            byteLength: "78557",
           },
           {
             path: "BrowserGradCppCuteArtifactWriter.h",
@@ -422,6 +422,16 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
             byteLength: "5570",
           },
           {
+            path: "BrowserGradCppCuteProducerObservation.cpp",
+            sha256: "61b16793d3821728962239d50692663d0baad3adaaaf8c70a4c5eabda44ca8a9",
+            byteLength: "6857",
+          },
+          {
+            path: "BrowserGradCppCuteProducerObservation.h",
+            sha256: "4ade11ddab506fd711380ed7b6c05c6de4947c200848970622b727853a1a98e6",
+            byteLength: "794",
+          },
+          {
             path: "BrowserGradCppCuteRuntime.cpp",
             sha256: "703e321fc7e0776ae138aa0354edda3daa22fcb765b9a5df3b415407b19ef22a",
             byteLength: "31142",
@@ -463,8 +473,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "CMakeLists.txt",
-            sha256: "86489411f0dd1f09182cf8bcbf56edc20d8866e13c4bf64e5e1ccaffa9675839",
-            byteLength: "9085",
+            sha256: "cc5ba6d6c4fc8a3cf1a316ddffe9c6de63661eeb04e1df6c91b0c30a5d1f286f",
+            byteLength: "9171",
           },
         ],
       },

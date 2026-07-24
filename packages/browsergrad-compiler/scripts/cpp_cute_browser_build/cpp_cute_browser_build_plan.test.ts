@@ -190,6 +190,8 @@ describe("C++/CuTe opaque Clang-WASM build plan", () => {
       "BrowserGradCppCutePreprocessorPolicy.h",
       "BrowserGradCppCuteProducer.cpp",
       "BrowserGradCppCuteProducer.h",
+      "BrowserGradCppCuteProducerObservation.cpp",
+      "BrowserGradCppCuteProducerObservation.h",
       "BrowserGradCppCuteRuntime.cpp",
       "BrowserGradCppCuteRuntime.h",
       "BrowserGradCppCuteSha256.cpp",
