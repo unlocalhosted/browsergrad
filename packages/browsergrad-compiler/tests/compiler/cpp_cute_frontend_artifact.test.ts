@@ -147,6 +147,37 @@ describe("C++/CuTe frontend artifact", () => {
     expect(Object.isFrozen(record.envelope.payload)).toBe(true);
   });
 
+  it("binds source-scoped Clang USRs to their exact spelling file and offset", async () => {
+    const scoped = await cloneCppCuteArtifactInput();
+    const payload = scoped["payload"] as Record<string, unknown>;
+    const declaration = recordById(
+      payload,
+      "declarations",
+      "declarationId",
+      CPP_CUTE_FIXTURE_RECORD_DECLARATION_ID,
+    );
+    declaration["canonicalUsr"] = "c:layout.cu@0@N@cute@S@Layout>#I#I";
+    await rebindArtifactId(scoped);
+    await expect(verifyCppCuteFrontendArtifact(scoped)).resolves.toMatchObject({
+      outcome: "accepted",
+    });
+
+    const mismatched = await cloneCppCuteArtifactInput();
+    const mismatchedDeclaration = recordById(
+      mismatched["payload"] as Record<string, unknown>,
+      "declarations",
+      "declarationId",
+      CPP_CUTE_FIXTURE_RECORD_DECLARATION_ID,
+    );
+    mismatchedDeclaration["canonicalUsr"] =
+      "c:other.cu@0@N@cute@S@Layout>#I#I";
+    await rebindArtifactId(mismatched);
+    await expect(verifyCppCuteFrontendArtifact(mismatched)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-ARTIFACT-INVALID",
+      path: expect.stringMatching(/\.canonicalUsr$/u),
+    });
+  });
+
   it("verifies one function-owned typed view-copy graph with compatible strided layouts", async () => {
     const verified = await verifyCppCuteFrontendArtifact(await createCppCuteViewCopyArtifactInput());
     const payload = unwrapVerifiedCppCuteFrontendArtifact(verified).envelope.payload;

@@ -68,7 +68,7 @@ const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const STABLE_ID = /^bg\.cpp\.([a-z][a-z0-9-]*)\.sha256\.[0-9a-f]{64}$/u;
 const CAPABILITY_ID = /^[a-z][a-z0-9.-]*:[a-z][a-z0-9._-]*(?:@[1-9][0-9]*)?$/u;
 const DIAGNOSTIC_CODE = /^[a-z][a-z0-9.-]*:[A-Za-z0-9][A-Za-z0-9._-]*$/u;
-const CANONICAL_USR = /^c:@/u;
+const CANONICAL_USR = /^c:(?:@|[^@/\\\u0000\r\n]+@[0-9]+@)/u;
 const MACRO_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const DEPENDENCY_ID = /^[a-z][a-z0-9._-]*$/u;
 
@@ -752,7 +752,12 @@ function parseDeclaration(value: JsonValue, path: string): CppCuteDeclarationV3 
     "identitySpanId", "mangledName", "cudaAttributes",
   ], path);
   const canonicalUsr = boundedString(field(object, "canonicalUsr", path), `${path}.canonicalUsr`, 16_384);
-  if (!CANONICAL_USR.test(canonicalUsr)) invalid(`${path}.canonicalUsr`, "canonical USR must use the Clang c:@ namespace");
+  if (!CANONICAL_USR.test(canonicalUsr)) {
+    invalid(
+      `${path}.canonicalUsr`,
+      "canonical USR must use the Clang c: namespace with external or source-scoped identity",
+    );
+  }
   const kind = enumValue(field(object, "kind", path), [
     "namespace", "type-alias", "record", "enum", "field", "function", "parameter", "variable", "template",
     "template-parameter",

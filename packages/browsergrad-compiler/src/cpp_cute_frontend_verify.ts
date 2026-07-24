@@ -29,6 +29,8 @@ import type {
 
 const MAX_MACRO_DEPTH = 128;
 const MAX_TEMPLATE_DEPTH = 128;
+const SOURCE_SCOPED_CLANG_USR =
+  /^c:([^@/\\\u0000\r\n]+)@([0-9]+)@/u;
 
 export interface VerifiedCppCuteInputHashes {
   readonly sourceSetSha256: string;
@@ -327,6 +329,25 @@ function verifyDeclarations(payload: CppCuteFrontendPayloadV3, indexes: Artifact
       }
       const identitySpan = ref(indexes.spans, declaration.identitySpanId, `${path}.identitySpanId`, "span");
       const declarationSpan = ref(indexes.spans, declaration.origin.spanId, `${path}.origin.spanId`, "span");
+      if (!declaration.canonicalUsr.startsWith("c:@")) {
+        const scoped = SOURCE_SCOPED_CLANG_USR.exec(declaration.canonicalUsr);
+        const sourceFile = ref(
+          indexes.files,
+          declarationSpan.spelling.fileId,
+          `${path}.origin.spanId`,
+          "file",
+        );
+        const separator = sourceFile.virtualPath.lastIndexOf("/");
+        const basename = sourceFile.virtualPath.slice(separator + 1);
+        if (scoped?.[1] !== basename ||
+            BigInt(scoped[2] ?? "-1") !==
+              wireIntegerToBigInt(declarationSpan.spelling.startByte)) {
+          invalid(
+            `${path}.canonicalUsr`,
+            "source-scoped Clang USR must bind the declaration spelling file and start byte",
+          );
+        }
+      }
       if (wireIntegerToBigInt(identitySpan.spelling.startByte) === wireIntegerToBigInt(identitySpan.spelling.endByte) ||
           wireIntegerToBigInt(identitySpan.expansion.startByte) === wireIntegerToBigInt(identitySpan.expansion.endByte)) {
         invalid(`${path}.identitySpanId`, "declaration identity span must be nonempty");
@@ -335,8 +356,13 @@ function verifyDeclarations(payload: CppCuteFrontendPayloadV3, indexes: Artifact
           !sourceRangeContains(declarationSpan.expansion, identitySpan.expansion)) {
         invalid(`${path}.identitySpanId`, "declaration identity span must stay within declaration origin");
       }
-    } else if (declaration.identitySpanId !== null) {
-      invalid(`${path}.identitySpanId`, "implicit declaration cannot claim a source identity span");
+    } else {
+      if (!declaration.canonicalUsr.startsWith("c:@")) {
+        invalid(`${path}.canonicalUsr`, "implicit declaration requires an external Clang USR");
+      }
+      if (declaration.identitySpanId !== null) {
+        invalid(`${path}.identitySpanId`, "implicit declaration cannot claim a source identity span");
+      }
     }
     if (declaration.lexicalParentId !== null) ref(indexes.declarations, declaration.lexicalParentId, `${path}.lexicalParentId`, "declaration");
     if (declaration.semanticParentId !== null) ref(indexes.declarations, declaration.semanticParentId, `${path}.semanticParentId`, "declaration");

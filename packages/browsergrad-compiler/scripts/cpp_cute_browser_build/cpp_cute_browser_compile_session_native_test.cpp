@@ -267,10 +267,16 @@ ProducerReviewResult run_cpp_cute_producer_review(
       pass.view_copy.source_tensor_ordinal = 0U;
       pass.view_copy.destination_tensor_ordinal = 1U;
       pass.view_copy.parameters = {
-          {true, true, true, 0U, "c:@F@copy_views#*1f#*f#@source", "source",
+          {true, true, true, 0U,
+           std::string("c:main.cu@") + std::to_string(source_parameter[0U]) +
+               "@F@copy_views#*1f#*f#@source",
+           "source",
            "const float *", source_parameter[0U], source_parameter[1U],
            source_parameter_identity[0U], source_parameter_identity[1U]},
-          {true, true, false, 1U, "c:@F@copy_views#*1f#*f#@destination",
+          {true, true, false, 1U,
+           std::string("c:main.cu@") +
+               std::to_string(destination_parameter[0U]) +
+               "@F@copy_views#*1f#*f#@destination",
            "destination", "float *", destination_parameter[0U],
            destination_parameter[1U], destination_parameter_identity[0U],
            destination_parameter_identity[1U]},
@@ -281,7 +287,8 @@ ProducerReviewResult run_cpp_cute_producer_review(
            true,
            true,
            0U,
-           "c:@F@copy_views#*1f#*f#@source_tensor",
+           std::string("c:main.cu@") + std::to_string(source_tensor[0U]) +
+               "@F@copy_views#*1f#*f#@source_tensor",
            "source_tensor",
            "cute::Tensor<const float *, SourceLayout>",
            std::string(kCuteTensorHeaderPath),
@@ -306,7 +313,9 @@ ProducerReviewResult run_cpp_cute_producer_review(
            true,
            false,
            1U,
-           "c:@F@copy_views#*1f#*f#@destination_tensor",
+           std::string("c:main.cu@") +
+               std::to_string(destination_tensor[0U]) +
+               "@F@copy_views#*1f#*f#@destination_tensor",
            "destination_tensor",
            "cute::Tensor<float *, DestinationLayout>",
            std::string(kCuteTensorHeaderPath),

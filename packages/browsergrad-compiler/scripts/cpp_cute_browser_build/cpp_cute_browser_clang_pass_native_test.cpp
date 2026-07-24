@@ -248,11 +248,15 @@ int main() {
     BG_CHECK(trace.canonical_name == "copy_views");
     BG_CHECK(!trace.canonical_usr.empty());
     BG_CHECK(trace.parameters.size() == 2U);
+    BG_CHECK(trace.parameters[0].canonical_usr.starts_with("c:main.cu@"));
+    BG_CHECK(!trace.parameters[0].canonical_usr.starts_with("c:@"));
     BG_CHECK(trace.parameters[0].ordinal == 0U);
     BG_CHECK(trace.parameters[0].resolved_pointer);
     BG_CHECK(trace.parameters[0].resolved_float_pointee);
     BG_CHECK(trace.parameters[0].pointee_const);
     BG_CHECK(trace.parameters[1].ordinal == 1U);
+    BG_CHECK(trace.parameters[1].canonical_usr.starts_with("c:main.cu@"));
+    BG_CHECK(!trace.parameters[1].canonical_usr.starts_with("c:@"));
     BG_CHECK(trace.parameters[1].resolved_pointer);
     BG_CHECK(trace.parameters[1].resolved_float_pointee);
     BG_CHECK(!trace.parameters[1].pointee_const);
@@ -264,6 +268,8 @@ int main() {
     BG_CHECK(trace.copy_callee_path ==
              "/toolchain/cutlass/include/cute/tensor.hpp");
     for (const ViewCopyTensorTrace& tensor : trace.tensors) {
+      BG_CHECK(tensor.canonical_usr.starts_with("c:main.cu@"));
+      BG_CHECK(!tensor.canonical_usr.starts_with("c:@"));
       BG_CHECK(tensor.resolved_tensor_type);
       BG_CHECK(tensor.resolved_static_affine_layout);
       BG_CHECK(tensor.initializer_parameter_bound);

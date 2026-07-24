@@ -43,6 +43,33 @@ bool cute_header_path(const std::string_view path) noexcept {
          bounded_text(path, 4096U);
 }
 
+bool source_scoped_clang_usr(const std::string_view usr,
+                             const std::string_view virtual_path,
+                             const std::uint64_t declaration_begin) noexcept {
+  const std::size_t separator = virtual_path.find_last_of('/');
+  const std::string_view basename =
+      separator == std::string_view::npos
+          ? virtual_path
+          : virtual_path.substr(separator + 1U);
+  if (basename.empty() || basename.find('@') != std::string_view::npos ||
+      basename.find('\\') != std::string_view::npos) {
+    return false;
+  }
+  std::array<char, 32U> offset{};
+  const auto converted = std::to_chars(
+      offset.data(), offset.data() + offset.size(), declaration_begin);
+  if (converted.ec != std::errc{}) return false;
+  const std::string_view decimal(offset.data(), converted.ptr);
+  if (!usr.starts_with("c:") ||
+      usr.size() <= 2U + basename.size() + 1U + decimal.size() + 1U) {
+    return false;
+  }
+  return usr.substr(2U).starts_with(basename) &&
+         usr[2U + basename.size()] == '@' &&
+         usr.substr(3U + basename.size()).starts_with(decimal) &&
+         usr[3U + basename.size() + decimal.size()] == '@';
+}
+
 std::string decimal_u64(const std::uint64_t value) {
   std::array<char, 32U> output{};
   const auto converted =
@@ -233,7 +260,9 @@ void validate_observation(const ProducerViewCopyObservation& observation,
         parameter.ordinal != index ||
         !bounded_text(parameter.canonical_usr,
                       kMaximumArtifactStringByteLength) ||
-        !std::string_view(parameter.canonical_usr).starts_with("c:@") ||
+        !source_scoped_clang_usr(parameter.canonical_usr,
+                                 input.main_virtual_path,
+                                 parameter.declaration_begin_byte) ||
         !bounded_text(parameter.canonical_name,
                       kMaximumArtifactStringByteLength) ||
         !bounded_text(parameter.canonical_type,
@@ -259,7 +288,9 @@ void validate_observation(const ProducerViewCopyObservation& observation,
         tensor.engine_pointee_const !=
             (tensor.engine_parameter_ordinal == 0U) ||
         !bounded_text(tensor.canonical_usr, kMaximumArtifactStringByteLength) ||
-        !std::string_view(tensor.canonical_usr).starts_with("c:@") ||
+        !source_scoped_clang_usr(tensor.canonical_usr,
+                                 input.main_virtual_path,
+                                 tensor.declaration_begin_byte) ||
         !bounded_text(tensor.canonical_name,
                       kMaximumArtifactStringByteLength) ||
         tensor.canonical_name.size() > kMaximumArtifactStringByteLength -
