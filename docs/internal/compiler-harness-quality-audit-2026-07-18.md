@@ -160,6 +160,36 @@ under its cooperative same-UID threat model. Browser/WebGPU remains the
 dominant verifier cost even after sharding. These are current quality findings,
 not reasons to weaken the semantic or real-device gates.
 
+## 2026-07-24 producer and feedback follow-up
+
+The 90-minute compiler feedback loop is closed. On current `main`,
+`verify:browser-clang-wasm:fast` builds the package, verifies the exact build
+lock, verifies both zero-import Worker bundles, and passes 86 files/748 tests;
+the Vitest portion takes 13.47 seconds. The complete compiler unit suite passes
+97 files/1,623 tests in 15.96 seconds. The intentionally broader native
+boundary, including optimized, UBSan, and platform-gated ASan work, passes 50
+files/267 tests with nine explicit skips in 67.62 seconds. Cache-free LLVM/Clang
+reproducibility remains an evidence-production lane and runs as two concurrent
+isolated jobs; it is not an edit loop.
+
+The browser-local producer is also no longer a parser-only claim. Package-pinned
+evidence already covers unchanged C++17/CuTe rank-2/rank-3, strided-slice, and
+broadcast source compiling inside the real compiler Worker. The current
+extractor source additionally emits exact f32/i32/u32 32-bit ABI facts and the
+shared view-copy lowerer executes ranks 1 through 4 through the same canonical
+semantic-core and kernels seams. Required headed Chromium on Apple Metal 3
+passes a 13-case bit-exact CPU/WebGPU matrix under
+`browsergrad.webgpu.view-copy.word32@2`.
+
+This does not erase the remaining production boundaries. The current extractor
+change still requires exact two-clean-build package admission and a strict
+eight-case real-browser source matrix. Externally rooted producer signing,
+file-level redistribution approval, full distributed-output reproducibility,
+and final release authority remain separate and false. The large compiler
+modules and native producer files also remain maintainability debt even though
+their line ratchets, dependency-cycle checks, and single-path architecture
+prevent further ungoverned growth.
+
 ## Why feedback was slow
 
 The locked recipe originally performed a clean LLVM/Clang 22.1.8 build with
