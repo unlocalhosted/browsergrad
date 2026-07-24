@@ -4,9 +4,16 @@ import {
   persistCppCuteBrowserRealCompileEvidence,
   runCppCuteBrowserRealCompile,
 } from "./cpp_cute_browser_real_compile_runner.mjs";
+import {
+  CPP_CUTE_BROWSER_WASM_VERIFIER_BUNDLE_V1_SHA256,
+} from "../../dist/resources/cpp_cute_browser_wasm_verifier_bundle_v1.js";
+import {
+  CPP_CUTE_BROWSER_WORKER_BUNDLE_V1_SHA256,
+} from "../../dist/resources/cpp_cute_browser_worker_bundle_v1.js";
 
 const ERROR_CODE =
   "BG-COMPILER-CPP-CUTE-BROWSER-REAL-COMPILE-MATRIX";
+const SOURCE_REVISION = /^[0-9a-f]{40}$/u;
 const CASE_PROFILES = Object.freeze([
   Object.freeze({ caseId: "rank2", rank: 2, dtype: "f32" }),
   Object.freeze({ caseId: "rank3", rank: 3, dtype: "f32" }),
@@ -50,12 +57,16 @@ export function parseCppCuteBrowserRealCompileMatrixArguments(argv) {
     }
     const name = argument.slice(2, separator);
     if (name !== "wasm" && name !== "pack-root" &&
-        name !== "evidence-output") {
+        name !== "evidence-output" && name !== "source-revision") {
       invalid(`$.argv[${index}]`, `unsupported option --${name}`);
     }
     if (values.has(name)) invalid(`$.argv[${index}]`, `duplicate --${name}`);
     const value = argument.slice(separator + 1);
-    if (!isAbsolute(value)) {
+    if (name === "source-revision") {
+      if (!SOURCE_REVISION.test(value)) {
+        invalid(`$.argv[${index}]`, "--source-revision requires one lowercase 40-hex revision");
+      }
+    } else if (!isAbsolute(value)) {
       invalid(`$.argv[${index}]`, `--${name} requires one absolute path`);
     }
     values.set(name, value);
@@ -63,10 +74,15 @@ export function parseCppCuteBrowserRealCompileMatrixArguments(argv) {
   const wasmPath = values.get("wasm");
   const packRoot = values.get("pack-root");
   const evidenceOutput = values.get("evidence-output");
+  const sourceRevision = values.get("source-revision");
   if (typeof wasmPath !== "string" ||
       typeof packRoot !== "string" ||
-      typeof evidenceOutput !== "string") {
-    invalid("$.argv", "wasm, pack-root, and evidence-output are required");
+      typeof evidenceOutput !== "string" ||
+      typeof sourceRevision !== "string") {
+    invalid(
+      "$.argv",
+      "wasm, pack-root, evidence-output, and source-revision are required",
+    );
   }
   const requireCompiled = values.get("--require-compiled") === true;
   const allowUntrustedDiagnosticWasm =
@@ -81,12 +97,23 @@ export function parseCppCuteBrowserRealCompileMatrixArguments(argv) {
     wasmPath,
     packRoot,
     evidenceOutput,
+    sourceRevision,
     requireCompiled,
     allowUntrustedDiagnosticWasm,
   });
 }
 
-export function prepareCppCuteBrowserRealCompileMatrix(observations) {
+export function prepareCppCuteBrowserRealCompileMatrix(
+  observations,
+  sourceRevision,
+) {
+  if (typeof sourceRevision !== "string" ||
+      !SOURCE_REVISION.test(sourceRevision)) {
+    invalid(
+      "$.sourceRevision",
+      "matrix source revision must be one lowercase 40-hex revision",
+    );
+  }
   if (!Array.isArray(observations) ||
       observations.length !== CASE_PROFILES.length) {
     invalid(
@@ -156,10 +183,18 @@ export function prepareCppCuteBrowserRealCompileMatrix(observations) {
   return Object.freeze({
     schema:
       "browsergrad.compiler.cpp-cute.browser-real-compile-matrix-observation",
-    version: 1,
+    version: 2,
     authority: "local-real-browser-worker-matrix-observation-only",
     caseCount: CASE_PROFILES.length,
     cases: Object.freeze(cases),
+    packageBinding: Object.freeze({
+      compilerWorkerSha256:
+        CPP_CUTE_BROWSER_WORKER_BUNDLE_V1_SHA256,
+      matrixSourceRevision: sourceRevision,
+      verifierWorkerSha256:
+        CPP_CUTE_BROWSER_WASM_VERIFIER_BUNDLE_V1_SHA256,
+      workerBundleAuthority: "package-owned-zero-import-module-bytes",
+    }),
     claims: Object.freeze({
       unchangedCpp17CuteRank2Compiled: true,
       unchangedCpp17CuteRank3Compiled: true,
@@ -202,7 +237,10 @@ export async function runCppCuteBrowserRealCompileMatrix(
     ];
     observations.push(await runCppCuteBrowserRealCompile(caseArguments));
   }
-  const matrix = prepareCppCuteBrowserRealCompileMatrix(observations);
+  const matrix = prepareCppCuteBrowserRealCompileMatrix(
+    observations,
+    options.sourceRevision,
+  );
   const written = await persistCppCuteBrowserRealCompileEvidence(
     options.evidenceOutput,
     matrix,

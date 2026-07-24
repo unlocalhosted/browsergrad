@@ -82,12 +82,20 @@ describe("real browser C++/CuTe compile matrix", () => {
       observation("broadcast"),
       observation("i32-rank2"),
       observation("u32-broadcast"),
-    ]);
+    ], "a".repeat(40));
     expect(matrix).toMatchObject({
       schema:
         "browsergrad.compiler.cpp-cute.browser-real-compile-matrix-observation",
-      version: 1,
+      version: 2,
       caseCount: 8,
+      packageBinding: {
+        compilerWorkerSha256:
+          "3d1692b959f5ce1b61cd9a1810641f7a7aabad08e56b992c9297368c875ef3b1",
+        matrixSourceRevision: "a".repeat(40),
+        verifierWorkerSha256:
+          "06ffb66e4e808e9df030cc3fe2981fa3adddf13d03780680abb091cbcbd4b9eb",
+        workerBundleAuthority: "package-owned-zero-import-module-bytes",
+      },
       claims: {
         unchangedCpp17CuteRank2Compiled: true,
         unchangedCpp17CuteRank3Compiled: true,
@@ -109,7 +117,7 @@ describe("real browser C++/CuTe compile matrix", () => {
   it("rejects missing, reordered, reused, and mixed-authority cases", () => {
     expect(() => prepareCppCuteBrowserRealCompileMatrix([
       observation("rank2"),
-    ])).toThrow();
+    ], "a".repeat(40))).toThrow();
     expect(() => prepareCppCuteBrowserRealCompileMatrix([
       observation("rank3"),
       observation("rank2"),
@@ -119,7 +127,7 @@ describe("real browser C++/CuTe compile matrix", () => {
       observation("broadcast"),
       observation("i32-rank2"),
       observation("u32-broadcast"),
-    ])).toThrow();
+    ], "a".repeat(40))).toThrow();
     expect(() => prepareCppCuteBrowserRealCompileMatrix([
       observation("rank2"),
       {
@@ -132,7 +140,7 @@ describe("real browser C++/CuTe compile matrix", () => {
       observation("broadcast"),
       observation("i32-rank2"),
       observation("u32-broadcast"),
-    ])).toThrow();
+    ], "a".repeat(40))).toThrow();
     expect(() => prepareCppCuteBrowserRealCompileMatrix([
       observation("rank2"),
       observation("rank3", true),
@@ -142,7 +150,17 @@ describe("real browser C++/CuTe compile matrix", () => {
       observation("broadcast"),
       observation("i32-rank2"),
       observation("u32-broadcast"),
-    ])).toThrow();
+    ], "a".repeat(40))).toThrow();
+    expect(() => prepareCppCuteBrowserRealCompileMatrix([
+      observation("rank2"),
+      observation("rank3"),
+      observation("rank1"),
+      observation("rank4"),
+      observation("strided-slice"),
+      observation("broadcast"),
+      observation("i32-rank2"),
+      observation("u32-broadcast"),
+    ], "A".repeat(40))).toThrow();
   });
 
   it("admits only explicit absolute matrix paths and one authority mode", () => {
@@ -150,11 +168,13 @@ describe("real browser C++/CuTe compile matrix", () => {
       "--wasm=/work/clang.wasm",
       "--pack-root=/work/packs",
       "--evidence-output=/work/matrix.json",
+      `--source-revision=${"a".repeat(40)}`,
       "--require-compiled",
     ])).toEqual({
       wasmPath: "/work/clang.wasm",
       packRoot: "/work/packs",
       evidenceOutput: "/work/matrix.json",
+      sourceRevision: "a".repeat(40),
       requireCompiled: true,
       allowUntrustedDiagnosticWasm: false,
     });
@@ -162,11 +182,13 @@ describe("real browser C++/CuTe compile matrix", () => {
       "--wasm=relative.wasm",
       "--pack-root=/work/packs",
       "--evidence-output=/work/matrix.json",
+      `--source-revision=${"a".repeat(40)}`,
     ])).toThrow();
     expect(() => parseCppCuteBrowserRealCompileMatrixArguments([
       "--wasm=/work/clang.wasm",
       "--pack-root=/work/packs",
       "--evidence-output=/work/matrix.json",
+      `--source-revision=${"a".repeat(40)}`,
       "--require-compiled",
       "--allow-untrusted-diagnostic-wasm",
     ])).toThrow();

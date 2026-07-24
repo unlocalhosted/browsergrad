@@ -2,6 +2,7 @@ export interface CppCuteBrowserRealCompileMatrixOptions {
   readonly wasmPath: string;
   readonly packRoot: string;
   readonly evidenceOutput: string;
+  readonly sourceRevision: string;
   readonly requireCompiled: boolean;
   readonly allowUntrustedDiagnosticWasm: boolean;
 }
@@ -17,6 +18,7 @@ export function parseCppCuteBrowserRealCompileMatrixArguments(
 
 export function prepareCppCuteBrowserRealCompileMatrix(
   observations: readonly unknown[],
+  sourceRevision: string,
 ): Readonly<Record<string, unknown>>;
 
 export function runCppCuteBrowserRealCompileMatrix(
