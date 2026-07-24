@@ -8,7 +8,7 @@ import type { DecodeLimits } from "../schema/limits.js";
 import { kernelArtifactPayload, type VerifiedKernelArtifact } from "./artifact.js";
 import type { ViewCopyOperation } from "./model.js";
 import {
-  verifyInitialPortableViewCopyProfile,
+  verifyPortableViewCopyProfile,
   type PortableViewCopyProfile,
 } from "./profile.js";
 
@@ -52,7 +52,7 @@ export interface PreparedViewCopySpecialization {
 }
 
 /**
- * Backend-neutral specialization proof for the initial portable view-copy.
+ * Backend-neutral specialization proof for portable view-copy profiles.
  * It resolves bindings once, verifies every guarded access, proves a dense
  * destination, and optionally caches source byte offsets for interpreters.
  */
@@ -79,7 +79,7 @@ export async function prepareViewCopySpecialization(
   const source = prepareViewAccessor(layoutArtifact, { viewId: operation.source.viewId, ...accessorRequest });
   const destination = prepareViewAccessor(layoutArtifact, { viewId: operation.destination.viewId, ...accessorRequest });
   ensurePreparedContract(operation, source, destination);
-  const portableProfile = verifyInitialPortableViewCopyProfile(layoutArtifact, operation, source, destination);
+  const portableProfile = verifyPortableViewCopyProfile(layoutArtifact, operation, source, destination);
 
   const maxElements = resolveMaxElements(request.maxElements);
   const elementCount = checkedElementCount(destination.logicalShape, maxElements);

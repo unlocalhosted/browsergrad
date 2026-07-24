@@ -216,6 +216,7 @@ try {
     "createVerifiedViewCopyArtifacts",
     "verifyKernelArtifact",
     "verifyInitialPortableViewCopyProfile",
+    "verifyPortableViewCopyProfile",
     "prepareViewCopyCpu",
     "prepareAttentionForwardCpu",
     "prepareAttentionForwardSpecialization",

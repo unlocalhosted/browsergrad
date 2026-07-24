@@ -4,7 +4,9 @@ import type { IndexExpr, PredicateExpr } from "../layout/model.js";
 import { KERNEL_DIAGNOSTIC_CODES, SemanticSchemaError } from "../schema/diagnostics.js";
 import type { ViewCopyOperation } from "./model.js";
 
-export const INITIAL_PORTABLE_VIEW_COPY_PROFILE = "browsergrad.view-copy.positive-affine-f32@1";
+export const PORTABLE_F32_VIEW_COPY_PROFILE = "browsergrad.view-copy.positive-affine-f32@1";
+/** @deprecated Use PORTABLE_F32_VIEW_COPY_PROFILE. */
+export const INITIAL_PORTABLE_VIEW_COPY_PROFILE = PORTABLE_F32_VIEW_COPY_PROFILE;
 export const PORTABLE_WORD32_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.positive-affine-word32@1";
 export const PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE =
@@ -14,7 +16,7 @@ export type PortableViewCopyDType = "f32" | "i32" | "u32";
 
 export interface PortableViewCopyProfile {
   readonly profileId:
-    | typeof INITIAL_PORTABLE_VIEW_COPY_PROFILE
+    | typeof PORTABLE_F32_VIEW_COPY_PROFILE
     | typeof PORTABLE_WORD32_VIEW_COPY_PROFILE
     | typeof PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE;
   readonly rank: 1 | 2 | 3 | 4;
@@ -25,7 +27,7 @@ export interface PortableViewCopyProfile {
  * Shared frontend/backend legalization floor. Backends add their own integer,
  * buffer, device-limit, and schedule proofs without redefining view meaning.
  */
-export function verifyInitialPortableViewCopyProfile(
+export function verifyPortableViewCopyProfile(
   layoutArtifact: VerifiedLayoutArtifact,
   operation: ViewCopyOperation,
   source: PreparedViewAccessor,
@@ -55,7 +57,7 @@ export function verifyInitialPortableViewCopyProfile(
     );
   }
   if (source.memorySpace.kind !== "global" || destination.memorySpace.kind !== "global") {
-    unsupported("$.operation", "initial portable view-copy profile requires global-memory allocations");
+    unsupported("$.operation", "portable view-copy requires global-memory allocations");
   }
   if (!source.fullySpecialized || !destination.fullySpecialized) {
     unsupported("$.bindings", "portable view-copy specialization requires bindings for every index-map dimension reference");
@@ -74,12 +76,15 @@ export function verifyInitialPortableViewCopyProfile(
     profileId: rank === 1 || rank === 4
       ? PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE
       : operation.dtype === "f32"
-        ? INITIAL_PORTABLE_VIEW_COPY_PROFILE
+        ? PORTABLE_F32_VIEW_COPY_PROFILE
         : PORTABLE_WORD32_VIEW_COPY_PROFILE,
     rank: rank as 1 | 2 | 3 | 4,
     dtype: operation.dtype,
   });
 }
+
+/** @deprecated Use verifyPortableViewCopyProfile. */
+export const verifyInitialPortableViewCopyProfile = verifyPortableViewCopyProfile;
 
 interface AffineProfile {
   readonly coordinateDependent: boolean;
