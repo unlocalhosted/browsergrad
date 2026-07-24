@@ -19,10 +19,12 @@ import {
 } from "./support/cpp_cute_frontend_fixtures.js";
 import {
   mutateCppCutePayloadToBroadcastViewCopy,
+  mutateCppCutePayloadToI32ViewCopy,
   mutateCppCutePayloadToViewCopy,
   mutateCppCutePayloadToRank3ViewCopy,
   mutateCppCutePayloadToRank4ViewCopy,
   mutateCppCutePayloadToStridedSliceViewCopy,
+  mutateCppCutePayloadToU32ViewCopy,
 } from "./support/cpp_cute_frontend_view_copy_fixtures.js";
 import {
   createAuthorizedCppCuteProvenanceFixture,
@@ -229,6 +231,54 @@ describe("authorized C++/CuTe view-copy lowering", () => {
         convergence.expected.destinationWords,
       );
       expect(trace).toMatchObject(convergence.expected.cpuTrace);
+    }
+  });
+
+  it("lowers source-derived i32 and u32 view copies without changing their bits", async () => {
+    for (const [dtype, mutatePayload] of [
+      ["i32", mutateCppCutePayloadToI32ViewCopy],
+      ["u32", mutateCppCutePayloadToU32ViewCopy],
+    ] as const) {
+      const candidate = await createAuthorizedCppCuteProvenanceFixture({
+        mutatePayload,
+      });
+      const artifacts = await lowerAuthorizedCppCuteViewCopyEntry(
+        candidate.authorization,
+        requestFor(candidate),
+      );
+      const operation = kernelArtifactPayload(artifacts.kernel).operations[0];
+      const cpu = await prepareViewCopyCpu(
+        artifacts.layout,
+        artifacts.kernel,
+        { operationId: artifacts.operationId },
+      );
+      const input = Uint32Array.from([
+        0xaaaa_aaaa,
+        0x8000_0000,
+        0xffff_ffff,
+        0,
+        1,
+        0x7fff_ffff,
+        0xdead_beef,
+        0xbbbb_bbbb,
+      ]);
+      const destination = new Uint32Array(8);
+      destination.fill(0xcccc_cccc);
+      cpu.execute({
+        source: new Uint8Array(input.buffer),
+        destination: new Uint8Array(destination.buffer),
+      });
+      expect(operation?.dtype).toBe(dtype);
+      expect([...destination]).toEqual([
+        0xcccc_cccc,
+        0x8000_0000,
+        1,
+        0xffff_ffff,
+        0x7fff_ffff,
+        0,
+        0xdead_beef,
+        0xcccc_cccc,
+      ]);
     }
   });
 

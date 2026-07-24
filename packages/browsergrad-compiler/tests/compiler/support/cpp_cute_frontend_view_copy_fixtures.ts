@@ -113,6 +113,30 @@ export async function mutateCppCutePayloadToStridedSliceViewCopy(
   });
 }
 
+export async function mutateCppCutePayloadToI32ViewCopy(
+  payload: CppCuteFrontendPayloadV3,
+): Promise<void> {
+  await mutateCppCutePayloadToViewCopy(payload);
+  await mutateCppCuteViewCopyDType(payload, {
+    builtin: "int",
+    canonicalName: "int",
+    functionUsr: "c:@F@copy_views#*1i#*i#",
+    mangledName: "_Z10copy_viewsPKiPi",
+  });
+}
+
+export async function mutateCppCutePayloadToU32ViewCopy(
+  payload: CppCuteFrontendPayloadV3,
+): Promise<void> {
+  await mutateCppCutePayloadToViewCopy(payload);
+  await mutateCppCuteViewCopyDType(payload, {
+    builtin: "unsigned-int",
+    canonicalName: "unsigned int",
+    functionUsr: "c:@F@copy_views#*1j#*j#",
+    mangledName: "_Z10copy_viewsPKjPj",
+  });
+}
+
 /** Valid producer artifact used to prove that lowering rejects ranks above its explicit profile. */
 export async function mutateCppCutePayloadToRank4ViewCopy(
   payload: CppCuteFrontendPayloadV3,
@@ -554,6 +578,171 @@ export async function mutateCppCutePayloadToViewCopy(payload: CppCuteFrontendPay
   })));
   const boundPayload = unshareJsonTree<CppCuteFrontendPayloadV3>({ ...nextPayload, semanticPasses });
   Object.assign(payload, boundPayload);
+}
+
+async function mutateCppCuteViewCopyDType(
+  payload: CppCuteFrontendPayloadV3,
+  profile: Readonly<{
+    builtin: "int" | "unsigned-int";
+    canonicalName: "int" | "unsigned int";
+    functionUsr: string;
+    mangledName: string;
+  }>,
+): Promise<void> {
+  const requiredType = (typeId: string) => {
+    const type = payload.types.find((candidate) => candidate.typeId === typeId);
+    if (type === undefined) throw new Error(`fixture lost type ${typeId}`);
+    return type as CppCuteFrontendPayloadV3["types"][number] & Record<string, unknown>;
+  };
+  Object.assign(requiredType(CPP_CUTE_VIEW_COPY_FLOAT_TYPE_ID), {
+    builtin: profile.builtin,
+    canonicalName: profile.canonicalName,
+  });
+  Object.assign(requiredType(CPP_CUTE_VIEW_COPY_CONST_FLOAT_TYPE_ID), {
+    builtin: profile.builtin,
+    canonicalName: `const ${profile.canonicalName}`,
+  });
+  Object.assign(requiredType(CPP_CUTE_VIEW_COPY_SOURCE_POINTER_TYPE_ID), {
+    canonicalName: `const ${profile.canonicalName} *`,
+  });
+  Object.assign(requiredType(CPP_CUTE_VIEW_COPY_DESTINATION_POINTER_TYPE_ID), {
+    canonicalName: `${profile.canonicalName} *`,
+  });
+  Object.assign(requiredType(CPP_CUTE_VIEW_COPY_FUNCTION_TYPE_ID), {
+    canonicalName:
+      `void (const ${profile.canonicalName} *, ${profile.canonicalName} *)`,
+  });
+  for (const typeId of [
+    CPP_CUTE_VIEW_COPY_SOURCE_TENSOR_TYPE_ID,
+    CPP_CUTE_VIEW_COPY_DESTINATION_TENSOR_TYPE_ID,
+  ]) {
+    const type = requiredType(typeId);
+    if (typeof type.canonicalName !== "string") {
+      throw new Error("fixture tensor type lost canonical name");
+    }
+    Object.assign(type, {
+      canonicalName: type.canonicalName.replaceAll("float", profile.canonicalName),
+    });
+  }
+
+  const functionDeclaration = payload.declarations.find(
+    (candidate) =>
+      candidate.declarationId === CPP_CUTE_VIEW_COPY_FUNCTION_DECLARATION_ID,
+  );
+  if (functionDeclaration === undefined) {
+    throw new Error("fixture lost view-copy function declaration");
+  }
+  Object.assign(functionDeclaration, {
+    canonicalUsr: profile.functionUsr,
+    mangledName: profile.mangledName,
+  });
+
+  const functionEntity = payload.sourceEntities.find(
+    (entity) => entity.entityKind === "function",
+  );
+  const elementEntity = payload.sourceEntities.find(
+    (entity) =>
+      entity.entityKind === "type" && entity.canonicalIdentity === "float",
+  );
+  if (functionEntity === undefined || elementEntity === undefined) {
+    throw new Error("fixture lost view-copy source entities");
+  }
+  const functionBody = {
+    entityKind: functionEntity.entityKind,
+    canonicalIdentity: profile.functionUsr,
+    origin: functionEntity.origin,
+    domains: functionEntity.domains,
+  };
+  const elementBody = {
+    entityKind: elementEntity.entityKind,
+    canonicalIdentity: profile.canonicalName,
+    origin: elementEntity.origin,
+    domains: elementEntity.domains,
+  };
+  const nextFunctionEntityId = await deriveCppCuteSourceEntityId(
+    payload,
+    functionBody,
+  );
+  const nextElementEntityId = await deriveCppCuteSourceEntityId(
+    payload,
+    elementBody,
+  );
+  const existingElementEntity = payload.sourceEntities.find(
+    (entity) =>
+      entity.sourceEntityId === nextElementEntityId &&
+      entity.sourceEntityId !== elementEntity.sourceEntityId,
+  );
+  if (existingElementEntity !== undefined) {
+    const existingElementAbi = payload.sourceAbi.types.find(
+      (abi) =>
+        abi.domain === "device" &&
+        abi.sourceTypeEntityId === existingElementEntity.sourceEntityId &&
+        abi.deviceTypeId !== null,
+    );
+    if (existingElementAbi?.deviceTypeId === null ||
+        existingElementAbi === undefined) {
+      throw new Error("fixture collided with a source type lacking device ABI");
+    }
+    Object.assign(requiredType(CPP_CUTE_VIEW_COPY_DESTINATION_POINTER_TYPE_ID), {
+      pointeeTypeId: existingElementAbi.deviceTypeId,
+    });
+    for (const fact of payload.facts) {
+      if (fact.kind === "tensor" &&
+          (fact.factId === CPP_CUTE_VIEW_COPY_SOURCE_TENSOR_FACT_ID ||
+           fact.factId === CPP_CUTE_VIEW_COPY_DESTINATION_TENSOR_FACT_ID)) {
+        Object.assign(fact, { elementTypeId: existingElementAbi.deviceTypeId });
+      }
+    }
+  }
+  const sourceEntities = payload.sourceEntities.flatMap((entity) => {
+    if (entity.sourceEntityId === functionEntity.sourceEntityId) {
+      return [{ ...functionBody, sourceEntityId: nextFunctionEntityId }];
+    }
+    if (entity.sourceEntityId === elementEntity.sourceEntityId) {
+      return existingElementEntity === undefined
+        ? [{ ...elementBody, sourceEntityId: nextElementEntityId }]
+        : [];
+    }
+    return [entity];
+  }).sort((left, right) => left.sourceEntityId.localeCompare(right.sourceEntityId));
+  const sourceAbi: CppCuteFrontendPayloadV3["sourceAbi"] = {
+    ...payload.sourceAbi,
+    types: payload.sourceAbi.types.flatMap((abi) => {
+      if (abi.sourceTypeEntityId !== elementEntity.sourceEntityId) return [abi];
+      return existingElementEntity === undefined
+        ? [{ ...abi, sourceTypeEntityId: nextElementEntityId }]
+        : [];
+    }),
+  };
+  const nextPayload: CppCuteFrontendPayloadV3 = {
+    ...payload,
+    sourceEntities,
+    sourceAbi,
+    semanticPasses: payload.semanticPasses.map((pass) => ({
+      ...pass,
+      selectedSourceRootEntityIds: pass.selectedSourceRootEntityIds.map(
+        (entityId) => entityId === functionEntity.sourceEntityId
+          ? nextFunctionEntityId
+          : entityId,
+      ),
+    })),
+  };
+  const semanticPasses = await Promise.all(
+    nextPayload.semanticPasses.map(async (pass) => ({
+      ...pass,
+      sharedSurfaceSha256: await computeCppCuteSharedSurfaceHash(
+        nextPayload,
+        pass.domain,
+      ),
+    })),
+  );
+  Object.assign(
+    payload,
+    unshareJsonTree<CppCuteFrontendPayloadV3>({
+      ...nextPayload,
+      semanticPasses,
+    }),
+  );
 }
 
 function mutateCppCuteViewCopyFlatLayouts(

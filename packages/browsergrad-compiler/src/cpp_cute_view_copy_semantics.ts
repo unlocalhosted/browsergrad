@@ -68,6 +68,7 @@ export interface NormalizedCppCuteViewCopyOptions {
 
 type TensorFact = Extract<CppCuteResolvedFactV1, { readonly kind: "tensor" }>;
 type IntrinsicFact = Extract<CppCuteResolvedFactV1, { readonly kind: "target-intrinsic" }>;
+export type CppCuteViewCopyDType = "f32" | "i32" | "u32";
 
 /** Producer-derived view-copy semantics before any host storage geometry is supplied. */
 export interface PreparedVerifiedCppCuteViewCopySemantics {
@@ -82,6 +83,7 @@ export interface PreparedVerifiedCppCuteViewCopySemantics {
   readonly destinationLayout: LayoutExpr;
   readonly sourceSpanElements: bigint;
   readonly destinationSpanElements: bigint;
+  readonly dtype: CppCuteViewCopyDType;
   readonly entrySubjectHash: string;
   readonly loweringAuthorityMinted: false;
 }
@@ -102,7 +104,7 @@ export async function prepareVerifiedCppCuteViewCopySemantics(
   const sourceLayoutFact = layoutFact(payload, sourceTensor.layoutFactId, "$.artifact.source.layoutFactId");
   const destinationLayoutFact = layoutFact(payload, destinationTensor.layoutFactId, "$.artifact.destination.layoutFactId");
   const intrinsic = viewCopyIntrinsic(payload, entry.operationExpressionId);
-  validateProfile(
+  const dtype = validateProfile(
     payload,
     sourceTensor,
     destinationTensor,
@@ -186,6 +188,7 @@ export async function prepareVerifiedCppCuteViewCopySemantics(
     destinationLayout,
     sourceSpanElements,
     destinationSpanElements,
+    dtype,
     entrySubjectHash,
     loweringAuthorityMinted: false,
   });
@@ -298,15 +301,25 @@ function validateProfile(
   sourceLayout: CppCuteAffineLayoutFactV1,
   destinationLayout: CppCuteAffineLayoutFactV1,
   intrinsic: IntrinsicFact,
-): void {
+): CppCuteViewCopyDType {
   const elementType = payload.types.find((candidate) => candidate.typeId === source.elementTypeId);
+  const elementBuiltin = elementType?.kind === "builtin" &&
+      typeof elementType.builtin === "string"
+    ? elementType.builtin
+    : undefined;
+  const dtype = elementBuiltin === undefined
+    ? undefined
+    : portableDType(elementBuiltin);
   const abi = payload.sourceAbi.types.filter((candidate) => (
     candidate.domain === "device" && candidate.deviceTypeId === source.elementTypeId
   ));
   if (source.elementTypeId !== destination.elementTypeId ||
-      elementType?.kind !== "builtin" || elementType.builtin !== "float" ||
+      elementBuiltin === undefined || dtype === undefined ||
       abi.length !== 1 || abi[0]?.sizeBits !== "32" || abi[0].alignmentBits !== "32") {
-    unsupportedProfile("$.artifact.source.elementTypeId", "initial view-copy lowering requires one exact f32 device ABI with 32-bit size and alignment");
+    unsupportedProfile(
+      "$.artifact.source.elementTypeId",
+      "view-copy lowering requires one exact f32, i32, or u32 device ABI with 32-bit size and alignment",
+    );
   }
   if (source.memorySpace !== "global" || destination.memorySpace !== "global" ||
       source.engine.kind !== "global-pointer" || destination.engine.kind !== "global-pointer" ||
@@ -314,8 +327,20 @@ function validateProfile(
       source.engine.pointerDeclarationId === destination.engine.pointerDeclarationId) {
     unsupportedProfile("$.artifact.entry", "initial view-copy lowering requires distinct non-null global pointer engines");
   }
-  validateF32Pointer(payload, source.engine.pointerDeclarationId, true, "$.artifact.source.engine");
-  validateF32Pointer(payload, destination.engine.pointerDeclarationId, false, "$.artifact.destination.engine");
+  validatePointer(
+    payload,
+    source.engine.pointerDeclarationId,
+    elementBuiltin,
+    true,
+    "$.artifact.source.engine",
+  );
+  validatePointer(
+    payload,
+    destination.engine.pointerDeclarationId,
+    elementBuiltin,
+    false,
+    "$.artifact.destination.engine",
+  );
   if (sourceLayout.rank !== destinationLayout.rank ||
       (sourceLayout.rank !== 2 && sourceLayout.rank !== 3)) {
     unsupportedLayout(
@@ -330,11 +355,22 @@ function validateProfile(
       intrinsic.effects.synchronizes || intrinsic.effects.convergent) {
     unsupportedProfile("$.artifact.entry.operationExpressionId", "initial view-copy lowering requires one synchronous portable 32-bit global copy with exact read/write effects");
   }
+  return dtype;
 }
 
-function validateF32Pointer(
+function portableDType(
+  builtin: string,
+): CppCuteViewCopyDType | undefined {
+  if (builtin === "float") return "f32";
+  if (builtin === "int") return "i32";
+  if (builtin === "unsigned-int") return "u32";
+  return undefined;
+}
+
+function validatePointer(
   payload: CppCuteFrontendPayloadV3,
   declarationId: string,
+  expectedBuiltin: string,
   readOnly: boolean,
   path: string,
 ): void {
@@ -347,9 +383,12 @@ function validateF32Pointer(
     : undefined;
   if (declaration?.kind !== "parameter" || declaration.memorySpace !== "global" ||
       pointer?.kind !== "pointer" || pointer.addressSpace !== "global" ||
-      pointee?.kind !== "builtin" || pointee.builtin !== "float" ||
+      pointee?.kind !== "builtin" || pointee.builtin !== expectedBuiltin ||
       pointee.qualifiers.const !== readOnly) {
-    unsupportedProfile(path, "initial view-copy engine must be an exact global f32 parameter pointer with source-only const qualification");
+    unsupportedProfile(
+      path,
+      "view-copy engine must be an exact global 32-bit scalar parameter pointer with source-only const qualification",
+    );
   }
 }
 

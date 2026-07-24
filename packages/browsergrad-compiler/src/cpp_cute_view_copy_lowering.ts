@@ -93,7 +93,7 @@ export async function lowerAuthorizedCppCuteViewCopyEntry(
   throwIfCppCuteViewCopyAborted(normalizedOptions.signal);
   try {
     const artifacts = await createVerifiedViewCopyArtifacts({
-      dtype: "f32",
+      dtype: semantics.dtype,
       symbols: [],
       constraints: [],
       source: {
@@ -146,8 +146,18 @@ function validateStorage(
   byteLengthPath: string,
   byteOffsetPath: string,
 ): void {
-  if (byteLength % 4n !== 0n) invalidRequest(byteLengthPath, "f32 allocation byte length must be 4-byte aligned");
-  if (byteOffset % 4n !== 0n) invalidRequest(byteOffsetPath, "f32 view byte offset must be 4-byte aligned");
+  if (byteLength % 4n !== 0n) {
+    invalidRequest(
+      byteLengthPath,
+      "32-bit scalar allocation byte length must be 4-byte aligned",
+    );
+  }
+  if (byteOffset % 4n !== 0n) {
+    invalidRequest(
+      byteOffsetPath,
+      "32-bit scalar view byte offset must be 4-byte aligned",
+    );
+  }
   const required = byteOffset + spanElements * 4n;
   if (required > byteLength) {
     cppCuteViewCopyFailure(
