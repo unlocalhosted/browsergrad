@@ -124,7 +124,7 @@ bool same_view_copy_parameter(
     const ProducerViewCopyParameterObservation& left,
     const ProducerViewCopyParameterObservation& right) noexcept {
   return left.resolved_pointer == right.resolved_pointer &&
-         left.resolved_float_pointee == right.resolved_float_pointee &&
+         left.scalar_kind == right.scalar_kind &&
          left.pointee_const == right.pointee_const &&
          left.ordinal == right.ordinal &&
          left.canonical_usr == right.canonical_usr &&
@@ -226,9 +226,22 @@ bool view_copy_origins_opened(const ViewCopyTrace& trace,
 
 ProducerViewCopyParameterObservation producer_parameter(
     ViewCopyParameterTrace&& source) {
+  const auto scalar_kind = [&source]() {
+    switch (source.scalar_kind) {
+      case ViewCopyScalarKind::kFloat32:
+        return ProducerViewCopyScalarKind::kFloat32;
+      case ViewCopyScalarKind::kSignedInt32:
+        return ProducerViewCopyScalarKind::kSignedInt32;
+      case ViewCopyScalarKind::kUnsignedInt32:
+        return ProducerViewCopyScalarKind::kUnsignedInt32;
+      case ViewCopyScalarKind::kUnsupported:
+        return ProducerViewCopyScalarKind::kUnsupported;
+    }
+    return ProducerViewCopyScalarKind::kUnsupported;
+  }();
   return {
       source.resolved_pointer,
-      source.resolved_float_pointee,
+      scalar_kind,
       source.pointee_const,
       source.ordinal,
       std::move(source.canonical_usr),

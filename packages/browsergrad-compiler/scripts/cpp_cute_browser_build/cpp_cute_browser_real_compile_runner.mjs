@@ -29,6 +29,8 @@ const REAL_COMPILE_CASE_IDS = new Set([
   "rank3",
   "strided-slice",
   "broadcast",
+  "i32-rank2",
+  "u32-broadcast",
 ]);
 const PACK_FILES = Object.freeze({
   "clang-resource": "clang-resource.headers.bgvfs",
@@ -379,7 +381,7 @@ function exactInput(value) {
   if (typeof caseId !== "string" || !REAL_COMPILE_CASE_IDS.has(caseId)) {
     invalid(
       "$.caseId",
-      "expected rank2, rank3, strided-slice, or broadcast",
+      "expected rank2, rank3, strided-slice, broadcast, i32-rank2, or u32-broadcast",
     );
   }
   return {

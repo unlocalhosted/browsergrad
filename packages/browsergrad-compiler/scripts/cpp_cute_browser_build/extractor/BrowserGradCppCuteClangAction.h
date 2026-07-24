@@ -48,9 +48,16 @@ struct LayoutTrace {
   LayoutIntegerHierarchy stride;
 };
 
+enum class ViewCopyScalarKind : std::uint8_t {
+  kUnsupported,
+  kFloat32,
+  kSignedInt32,
+  kUnsignedInt32,
+};
+
 struct ViewCopyParameterTrace {
   bool resolved_pointer = false;
-  bool resolved_float_pointee = false;
+  ViewCopyScalarKind scalar_kind = ViewCopyScalarKind::kUnsupported;
   bool pointee_const = false;
   std::uint32_t ordinal = 0U;
   std::string canonical_usr;

@@ -89,7 +89,7 @@ std::string_view producer_view_copy_extraction_failure_message(
     const ProducerViewCopyParameterObservation& parameter =
         view_copy.parameters[index];
     if (!parameter.resolved_pointer ||
-        !parameter.resolved_float_pointee ||
+        parameter.scalar_kind == ProducerViewCopyScalarKind::kUnsupported ||
         parameter.pointee_const != (index == 0U) ||
         parameter.canonical_usr.empty()) {
       return "selected view-copy function has unsupported parameter semantics";

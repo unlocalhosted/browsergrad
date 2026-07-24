@@ -252,13 +252,15 @@ int main() {
     BG_CHECK(!trace.parameters[0].canonical_usr.starts_with("c:@"));
     BG_CHECK(trace.parameters[0].ordinal == 0U);
     BG_CHECK(trace.parameters[0].resolved_pointer);
-    BG_CHECK(trace.parameters[0].resolved_float_pointee);
+    BG_CHECK(trace.parameters[0].scalar_kind ==
+             ViewCopyScalarKind::kFloat32);
     BG_CHECK(trace.parameters[0].pointee_const);
     BG_CHECK(trace.parameters[1].ordinal == 1U);
     BG_CHECK(trace.parameters[1].canonical_usr.starts_with("c:main.cu@"));
     BG_CHECK(!trace.parameters[1].canonical_usr.starts_with("c:@"));
     BG_CHECK(trace.parameters[1].resolved_pointer);
-    BG_CHECK(trace.parameters[1].resolved_float_pointee);
+    BG_CHECK(trace.parameters[1].scalar_kind ==
+             ViewCopyScalarKind::kFloat32);
     BG_CHECK(!trace.parameters[1].pointee_const);
     BG_CHECK(trace.tensors.size() == 2U);
     BG_CHECK(trace.source_tensor_ordinal == 0U);
@@ -300,6 +302,52 @@ int main() {
   }
   BG_CHECK(complete_frontend_work_invocation(2U));
   BG_CHECK(frontend_work_metrics_ready());
+
+  struct ScalarProfile final {
+    std::string_view source_name;
+    ViewCopyScalarKind kind;
+  };
+  for (const ScalarProfile profile : {
+           ScalarProfile{"int", ViewCopyScalarKind::kSignedInt32},
+           ScalarProfile{"unsigned int",
+                         ViewCopyScalarKind::kUnsignedInt32},
+       }) {
+    std::string scalar_source(view_copy_source);
+    std::size_t offset = 0U;
+    while ((offset = scalar_source.find("float", offset)) !=
+           std::string::npos) {
+      scalar_source.replace(offset, std::string_view("float").size(),
+                            profile.source_name);
+      offset += profile.source_name.size();
+    }
+    const std::size_t scalar_identity = scalar_source.rfind("copy_views");
+    BG_CHECK(scalar_identity != std::string::npos);
+    const SourceAnchor scalar_anchor{
+        "/workspace/main.cu",
+        static_cast<std::uint32_t>(scalar_identity),
+        static_cast<std::uint32_t>(
+            scalar_identity + std::string_view("copy_views").size()),
+        SourceAnchorKind::kViewCopyFunction,
+    };
+    reset_frontend_work_metrics();
+    BG_CHECK(begin_frontend_work_invocation(frontend_limits));
+    install_source(scalar_source,
+                   "/toolchain/cutlass/include/cute/tensor.hpp",
+                   view_copy_header_source);
+    ClangPassReview scalar_review;
+    BG_CHECK(run_cpp_cute_clang_pass_for_review(
+        arguments("host"), scalar_anchor, {},
+        ImportedVfsObservationLimits{}, 1024U, 1024U * 1024U,
+        scalar_review));
+    BG_CHECK(scalar_review.view_copy_trace.resolved_function);
+    BG_CHECK(scalar_review.view_copy_trace.parameters.size() == 2U);
+    BG_CHECK(scalar_review.view_copy_trace.parameters[0U].scalar_kind ==
+             profile.kind);
+    BG_CHECK(scalar_review.view_copy_trace.parameters[1U].scalar_kind ==
+             profile.kind);
+    BG_CHECK(complete_frontend_work_invocation(1U));
+    BG_CHECK(frontend_work_metrics_ready());
+  }
 
   std::string decoy_copy_source(view_copy_source);
   const std::string_view semantic_call =

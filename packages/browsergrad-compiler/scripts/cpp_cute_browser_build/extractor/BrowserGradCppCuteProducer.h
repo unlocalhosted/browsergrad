@@ -60,9 +60,17 @@ struct ProducerLayoutObservation {
   ProducerIntegerHierarchy stride;
 };
 
+enum class ProducerViewCopyScalarKind : std::uint8_t {
+  kUnsupported,
+  kFloat32,
+  kSignedInt32,
+  kUnsignedInt32,
+};
+
 struct ProducerViewCopyParameterObservation {
   bool resolved_pointer = false;
-  bool resolved_float_pointee = false;
+  ProducerViewCopyScalarKind scalar_kind =
+      ProducerViewCopyScalarKind::kUnsupported;
   bool pointee_const = false;
   std::uint32_t ordinal = 0U;
   std::string canonical_usr;

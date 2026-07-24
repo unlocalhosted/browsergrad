@@ -236,6 +236,10 @@ void validate_observation(const ProducerViewCopyObservation& observation,
       observation.copy_begin_byte < observation.declaration_begin_byte ||
       observation.copy_end_byte > observation.declaration_end_byte ||
       observation.parameters.size() != 2U || observation.tensors.size() != 2U ||
+      observation.parameters[0U].scalar_kind ==
+          ProducerViewCopyScalarKind::kUnsupported ||
+      observation.parameters[0U].scalar_kind !=
+          observation.parameters[1U].scalar_kind ||
       observation.source_tensor_ordinal >= observation.tensors.size() ||
       observation.destination_tensor_ordinal >= observation.tensors.size() ||
       observation.source_tensor_ordinal ==
@@ -255,7 +259,7 @@ void validate_observation(const ProducerViewCopyObservation& observation,
     const ProducerViewCopyParameterObservation& parameter =
         observation.parameters[index];
     validate_declaration_spans(input.parameter_spans[index]);
-    if (!parameter.resolved_pointer || !parameter.resolved_float_pointee ||
+    if (!parameter.resolved_pointer ||
         parameter.pointee_const != (index == 0U) ||
         parameter.ordinal != index ||
         !bounded_text(parameter.canonical_usr,
@@ -364,13 +368,33 @@ void sort_records(Json::Array& records, Id id) {
 
 struct TypeIds final {
   std::string void_type;
-  std::string float_type;
-  std::string const_float_type;
+  std::string scalar_type;
+  std::string const_scalar_type;
   std::array<std::string, 2U> pointer_types;
   std::string function_type;
   std::array<std::string, 2U> layout_types;
   std::array<std::string, 2U> tensor_types;
 };
+
+struct ScalarDescriptor final {
+  std::string_view canonical_name;
+  std::string_view builtin;
+};
+
+ScalarDescriptor scalar_descriptor(
+    const ProducerViewCopyScalarKind kind) {
+  switch (kind) {
+    case ProducerViewCopyScalarKind::kFloat32:
+      return {"float", "float"};
+    case ProducerViewCopyScalarKind::kSignedInt32:
+      return {"int", "int"};
+    case ProducerViewCopyScalarKind::kUnsignedInt32:
+      return {"unsigned int", "unsigned-int"};
+    case ProducerViewCopyScalarKind::kUnsupported:
+      throw InvalidObservation();
+  }
+  throw InvalidObservation();
+}
 
 Json builtin_type(const std::string_view type_id,
                   const std::string_view canonical_name,
@@ -445,7 +469,7 @@ bool equivalent_view_copy_observation(
     const ProducerViewCopyParameterObservation& a = left.parameters[index];
     const ProducerViewCopyParameterObservation& b = right.parameters[index];
     if (a.resolved_pointer != b.resolved_pointer ||
-        a.resolved_float_pointee != b.resolved_float_pointee ||
+        a.scalar_kind != b.scalar_kind ||
         a.pointee_const != b.pointee_const || a.ordinal != b.ordinal ||
         a.canonical_usr != b.canonical_usr ||
         a.canonical_name != b.canonical_name ||
@@ -500,6 +524,10 @@ ViewCopyArtifactGraph build_view_copy_artifact_graph(
       observation.parameters[0U];
   const ProducerViewCopyParameterObservation& destination_parameter =
       observation.parameters[1U];
+  const ScalarDescriptor scalar =
+      scalar_descriptor(source_parameter.scalar_kind);
+  const std::string const_scalar_name =
+      std::string("const ") + std::string(scalar.canonical_name);
 
   const Json function_origin =
       source_origin(input.function_spans.declaration_span_id);
@@ -546,17 +574,17 @@ ViewCopyArtifactGraph build_view_copy_artifact_graph(
                                          {"origin", function_origin},
                                          {"qualifiers", qualifiers()}}),
                                  maximum);
-  type_ids.float_type =
+  type_ids.scalar_type =
       stable_id("type",
-                object({{"builtin", "float"},
-                        {"canonicalName", "float"},
+                object({{"builtin", scalar.builtin},
+                        {"canonicalName", scalar.canonical_name},
                         {"origin", destination_parameter_origin},
                         {"qualifiers", qualifiers()}}),
                 maximum);
-  type_ids.const_float_type =
+  type_ids.const_scalar_type =
       stable_id("type",
-                object({{"builtin", "float"},
-                        {"canonicalName", "const float"},
+                object({{"builtin", scalar.builtin},
+                        {"canonicalName", const_scalar_name},
                         {"origin", source_parameter_origin},
                         {"qualifiers", qualifiers(true)}}),
                 maximum);
@@ -566,7 +594,7 @@ ViewCopyArtifactGraph build_view_copy_artifact_graph(
                         {"canonicalName", source_parameter.canonical_type},
                         {"kind", "pointer"},
                         {"origin", source_parameter_origin},
-                        {"pointeeTypeId", type_ids.const_float_type},
+                        {"pointeeTypeId", type_ids.const_scalar_type},
                         {"qualifiers", qualifiers()}}),
                 maximum);
   type_ids.pointer_types[1U] =
@@ -575,7 +603,7 @@ ViewCopyArtifactGraph build_view_copy_artifact_graph(
                         {"canonicalName", destination_parameter.canonical_type},
                         {"kind", "pointer"},
                         {"origin", destination_parameter_origin},
-                        {"pointeeTypeId", type_ids.float_type},
+                        {"pointeeTypeId", type_ids.scalar_type},
                         {"qualifiers", qualifiers()}}),
                 maximum);
   type_ids.function_type = stable_id(
@@ -624,22 +652,22 @@ ViewCopyArtifactGraph build_view_copy_artifact_graph(
 
   Json::Array types = {
       builtin_type(type_ids.void_type, "void", "void", function_origin),
-      builtin_type(type_ids.float_type, "float", "float",
+      builtin_type(type_ids.scalar_type, scalar.canonical_name, scalar.builtin,
                    destination_parameter_origin),
-      builtin_type(type_ids.const_float_type, "const float", "float",
+      builtin_type(type_ids.const_scalar_type, const_scalar_name, scalar.builtin,
                    source_parameter_origin, true),
       object({{"addressSpace", "global"},
               {"canonicalName", source_parameter.canonical_type},
               {"kind", "pointer"},
               {"origin", source_parameter_origin},
-              {"pointeeTypeId", type_ids.const_float_type},
+              {"pointeeTypeId", type_ids.const_scalar_type},
               {"qualifiers", qualifiers()},
               {"typeId", type_ids.pointer_types[0U]}}),
       object({{"addressSpace", "global"},
               {"canonicalName", destination_parameter.canonical_type},
               {"kind", "pointer"},
               {"origin", destination_parameter_origin},
-              {"pointeeTypeId", type_ids.float_type},
+              {"pointeeTypeId", type_ids.scalar_type},
               {"qualifiers", qualifiers()},
               {"typeId", type_ids.pointer_types[1U]}}),
       object({{"callingConvention", "cuda-device"},
@@ -796,7 +824,7 @@ ViewCopyArtifactGraph build_view_copy_artifact_graph(
         maximum);
     tensor_fact_ids[index] = stable_id(
         "fact",
-        object({{"elementTypeId", type_ids.float_type},
+        object({{"elementTypeId", type_ids.scalar_type},
                 {"engine", object({{"kind", "global-pointer"},
                                    {"nullable", false},
                                    {"pointerDeclarationId",
@@ -871,7 +899,7 @@ ViewCopyArtifactGraph build_view_copy_artifact_graph(
                                         tensors[index]->size))}})},
          {"stride", hierarchy_json(tensors[index]->stride)}}));
     facts.push_back(object(
-        {{"elementTypeId", type_ids.float_type},
+        {{"elementTypeId", type_ids.scalar_type},
          {"engine",
           object({{"kind", "global-pointer"},
                   {"nullable", false},
@@ -992,10 +1020,10 @@ ViewCopyArtifactGraph build_view_copy_artifact_graph(
                                       input, observation.declaration_begin_byte,
                                       observation.declaration_end_byte),
           maximum);
-  const std::string float_source_entity_id =
+  const std::string scalar_source_entity_id =
       std::string("bg.cpp.source-entity.sha256.") +
       hash_json(source_entity_id_projection(
-                    "float", "type", input,
+                    scalar.canonical_name, "type", input,
                     destination_parameter.declaration_begin_byte,
                     destination_parameter.declaration_end_byte),
                 maximum);
@@ -1005,23 +1033,23 @@ ViewCopyArtifactGraph build_view_copy_artifact_graph(
               {"entityKind", "function"},
               {"origin", function_origin},
               {"sourceEntityId", function_source_entity_id}}),
-      object({{"canonicalIdentity", "float"},
+      object({{"canonicalIdentity", scalar.canonical_name},
               {"domains", array({"device", "host"})},
               {"entityKind", "type"},
               {"origin", destination_parameter_origin},
-              {"sourceEntityId", float_source_entity_id}}),
+              {"sourceEntityId", scalar_source_entity_id}}),
   };
   sort_records(source_entities, "sourceEntityId");
 
   Json::Array abi_types = {
       object({{"alignmentBits", "32"},
               {"bases", Json::Array{}},
-              {"deviceTypeId", type_ids.float_type},
+              {"deviceTypeId", type_ids.scalar_type},
               {"domain", "device"},
               {"fields", Json::Array{}},
               {"shared", true},
               {"sizeBits", "32"},
-              {"sourceTypeEntityId", float_source_entity_id}}),
+              {"sourceTypeEntityId", scalar_source_entity_id}}),
       object({{"alignmentBits", "32"},
               {"bases", Json::Array{}},
               {"deviceTypeId", nullptr},
@@ -1029,7 +1057,7 @@ ViewCopyArtifactGraph build_view_copy_artifact_graph(
               {"fields", Json::Array{}},
               {"shared", true},
               {"sizeBits", "32"},
-              {"sourceTypeEntityId", float_source_entity_id}}),
+              {"sourceTypeEntityId", scalar_source_entity_id}}),
   };
   const Json source_abi = object(
       {{"functions", Json::Array{}}, {"types", Json(std::move(abi_types))}});
@@ -1053,7 +1081,7 @@ ViewCopyArtifactGraph build_view_copy_artifact_graph(
   Json::Array shared_types = {
       object({{"bases", Json::Array{}},
               {"fields", Json::Array{}},
-              {"sourceTypeEntityId", float_source_entity_id}}),
+              {"sourceTypeEntityId", scalar_source_entity_id}}),
   };
   const std::string shared_surface_sha256 = hash_json(
       object(

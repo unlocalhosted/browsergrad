@@ -5,10 +5,22 @@ import {
   prepareCppCuteBrowserRealCompileMatrix,
 } from "./cpp_cute_browser_real_compile_matrix.mjs";
 
-type CaseId = "rank2" | "rank3" | "strided-slice" | "broadcast";
+type CaseId =
+  | "rank2"
+  | "rank3"
+  | "strided-slice"
+  | "broadcast"
+  | "i32-rank2"
+  | "u32-broadcast";
 
 function observation(caseId: CaseId, diagnostic = false) {
   const rank = caseId === "rank3" ? 3 : 2;
+  const dtype =
+    caseId === "i32-rank2"
+      ? "i32"
+      : caseId === "u32-broadcast"
+        ? "u32"
+        : "f32";
   return {
     schema: "browsergrad.compiler.cpp-cute.browser-real-compile-observation",
     version: 2,
@@ -38,6 +50,7 @@ function observation(caseId: CaseId, diagnostic = false) {
       candidateId: `candidate-${caseId}`,
       sourceCoordinateRank: rank,
       destinationCoordinateRank: rank,
+      dtype,
       sharedViewCopySemanticsPrepared: true,
     },
     headerDistributionLicenseApproved: false,
@@ -50,23 +63,27 @@ function observation(caseId: CaseId, diagnostic = false) {
 }
 
 describe("real browser C++/CuTe compile matrix", () => {
-  it("retains four distinct compiled layouts under one closed authority tier", () => {
+  it("retains six distinct compiled layout and dtype cases under one closed authority tier", () => {
     const matrix = prepareCppCuteBrowserRealCompileMatrix([
       observation("rank2"),
       observation("rank3"),
       observation("strided-slice"),
       observation("broadcast"),
+      observation("i32-rank2"),
+      observation("u32-broadcast"),
     ]);
     expect(matrix).toMatchObject({
       schema:
         "browsergrad.compiler.cpp-cute.browser-real-compile-matrix-observation",
       version: 1,
-      caseCount: 4,
+      caseCount: 6,
       claims: {
         unchangedCpp17CuteRank2Compiled: true,
         unchangedCpp17CuteRank3Compiled: true,
         unchangedCpp17CuteStridedSliceCompiled: true,
         unchangedCpp17CuteBroadcastCompiled: true,
+        unchangedCpp17CuteI32Rank2Compiled: true,
+        unchangedCpp17CuteU32BroadcastCompiled: true,
         canonicalGate2LayoutFixturesMatched: true,
         pinnedReproducibleWasmMatched: true,
         untrustedDiagnosticWasm: false,
@@ -85,6 +102,8 @@ describe("real browser C++/CuTe compile matrix", () => {
       observation("rank2"),
       observation("strided-slice"),
       observation("broadcast"),
+      observation("i32-rank2"),
+      observation("u32-broadcast"),
     ])).toThrow();
     expect(() => prepareCppCuteBrowserRealCompileMatrix([
       observation("rank2"),
@@ -94,12 +113,16 @@ describe("real browser C++/CuTe compile matrix", () => {
       },
       observation("strided-slice"),
       observation("broadcast"),
+      observation("i32-rank2"),
+      observation("u32-broadcast"),
     ])).toThrow();
     expect(() => prepareCppCuteBrowserRealCompileMatrix([
       observation("rank2"),
       observation("rank3", true),
       observation("strided-slice"),
       observation("broadcast"),
+      observation("i32-rank2"),
+      observation("u32-broadcast"),
     ])).toThrow();
   });
 

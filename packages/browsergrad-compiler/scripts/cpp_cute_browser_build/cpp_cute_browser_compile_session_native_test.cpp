@@ -267,13 +267,13 @@ ProducerReviewResult run_cpp_cute_producer_review(
       pass.view_copy.source_tensor_ordinal = 0U;
       pass.view_copy.destination_tensor_ordinal = 1U;
       pass.view_copy.parameters = {
-          {true, true, true, 0U,
+          {true, ProducerViewCopyScalarKind::kFloat32, true, 0U,
            std::string("c:main.cu@") + std::to_string(source_parameter[0U]) +
                "@F@copy_views#*1f#*f#@source",
            "source",
            "const float *", source_parameter[0U], source_parameter[1U],
            source_parameter_identity[0U], source_parameter_identity[1U]},
-          {true, true, false, 1U,
+          {true, ProducerViewCopyScalarKind::kFloat32, false, 1U,
            std::string("c:main.cu@") +
                std::to_string(destination_parameter[0U]) +
                "@F@copy_views#*1f#*f#@destination",

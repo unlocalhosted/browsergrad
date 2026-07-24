@@ -8,10 +8,12 @@ import {
 const ERROR_CODE =
   "BG-COMPILER-CPP-CUTE-BROWSER-REAL-COMPILE-MATRIX";
 const CASE_PROFILES = Object.freeze([
-  Object.freeze({ caseId: "rank2", rank: 2 }),
-  Object.freeze({ caseId: "rank3", rank: 3 }),
-  Object.freeze({ caseId: "strided-slice", rank: 2 }),
-  Object.freeze({ caseId: "broadcast", rank: 2 }),
+  Object.freeze({ caseId: "rank2", rank: 2, dtype: "f32" }),
+  Object.freeze({ caseId: "rank3", rank: 3, dtype: "f32" }),
+  Object.freeze({ caseId: "strided-slice", rank: 2, dtype: "f32" }),
+  Object.freeze({ caseId: "broadcast", rank: 2, dtype: "f32" }),
+  Object.freeze({ caseId: "i32-rank2", rank: 2, dtype: "i32" }),
+  Object.freeze({ caseId: "u32-broadcast", rank: 2, dtype: "u32" }),
 ]);
 
 export class CppCuteBrowserRealCompileMatrixError extends Error {
@@ -87,10 +89,10 @@ export function prepareCppCuteBrowserRealCompileMatrix(observations) {
       observations.length !== CASE_PROFILES.length) {
     invalid(
       "$.observations",
-      "expected exactly rank2, rank3, strided-slice, and broadcast observations",
+      "expected exactly rank2, rank3, strided-slice, broadcast, i32-rank2, and u32-broadcast observations",
     );
   }
-  const cases = CASE_PROFILES.map(({ caseId, rank }, index) => {
+  const cases = CASE_PROFILES.map(({ caseId, rank, dtype }, index) => {
     const observation = observations[index];
     if (typeof observation !== "object" || observation === null ||
         observation.schema !==
@@ -101,6 +103,7 @@ export function prepareCppCuteBrowserRealCompileMatrix(observations) {
         observation.execution?.artifactOutcome !== "accepted" ||
         observation.semanticCandidate?.sourceCoordinateRank !== rank ||
         observation.semanticCandidate?.destinationCoordinateRank !== rank ||
+        observation.semanticCandidate?.dtype !== dtype ||
         observation.semanticCandidate?.sharedViewCopySemanticsPrepared !== true ||
         observation.inputs?.packagePinnedHeaderPacksMatched !== true ||
         observation.execution?.rawWasmVerified !== true ||
@@ -160,6 +163,8 @@ export function prepareCppCuteBrowserRealCompileMatrix(observations) {
       unchangedCpp17CuteRank3Compiled: true,
       unchangedCpp17CuteStridedSliceCompiled: true,
       unchangedCpp17CuteBroadcastCompiled: true,
+      unchangedCpp17CuteI32Rank2Compiled: true,
+      unchangedCpp17CuteU32BroadcastCompiled: true,
       canonicalGate2LayoutFixturesMatched: true,
       packagePinnedHeaderPacksMatched: true,
       pinnedReproducibleWasmMatched,

@@ -37,6 +37,30 @@
 namespace browsergrad::cpp_cute {
 namespace {
 
+ViewCopyScalarKind view_copy_scalar_kind(
+    const clang::QualType pointee,
+    const clang::ASTContext& context) noexcept {
+  const clang::QualType scalar = pointee.getUnqualifiedType();
+  const ViewCopyScalarKind kind = [&scalar]() noexcept {
+    if (scalar->isSpecificBuiltinType(clang::BuiltinType::Float)) {
+      return ViewCopyScalarKind::kFloat32;
+    }
+    if (scalar->isSpecificBuiltinType(clang::BuiltinType::Int)) {
+      return ViewCopyScalarKind::kSignedInt32;
+    }
+    if (scalar->isSpecificBuiltinType(clang::BuiltinType::UInt)) {
+      return ViewCopyScalarKind::kUnsignedInt32;
+    }
+    return ViewCopyScalarKind::kUnsupported;
+  }();
+  if (kind == ViewCopyScalarKind::kUnsupported) return kind;
+  if (context.getTypeSize(scalar) != 32U ||
+      context.getTypeAlign(scalar) != 32U) {
+    return ViewCopyScalarKind::kUnsupported;
+  }
+  return kind;
+}
+
 const clang::Expr* strip_transparent_expression(const clang::Expr* expression) {
   const clang::Expr* current = expression;
   while (current != nullptr) {
@@ -405,9 +429,7 @@ class SemanticTraceVisitor final
         const clang::QualType pointee =
             pointer->getPointeeType().getCanonicalType();
         trace.resolved_pointer = true;
-        trace.resolved_float_pointee =
-            pointee.getUnqualifiedType()->isSpecificBuiltinType(
-                clang::BuiltinType::Float);
+        trace.scalar_kind = view_copy_scalar_kind(pointee, context_);
         trace.pointee_const = pointee.isConstQualified();
       }
       view_copy_trace_.parameters.push_back(std::move(trace));
@@ -478,9 +500,11 @@ class SemanticTraceVisitor final
     }
     const ViewCopyParameterTrace& source = view_copy_trace_.parameters[0U];
     const ViewCopyParameterTrace& destination = view_copy_trace_.parameters[1U];
-    if (!source.resolved_pointer || !source.resolved_float_pointee ||
+    if (!source.resolved_pointer ||
+        source.scalar_kind == ViewCopyScalarKind::kUnsupported ||
         !source.pointee_const || !destination.resolved_pointer ||
-        !destination.resolved_float_pointee || destination.pointee_const ||
+        destination.scalar_kind != source.scalar_kind ||
+        destination.pointee_const ||
         source.canonical_usr.empty() || destination.canonical_usr.empty() ||
         view_copy_trace_.ambiguous || !view_copy_trace_.resolved_copy) {
       view_copy_trace_.resolved_function = false;
