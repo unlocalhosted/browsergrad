@@ -356,6 +356,17 @@ ProducerReviewResult run_cpp_cute_producer_review(
     result.passes[1].layout.canonical_usr = "c:@other_layout";
   } else if (g_producer_mode == "view-copy-surface-drift") {
     result.passes[1].view_copy.canonical_usr = "c:@F@other_copy#*1f#*f#";
+  } else if (g_producer_mode == "view-copy-semantic-failure") {
+    result.status =
+        ProducerReviewStatus::kReviewCompleteWithBlockingDiagnostics;
+    result.completed_pass_count = 1U;
+    result.blocking_diagnostic_pass_count = 1U;
+    result.shared_surface_converged = false;
+    result.passes[0]
+        .view_copy.tensors[0U]
+        .initializer_parameter_bound = false;
+    result.passes[0].view_copy.resolved_function = false;
+    result.passes[1] = ProducerPassObservation{};
   } else if (g_producer_mode == "view-copy-mutable-source") {
     for (ProducerPassObservation& pass : result.passes) {
       pass.view_copy.parameters[0U].pointee_const = false;
@@ -622,7 +633,9 @@ int run(const char* frame_path, const char* artifact_path,
   BG_CHECK(g_decode_status == status_from_name(expected_status));
   const bool artifact_expected = producer_mode == "success" ||
                                  producer_mode == "semantic-failure" ||
-                                 producer_mode == "surface-divergence";
+                                 producer_mode == "surface-divergence" ||
+                                 producer_mode ==
+                                     "view-copy-semantic-failure";
   if (g_decode_status == CompileSessionDecodeStatus::kReady &&
       artifact_expected) {
     BG_CHECK(runtime_result ==

@@ -478,6 +478,40 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
     expect(semantics.destinationLayoutFact.rank).toBe(2);
     expect(semantics.sourceSpanElements).toBe(6n);
     expect(semantics.destinationSpanElements).toBe(6n);
+    const rejectedViewCopyArtifactPath = join(
+      workingDirectory,
+      "view-copy-semantic-failure.artifact.json",
+    );
+    const rejectedViewCopy = spawnSync(executable, [
+      viewCopyFramePath,
+      rejectedViewCopyArtifactPath,
+      "view-copy-semantic-failure",
+      "ready",
+      viewCopyFixture.profileHash,
+      viewCopyFixture.compilationContractHash,
+      viewCopyFixture.requestHash,
+    ], {
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect(rejectedViewCopy.error).toBeUndefined();
+    expect(rejectedViewCopy.status,
+      `view-copy-semantic-failure: signal=${rejectedViewCopy.signal ?? "none"}\n`
+      + `${rejectedViewCopy.stdout}\n${rejectedViewCopy.stderr}`,
+    ).toBe(0);
+    const rejectedViewCopyResource = await decodeCppCuteFrontendArtifact(
+      readFileSync(rejectedViewCopyArtifactPath),
+    );
+    const rejectedViewCopyEnvelope = unwrapVerifiedCppCuteFrontendArtifact(
+      unwrapVerifiedCppCuteFrontendArtifactResource(rejectedViewCopyResource),
+    ).envelope;
+    expect(rejectedViewCopyEnvelope.payload.outcome.kind).toBe("rejected");
+    expect(rejectedViewCopyEnvelope.payload.diagnostics).toHaveLength(1);
+    expect(rejectedViewCopyEnvelope.payload.diagnostics[0]).toMatchObject({
+      code: "browsergrad.cpp-cute:semantic-extraction-failed",
+      renderedMessage:
+        "selected view-copy tensor is not bound to its function parameter",
+    });
     for (const producerMode of [
       "view-copy-surface-drift",
       "view-copy-mutable-source",
