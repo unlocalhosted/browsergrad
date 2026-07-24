@@ -94,6 +94,7 @@ let wasmLinkerFlags: readonly string[];
 let forbiddenWasmFeatures: readonly string[];
 let wasmExceptionTagCount: number;
 let wasmLibrariesRttiEnabled: boolean;
+let runtimeAbiResourceSha256: string;
 
 beforeAll(async () => {
   const prepared = await decodeCppCuteBrowserBuildInputLock(
@@ -116,6 +117,7 @@ beforeAll(async () => {
   const runtimeAbi = await decodeCppCuteBrowserRuntimeAbiManifest(
     cppCuteBrowserRuntimeAbiManifestResourceBytes(),
   );
+  runtimeAbiResourceSha256 = runtimeAbi.resourceSha256;
   const body = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(runtimeAbi)
     .manifest.body;
   applicationImportNames = body.hostImports.functions.map((entry) => entry.fieldName);
@@ -200,6 +202,15 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
     expect([...wasmCompilerFlags, ...wasmLinkerFlags]).not.toContain("-fwasm-exceptions");
     expect(forbiddenWasmFeatures).toContain("exception-handling");
     expect(wasmExceptionTagCount).toBe(0);
+  });
+
+  it("binds native profile admission to the exact package runtime-ABI bytes", async () => {
+    const source = await extractorSource("BrowserGradCppCuteCompileSession.cpp");
+    const match = source.match(
+      /constexpr std::string_view kRuntimeAbiManifestSha256 =\s*"([0-9a-f]{64})";/u,
+    );
+    expect(match?.[1]).toBe(runtimeAbiResourceSha256);
+    expect(source.match(/kRuntimeAbiManifestSha256/gu)).toHaveLength(2);
   });
 
   it("preserves raw Wasm import and export names for the pinned runtime ABI", () => {

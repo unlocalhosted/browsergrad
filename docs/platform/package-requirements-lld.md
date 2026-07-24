@@ -1114,10 +1114,17 @@ compile/link in about 3 minutes 18 seconds and produced a 31,835,141-byte Wasm
 with SHA-256
 `7939cb244b1d02346dbd511c61b4bdaf4d58c9321dfd62dba20bf7c57558cc8f`;
 detached local review against ABI 1.14 reports zero mismatches. Two-clean-build
-reproducibility, detached package evidence, and fresh strict Chromium execution
-remain required before the source-derived Tensor/view-copy result can become
-current browser authority. Externally trusted producer, header redistribution,
-lowering, backend execution, and release authorities remain separate and false.
+reproducibility run `30054873849` then exposed a stale native
+`kRuntimeAbiManifestSha256` profile-admission binding before it could certify
+the run. That binding is now cross-checked by the fast source-closure gate and
+the current build lock is
+`bg.cpp.browser-build-input-lock.sha256.2ba2736bfd84e2243f6f019bbabc0c7b9ce486df714cef9b6b2ba9035ee48b22`.
+The complete local build-plan boundary passes 49 files/262 tests after the
+correction. A fresh build, two-clean reproducibility, detached package
+evidence, and strict Chromium execution remain required before the
+source-derived Tensor/view-copy result can become current browser authority.
+Externally trusted producer, header redistribution, lowering, backend
+execution, and release authorities remain separate and false.
 Use the linked implementation ledger
 for exact chronology, failures, and evidence. This checkpoint is informational: the
 remainder of this document continues to define the normative target and does
