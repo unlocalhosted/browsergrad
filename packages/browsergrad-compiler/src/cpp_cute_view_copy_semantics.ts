@@ -254,7 +254,7 @@ function selectedViewCopyEntry(payload: CppCuteFrontendPayloadV3, entryId: strin
     cppCuteViewCopyFailure(
       "BG-COMPILER-CPP-CUTE-VIEW-COPY-UNSUPPORTED-ENTRY",
       "$.artifact.outcome.selectedEntryIds",
-      "initial view-copy lowering requires exactly the explicitly requested selected entry",
+      "portable view-copy lowering requires exactly the explicitly requested selected entry",
     );
   }
   const entry = payload.entries.find((candidate) => candidate.entryId === entryId);
@@ -325,7 +325,10 @@ function validateProfile(
       source.engine.kind !== "global-pointer" || destination.engine.kind !== "global-pointer" ||
       source.engine.nullable || destination.engine.nullable ||
       source.engine.pointerDeclarationId === destination.engine.pointerDeclarationId) {
-    unsupportedProfile("$.artifact.entry", "initial view-copy lowering requires distinct non-null global pointer engines");
+    unsupportedProfile(
+      "$.artifact.entry",
+      "portable view-copy lowering requires distinct non-null global pointer engines",
+    );
   }
   validatePointer(
     payload,
@@ -353,7 +356,10 @@ function validateProfile(
       intrinsic.operation.asynchronous || intrinsic.availability.kind !== "portable-candidate" ||
       !intrinsic.effects.readsMemory || !intrinsic.effects.writesMemory ||
       intrinsic.effects.synchronizes || intrinsic.effects.convergent) {
-    unsupportedProfile("$.artifact.entry.operationExpressionId", "initial view-copy lowering requires one synchronous portable 32-bit global copy with exact read/write effects");
+    unsupportedProfile(
+      "$.artifact.entry.operationExpressionId",
+      "portable view-copy lowering requires one synchronous 32-bit global copy with exact read/write effects",
+    );
   }
   return dtype;
 }
