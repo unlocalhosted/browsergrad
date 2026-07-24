@@ -8,6 +8,7 @@ export interface CppCuteBrowserBuildLockAuthoringReport {
   readonly resourceByteLength: number;
   readonly recipeSha256: string;
   readonly extractorSourceSetSha256: string;
+  readonly nativeRuntimeAbiResourceSha256: string;
   readonly files: readonly {
     readonly path: string;
     readonly sha256: string;
@@ -26,4 +27,3 @@ export function parseCppCuteBrowserBuildLockAuthoringArguments(
 
 export function projectCppCuteBrowserBuildInputLock():
   Promise<CppCuteBrowserBuildLockAuthoringReport>;
-
