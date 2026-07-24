@@ -151,6 +151,8 @@ struct DiagnosticNormalizerConfig {
   std::span<const std::string_view> opened_virtual_paths;
 };
 
+std::uint32_t cpp_cute_maximum_retained_normalized_diagnostic_bytes() noexcept;
+
 enum class DiagnosticNormalizationStatus : std::uint8_t {
   kReady,
   kEmitted,

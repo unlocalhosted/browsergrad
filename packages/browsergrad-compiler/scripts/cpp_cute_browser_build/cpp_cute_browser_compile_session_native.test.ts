@@ -240,7 +240,7 @@ async function cases(): Promise<readonly {
   const driftFiles = identityDrift["files"] as Record<string, unknown>[];
   driftFiles[0]!["contentSha256"] = "f".repeat(64);
   const widened = structuredClone(fixture.request) as unknown as Record<string, unknown>;
-  (widened["limits"] as Record<string, unknown>)["maxOutputBytes"] = 8 * 1024 * 1024 + 1;
+  (widened["limits"] as Record<string, unknown>)["maxOutputBytes"] = 32 * 1024 * 1024 + 1;
   const contractDrift = structuredClone(fixture.request) as unknown as Record<string, unknown>;
   contractDrift["compilationContractHash"] = "0".repeat(64);
   const compilerDrift = structuredClone(fixture.profile) as unknown as Record<string, unknown>;

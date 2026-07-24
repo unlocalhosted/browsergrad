@@ -179,7 +179,7 @@ describe("browser C++/CuTe compiler-runtime profile", () => {
 
   it("reserves the live ABI input frame alongside stack, compiler, and result bytes", async () => {
     const belowFourTermSum = browserProfileInput();
-    extractionLimits(belowFourTermSum)["maxMemoryBytes"] = 539 * MIB;
+    extractionLimits(belowFourTermSum)["maxMemoryBytes"] = 563 * MIB;
     await expectProfileError(
       belowFourTermSum,
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
@@ -187,7 +187,7 @@ describe("browser C++/CuTe compiler-runtime profile", () => {
     );
 
     const exactFourTermSum = browserProfileInput();
-    extractionLimits(exactFourTermSum)["maxMemoryBytes"] = 540 * MIB;
+    extractionLimits(exactFourTermSum)["maxMemoryBytes"] = 564 * MIB;
     await expect(prepareCppCuteFrontendProfile(exactFourTermSum)).resolves.toMatchObject({
       deploymentMode: "browser-local",
     });
@@ -244,7 +244,7 @@ describe("browser C++/CuTe compiler-runtime profile", () => {
     );
 
     const output = browserProfileInput();
-    (output["extractionLimits"] as Record<string, unknown>)["maxOutputBytes"] = 8 * MIB + 1;
+    (output["extractionLimits"] as Record<string, unknown>)["maxOutputBytes"] = 32 * MIB + 1;
     await expectProfileError(
       output,
       "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",

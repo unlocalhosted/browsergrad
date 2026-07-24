@@ -21,7 +21,7 @@ namespace browsergrad::cpp_cute {
 namespace {
 
 constexpr std::size_t kMaximumDecodeScratchByteLength = 16U * 1024U * 1024U;
-constexpr std::uint32_t kMaximumResultByteLength = 8U * 1024U * 1024U;
+constexpr std::uint32_t kMaximumResultByteLength = 32U * 1024U * 1024U;
 constexpr std::string_view kProfileSchema =
     "browsergrad.compiler.cpp-cute.frontend-profile";
 constexpr std::string_view kRequestSchema =
@@ -33,7 +33,7 @@ constexpr std::string_view kContractSchema =
 constexpr std::string_view kRuntimeAbiId =
     "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1";
 constexpr std::string_view kRuntimeAbiManifestSha256 =
-    "836c70584bdfc4713799ce9c05c8366fd52d7157ae71cada2a84caab3094e347";
+    "e41d149bbb65329bd0a9bf0355ddc6fea8eae24070660e26ab5dc743787f6f37";
 constexpr std::string_view kSemanticAdapterManifestSha256 =
     "e5aa795c4feebd523ed72b95be03b102d497f2e0313ee9c99fadf1309cde6150";
 constexpr std::string_view kTemporalPolicyId =

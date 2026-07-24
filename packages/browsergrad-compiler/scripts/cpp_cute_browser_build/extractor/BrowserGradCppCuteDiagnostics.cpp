@@ -390,6 +390,11 @@ std::size_t retained_size(const NormalizedDiagnostic& diagnostic,
 
 }  // namespace
 
+std::uint32_t
+cpp_cute_maximum_retained_normalized_diagnostic_bytes() noexcept {
+  return kMaximumRetainedNormalizedBytes;
+}
+
 struct CppCuteDiagnosticNormalizer::Impl final {
   explicit Impl(const DiagnosticNormalizerConfig& config) {
     if (!lowercase_sha256(config.compilation_contract_hash) ||

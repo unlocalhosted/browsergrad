@@ -312,7 +312,7 @@ describe("BrowserGrad-owned Clang-WASM extractor source", () => {
       /using ArtifactV3Compile[\s\S]*?const std::uint8_t\* input/u,
     );
     expect(header).toContain("kAbiMaximumByteLength");
-    expect(header).toContain("8U * 1024U * 1024U");
+    expect(header).toContain("32U * 1024U * 1024U");
     expect(header).toContain("bind_invocation_maximum_byte_length");
     expect(header).toContain("ArtifactV3ResultSink(const ArtifactV3ResultSink&) = delete");
     expect(source).not.toMatch(/clang\/|llvm\/|bg_vfs_/u);

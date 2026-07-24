@@ -43,8 +43,8 @@ function supportExport(
  */
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
-  version: { major: 1, minor: 15 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.ca26cb6a191c943c49b5b3ab4ea8f6587557add274fdeacf1c63e78fedf14b00",
+  version: { major: 1, minor: 16 },
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.a5ee4863dfe4a551d72f61dbf58033d2b21d101456da7f42f48d668fd82bdb1a",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -227,7 +227,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         stackByteLength: 16_777_216,
         maxCompilerWorkingByteLength: 536_870_912,
         maxInputFrameByteLength: 4_194_304,
-        maxResultByteLength: 8_388_608,
+        maxResultByteLength: 33_554_432,
       },
     },
     cExports: [
@@ -954,7 +954,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
       schema: "browsergrad.compiler.cpp-cute.frontend-artifact",
       version: { major: 3, minor: 0 },
       encoding: "canonical-json-bytes",
-      maximumByteLength: 8_388_608,
+      maximumByteLength: 33_554_432,
       ownership: "module-owned-worker-must-copy-before-reset",
       lifetime: "from-artifact-ready-until-reset-or-worker-termination",
       emptyResult: "forbidden-when-status-is-artifact-ready",

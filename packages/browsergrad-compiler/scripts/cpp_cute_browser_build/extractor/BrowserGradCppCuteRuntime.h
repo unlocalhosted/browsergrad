@@ -160,7 +160,7 @@ class ValidatedInputFrameRegions final {
 class ArtifactV3ResultSink final {
  public:
   static constexpr std::uint32_t kAbiMaximumByteLength =
-      8U * 1024U * 1024U;
+      32U * 1024U * 1024U;
 
   ArtifactV3ResultSink(const ArtifactV3ResultSink&) = delete;
   ArtifactV3ResultSink& operator=(const ArtifactV3ResultSink&) = delete;

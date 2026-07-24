@@ -1506,7 +1506,9 @@ DiagnosticBuild normalize_diagnostics(
         semantic_pass.pass_id,
         static_cast<std::uint32_t>(
             session.request_semantic_limit(CompileSemanticLimit::kDiagnostics)),
-        session.maximum_output_byte_length(),
+        std::min(
+            session.maximum_output_byte_length(),
+            cpp_cute_maximum_retained_normalized_diagnostic_bytes()),
         opened_span_ids,
         opened_virtual_paths,
     };

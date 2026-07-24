@@ -253,7 +253,7 @@ export function createCppCuteProfileInput(
       maxOperations: 1_000_000,
       maxTargetIntrinsics: 100_000,
       maxDiagnostics: 100_000,
-      maxOutputBytes: 8_388_608,
+      maxOutputBytes: 33_554_432,
       maxWallTimeMs: 120_000,
       maxCpuTimeMs: 120_000,
       maxMemoryBytes: 4_294_967_296,

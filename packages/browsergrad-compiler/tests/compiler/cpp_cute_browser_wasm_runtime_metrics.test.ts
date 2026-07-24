@@ -118,12 +118,12 @@ describe("C++/CuTe runtime-local Wasm metrics", () => {
       allocatorRecordPointer: ALLOCATOR_RECORD_POINTER,
     });
     expect(metrics.maxLinearMemoryByteLength).toBe(1024 * MIB);
-    expect(metrics.maxTrackedAllocatorRequestedByteLength).toBe(524 * MIB);
+    expect(metrics.maxTrackedAllocatorRequestedByteLength).toBe(548 * MIB);
     const deployment = unwrapPreparedCppCuteBrowserFrontendProfile(profile).profile.deployment;
     if (deployment.mode !== "browser-local") throw new Error("expected browser fixture");
     expect(metrics.maxTrackedAllocatorRequestedByteLength).toBe(
       deployment.compilerRuntime.memory.maxCompilerWorkingByteLength +
-        4 * 1024 * 1024 + 8 * 1024 * 1024,
+        4 * 1024 * 1024 + 32 * 1024 * 1024,
     );
 
     beginCppCuteBrowserWasmRuntimePhase(metrics, "input-frame-copy");
@@ -289,7 +289,7 @@ describe("C++/CuTe runtime-local Wasm metrics", () => {
     );
 
     const impossibleCumulativeMemory = memoryFixture();
-    const aboveOneAllocationBound = 525n * BigInt(MIB);
+    const aboveOneAllocationBound = 549n * BigInt(MIB);
     writeAllocatorRecord(impossibleCumulativeMemory, {
       ...EMPTY_ALLOCATOR_RECORD,
       peakLiveGlobalRequestedByteLength: 1n,
@@ -421,7 +421,7 @@ describe("C++/CuTe runtime-local Wasm metrics", () => {
       extractionLimits: { maxMemoryBytes: number };
     };
     input.deployment.compilerRuntime.memory.maxCompilerWorkingByteLength = 240 * MIB;
-    input.extractionLimits.maxMemoryBytes = 268 * MIB;
+    input.extractionLimits.maxMemoryBytes = 292 * MIB;
     const narrowProfile = await prepareCppCuteFrontendProfile(input as never);
     const memory = memoryFixture(narrowProfile);
     const metrics = prepareCppCuteBrowserWasmRuntimeMetrics({
@@ -429,10 +429,10 @@ describe("C++/CuTe runtime-local Wasm metrics", () => {
       memory,
       allocatorRecordPointer: ALLOCATOR_RECORD_POINTER,
     });
-    expect(metrics.maxLinearMemoryByteLength).toBe(268 * MIB);
-    expect(metrics.maxTrackedAllocatorRequestedByteLength).toBe(252 * MIB);
+    expect(metrics.maxLinearMemoryByteLength).toBe(292 * MIB);
+    expect(metrics.maxTrackedAllocatorRequestedByteLength).toBe(276 * MIB);
 
-    expect(memory.grow(193)).toBe(metrics.initialPages);
+    expect(memory.grow(577)).toBe(metrics.initialPages);
     expectMetricsError(
       () => observeCppCuteBrowserWasmRuntimeMetrics(metrics),
       "BG-COMPILER-CPP-CUTE-BROWSER-WASM-METRICS-RESOURCE-LIMIT",

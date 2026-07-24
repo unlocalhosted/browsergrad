@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.dbe282986b88800046877d180ec0a8ca84ec6d8cf084b2b88adcbaaa0facd8d1",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.3e6742cde1fd6fa984d70af6b6b818e901696e666d4490475cd65f00dd53ca9c",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -30,9 +30,9 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
       outputPath: "assets/browsergrad-cpp-cute/runtime-abi-manifest.json",
       mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
       runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
-      manifestId: "bg.cpp.browser-runtime-abi.sha256.ca26cb6a191c943c49b5b3ab4ea8f6587557add274fdeacf1c63e78fedf14b00",
-      resourceSha256: "836c70584bdfc4713799ce9c05c8366fd52d7157ae71cada2a84caab3094e347",
-      resourceByteLength: "44476",
+      manifestId: "bg.cpp.browser-runtime-abi.sha256.a5ee4863dfe4a551d72f61dbf58033d2b21d101456da7f42f48d668fd82bdb1a",
+      resourceSha256: "e41d149bbb65329bd0a9bf0355ddc6fea8eae24070660e26ab5dc743787f6f37",
+      resourceByteLength: "44478",
       byteIdentity: "must-equal-package-canonical-resource",
       authority: "design-reference-only-no-wasm-conformance-worker-or-release-authority",
     },
@@ -253,7 +253,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
         },
       ],
       extractorSource: {
-        sourceSetSha256: "eba860b70667b10e506b0e6a8e6224b4665990eafd8726ae4a0c467c711cd223",
+        sourceSetSha256: "00eeade403122cbec5213429df2311d5968db4f55d0d861956e195dff51d422e",
         hashDomain: "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1",
         files: [
           {
@@ -278,8 +278,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteArtifactWriter.cpp",
-            sha256: "d1195682473109031eaa66ec5e6694fba4ebc123af69387b02ac79dd4b0044fd",
-            byteLength: "84720",
+            sha256: "f713f3bf15eb4c9848d31b9b83bb9c54779e62834c84c8ae8789a994ba821f0e",
+            byteLength: "84812",
           },
           {
             path: "BrowserGradCppCuteArtifactWriter.h",
@@ -343,8 +343,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteCompileSession.cpp",
-            sha256: "e2d19731ae0c54281688861519141f68ae9207f918c6c77cb3c17bc0d3775063",
-            byteLength: "98092",
+            sha256: "2f60b03163af6487195ad43aca90e27a329930459db399225a879ccd24006de3",
+            byteLength: "98093",
           },
           {
             path: "BrowserGradCppCuteCompileSession.h",
@@ -353,13 +353,13 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteDiagnostics.cpp",
-            sha256: "0939fb48ebabd2a0f92b0f92954d349b028337dbc4562648c0bbfdfe222f7c20",
-            byteLength: "29756",
+            sha256: "38ac8706ea5943ab1bffa70f35b40f798ede148ff60d6f8a6c37ef49d198ad4f",
+            byteLength: "29882",
           },
           {
             path: "BrowserGradCppCuteDiagnostics.h",
-            sha256: "80c34ee9e730b4903dd11edb381feb2a97d7b5177612427c23e7e0d851ebbb4c",
-            byteLength: "5269",
+            sha256: "cbae4dbcbd3104c4f32b5734dd6b657f7bb2db4df60ae8653f5c62b7b8b7f8f1",
+            byteLength: "5350",
           },
           {
             path: "BrowserGradCppCuteDiagnosticsPolicy.inc",
@@ -428,8 +428,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteRuntime.h",
-            sha256: "083174d250200427fb05ebd10455a3d3bc9befd91428793eb7ecbb9610af9987",
-            byteLength: "7384",
+            sha256: "b0ed512763b3862b34f811216974346a8ebb969913498b8daca1deed339eca58",
+            byteLength: "7385",
           },
           {
             path: "BrowserGradCppCuteSha256.cpp",

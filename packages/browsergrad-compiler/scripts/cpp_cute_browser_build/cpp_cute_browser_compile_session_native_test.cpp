@@ -560,7 +560,7 @@ ArtifactV3CompileResult decode_callback(
       const std::span<const std::string> host = plan.plan->host_arguments();
       g_compile_plan_ready =
           plan.plan->compilation_contract_hash() == g_contract_hash &&
-          plan.plan->maximum_output_byte_length() == 8U * 1024U * 1024U &&
+          plan.plan->maximum_output_byte_length() == 32U * 1024U * 1024U &&
           plan.plan->maximum_diagnostic_count() == 100000U && !device.empty() &&
           !host.empty() && device.front() == "clang++" &&
           host.front() == "clang++" &&
@@ -647,6 +647,11 @@ int run(const char* frame_path, const char* artifact_path,
                                      "view-copy-semantic-failure";
   if (g_decode_status == CompileSessionDecodeStatus::kReady &&
       artifact_expected) {
+    if (runtime_result !=
+        static_cast<std::int32_t>(WireCompileStatus::kArtifactReady)) {
+      std::fprintf(stderr, "runtime result=%d native diagnostic=%u\n",
+                   runtime_result, runtime_last_diagnostic_code());
+    }
     BG_CHECK(runtime_result ==
              static_cast<std::int32_t>(WireCompileStatus::kArtifactReady));
     BG_CHECK(runtime_result_pointer() == kResultWirePointer);
@@ -664,7 +669,7 @@ int run(const char* frame_path, const char* artifact_path,
     BG_CHECK(g_request_hash == expected_request_hash);
     BG_CHECK(g_request_id == std::string("bg.cpp.frontend-request.sha256.") +
                                  expected_request_hash);
-    BG_CHECK(g_output_limit == 8U * 1024U * 1024U);
+    BG_CHECK(g_output_limit == 32U * 1024U * 1024U);
   } else if (g_decode_status == CompileSessionDecodeStatus::kReady) {
     BG_CHECK(runtime_result ==
              static_cast<std::int32_t>(WireCompileStatus::kInvalidFrame));
