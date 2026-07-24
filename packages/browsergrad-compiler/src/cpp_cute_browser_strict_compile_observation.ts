@@ -22,17 +22,17 @@ import {
 } from "./resources/cpp_cute_browser_strict_compile_observation_v1.js";
 
 export const CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_SHA256 =
-  "bf4d378a92eda260a120da15651deac8d42c7324de490ad1009224a3e7761496";
+  "4796018356bae285feb4b67b33139b38467d71e95807d706290821f5817bb6be";
 export const CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_BYTE_LENGTH =
-  2_886;
+  6_823;
 export const CPP_CUTE_BROWSER_STRICT_COMPILE_SOURCE_REVISION =
-  "559a0586a172b536179a8c69b8848e5293bf99d4";
+  "d1509e96970ebb0137941c18b9cca97b91e41102";
 export const CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256 =
-  "eb7df701054a82f59486c011e9a861e1565525c688e402fc1d3fe1724f2530f6";
+  "8c47f72a003cb1d420c1920d67bee2c3c9482134dda54a08c0ef6d57b9feb0a2";
 const STRICT_OBSERVATION_HEADER_REPRODUCIBILITY_ID =
-  "bg.cpp.browser-header-distribution-reproducibility.sha256.43f703672ddbeaf1e6e6d544e3ed50721a2585e947b5d0a1e624293cac80d449";
+  "bg.cpp.browser-header-distribution-reproducibility.sha256.4d4c054fd4c93dbdbdef9581eeac52b037af3425e6a1c7eff8acc585abce1e55";
 const STRICT_OBSERVATION_HEADER_OUTPUT_VERIFICATION_ID =
-  "bg.cpp.distribution-output-file-verification.sha256.1cc298cf70ed624df258a14b0eb687c6a0666a14cdd4e5d208674f6c0f7fb3df";
+  "bg.cpp.distribution-output-file-verification.sha256.5bc2231523c4537b30dac139a40c515b725815eec34d81cd0af79f759b31a441";
 const STRICT_OBSERVATION_HEADER_PACKS = Object.freeze([
   Object.freeze({
     outputPath: "assets/browsergrad-cpp-cute/clang-resource.headers.bgvfs",
@@ -60,6 +60,24 @@ const STRICT_OBSERVATION_HEADER_PACKS = Object.freeze([
     byteLength: "8927070",
   }),
 ]);
+const EXPECTED_CASES = Object.freeze([
+  Object.freeze({
+    caseId: "rank2",
+    rank: 2,
+    spanElements: "6",
+    sourceSha256:
+      "4134804a9892ed1f0a2778fae305e957b5a981afccf2a096f1585f3b1d4e6f06",
+    virtualPath: "/workspace/src/real-view-copy-rank2.cu",
+  }),
+  Object.freeze({
+    caseId: "rank3",
+    rank: 3,
+    spanElements: "24",
+    sourceSha256:
+      "6a7beae44e88d7fe8749cb5b485dc7d51d30ed285d33314895be461d428550dd",
+    virtualPath: "/workspace/src/real-view-copy-rank3.cu",
+  }),
+]);
 
 const BUILTIN_RESOURCE_BYTES = canonicalJsonBytes(
   CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE,
@@ -70,14 +88,14 @@ declare const verifiedCppCuteBrowserStrictCompileObservationBrand:
   unique symbol;
 
 /**
- * Exact package authority for one strict real-browser compilation observation.
- * It proves Worker execution and an accepted source-derived Artifact V3 only.
- * Producer trust, licensing, lowering, backend execution, and release remain
- * separate and false.
+ * Exact package authority for the strict rank-2/rank-3 browser compilation
+ * matrix. It proves source execution and candidate preparation only. Producer
+ * trust, licensing, lowering, backend execution, and release stay false.
  */
 export interface VerifiedCppCuteBrowserStrictCompileObservation {
   readonly [verifiedCppCuteBrowserStrictCompileObservationBrand]: true;
-  readonly authority: "package-pinned-strict-browser-compile-observation-only";
+  readonly authority:
+    "package-pinned-strict-browser-compile-matrix-observation-only";
   readonly resourceSha256:
     typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_SHA256;
   readonly resourceByteLength:
@@ -86,21 +104,27 @@ export interface VerifiedCppCuteBrowserStrictCompileObservation {
     typeof CPP_CUTE_BROWSER_STRICT_COMPILE_SOURCE_REVISION;
   readonly workerBundleSha256:
     typeof CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256;
-  readonly evidenceId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.execution.evidenceId;
-  readonly artifactId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.execution.artifactId;
-  readonly candidateId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.semanticCandidate.candidateId;
-  readonly layoutSemanticHash:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.semanticCandidate.layoutSemanticHash;
+  readonly rank2EvidenceId:
+    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[0]["execution"]["evidenceId"];
+  readonly rank3EvidenceId:
+    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[1]["execution"]["evidenceId"];
+  readonly rank2ArtifactId:
+    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[0]["execution"]["artifactId"];
+  readonly rank3ArtifactId:
+    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[1]["execution"]["artifactId"];
+  readonly rank2CandidateId:
+    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[0]["semanticCandidate"]["candidateId"];
+  readonly rank3CandidateId:
+    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[1]["semanticCandidate"]["candidateId"];
+  readonly unchangedCpp17CuteRank2Compiled: true;
+  readonly unchangedCpp17CuteRank3Compiled: true;
+  readonly canonicalGate2LayoutFixturesMatched: true;
   readonly reproducibleWasmMatched: true;
   readonly packagePinnedHeaderPacksMatched: true;
   readonly rawWasmVerified: true;
   readonly exactInterfaceConformanceObserved: true;
-  readonly strictBrowserCompileObserved: true;
   readonly workerExecutionObserved: true;
-  readonly sharedLayoutSemanticsPrepared: true;
+  readonly sharedViewCopySemanticsPrepared: true;
   readonly headerDistributionLicenseApproved: false;
   readonly producerTrusted: false;
   readonly loweringAuthorityMinted: false;
@@ -126,15 +150,16 @@ export class CppCuteBrowserStrictCompileObservationError extends Error {
   }
 }
 
-/** Returns a disposable copy of the exact checked-in strict observation. */
+/** Returns a disposable copy of the exact checked-in strict matrix. */
 export function cppCuteBrowserStrictCompileObservationResourceBytes():
 Uint8Array {
   return new Uint8Array(BUILTIN_RESOURCE_BYTES);
 }
 
 /**
- * Admits only the exact package resource and cross-binds its Wasm, headers,
- * Worker bundle, artifact, and retained false authority claims.
+ * Admits only the exact package resource and independently cross-binds its
+ * extractor, complete header-pack set, Worker module, two artifacts, and
+ * retained false authority claims.
  */
 export async function verifyCppCuteBrowserStrictCompileObservationResource(
   value: Uint8Array,
@@ -160,11 +185,7 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
   }
   const snapshot = copyInspectedUnsharedUint8Array(value, inspected);
   if (!equalBytes(snapshot, BUILTIN_RESOURCE_BYTES)) {
-    fail(
-      "BG-COMPILER-CPP-CUTE-BROWSER-STRICT-COMPILE-EVIDENCE-HASH-MISMATCH",
-      "$bytes",
-      "evidence bytes differ from the exact package resource",
-    );
+    mismatch("$bytes", "evidence bytes differ from the exact package resource");
   }
   const resourceSha256 = await hash(snapshot, "$bytes.sha256");
   if (resourceSha256 !==
@@ -181,59 +202,127 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
     ),
     verifyCppCuteBrowserWorkerBundle(),
   ]);
-  const resource = CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE;
-  const currentWorkerSha256: string = worker.sha256;
-  if (currentWorkerSha256 !==
-      CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256) {
+  if (worker.sha256 !== CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256) {
     mismatch("$.workerBundle", "observation does not bind the current package Worker");
   }
-  const observedWasmSha256: string = resource.inputs.wasmSha256;
-  if (observedWasmSha256 !== wasm.wasmSha256 ||
-      resource.inputs.wasmAuthority !==
-        "package-pinned-two-clean-build-output" ||
-      !resource.inputs.pinnedReproducibleWasmMatched ||
-      resource.inputs.untrustedDiagnosticWasm) {
-    mismatch("$.inputs.wasmSha256", "observation does not bind the reproducible package Wasm");
-  }
-  if (resource.inputs.headerDistributionReproducibilityId !==
+  if (headers.reproducibilityId !==
         STRICT_OBSERVATION_HEADER_REPRODUCIBILITY_ID ||
-      resource.inputs.headerDistributionOutputVerificationId !==
+      headers.outputVerificationId !==
         STRICT_OBSERVATION_HEADER_OUTPUT_VERIFICATION_ID ||
-      !sameStrictObservationHeaderPacks(headers.outputs) ||
-      !resource.inputs.packagePinnedHeaderPacksMatched ||
-      resource.inputs.packCount !== 5 ||
-      resource.inputs.installedFileCount !== 5_788) {
-    mismatch("$.inputs", "observation does not bind the package header distribution");
-  }
-  if (resource.schema !==
-        "browsergrad.compiler.cpp-cute.browser-real-compile-observation" ||
-      resource.version !== 1 ||
-      resource.outcome !== "compiled" ||
-      resource.authority !==
-        "local-real-browser-worker-execution-observation-only" ||
-      resource.execution.artifactOutcome !== "accepted" ||
-      resource.execution.artifactId !==
-        `bg.artifact.cpp-cute-frontend.sha256.${resource.execution.artifactHash}` ||
-      resource.execution.acceptedTerminalMessages !== "1" ||
-      !resource.execution.rawWasmVerified ||
-      !resource.execution.exactInterfaceConformanceObserved ||
-      !resource.execution.verifierWorkerExecutionObserved ||
-      !resource.execution.workerExecutionObserved ||
-      !resource.workerExecutionObserved ||
-      !resource.semanticCandidate.sharedLayoutSemanticsPrepared ||
-      resource.semanticCandidate.coordinateRank !== 2) {
-    mismatch("$.execution", "strict browser execution claims are inconsistent");
-  }
-  if (resource.headerDistributionLicenseApproved ||
-      resource.producerTrusted ||
-      resource.loweringAuthorityMinted ||
-      resource.backendExecutionAuthorized ||
-      resource.releaseReady) {
-    mismatch("$", "strict observation widened an independent authority claim");
+      !sameStrictObservationHeaderPacks(headers.outputs)) {
+    mismatch("$.headers", "observation does not bind the package header distribution");
   }
 
+  const resource = CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE;
+  if (resource.schema !==
+        "browsergrad.compiler.cpp-cute.browser-real-compile-matrix-observation" ||
+      resource.version !== 1 ||
+      resource.authority !==
+        "local-real-browser-worker-matrix-observation-only" ||
+      resource.caseCount !== EXPECTED_CASES.length ||
+      resource.cases.length !== EXPECTED_CASES.length) {
+    mismatch("$", "strict matrix envelope is inconsistent");
+  }
+  const headerPackByteLength = strictObservationHeaderPackByteLength();
+  const evidenceIds = new Set<string>();
+  const artifactIds = new Set<string>();
+  const candidateIds = new Set<string>();
+  const assetSetIds = new Set<string>();
+  for (const [index, expected] of EXPECTED_CASES.entries()) {
+    const observed = resource.cases[index];
+    if (observed === undefined ||
+        observed.schema !==
+          "browsergrad.compiler.cpp-cute.browser-real-compile-observation" ||
+        observed.version !== 2 ||
+        observed.outcome !== "compiled" ||
+        observed.authority !==
+          "local-real-browser-worker-execution-observation-only" ||
+        observed.source.caseId !== expected.caseId ||
+        observed.source.virtualPath !== expected.virtualPath ||
+        observed.source.sourceSha256 !== expected.sourceSha256 ||
+        observed.source.syntax !== "unchanged-cpp17-cute" ||
+        observed.source.selectedDeclaration !== "copy_views") {
+      mismatch(`$.cases[${index}].source`, "strict source identity is inconsistent");
+    }
+    if (observed.inputs.wasmSha256 !== wasm.wasmSha256 ||
+        observed.inputs.wasmAuthority !==
+          "package-pinned-two-clean-build-output" ||
+        !observed.inputs.pinnedReproducibleWasmMatched ||
+        observed.inputs.untrustedDiagnosticWasm ||
+        observed.inputs.headerDistributionReproducibilityId !==
+          headers.reproducibilityId ||
+        observed.inputs.headerDistributionOutputVerificationId !==
+          headers.outputVerificationId ||
+        !observed.inputs.packagePinnedHeaderPacksMatched ||
+        observed.inputs.externalAssetCount !== 6 ||
+        observed.inputs.packCount !== 5 ||
+        observed.inputs.installedFileCount !== 5_788 ||
+        observed.inputs.totalExternalByteLength !==
+          wasm.wasmByteLength + headerPackByteLength) {
+      mismatch(`$.cases[${index}].inputs`, "strict input closure is inconsistent");
+    }
+    if (observed.execution.artifactOutcome !== "accepted" ||
+        observed.execution.artifactId !==
+          `bg.artifact.cpp-cute-frontend.sha256.${observed.execution.artifactHash}` ||
+        observed.execution.acceptedTerminalMessages !== "1" ||
+        !observed.execution.rawWasmVerified ||
+        !observed.execution.exactInterfaceConformanceObserved ||
+        !observed.execution.verifierWorkerExecutionObserved ||
+        !observed.execution.workerExecutionObserved ||
+        observed.execution.openedSourceFiles !== "1" ||
+        observed.execution.compileElapsedMilliseconds <= 0 ||
+        observed.execution.totalElapsedMilliseconds <
+          observed.execution.compileElapsedMilliseconds) {
+      mismatch(`$.cases[${index}].execution`, "strict execution is inconsistent");
+    }
+    if (observed.semanticCandidate.sourceCoordinateRank !== expected.rank ||
+        observed.semanticCandidate.destinationCoordinateRank !== expected.rank ||
+        observed.semanticCandidate.sourceSpanElements !== expected.spanElements ||
+        observed.semanticCandidate.destinationSpanElements !==
+          expected.spanElements ||
+        !observed.semanticCandidate.sharedViewCopySemanticsPrepared) {
+      mismatch(
+        `$.cases[${index}].semanticCandidate`,
+        "strict semantic candidate is inconsistent",
+      );
+    }
+    if (observed.headerDistributionLicenseApproved ||
+        observed.producerTrusted ||
+        observed.loweringAuthorityMinted ||
+        observed.backendExecutionAuthorized ||
+        observed.releaseReady ||
+        !observed.workerExecutionObserved) {
+      mismatch(`$.cases[${index}]`, "strict case widened an authority claim");
+    }
+    evidenceIds.add(observed.execution.evidenceId);
+    artifactIds.add(observed.execution.artifactId);
+    candidateIds.add(observed.semanticCandidate.candidateId);
+    assetSetIds.add(observed.inputs.assetSetSha256);
+  }
+  if (evidenceIds.size !== 2 || artifactIds.size !== 2 ||
+      candidateIds.size !== 2 || assetSetIds.size !== 1) {
+    mismatch("$.cases", "strict matrix identities are reused or divergent");
+  }
+  if (!resource.claims.unchangedCpp17CuteRank2Compiled ||
+      !resource.claims.unchangedCpp17CuteRank3Compiled ||
+      !resource.claims.canonicalGate2LayoutFixturesMatched ||
+      !resource.claims.packagePinnedHeaderPacksMatched ||
+      !resource.claims.pinnedReproducibleWasmMatched ||
+      resource.claims.untrustedDiagnosticWasm ||
+      !resource.claims.workerExecutionObserved ||
+      resource.claims.headerDistributionLicenseApproved ||
+      resource.claims.producerTrusted ||
+      resource.claims.loweringAuthorityMinted ||
+      resource.claims.backendExecutionAuthorized ||
+      resource.claims.releaseReady) {
+    mismatch("$.claims", "strict matrix claims are inconsistent");
+  }
+
+  const rank2 = resource.cases[0];
+  const rank3 = resource.cases[1];
   const authority = Object.freeze({
-    authority: "package-pinned-strict-browser-compile-observation-only",
+    authority:
+      "package-pinned-strict-browser-compile-matrix-observation-only",
     resourceSha256:
       CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_SHA256,
     resourceByteLength:
@@ -241,17 +330,21 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
     sourceRevision: CPP_CUTE_BROWSER_STRICT_COMPILE_SOURCE_REVISION,
     workerBundleSha256:
       CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256,
-    evidenceId: resource.execution.evidenceId,
-    artifactId: resource.execution.artifactId,
-    candidateId: resource.semanticCandidate.candidateId,
-    layoutSemanticHash: resource.semanticCandidate.layoutSemanticHash,
+    rank2EvidenceId: rank2.execution.evidenceId,
+    rank3EvidenceId: rank3.execution.evidenceId,
+    rank2ArtifactId: rank2.execution.artifactId,
+    rank3ArtifactId: rank3.execution.artifactId,
+    rank2CandidateId: rank2.semanticCandidate.candidateId,
+    rank3CandidateId: rank3.semanticCandidate.candidateId,
+    unchangedCpp17CuteRank2Compiled: true,
+    unchangedCpp17CuteRank3Compiled: true,
+    canonicalGate2LayoutFixturesMatched: true,
     reproducibleWasmMatched: true,
     packagePinnedHeaderPacksMatched: true,
     rawWasmVerified: true,
     exactInterfaceConformanceObserved: true,
-    strictBrowserCompileObserved: true,
     workerExecutionObserved: true,
-    sharedLayoutSemanticsPrepared: true,
+    sharedViewCopySemanticsPrepared: true,
     headerDistributionLicenseApproved: false,
     producerTrusted: false,
     loweringAuthorityMinted: false,
@@ -269,7 +362,8 @@ function sameStrictObservationHeaderPacks(
     byteLength: string;
   }>[],
 ): boolean {
-  const packs = outputs.filter((output) => output.outputPath.endsWith(".headers.bgvfs"));
+  const packs = outputs.filter((output) =>
+    output.outputPath.endsWith(".headers.bgvfs"));
   return packs.length === STRICT_OBSERVATION_HEADER_PACKS.length &&
     packs.every((output, index) => {
       const expected = STRICT_OBSERVATION_HEADER_PACKS[index];
@@ -278,6 +372,18 @@ function sameStrictObservationHeaderPacks(
         output.sha256 === expected.sha256 &&
         output.byteLength === expected.byteLength;
     });
+}
+
+function strictObservationHeaderPackByteLength(): number {
+  let total = 0;
+  for (const pack of STRICT_OBSERVATION_HEADER_PACKS) {
+    const byteLength = Number(pack.byteLength);
+    if (!Number.isSafeInteger(byteLength) || byteLength <= 0) {
+      mismatch("$.headers", "package header byte length is invalid");
+    }
+    total += byteLength;
+  }
+  return total;
 }
 
 export function requireVerifiedCppCuteBrowserStrictCompileObservation(
@@ -300,7 +406,7 @@ async function hash(bytes: Uint8Array, path: string): Promise<string> {
     fail(
       "BG-COMPILER-CPP-CUTE-BROWSER-STRICT-COMPILE-EVIDENCE-UNVERIFIED",
       path,
-      "SHA-256 is unavailable",
+      "SHA-256 is unavailable for strict browser compile evidence",
       { cause },
     );
   }

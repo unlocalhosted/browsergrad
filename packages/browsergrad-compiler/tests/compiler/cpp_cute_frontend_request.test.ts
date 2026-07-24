@@ -224,7 +224,7 @@ describe("producer-neutral C++/CUDA/CuTe frontend request", () => {
   it("prepares deterministic opaque authority over copied caller source bytes", async () => {
     const fixture = await createRequestFixture();
     expect(fixture.input.requestId).toBe(
-      "bg.cpp.frontend-request.sha256.236bb761d82bcf300b9aa13b1b67459780a2726785c04d77408d0e4db0555c85",
+      "bg.cpp.frontend-request.sha256.5b3ec3cd048b8e256fe6bcfe36e29955a2550b65ea0af7e988a9b74587480616",
     );
     const first = await prepareCppCuteFrontendRequest(fixture.profile, fixture.input, fixture.snapshots);
     const second = await prepareCppCuteFrontendRequest(fixture.profile, cloneRequest(fixture.input), fixture.snapshots);
