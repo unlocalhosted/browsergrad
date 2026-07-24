@@ -15,1132 +15,156 @@ general emphasis.
 
 ## Implementation Checkpoint — Active 2026-07-24
 
-Gates 0 through 2 and Gates 4 through 6 are verified; Gate 3 remains active;
-Gate 7 has not started. Gate 4 is verified for its initial
-closed portable profile only: dense row-major, 4-byte-aligned, certified exact-input `f32`
-GEMM. The strict native producer, pinned no-shell Clang-Wasm executor,
-isolated clean/reproducibility authorities, and independent raw-Wasm ABI review
-are implemented on `main`. The current source additionally owns exact
-frontend-work instrumentation, the local Wasm C-ABI runner, and a canonical
-Worker result-control encoder. It now pins the current 27,285-byte generated
-factory inside one exact 582,580-byte package-owned compiler Worker module and
-a separate exact 157,378-byte package-owned raw-Wasm verifier Worker;
-both have zero static or dynamic imports. The production controller captures
-browser effects at module evaluation, runs the exact verifier before preparing
-the compiler invocation, transfers only its bounded canonical derivative
-evidence, composes only package-owned Worker bytes, and terminalizes every
-Worker/Blob/timer/listener effect before returning. Caller-supplied verifier or
-conformance records cannot substitute for the retained host authority.
-Immediately before minting execution evidence the controller re-unwraps the
-exact protocol-issued validated frame and cross-binds its invocation, request,
-profile, request-binding, artifact, and verifier identities; a structural copy
-cannot substitute for that authority. Validated terminal frames retain the
-exact observed-execution, invocation, request, profile, asset-manifest, VFS,
-runtime-ABI, package-Worker, and verifier authority chain. An accepted layout
-from that exact chain can be prepared through the shared Gate 2 layout seam as
-an opaque observed semantic candidate. A separate host-only policy authority
-can now independently admit the exact predicate, trust-store digest, builder,
-key, and policy version without changing the signature binding's
-`producerTrusted=false` claim. Only that exact opaque producer authority plus
-the exact observed candidate may mint canonical local semantic-lowering
-authority. The transition re-authenticates the retained profile, manifest,
-asset-set, package-Worker, invocation, request, artifact, and prepared layout;
-backend execution, distribution, and release remain false. The same exact
-observed Worker lineage can now prepare an opaque `view-copy` candidate. Only
-that candidate plus the independently admitted exact producer may converge
-into the existing canonical authorized frontend artifact. Candidate and
-authorization identities exclude allocation sizes and byte offsets; explicit
-storage remains a later lowering fact and is never inferred from CuTe
-`cosize`. Current authorization tests use a synthetic producer authority, and
-the producer tests use a synthetic key and policy, so no externally trusted
-production producer has been admitted. Exact-source run `30062037424` built
-the current runtime-ABI 1.16 extractor at commit `6d5c8bca`; its untrusted
-diagnostic bytes then compiled unchanged C++17/CuTe source in the real browser
-Worker and emitted one accepted source-derived rank-2 `view-copy` Artifact V3
-candidate. This proves browser-local source compatibility and semantic
-preparation, but remains diagnostic execution evidence until the exact bytes
-are admitted through two-clean-build package reproducibility. Producer trust,
-header-license approval, lowering authority, backend execution, distribution,
-and release remain false. Hostile view-copy graphs are checked with
-non-recursive, target-intrinsic cycle detection before any semantic authority
-can be minted.
-The resulting exact
-producer-neutral authorized `view-copy` entry can lower genuine f32 ABI,
-tensor-engine, affine-layout, copy-effect, and explicit runtime-allocation
-facts into the canonical Gate 2 layout/kernel artifacts. The initial profile
-is positive flat static rank 2 or rank 3, two distinct non-null global pointers,
-synchronous portable copy, reject on an invalid source, and forbid overlap.
-Its CPU reference proves the pinned rank-2 and `(2,3,4)` rank-3 transposes
-bit-for-bit with nonzero allocation offsets. The two exact canonical payloads
-reproduced by that authorization path now also execute bit-for-bit through the
-canonical WebGPU backend, including complete destination comparison and
-nonzero-offset canaries. The required actual-WebGPU lane executes both cases.
-This browser evidence is fixture-payload convergence across realms: it
-explicitly records
-`productionBrowserCompileObserved=false` and does not mint backend,
-distribution, or release authority. Capability commits `a8a861e2`,
-`c4e2d799`, `08f4b102`, `6355289c`, `e546a124`, and `dca33be5`, plus
-their tests, prove the candidate/authorization, rank-2/rank-3 lowering, and
-required-WebGPU boundaries. Exact-source CI run `29811673981` completed with
-all eight jobs green. The complete compiler suite passes 95 files and 1,591
-tests at that checkpoint. Gate 4 capability commits `2cb7cea3` through
-`fe5581d3` now define one frontend-neutral logical GEMM tile independently from
-physical schedule, staging, and backend mapping; derive and verify separate
-8x8x8 and 16x16x16 scalar cooperative schedules; and bind exact retained input
-bytes to the logical and schedule-specialization hashes. A typed compiler
-artifact can lower into the same canonical constructor, but it does not claim
-source-body equivalence or a production browser compile. The kernels package
-implements zero-filled cooperative workgroup staging, boundary-masked stores,
-uniform barriers, and increasing-K scalar accumulation. Required real-WebGPU
-evidence executes the irregular 17x23 by 23x19 case under both schedules and
-compares every destination byte against one CPU reference and against each
-other. The terminal evidence reports `portable-webgpu-core`,
-`portable-relegalized`, and `bit-exact-on-certified-inputs`; it makes no native
-MMA, preserved CUDA/CuTe schedule, general-f32, resident-buffer, distribution,
-or source-compatibility claim. CI run `29818182317` contains the successful
-dedicated required semantic-GEMM WebGPU job; its whole run is not a success
-record because the required-native lane exposed the stale package Worker pin.
-Commit `343523fe` regenerates and repins the deterministic zero-import compiler
-Worker at 571,098 bytes and SHA-256
-`01a4c1d10d606773bfa241284160f3af787dec856e1a17e22edd7c34dae043a3`.
-Gate 5's first software slice now defines the closed frontend-neutral
-`browsergrad.kernel.attention-forward@1` artifact. It binds verified rank-4
-Q/K/V/output views, exact f32 inverse-square-root scale bits, non-causal or
-upper-left causal masking, stable-softmax phases, finite scaled-score and
-online-state preconditions, a named `1e-4` absolute-or-relative comparison
-policy, pairwise-disjoint effects, and explicit VJP refusal. The artifact
-contains no physical tiles, staging, barriers, WGSL, backend, or performance
-meaning and grants no CPU or WebGPU execution claim. A separate closed
-`browsergrad.schedule.attention-online-kv-tile@1` artifact now binds the exact
-logical hash to physical query/key tiles, increasing key traversal,
-cooperative single-buffered K/V staging, tile-wise online-softmax rescaling,
-uniform workgroup barriers, scalar vectors, and masks that exclude invalid or
-logical-mask keys before online-state updates. It contains no logical dtype,
-scale, view, comparison, backend, execution, performance, or named fused-kernel
-claim. A schedule-independent CPU oracle now proves the dense row-major address
-profile under explicit work/time/cancellation limits, snapshots fixed unshared
-inputs before yielding, enforces every finite-domain requirement, evaluates
-the stable-softmax and weighted-value phases with stepwise f32 rounding, and
-commits destination bytes only after complete success. Its comparator
-implements the named absolute-or-relative policy and rejects non-finite output.
-This grants CPU reference evidence only. Schedule specialization now composes the
-exact prepared logical and schedule authorities and derives bounded workgroup,
-K/V staging, private-state, key-tile, and dispatch geometry without granting
-device legality or preservation. Kernels now consumes that exact composition
-to prepare a bounded scalar WGSL module with cooperative K/V workgroup staging,
-two uniform barriers per key tile, private Q/output state, tile-wise online
-softmax, pre-update causal/tail masks, and suppressed boundary stores. The
-backend identity reports `block-tiled-kv-online-softmax-forward` and
-`portable-relegalized`; preparation alone grants no device execution,
-numerical-preservation, performance, FlashAttention-v2, or frontend claim. The
-host execution path now snapshots exact fixed unshared finite Q/K/V allocations
-before yielding or touching WebGPU, verifies device limits, scopes asynchronous
-pipeline/dispatch errors, bounds waits, and publishes only a complete finite
-destination. Required headed Chromium evidence on Apple Metal 3 executes
-causal and non-causal irregular rank-4 inputs under 8x8 and 8x16 schedules; all
-four complete outputs pass the semantic-core `1e-4` absolute-or-relative CPU
-comparator and same-mask cross-schedule comparison. The trace reports that
-comparison is required rather than converting one successful run into a global
-numerical claim. A separate required performance record compares the production
-host APIs for `(B=1,H=2,Sq=256,Sk=256,D=Dv=32)` after 16 warmups with 20
-alternating paired samples, complete readback, and queue drain. It names the
-existing row-wise online-softmax implementation only as a baseline, retains raw
-samples and lifecycle differences, and explicitly makes no superiority or
-regression-threshold claim. Correctness remains in the separate conformance
-record. The initial closed f32 Gate 5 profile therefore meets its exit without
-claiming FlashAttention-v2, general dtype/layout coverage, or frontend schedule
-preservation. Two
-distinct cache-free builds now prove exact
-extractor Wasm/factory reproducibility; the package binds their canonical v3
-evidence without claiming reproducibility of the still-incomplete distributed
-asset set.
+This checkpoint is informational. The rest of this document is normative, and
+the [implementation ledger](../internal/package-requirements-implementation-ledger.md)
+owns detailed chronology, decisions, failures, and evidence identities.
 
-Gate 6's initial framework-convergence profile is verified. It began by
-retiring public `Tensor.expand`, `Tensor.abs`,
-`Tensor.sign`, `Tensor.sin`, `Tensor.cos`, `Tensor.clamp`, `Tensor.flip`,
-`Tensor.gather`, `Tensor.masked_fill`, `Tensor.prod`, `Tensor.repeat`,
-`Tensor.repeat_interleave`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`,
-`Tensor.var`, top-level `torch.cat`, top-level `torch.stack`, and
-`torch.nn.functional.pad`, plus both values and indices from `torch.sort` and
-`torch.topk`, `torch.scatter`, `torch.einsum`,
-`torch.nn.functional.l1_loss`, `torch.nn.functional.smooth_l1_loss`, and
-`torch.nn.functional.binary_cross_entropy`, plus
-`torch.nn.functional.binary_cross_entropy_with_logits` and
-`torch.nn.functional.kl_div`, `torch.nn.functional.nll_loss`, and
-`torch.nn.functional.cross_entropy` plus
-`torch.nn.functional.dropout`, `torch.nn.BatchNorm1d`, and
-`torch.nn.functional.interpolate`, from the frozen opaque callback
-inventory.
-Expand emits the existing typed `BROADCAST_TO`
-primitive. One shared contract validates exact arity, closed shape arguments,
-output-shape identity, dtype preservation, rank direction, and broadcast
-compatibility at construction and again at CPU, VJP, vmap, ONNX, and
-tensor-plan boundaries so mutation of the legacy argument dictionary fails
-locally. Valid calls retain owning CPU materialization and closure autograd;
-symbolic VJP sums expanded axes, vmap keeps its batch axis outside the declared
-broadcast, ONNX emits `Expand`, and materializing/resident tensor-plan routes
-contain no `CUSTOM`. Grad eager `Tensor.expand` consumes the same cross-package
-shape/dtype conformance fixture, rejects the same invalid dimension classes
-before NumPy execution, preserves float16 and integer dtypes, and explicitly
-retains owning contiguous materialization rather than claiming PyTorch view
-aliasing. `abs` and `sign` now emit typed `ABS` and `SIGN`; their shared unary
-profile preserves real-numeric shape and dtype, rejects bool, returns owning
-CPU arrays, defines closure and symbolic gradients, supports leading-axis
-vmap, and exports direct ONNX unary nodes. Tensor-plan and WebGPU execution
-remain explicit refusals because this slice adds no portable kernel. `sin` and
-`cos` now emit mutually differentiable typed `SIN` and `COS`. They preserve
-float16/32/64 shape and dtype, reject bool/integer inputs before execution,
-provide owning CPU results and typed symbolic derivatives, vmap across a
-leading batch axis, and emit direct ONNX unary nodes. Their plan/WebGPU profile
-also remains an explicit refusal. Clamp now emits typed `CLAMP` with closed
-finite optional bounds, floating dtype preservation, inclusive-bound closure
-and symbolic gradients, leading-axis vmap, and ONNX `Clip` optional-input
-lowering. Hostile scalar coercion and integer dtype drift fail before UOp
-construction; tensor-plan/WebGPU remain explicit refusals. ADR-0034 also
-removes the constructor-only `bg.experimental.webnn.matmul` surface rather
-than silently substituting ordinary matmul for nonexistent WebNN execution.
-ADR-0035 removes the similarly non-executable
-`bg.kernels.transformer_block` constructor rather than implying that the draft
-PRD-012c megakernel exists. ADR-0036 migrates the legacy
-`bg.kernels.flash_attention` compatibility constructor to typed
-`ATTENTION_FORWARD` and accurately limits its direct-WebGPU route to the
-row-wise online-softmax bridge. The opaque baseline is therefore narrowed to
-one intentional user-kernel constructor call and operation under ADR-0002 and
-ADR-0004 through ADR-0036. Flip now emits typed `FLIP` with one strictly
-normalized axis, owning CPU reversal, involutive closure and symbolic VJP,
-leading-batch vmap axis shifting, and ONNX `Slice` export for the exact
-float32/int32/int64/bool exporter profile. It rejects bool,
-floating, hostile-conversion, scalar-rank, and out-of-range axes before
-execution. Tensor-plan and WebGPU explicitly refuse its negative-stride
-profile, so this migration does not widen the Gate 2 positive-stride contract.
-Repeat now emits typed `REPEAT` with bounded exact tile multipliers, owning
-dtype-preserving CPU realization, tile-block closure and symbolic reduction,
-batch-axis-preserving vmap, and ONNX `Tile` for the exact
-float32/int32/int64/bool exporter profile. Its tensor-plan/WebGPU profile
-explicitly refuses execution until canonical tile/index layout semantics
-exist. Grad consumes the same repeat conformance fixture, preserves input
-dtype, and rejects malformed multipliers before NumPy. Repeat-interleave now
-emits typed `REPEAT_INTERLEAVE` with one strictly normalized selected axis and
-bounded exact repeat count. CPU returns an owning dtype-preserving array;
-closure and symbolic VJP split the expanded axis into source/repeat blocks and
-sum the repeat block; vmap shifts the axis past its leading batch dimension;
-ONNX emits an exact `Unsqueeze`/`Tile`/`Reshape` decomposition for
-float32/int32/int64/bool. Its tensor-plan/WebGPU profile explicitly refuses
-execution until canonical selected-axis replication semantics exist. Grad
-consumes the shared repeat-interleave conformance fixture and preserves output
-and gradient dtype. Product now emits typed `PROD` with canonical static axes,
-exact keepdims, owning dtype-preserving scalar/tensor CPU results, and a
-zero-aware closure/symbolic derivative. Vmap shifts every reduction axis past
-its batch dimension, and ONNX emits `ReduceProd` for float32/int32/int64 while
-other exporter dtypes fail explicitly. Tensor-plan/WebGPU remain explicit
-refusals until portable product reduction exists. Grad consumes the shared
-product fixture, preserves output and gradient dtype, and corrects the
-single-zero derivative. Through product this was ten migrated operations, not
-Gate 6 completion: remaining Grad view/dtype debt, runtime/profile consumption,
-and advertised opaque operations were still open at that checkpoint.
+### Gate status
 
-Gather now emits typed `INDEX` with one exact normalized axis and a same-rank
-int64 index. The closed contract preserves source dtype, derives the output
-shape from the index, allows smaller non-gather extents, rejects NumPy-style
-negative index wrapping through runtime bounds checks, and returns an owning
-CPU result. Closure and symbolic VJP use deterministic duplicate-accumulating
-`SCATTER_ADD`; paired vmap shifts the axis past the shared leading batch;
-ONNX emits `GatherElements` for float32/int32/int64/bool. Tensor-plan and
-WebGPU explicitly refuse until a deterministic bounds-checked index/scatter
-lowering exists. Grad consumes the same gather fixture and preserves output
-and gradient dtype. Grad indexing, reshape, transpose, and permute also preserve
-float16, bool, and integer storage dtype plus compatible NumPy aliasing, so an
-int64 index cannot silently become float32 while passing through an ordinary
-slice/unsqueeze path. This is eleven migrated operations, not Gate 6
-completion.
+| Gate | Status | Current boundary |
+| --- | --- | --- |
+| 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
+| 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
+| 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. |
+| 3 — real browser-local C++/CuTe | in progress | Real Clang-Wasm Worker compilation exists; current extractor promotion, external trust, legal approval, and release authority remain open. |
+| 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
+| 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
+| 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
+| 7 — host graphs and optional systems | not started | No Gate 7 production claim exists. |
 
-Variance now emits typed `VAR` with canonical sorted static axes, exact signed
-32-bit correction, exact keepdims, floating dtype preservation, and owning CPU
-scalar/tensor results. The default correction is one; the legacy `unbiased`
-alias is accepted only when correction is absent. Closure and symbolic VJP use
-the centered correction-aware derivative; vmap shifts every reduction axis
-past the leading batch; ONNX decomposes the exact float32 profile into
-`ReduceMean`, `Sub`, `Mul`, `ReduceSum`, and `Div`. Tensor-plan and WebGPU
-explicitly refuse until a portable variance reduction exists. Grad consumes
-the same value/dtype/refusal fixture and no longer casts variance or its
-gradient to float32. This is twelve migrated operations, not Gate 6
-completion.
+Only `verified` means every exit criterion for the declared gate profile is
+complete. Verification of a closed initial profile does not imply broader
+dtype, layout, numerical, or backend coverage.
 
-Masked fill now reuses typed `WHERE(mask, fill, source)`. The closed contract
-requires an actual bool tensor mask that broadcasts into but cannot enlarge
-the source, an exact scalar `CONST` normalized to the source dtype, and a
-source-shaped dtype-preserving output. CPU returns an owning array; closure and
-symbolic VJP route source cotangents through the mask complement; vmap supports
-a leading mapped source with captured or mapped mask broadcasting; ONNX emits
-`Where` for float32/int32/int64/bool. The planner validates and refuses `WHERE`
-until the kernels tensor-plan owns portable masked selection. Grad consumes the
-same mask/value/dtype/refusal fixture and no longer coerces masks or casts
-results and gradients to float32. This is thirteen migrated operations, not
-Gate 6 completion.
+### Feedback and evidence lanes
 
-Lower triangular selection now emits typed `TRIL` over the final two axes of
-a matrix or batch of matrices. Its closed contract requires rank at least two,
-preserves source shape and dtype, accepts only an exact built-in or NumPy
-integer diagonal, and saturates that diagonal into the matrix-derived
-all-zero/all-input semantic range before IR construction. CPU returns an
-owning array; closure and symbolic VJP apply the same idempotent triangular
-selection; vmap preserves the final matrix axes while inserting a leading
-batch; ONNX emits `Trilu` with `upper=0` for float32/int32/int64/bool.
-Tensor-plan and WebGPU explicitly refuse until portable triangular selection
-exists. Grad consumes the same values, dtype, saturation, gradient, and
-refusal fixture. This is fourteen migrated operations, not Gate 6 completion.
+The 90-minute build is no longer an engineering iteration loop:
 
-Upper triangular selection now emits typed `TRIU` through the same canonical
-triangular-selection seam. Its exact nonempty diagonal range is
-`[1 - rows, columns]`, from the all-input to the all-zero representative; empty
-matrices canonicalize to zero. Construction and every execution/transform
-boundary share the strict rank, dtype, exact-integer, shape, and mutation
-checks. CPU returns an owning dtype-preserving array; closure and symbolic VJP
-apply the same idempotent upper selection; vmap preserves the final matrix
-axes; ONNX emits `Trilu` with `upper=1` for float32/int32/int64/bool; and
-tensor-plan/WebGPU refuse until portable triangular selection exists. Grad now
-exposes equivalent instance and top-level spellings and consumes the shared
-two-variant triangular conformance harness. This is fifteen migrated
-operations, not Gate 6 completion.
+- `verify:changed` is the default edit loop and routes changed files to owning
+  tests.
+- `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
+  exact build lock, verifies both zero-import Worker bundles, and passes 86
+  files/748 tests. Its Vitest portion takes 13.47 seconds on current `main`.
+- The complete compiler unit suite passes 97 files/1,623 tests in 15.96
+  seconds.
+- The required native boundary passes 50 files/267 tests with nine explicit
+  platform skips in 67.62 seconds. It intentionally includes optimized, UBSan,
+  and platform-gated ASan work and is not the per-edit loop.
+- Cache-free LLVM/Clang builds exist only to mint clean-build and
+  reproducibility evidence. Their two jobs run concurrently and never replace
+  the focused or fast local paths.
 
-Cumulative sum now emits typed `CUMSUM` with one exact normalized axis and a
-closed scan dtype contract. Floating defaults preserve dtype; integral and
-boolean defaults promote to int64; an explicit supported dtype casts before
-accumulation. CPU returns an owning exact-dtype array, closure and symbolic VJP
-scan the cotangent in the opposite direction, vmap shifts the scan axis past a
-leading batch, and ONNX emits exact `Cast`/`CumSum` wiring for the supported
-float32/int32/int64 output profile. Tensor-plan and WebGPU explicitly refuse
-until portable scan lowering exists. Grad consumes the same value, axis,
-dtype, empty, hostile-input, mutation-refusal, and gradient fixture. This is
-sixteen migrated operations, not Gate 6 completion.
+An unavailable browser, native sanitizer, external approval, signer, or release
+authority is an explicit non-passing result. No parser, fixture, CPU reference,
+or cached build may substitute for the evidence tier named by a requirement.
 
-Concatenation now emits typed variadic `CONCAT` over one exact normalized
-existing axis. A closed contract requires a nonempty plain tuple/list of exact
-same-session tensors, caps arity at 1,024 and output storage at 256 MiB,
-requires matching substantive ranks and non-concatenated extents, and preserves
-the PyTorch-compatible rank-1 `(0,)` empty exception. Dtype promotion is closed
-over bool, uint8, signed int8/16/32/64, and float16/32/64 using dimensioned-
-tensor category precedence. CPU realization casts inputs and returns one owning
-array in the exact declared dtype. Closure and symbolic VJP split the cotangent
-through typed internal `NARROW`, reshape a legacy empty segment, and cast each
-floating gradient to source dtype. Vmap shifts the axis past a leading batch
-and broadcasts captured inputs. ONNX emits exact `Cast`/`Concat` wiring for
-float32/int32/int64/bool and explicitly refuses the remaining output dtypes.
-Tensor-plan and WebGPU refuse until canonical variadic copy lowering exists;
-`out=` remains refused until a shared effect contract exists. Grad consumes the
-same value, shape, axis, dtype-promotion, legacy-empty, ownership, gradient,
-resource, hostile-input, mutation-refusal, and boundary fixture. This is
-seventeen migrated operations, not Gate 6 completion.
+### Browser-local C++/CuTe producer
 
-Stacking now emits typed variadic `STACK` over one exact normalized inserted
-axis. A closed contract requires a nonempty plain tuple/list of no more than
-1,024 exact same-session tensors, identical input shapes, and an output no
-larger than 256 MiB. Scalars and identically shaped empty tensors remain valid.
-It reuses concatenation's closed dimensioned-tensor promotion lattice. CPU
-casts every input and returns an owning `np.stack` copy; closure and symbolic
-VJP select each static source index through typed internal `NARROW`, reshape
-away the inserted axis, and cast floating gradients to source dtype. Vmap
-shifts the stack axis and broadcasts captured inputs. ONNX emits exact
-per-input `Cast`/`Unsqueeze` plus `Concat` for float32/int32/int64/bool and
-explicitly refuses other output dtypes. Tensor-plan/WebGPU and `out=` remain
-explicit refusals until canonical variadic copy lowering and a typed effect
-contract exist. Grad consumes the same eager/lazy conformance fixture. This is
-eighteen migrated operations, not Gate 6 completion.
+The portable product runs a pinned CUDA-capable Clang/LibTooling extractor as
+Wasm inside a dedicated browser Worker. Docker and native Clang remain optional
+build/parity machinery and are not runtime dependencies. The controller:
 
-Constant padding now emits typed `PAD` over a canonical rank-sized tuple of
-first-dimension-first padding pairs. The public PyTorch-shaped boundary accepts
-only a plain even-length tuple/list of exact built-in or fixed-width NumPy
-integers in last-dimension-first order, supports nonnegative `constant` mode,
-and normalizes `None` or an exact scalar fill into the source dtype without
-calling arbitrary conversion hooks. Bool, uint8, signed int8/16/32/64, and
-float16/32/64 are preserved exactly. Rank, each output extent, and total output
-storage are bounded before NumPy. CPU returns an owning copy; closure and
-symbolic VJP extract the static interior through typed `SLICE`; vmap preserves
-the leading mapped axis; and ONNX emits exact opset-17 `Pad` initializers for
-float32/int32/int64. Tensor-plan/WebGPU refuse until canonical padding/layout
-lowering exists. Grad consumes the same eager/lazy conformance fixture. This is
-nineteen migrated operations, not Gate 6 completion.
+- verifies exact package-owned verifier and compiler Worker bytes before
+  constructing Blob Workers;
+- mounts only canonical, package-matched VFS packs;
+- binds the exact profile, request, asset, ABI, invocation, result, and
+  semantic-candidate identities;
+- enforces bounded input, frontend work, memory, output, time, cancellation,
+  diagnostics, and cleanup; and
+- keeps build, ABI, Worker execution, semantic lowering, backend execution,
+  producer trust, distribution approval, and release as distinct authorities.
 
-Axis sorting now emits paired typed `SORT_INDICES` and `SORT_VALUES`. One
-canonical exact axis/descending/stable request binds both outputs to the same
-source and permutation. Bool, uint8, signed int8/16/32/64, and float16/32/64
-values preserve dtype; indices are owning int64. CPU uses deterministic stable
-ordering without dtype-changing negation, including descending ties, unsigned
-integers, minimum signed integers, and NaNs. Closure and symbolic VJP scatter
-value cotangents through the immutable permutation; indices remain discrete.
-Vmap shifts the selected axis past the leading mapped dimension, and ONNX
-opset 17 emits full-axis `TopK` plus `GatherElements` for
-float32/int32/int64. Rank, every extent, selected-axis work, and paired output
-bytes are bounded before sorting. Tensor-plan/WebGPU refuse until canonical
-portable ordering exists. Grad consumes the same eager/lazy conformance
-fixture. These are twenty-one migrated operation records, not Gate 6
-completion.
+The current extractor build lock is
+`bg.cpp.browser-build-input-lock.sha256.bf3150e48e3bd748a9e7814bfa1c7933f629acdf3463f06fdbea0f53b18dc22c`.
+The package factory remains 27,884 bytes with SHA-256
+`2eaa4ce31951cd5eff989679fd8d63c4ae74df0293f8f727209a3ce0f681764d`.
+Before the current reproducibility promotion, the compiler Worker is 584,660
+bytes and the raw-Wasm verifier Worker is 158,314 bytes; both have zero static
+or dynamic imports. Updating package-pinned reproducibility identity requires a
+deterministic Worker re-author and repin.
 
-Top-k selection now emits paired typed `TOPK_INDICES` and `TOPK_VALUES`. One
-canonical exact axis, `k`, largest, and sorted request binds both outputs to
-the same source and selected permutation. Bool, uint8, signed int8/16/32/64,
-and float16/32/64 values preserve dtype; indices are owning int64. CPU computes
-the permutation once with partial selection and, when requested, orders only
-the selected `k` values without dtype-changing negation. Closure and symbolic
-VJP scatter value cotangents through the immutable selected permutation;
-indices remain discrete. Vmap shifts the selected axis past the leading mapped
-dimension, and ONNX opset 17 emits selected-k `TopK` plus `GatherElements` for
-float32/int32/int64. Rank, every extent, selected-axis work, paired output
-bytes, and conservative NumPy workspace are bounded before selection; typed
-full sort now has the same explicit workspace ceiling. Tensor-plan/WebGPU
-refuse until canonical portable partial selection exists. Grad consumes the
-same eager/lazy conformance fixture. These are twenty-three migrated operation
-records, not Gate 6 completion.
-
-Overwrite scatter now emits typed `SCATTER` over one exact normalized axis.
-The target and int64 index have the same bounded nonzero rank; a tensor source
-has exactly the index shape and target dtype, while an exact scalar source
-stays scalar in IR. Bool, uint8, signed int8/16/32/64, and float16/32/64 are
-preserved in one owning CPU target copy. Negative, out-of-range, and duplicate
-destinations fail before assignment. The unique-destination profile avoids
-PyTorch's documented nondeterministic duplicate overwrite and incorrect
-gradient case and matches ONNX `ScatterElements` reduction-none preconditions.
-Closure and symbolic VJP zero overwritten target cotangents through typed
-`SCATTER` and gather tensor-source cotangents through typed `INDEX`. Vmap
-shifts the axis and broadcasts captured target/index/tensor-source inputs;
-ONNX opset 17 emits `ScatterElements` for float32/int32/int64/bool and expands
-a scalar source explicitly. Output storage and conservative duplicate-check
-workspace are separately bounded at 256 MiB. Deprecated reduction spellings,
-tensor-plan, and WebGPU fail explicitly until their distinct semantics and
-canonical portable lowering exist. Grad consumes the same eager/lazy
-conformance fixture. This is twenty-four migrated operation records, not Gate
-6 completion.
-
-Einstein contraction now emits typed variadic `EINSUM` with one canonical
-explicit equation and transform-owned batch rank. The string parser accepts
-ASCII upper/lower labels, implicit or explicit output, repeated-label
-diagonals, broadcast-compatible shared labels, different-rank ellipses, and
-PyTorch's explicit-output ellipsis reduction without executing NumPy during
-construction. Arity, equation bytes, rank, resolved labels, each extent,
-output bytes, conservative cast/contraction/gradient workspace, and total contraction
-domain are bounded before allocation. CPU performs one greedy numeric-label
-`np.einsum`, uses float32 accumulation for float16, and returns an owning array
-in the promoted dtype. Closure and symbolic `EINSUM_VJP` cover arbitrary
-admitted arity, broadcast reduction, absent target labels, repeated-label
-diagonal scatter, and immutable eager snapshots. Vmap preserves a leading
-mapped prefix independently of user ellipses and broadcasts captured inputs.
-ONNX opset 17 emits a fully resolved lower-case `Einsum` equation with casts,
-refusing bool and more than 26 resolved exporter labels. Tensor-plan and
-WebGPU validate and refuse until canonical contraction scheduling/lowering
-exists. Grad consumes the same equation/value/dtype/gradient/resource fixture
-instead of its former explicit-arrow, two-operand, float32-only path. This is
-twenty-five migrated operation records, not Gate 6 completion.
-
-L1 loss now emits typed binary `L1_LOSS` with one exact reduction and a
-transform-owned batch rank. The closed contract requires TensorProxy-compatible
-same-session floating tensors backed by exact NumPy ndarrays with identical shapes, refuses
-array subclasses before numerical hooks, and promotes float16/32/64 through the
-dimensioned-tensor lattice, and performs float16 difference and reduction in
-float32 before an owning half store. Rank, every extent, output bytes,
-conservative cast/intermediate/both-cotangent workspace, and total element
-visits are bounded from metadata before NumPy. Empty `none`, zero-valued empty
-`sum`, NaN empty `mean`, and scalar cases are explicit. Closure and symbolic
-typed `L1_LOSS_VJP` propagate `sign(input - target)` to both operands, use the
-zero subgradient at equality, normalize target zero, scale mean per example,
-and return each cotangent in source dtype. Vmap broadcasts captured operands
-and keeps reductions outside its leading batch prefix. ONNX opset 17 emits
-float32 compute casts for half, other mixed-dtype promotion casts,
-`Sub`/`Abs`, and, where required, `ReduceSum` or `ReduceMean` across only
-non-batch axes before an exact output cast. Tensor-plan and WebGPU validate and
-refuse until canonical loss-reduction lowering exists. Grad consumes the same
-value/dtype/empty/gradient/resource fixture and no longer casts every result to
-float32 or disconnects the target. This is twenty-six migrated operation
-records, not Gate 6 completion.
-
-Smooth L1 loss now emits typed binary `SMOOTH_L1_LOSS` with canonical finite
-non-negative beta, exact reduction, and transform-owned batch rank. It reuses
-the same-shape float16/32/64 promotion and float32 half-compute seam while
-rejecting positive beta values that cannot remain finite and nonzero in the
-compute dtype. Positive beta uses the exact quadratic branch only below the
-boundary and the linear branch at and above it; zero beta takes the L1 path
-without evaluating division. Rank, extents, output, conservative casts,
-intermediates, mask, both retained cotangents, and 32-visit piecewise work are
-bounded before allocation, including zero-extent hostile capacity. Closure and
-typed symbolic `SMOOTH_L1_LOSS_VJP` propagate source-dtype derivatives to both
-operands, normalize target zero, and Grad snapshots the piecewise derivative.
-Nested vmap keeps reductions per example. ONNX opset 17 emits float32
-half-compute casts plus `Sub`/`Abs` and, for positive beta,
-`Less`/`Mul`/`Div`/`Where` before the exact non-batch reduction and output cast;
-zero beta emits the smaller L1 decomposition. Tensor-plan and WebGPU validate
-and refuse pending canonical piecewise loss lowering. The shared loss geometry
-also tightens L1's workspace proof to count the retained upstream compute
-buffer. This is twenty-seven migrated operation records, not Gate 6
-completion.
-
-Binary cross entropy now emits typed binary `BINARY_CROSS_ENTROPY` with exact
-same-shape probability inputs, exact reduction, and transform-owned batch
-rank. Both runtime arrays must be finite and within `[0, 1]` before numerical
-work. Forward clamps each logarithm to `-100`, not the probability, so invalid
-values fail closed while valid endpoint losses remain exactly 100. The input
-derivative uses PyTorch's independent `1e-12` denominator floor; the target
-derivative is the unclamped logit derivative and therefore retains signed
-infinity at valid endpoints. Closure and typed symbolic
-`BINARY_CROSS_ENTROPY_VJP` return source-dtype cotangents for both operands;
-Grad snapshots both derivatives. Float16 uses float32 compute, empty and scalar
-reductions are explicit, and nested vmap preserves per-example reduction.
-Rank, extents, output, casts, four compute buffers, one mask, both retained
-cotangents, and 48-visit work are bounded before allocation. ONNX opset 17
-explicitly refuses the profile because its arithmetic decomposition cannot
-preserve fail-closed runtime probability-domain validation. Tensor-plan and
-WebGPU likewise validate and refuse pending a canonical probability-loss
-lowering and kernel. This is twenty-eight migrated operation records, not Gate
-6 completion.
-
-Binary cross entropy with logits now emits typed binary
-`BINARY_CROSS_ENTROPY_WITH_LOGITS` with exact same-shape floating inputs,
-exact reduction, and transform-owned batch rank. Forward evaluates
-`(1-target)*logits + softplus(-logits)` through a bounded
-`max(-logits,0)+log1p(exp(-abs(logits)))` decomposition, so finite logits at
-`+/-1000` do not overflow. Its stable sigmoid-minus-target input derivative
-and exact negative-logits target derivative propagate through closure and
-typed symbolic `BINARY_CROSS_ENTROPY_WITH_LOGITS_VJP`; Grad snapshots both.
-Float16 uses float32 compute, empty/scalar reductions are explicit, and nested
-vmap preserves per-example reduction. Rank, extents, output, casts, four
-compute buffers, one mask, both retained cotangents, and 36-visit work are
-bounded before allocation. ONNX opset 17 emits promoted
-`Neg`/`Softplus`/`Sub`/`Mul`/`Add`, exact non-batch reduction, and output cast.
-Tensor-plan and WebGPU validate and refuse pending canonical stable loss
-lowering. Optional `weight`, `pos_weight`, and deprecated reduction aliases
-remain explicit signature failures rather than being ignored. This is
-twenty-nine migrated operation records, not Gate 6 completion.
-
-KL divergence now emits typed binary `KL_DIV` with exact same-shape floating
-inputs, an exact `log_target` boolean, exact reduction, and transform-owned
-batch rank. Probability targets use the native
-`xlogy(target,target)-target*input` algebra with an exact zero-target forward
-contribution; log targets use `exp(target)*(target-input)`. Closure and typed
-symbolic `KL_DIV_VJP` propagate both source-dtype cotangents, including the
-current native zero-target target-gradient NaN rather than a clipped
-subgradient; Grad snapshots both derivatives. `batchmean` divides a
-non-scalar per-example sum by the first user dimension, leaves scalar sum
-unchanged, produces NaN for a zero batch, and preserves zero for a nonzero
-batch with empty support. Float16 uses float32 compute, all four reductions
-handle scalar and empty inputs explicitly, and nested vmap keeps mapped axes
-outside the reduction denominator. Rank, extents, output, casts, retained
-cotangents, compute buffers, masks, workspace, and 48-visit work are bounded
-before numerical work. ONNX opset 17 emits the exact probability/log-target
-decomposition, zero-target `Equal`/`Where`, batchmean denominator, and casts.
-Tensor-plan and WebGPU validate and refuse pending canonical loss reduction.
-Deprecated reduction aliases remain explicit signature failures. This is
-thirty migrated operation records, not Gate 6 completion.
-
-Negative-log-likelihood now emits typed variadic
-`NLL_LOSS(input, target[, weight])` with an exact class axis, int64 class
-indices, optional source-dtype class weights, signed-int64 `ignore_index`, and
-canonical `none`/`sum`/`mean` reduction. The unbatched `(C)` profile requires a
-scalar target; `(N,C,...)` removes only the class axis from target and
-per-element output shape. Runtime range checks reject every non-ignored target
-outside `[0,C)` before indexed access. Weighted mean divides by the selected
-weight sum, unweighted mean by the valid target count, and empty/all-ignored
-mean remains NaN while its input cotangent is zero. CPU returns owning
-source-dtype output with float32 half compute. Closure and typed
-`NLL_LOSS_VJP` write only selected-class input cotangents; target and weight
-are explicitly non-differentiable, and Grad snapshots validity, safe indices,
-and selected weights. Vmap shifts the class axis past transform-owned leading
-dimensions and supports captured or mapped weights. Unmapped ONNX opset 17
-emits `NegativeLogLikelihoodLoss`, normalizing rank-one input with
-`Unsqueeze`/`Squeeze`; mapped export, tensor-plan, and WebGPU execution refuse
-explicitly. Rank, extents, output, work, and conservative workspace are
-bounded before numerical work, including zero-hidden capacity.
-`cross_entropy` now emits typed `CROSS_ENTROPY` over stable log-sum-exp rather
-than composing a materialized softmax or retaining a callback. It accepts
-unbatched and spatial logits, exact class indices or matching floating
-probability targets, optional class weights, ignored index targets, label
-smoothing, legacy reduction aliases, and all three reductions. Index-target
-means use selected-class weight totals; probability-target means use the
-position count. Closure and symbolic `CROSS_ENTROPY_VJP` propagate logits and,
-for probability mode, target cotangents while weights remain
-non-differentiable. Nested vmap owns leading mapped axes and captured/mapped
-weights. Opset-17 `SoftmaxCrossEntropyLoss` is limited to the unmapped
-zero-smoothing index profile; probability, smoothing, mapped export,
-tensor-plan, and WebGPU paths refuse explicitly. Rank, extents, stable
-workspace, visits, and output are bounded before allocation. Typed `DROPOUT`
-owns one immutable per-operation seed. Evaluation, zero probability, and empty
-inputs return the exact input without consuming RNG; probability one emits an
-owning dtype-preserving zero result; active training accepts float16/32/64 and
-replays the same elementwise mask in CPU, closure, symbolic VJP, and checkpoint
-recomputation. Grad preserves output and gradient dtype and delegates its
-module to the functional contract. Stochastic vmap refuses until an explicit
-same/different randomness policy exists; ONNX inference export and
-tensor-plan/WebGPU execution also refuse rather than weakening the keyed
-contract. Trace caching excludes stochastic/effect-opaque graphs. Rank,
-output, work, and RNG/mask workspace are bounded before key consumption. This
-typed `BatchNorm1d` owns exact float32 rank-2/rank-3 normalization,
-`num_batches_tracked`, biased batch variance, unbiased persistent variance,
-fixed or cumulative momentum, and immutable eval snapshots. Session-owned,
-target-bound effect streams use reserved/applied sequence watermarks to order
-lazy state updates in constant memory per module and commit all three running
-buffers atomically and exactly once across repeated realization, backward,
-functional gradient, checkpoint recomputation, and state inspection. Minted
-module storage tokens prevent recyclable Python object IDs from colliding in
-long-lived sessions. Closure and symbolic
-VJPs share runtime array validation and bounded work/storage contracts with
-Grad. Vmap, ONNX, tensor-plan, and WebGPU routes validate then refuse until
-their batch-axis, export-snapshot, normalization, and ordered device-state
-contracts exist. Typed `INTERPOLATE_2D` now owns bounded rank-four
-float16/32/64 nearest and bilinear spatial resampling. Exactly one static
-size or positive scale determines output geometry; scaled extents use floor,
-and explicit non-recomputed scales retain their reciprocal coordinate map.
-Forward gather and transpose scatter are vectorized and preserve declared
-dtype, while half accumulates in float32. Closure and symbolic
-`INTERPOLATE_2D_VJP`, functional grad, leading-axis vmap with captured
-cotangent broadcast, and checkpoint replay share the same immutable geometry.
-ONNX opset 17 emits exact nearest or linear `Resize`; tensor-plan and WebGPU
-explicitly refuse until canonical spatial-resampling lowering exists. Grad
-shares the same fixture, bounds, scale-recomputation, aligned-corner, ownership,
-dtype, and derivative contract. Through interpolation this was thirty-five
-migrated operation records, not Gate 6 completion. Typed `ATTENTION_FORWARD`
-adds the thirty-sixth record
-for dense positive rank-four float32 Q/K/V with strict matching dimensions,
-canonical inverse-square-root scaling, stable owning CPU semantics, and
-bounded work/workspace. It rejects gradient-bearing inputs, masks, and custom
-scales at construction; vmap, ONNX, and tensor-plan routes validate then
-refuse. The legacy direct-WebGPU bridge remains row-wise online softmax and is
-not the Gate 5 block-tiled algorithm or a FlashAttention-v2 claim.
-
-ADR-0037 removes eager Grad's silent `bf16`/`bfloat16` to float32
-substitution. `torch.bfloat16` is now a distinct unsupported token, and direct
-tensor construction, conversion, plus `nn.Linear`/`nn.Embedding` parameter
-construction reject it before allocation. Those parameterized layers now
-accept only their exact float32 storage/computation profile and reject all
-other dtype requests instead of ignoring `dtype`. Real
-bfloat16 remains unsupported until distinct storage, rounding, conversion,
-serialization, and backend contracts exist. Remaining Grad convergence is
-view/materialization and conversion behavior, not bfloat16 relabeling.
-ADR-0038 fixes the first remaining view/materialization boundary:
-`Tensor.contiguous()` preserves identity only for already C-contiguous storage;
-otherwise it returns an owning C-order, dtype-preserving copy with an
-identity-gradient edge. `contiguous().view(...)` therefore no longer depends
-on an implicit later reshape copy.
-ADR-0039 fixes `Tensor.detach()` as the complementary zero-copy boundary: it
-returns a distinct leaf sharing the exact source storage, dtype, strides, and
-layout while clearing gradient tracking and history. Detach mutations are
-therefore visible in both directions, including for float16 and
-non-contiguous inputs.
-ADR-0040 fixes cross-dtype eager autograd. `Tensor.to()` casts among
-float16/float32/float64 now materialize the target dtype and preserve NumPy
-layout order while recording a VJP that restores the source dtype.
-`no_grad()` suppresses the edge, and casts with a bool or integer endpoint
-remain detached.
-ADR-0041 closes the eager tensor request parser. CPU device requests preserve
-identity and compose with the frozen dtype conversion contract; CUDA, MPS,
-XPU, Meta, indexed CPU, and other unavailable storage requests fail before
-execution. `Tensor.cuda()` also fails rather than substituting the existing
-CPU/Pyodide tensor. Invalid dtype strings and ambiguous or unsupported
-`Tensor.to()` signatures now reject before allocation.
-ADR-0042 closes the remaining torch-compatibility placement seams.
-`torch.tensor(device=...)` admits only CPU before following the frozen
-constructor dtype/default behavior. `nn.Module.to(...)` admits only no request
-or CPU identity; non-CPU placement and non-null dtype conversion reject before
-parameter access or mutation. The Grad freeze now includes the limited shim
-source as well as the real torch factory.
-ADR-0043 makes NumPy ownership directional and explicit. `from_numpy`
-zero-copy wraps the package-owned eager storage set with exact ndarray
-identity, dtype, strides, layout, and bidirectional mutation. `Tensor.numpy()`
-and the NumPy array protocol instead share one owning `order="K"` snapshot
-path; `copy=False` cannot bypass that export boundary.
-ADR-0044 closes Grad's eager dtype registry. String requests must resolve
-through the frozen BrowserGrad/PyTorch alias table. NumPy dtype objects and
-scalar types remain valid only when they resolve to the twelve admitted
-physical storage dtypes: bool, float16/32/64, int8/16/32/64, and
-uint8/16/32/64. Unsupported complex, object, structured, datetime, and other
-storage requests reject before allocation. Operation-specific dtype contracts
-remain narrower where required.
-ADR-0045 separates direct and compatibility constructor semantics. Direct
-`Tensor(data, dtype=None)` retains its BrowserGrad-defined float32 default and
-conditional ndarray aliasing. `torch.tensor` is an owning leaf-copy adapter:
-Python bool/int/float data infer bool/int64/float32, admitted NumPy and Tensor
-inputs preserve dtype unless explicitly converted, unsupported input kinds
-reject, and only floating storage may request gradients.
-ADR-0046 closes the final eager compatibility record. `Tensor.expand` now
-returns a storage-sharing view whose expanded singleton axes have zero stride.
-It preserves source writeability, dtype, and non-expanded strides; mutations
-propagate bidirectionally; and the VJP reduces expanded axes to the input
-shape. Validation still occurs before stride construction.
-
-The first executable framework-operation registry now removes the hand-written
-support-reporting seam for typed migrations. Its bounded package-owned v1 JSON
-records bind `Tensor.abs`, `torch.cat`, `Tensor.clamp`, `Tensor.cos`, `Tensor.expand`,
-`Tensor.flip`, `Tensor.gather`, `Tensor.masked_fill`, `Tensor.prod`,
-`Tensor.repeat_interleave`, `Tensor.repeat`, `Tensor.sign`, `Tensor.sin`,
-`torch.einsum`, `torch.scatter`, `torch.nn.functional.l1_loss`,
-`torch.nn.functional.binary_cross_entropy`,
-`torch.nn.functional.binary_cross_entropy_with_logits`,
-`torch.nn.functional.kl_div`,
-`torch.nn.functional.nll_loss`,
-`torch.nn.functional.cross_entropy`,
-`torch.nn.functional.dropout`,
-`torch.nn.BatchNorm1d`,
-`torch.nn.functional.interpolate`,
-`bg.kernels.attention_forward`,
-`torch.nn.functional.smooth_l1_loss`,
-`torch.sort.indices`, `torch.sort.values`, `torch.stack`,
-`torch.topk.indices`, `torch.topk.values`,
-`torch.nn.functional.pad`, `Tensor.tril`, `Tensor.triu`, `Tensor.cumsum`, and
-`Tensor.var` to the same
-validators invoked by construction and every admitted execution, transform,
-export, or plan boundary. Import rejects duplicate keys,
-open fields, unknown decisions, invalid versions, duplicate identities, and
-records without an exact executable validator. Public
-`framework_operation_support()` returns a detached deterministic table with
-explicit shape, dtype, CPU, autograd, transform, export, plan, WebGPU-profile,
-residency, and materialization decisions. A WebGPU profile is eligibility, not
-device availability or execution evidence. The architecture gate independently
-checks the registry and preserves the exact partition of the original 39
-opaque IDs into one intentional user-kernel opaque identity, thirty-six typed
-retirements, and two removed unsupported surfaces. ADR-0003 records this
-public contract; ADR-0034 and ADR-0035 record the unsupported-surface
-classifications, and ADR-0036 records the final advertised opaque migration.
-The JIT table covers every formerly opaque advertised operation in the frozen
-Gate 6 profile. Pre-existing typed families not in that baseline require new
-executable records before they can be advertised through the same source; they
-do not weaken the closed profile's result.
-
-ADR-0047 and ADR-0048 now make the separate assignment-requirement model
-executable. Semantic-core `/requirement` definitions are generated for all 53
-registered profile requirements, and runtime consumes complete provider-bound
-environments directly through run-plan, preflight, handoff, external-runner,
-matrix, and JavaScript profile paths while retaining the relevant resolution
-records. Definition presence alone never grants availability.
-
-ADR-0049 adds the program-scoped half of the support model. Semantic-core
-`/capability` now owns immutable capability/backend definitions and lowering
-decisions bound to one canonical program ID or semantic artifact hash. Runtime
-generates the one current capability and three registered backend definitions
-from the architecture vocabulary and constructs support views only from actual
-decisions for that subject. Positive decisions require a registered
-preservation level; conditional decisions retain exact feature, limit, or
-runtime-guard requirements; refusals cannot claim preservation. Static
-definitions and environment requirement resolutions therefore cannot become
-program-support claims.
-
-ADR-0050 composes those separate facts for platform consumers without
-flattening them. JIT's JavaScript root projects all 36 records from the same
-generated framework-operation JSON consumed by its Python executable
-validators. Runtime's framework-neutral platform view canonically reconstructs
-one provider-bound requirement environment and one program-support input,
-then bounds, validates, sorts, and freezes one or more framework sources.
-Requirement availability, program lowering state, framework decision strings,
-and terminal execution evidence remain separate fields and protocols. Runtime
-does not import JIT, and JIT does not import runtime. ADR-0051 generates Grad's
-22 verified eager records from its frozen executable compatibility inventory
-and proves that a packed consumer composes both framework sources. Terminal
-execution evidence remains a separate protocol rather than being inferred
-from either source.
-
-Browser asset manifest v1.4 now binds one build-signature predicate, exact
-trust-store digest, and canonical builder allowlist into the profile-pinned
-asset-set identity. One strict DSSE/in-toto verifier rebinds a valid P-256
-signature to the exact profile/compilation contract, manifest, build-input
-lock and recipe, package Worker/factory, and cycle-free build subject. This
-remains a manifest-policy signature binding: the opaque signature result
-explicitly keeps `producerTrusted`, exact-asset verification, complete
-reproducibility, legal approval, distribution, Worker execution, and release
-readiness false. The separate trust-policy transition is implemented and
-cannot mutate that narrower authority. The tests still use ephemeral synthetic
-keys and policy bytes. A package-controlled production policy, externally
-controlled key, and externally issued statement over the exact current build
-subject remain required before the current distributed producer can be claimed
-as trusted.
-
-The header-pack harness now binds eight exact source archives to the build lock:
-LLVM 22.1.8, CUTLASS 3.7.0, CUDA 12.6.3 CCCL/cudart/nvcc, NVIDIA `libcurand`
-10.3.7.77, and Ubuntu Noble glibc/Linux UAPI cross-development packages. It
-streams and verifies all 334,136,433 archive bytes and package-pins the current Darwin arm64
-normalization closure: exact `/usr/bin/bsdtar` bytes/version, exact Node 25.9.0
-executable bytes, Zstandard 1.5.7, empty runtime flags, and absent
-`NODE_OPTIONS`. It uses that bounded Node decoder for Debian `data.tar.zst` and
-normalizes only the nine selected header subtrees plus nine exact upstream
-license/copyright review files through a strict streamed tar parser. The parser
-rejects traversal, links, special files, duplicate virtual paths, malformed
-PAX metadata, invalid checksums/padding, and budget overflow. Extracted files
-use a content-addressed flat host store, so a case-insensitive macOS filesystem
-cannot collapse distinct Linux virtual paths such as `xt_CONNMARK.h` and
-`xt_connmark.h`.
-
-One same-process opaque pipeline rereads every selected source, detects
-conflicting overlays, and materializes the five canonical BrowserGrad VFS
-packs. The configured Clang resource pack includes one exact
-upstream-identity-bound CUDA runtime-wrapper derivative; the transformation is
-closed and deterministic rather than an ambient patch. The resulting 5,788
-files occupy 69,680,000 pack bytes and cover the complete configured Clang
-resource output, libc++, CUDA, CUTLASS, and the Linux sysroot. The same
-pipeline admits the exact 49,142-byte CUDA 12.6.3 redistribution index and
-writes a canonical 1,208,403-byte `license-inventory.json`. Its 5,788 unique
-file-map entries bind every
-distributed virtual path and content identity to the materialized pack,
-license component, and relevant package notice while also binding the complete
-ten-resource notice set, nine extracted upstream evidence files totaling
-313,228 bytes, and the selected CUDA index records. The pipeline now copies the
-ten verifier-retained package notice snapshots into their exact declared
-component-license paths and constructs a deterministic 115,330-byte aggregate
-notice containing ten components, nine of them third party. The eleven new
-notice files total 226,340 bytes, are created without clobber at mode `0400`,
-are independently reread, and complete an exact 17-file private output tree
-with the five packs and review input. The current clean two-root run reproduced
-the complete 71,114,743-byte output subset. Stable distribution metadata binds
-the narrow header-input projection rather than the extractor-sensitive full
-build-lock identity; the live authority chain still reauthenticates the complete
-current lock before producing any output. These are real
-source-derived, independently inspected non-release pack observations. They do
-establish the complete configured header universe under one package-reviewed
-builder identity and the complete engineering input for external header-file
-license review. They do not establish independent third-party implementation
-attestation, external review or approval, full distribution
-reproducibility, independently trusted signed provenance, Worker execution, or
-release authority.
-
-The two-root reproducibility command now runs that exact pipeline twice from
-one common archive/index/tool closure under four distinct non-overlapping source
-and pack roots. It then concurrently rehashes every immutable output, checks
-the complete file/directory trees before and after hashing, and confirms all 17
-paths, 71,114,743 bytes, and identities match. The current clean two-root
-command completed in about 28 seconds with reproducibility ID
-`bg.cpp.browser-header-distribution-reproducibility.sha256.4d4c054fd4c93dbdbdef9581eeac52b037af3425e6a1c7eff8acc585abce1e55`
-and output-verification ID
-`bg.cpp.distribution-output-file-verification.sha256.5bc2231523c4537b30dac139a40c515b725815eec34d81cd0af79f759b31a441`.
-This proves exact reproducibility only for the five header packs, license
-inventory, ten component notices, and aggregate notice. The Wasm/factory,
-Worker, remaining deterministic outputs, detached provenance, external legal
-review, and approved package asset set are not part of this subset, so full
-distribution reproducibility and release remain false.
-
-The package now pins the path-independent 4,181-byte header reproducibility
-record at SHA-256
-`7a39e78d7aa3f1f0ff68e4b7b095425c75aa5e3947b208cdc6c5c30b46524838`.
-Admission accepts only those exact bytes, verifies the current build-input lock
-and the exact header-input projection
-`bg.cpp.browser-header-input-projection.sha256.48490ddb7b2fe655ec36824e276b90122e2f548a77b768f5978029a31129c5b7`,
-validates the sorted 17-output projection and byte total, and independently
-rederives both the output-verification and
-reproducibility identities before minting an opaque subset authority. This
-closes the gap between local live-run evidence and package-consumable technical
-evidence without turning reproducible header bytes into legal approval, signed
-provenance, full-distribution reproducibility, Worker execution, or release
+The package-pinned strict browser observation currently proves unchanged
+C++17/CuTe f32 rank-2, rank-3, positive strided-slice, and read-only broadcast
+source compiling in the real Worker into accepted Artifact V3 candidates. The
+current extractor source additionally recognizes exact `float`, `int`, and
+`unsigned int` 32-bit device ABI facts. Its strict eight-case promotion adds
+rank-1, rank-4, i32 rank-2, and u32 broadcast source cases. Two concurrent
+cache-free builds for exact source revision
+`85778e8f23a81f5ca08fac44a923a91296ea09a5` are active in workflow run
+`30067229885`; until they match and are package-pinned, the new source cases
+remain implementation plus diagnostic evidence rather than promoted package
 authority.
 
-The clean composed header observation is
-`bg.cpp.browser-header-pack-pipeline.sha256.705235b37a1e0fb3621be0e537bc515dfddffe7da70b7cfea15c4e2341be16b3`.
-The five output SHA-256 identities are `037acb8a...` (configured Clang
-resource), `1917ba19...` (CUDA), `4f1c39b7...` (CUTLASS), `1f2c5a1e...`
-(libc++), and `d04a460d...` (Linux sysroot); the implementation ledger retains
-the complete hashes and byte counts.
+### Shared dtype and layout execution
 
-The original cold diagnostic run `29658164083` spent 97 minutes 5 seconds in
-isolated execution before failing closed at link. That result exposed two
-different costs that the harness had conflated: reusable LLVM/Clang
-provisioning and ordinary extractor edit validation. The cached diagnostic lane
-now reuses only the content-addressed toolchain directories, keeps the cache
-untrusted inside the networkless/capability-free container, and never grants
-clean-build, reproducibility, provenance, or release authority. Run
-`29668611133` completed in 5 minutes 3 seconds. Final no-migration proof
-`29668822793` at `056aaf02` then completed in 4 minutes 39 seconds: the
-JavaScript boundary took 27 seconds, cache restoration took 2 seconds, the
-isolated compile/link executor took 3 minutes 14 seconds, and ABI review took 3
-seconds. Subsequent source-only production validations remained stable from 4
-minutes 27 seconds through 5 minutes 4 seconds. Link policy and extractor
-source identities no longer invalidate the expensive toolchain cache, and all
-temporary cache-migration shims have been removed. The canonical local command
-`pnpm --filter @unlocalhosted/browsergrad-compiler run
-verify:browser-clang-wasm:fast` builds once, checks the lock without a second
-clean, then runs 700 tests across 80 files covering the build plan, runtime ABI,
-browser profile, browser asset identity chain, exact Worker-bundle authoring,
-package invocation, Worker entry, production controller, verifier evidence,
-observed layout- and view-copy-candidate preparation, independently admitted
-producer trust, producer-authorized local layout and view-copy lowering,
-exact header-tree
-inventory/materialization, seven-archive admission, strict archive
-normalization/extraction, the reviewed builder identity, CUDA-index admission,
-the complete header distribution review input, distribution-notice
-verification, exact notice-output materialization, two-root distribution
-reproducibility, exact package admission of that evidence, browser build-subject
-syntax, and signature/build-subject binding. The fast configuration now uses
-family globs for all browser and C++/CuTe lowering tests instead of a drifting
-per-file browser allowlist. The current Node 25 focused Vitest phase passes 700
-tests across the same 80 files in 11.54 seconds. The complete compiler suite
-after rank-3 convergence passes 95 files and 1,591 tests. The local
-feedback loop remains measured in tens of seconds.
-Clean validation and two-build
-reproducibility still restore no cache and remain intentionally more expensive.
+The canonical view-copy path has one semantic construction and execution seam:
+frontend Artifact V3 facts lower into semantic-core layout/kernel artifacts,
+then the same artifacts execute through the CPU reference or kernels WebGPU
+backend. There is no source-spelling-specific execution path.
 
-The remote build workflow no longer runs the complete JavaScript verification
-suite serially at the front of every expensive matrix build. One independent
-verification job now runs that suite once in parallel with all clean/cached
-compiler builds; each compiler job still materializes its own exact JavaScript
-runtime closure, and the final reproducibility verifier depends on both the
-verification job and both clean build jobs. This removes the previously
-observed 86-to-134-second test phase from the compiler critical path without
-changing build inputs or granting evidence when either branch fails. The two
-reproducibility builds already run concurrently, and each build remains pinned
-to the four cores available on the current standard runner.
-Workflow concurrency is now mode-scoped: fast feedback no longer queues behind
-clean or reproducibility evidence, and a newer fast request cancels only an
-older fast request. Clean validation and reproducibility never cancel one
-another and retain separate isolated runners and roots.
+The current portable word profile supports:
 
-The comprehensive compiler command now keeps its three true prerequisites
-serial, then feeds the exact remaining 14 commands into four bounded,
-fail-fast lanes with process-group cancellation and per-lane serialization.
-The complete local command passed in 2 minutes 6.39 seconds. CI additionally
-separates source/dist real-world corpus shards, the required-native harness,
-Node 20/24/25 surface checks, and required WebGPU. Exact-source run `29697264202`
-completed all of those lanes successfully in about 4 minutes 15 seconds,
-compared with about 6 minutes 14 seconds for pre-sharding run `29695555899`.
-Commands that clean or rewrite the same package build output remain mutually
-exclusive; parallelism is applied only where ownership and dependency edges
-are independent.
+- same-dtype f32, i32, and u32 storage with exact 32-bit size and alignment;
+- equal source/destination ranks 1 through 4;
+- positive affine layouts, nonzero byte offsets, positive strided slices, and
+  read-only broadcasts;
+- pairwise-disjoint global allocations and synchronous exact-word copy; and
+- exact float fill bits for guarded invalid reads, while integer profiles
+  reject invalid source coordinates.
 
-The real-world verifier now also runs its four read-only compile/codegen corpus
-audits concurrently and divides the browser corpus into two bounded child
-processes inside each already-built source or distribution job. Exact-source CI
-`29769844668` passed both bundles with complete 159-case browser coverage split
-80/79 and no failed or skipped case. The source shards took 96.57 and 96.69
-seconds concurrently and the distribution shards took 96.48 and 97.10 seconds;
-complete verifier time was 131.15 and 132.17 seconds rather than the sum of the
-parallel stages. Shard evidence rejects missing, duplicate, or unexpected case
-outcomes before the gate can pass. Runner setup, dependency installation,
-workspace build, corpus ownership, and final aggregation remain intentionally
-single-owner operations.
+The WebGPU backend identity is
+`browsergrad.webgpu.view-copy.word32@2`. Required headed Chromium on Apple
+Metal 3 passes a 13-case complete-destination, bit-exact CPU/WebGPU matrix
+covering all three dtypes, ranks 1 through 4, striding, broadcast, offsets,
+float padding, dynamic specialization, and zero-extent no-submit behavior.
+Signed/negative strides, 16-bit packed storage, bf16, f64, overlap, and layouts
+outside the declared rank/profile remain explicit refusals rather than silent
+substitutions.
 
-Corpus provisioning now uses target-scoped canonical ownership records for
-interrupted snapshots and reservations. While holding the same target lease, a
-later operation may inspect at most 32 candidates and reclaim at most four
-exact self-owned residues, each bounded to 4,096 entries. Descriptor-relative
-no-follow traversal, UID/root/target/process binding, exact snapshot Git-blob
-identity, and conservative retention protect foreign or ambiguous state. The
-remaining final leaf-unlink interval assumes cooperating same-UID writers honor
-the lease; no protection from hostile same-UID leaf replacement is claimed.
+### Tiled kernels and framework convergence
 
-Exact-source signature-binding run `29698350889` then passed the same complete
-graph in about 4 minutes 12 seconds, including Node 20/24/25, required-native,
-source/dist corpus, real Chromium/WebGPU, and Pyodide integration lanes.
+Gate 4 owns one frontend-neutral logical GEMM artifact and independent physical
+schedule artifacts. Its verified profile is dense row-major, 4-byte-aligned,
+certified exact-input f32 only; real WebGPU executes irregular boundary tiles
+under two scalar cooperative schedules. It makes no native-MMA, general-f32,
+resident-buffer, or source-schedule-preservation claim.
 
-Exact-source remote run `29695343749` proves the revised graph on Linux/Node
-24. The JavaScript branch passed in 56 seconds while the cached compiler branch
-continued independently; its locked executor took 3 minutes 15 seconds and the
-complete build job took 4 minutes 30 seconds. The run also exposed and closed a
-real harness race: a small fast-exiting normalizer could close stdout while its
-strict consumer was still creating private parser output. The process harness
-now attaches a bounded backpressured stream bridge immediately, awaits process,
-transport, parser, and stderr settlement, and preserves strict rejection and
-owned-output cleanup. Tests cover output beyond pipe capacity and malformed
-tar rejection without weakening the two-zero-block requirement.
+Gate 5 owns one frontend-neutral attention-forward artifact and an independent
+online K/V-tile schedule. Required real WebGPU evidence covers causal and
+non-causal irregular inputs under two schedules, while performance is recorded
+separately against the named row-wise online-softmax baseline. It makes no
+FlashAttention-v2 or broader dtype/layout claim.
 
-The remaining cache-free build cost is inside the LLVM/Clang dependency graph,
-not JavaScript verification or workflow queueing. Successful clean run
-`29681845216` spent 45 minutes 37 seconds in the locked build: about 12 seconds
-in native configure, 3 minutes 26 seconds in native TableGen, 1 minute 49
-seconds in Wasm configure, and 40 minutes 6 seconds in the four-way Wasm
-compile/link. LLVM acquisition/extraction plus builder-image acquisition took
-about 37 seconds. The two reproducibility builds already occupy separate
-runners and each CMake build uses all four cores of the current standard
-runner. Moving to a larger pinned runner and repinning build parallelism is the
-next low-risk wall-clock lever; a pinned Ninja graph is the next build-system
-experiment. Removing the one LibTooling use would prune only the small
-Tooling/DependencyScanning closure; a deeper direct-`cc1` refactor reaches more
-files but changes CUDA invocation semantics and is not an iteration-speed
-shortcut.
+Gate 6 generates 36 JIT operation records, 22 Grad platform records, and 53
+runtime requirement definitions from executable contracts. All advertised
+framework operations have typed semantics, CPU behavior, transform/export
+decisions, and explicit backend support or refusal. The only opaque JIT surface
+is the intentional user-authored WGSL kernel boundary; no internal advertised
+operation uses an opaque callback.
 
-The current CMake-stable primary cache is now proved at exact source.
-Migration run `29680686426` completed in 4 minutes 14 seconds and populated the
-new primary key. Exact-primary run `29680831101` completed in 4 minutes 17
-seconds: JavaScript verification took 32 seconds, cache restore took 3 seconds,
-the isolated compile/link took 2 minutes 25 seconds, and raw-Wasm review took 2
-seconds. Exact cache hits skip cache staging and saving. This is diagnostic
-iteration evidence only and cannot satisfy clean-build or reproducibility
-requirements.
+### Remaining production blockers
 
-The first successful uncached clean validation, run `29674887505`, completed in
-39 minutes 29 seconds rather than the earlier 97-minute failed cold diagnostic.
-Its locked build step took 36 minutes 25 seconds and produced the same
-31,307,826-byte exact-interface-conforming module as the reviewed diagnostic
-lane. This historical clean evidence predates the current ABI 1.2 frontend-work
-record. Current-source clean run `29678087663` failed after 46 minutes 25
-seconds because the generated patched `ExprConstant.cpp` retained its upstream
-relative include of `ByteCode/Context.h`, while the external extractor target
-did not include Clang's private `clang/lib/AST` source directory. It produced
-only failure observation at `$.steps[3]` and grants no output, ABI, clean,
-reproducibility, or release authority. The target now attaches the canonical
-private AST directory, and configured-target review requires that exact include
-before compilation. Reproducibility run `29676333678` completed both clean
-builds but its final comparator rejected the newly added per-build ABI-review
-sidecar as undeclared. Commit `eda1ad9d` closes that harness defect by admitting,
-binding, and comparing the canonical sidecar; no reproducibility authority is
-claimed from the failed run.
+Gate 3 cannot become verified until all of the following are independently
+satisfied:
 
-Current-lock clean run `29681845216` at `aca7ee4e` completed successfully in 49
-minutes 2 seconds. Its isolated build took 45 minutes 37 seconds and produced
-the same 31,641,377-byte Wasm and 27,125-byte generated factory as the exact
-warm lane. The current admission boundary accepts its exact closed artifact
-tree, independently reruns the raw-Wasm inspector over the admitted bytes, and
-requires its canonical 1,678,025-byte report to match byte for byte before
-exposing a no-clobber factory candidate. The resulting factory SHA-256 is
-`796a548237420df7f5eca0c0260d3cbe752aeca155d9c7182c6ad0f5491dfb12`.
-Two-clean-build run `29683677087` at `96ad7b16` completed both cache-free
-builds. Build 1 took 48 minutes 33 seconds including a 44-minute-57-second
-locked build; build 2 took 27 minutes 37 seconds including a
-24-minute-51-second locked build. The original v2 comparator failed only
-because the non-distributed linker maps embedded their intentionally distinct
-absolute build roots; their Wasm, factory, native TableGen tools, runtime
-closure, ABI-review sidecar, commands, and environments matched. Reproducibility
-v3 preserves each raw map identity and compares a strict boundary-aware
-projection that substitutes only the six recorded roots, rejects foreign-root
-references and reserved placeholders, and still requires all semantic map
-content to match. Verifier-only run `29685632925` at `c1a79c0d` independently
-admitted the existing immutable artifacts in 1 minute 7 seconds. Its exact
-3,470-byte evidence has SHA-256
-`6c7aebe1376edf0f9a526b55bacd930e7e9e0fd454a95213d97931117548f31a`
-and is package-pinned. This proves extractor-output reproducibility only, not
-headers, provenance, the complete distribution, Worker execution, or release.
+1. The current extractor Wasm and factory match across two clean builds, their
+   canonical reproducibility observation is package-pinned, and the exact
+   package Worker is regenerated and verified.
+2. The promoted Wasm compiles the strict eight-case unchanged C++17/CuTe matrix
+   in the real browser Worker and the resulting candidates converge through
+   shared CPU and required real-WebGPU execution.
+3. A package-controlled production policy admits an externally controlled key
+   and an externally issued exact-build statement for the exact build subject.
+4. An external reviewer approves the exact file-level header-pack map, notices,
+   CUDA index, and upstream evidence; package-generated hashes and license text
+   cannot self-approve redistribution.
+5. The complete distributed output set is reproducible and final release
+   authority is issued without collapsing build, legal, trust, execution, or
+   backend evidence into one claim.
 
-Current-lock two-clean-build run `30047077419` at `c41ab6a8` then produced
-byte-identical 31,653,752-byte Wasm and 27,285-byte factories. The locked build
-steps took 35 minutes 22 seconds and 45 minutes 14 seconds. The Wasm SHA-256 is
-`7950c52270fdac4ea8cae36fbaafbde56cb61720242e10ea5881becf2fe4cfd4`;
-the factory SHA-256 is
-`f64d5239d5c258f44e859834b57e1ea330b7efdf7a405dead3126b53330a5534`.
-The run's overall failure came from an independent native test that lacked
-`<array>`; both clean producer jobs and their strict raw-Wasm reviews
-succeeded. Detached verifier-only run `30049923259` at `2d3cd52b` reused those
-immutable trees, required exact interface conformance, and emitted the exact
-3,470-byte package-pinned reproducibility resource with SHA-256
-`974bcaae92e88522f2a8ed91874c50269fbe0a84ec00823508495e3f034ac047`.
-This authority proves exact extractor-output reproducibility only. It does not
-attest the producer, approve the header distribution, authorize lowering or
-backend execution, or make the release ready.
-
-Every admitted build runs the independent production-scale raw-Wasm inspector
-and uploads its exact report. The original 98-function import surface contained
-92 generated Emscripten imports, including forbidden clock, random, process,
-environment, and ambient-filesystem services. Those capabilities were closed
-inside the module before review. The current observed 75-function surface is
-exactly six `browsergrad_vfs_v1` functions plus 69 hash-pinned generated
-functions: 65 JavaScript-exception/control-flow shims, two bounded
-memory-growth helpers, one stack-overflow trap, and output-only `fd_write`.
-The 29 worker-internal support functions and one fixed 15,304-entry `funcref`
-dispatch table are separately pinned; absent `target_features` metadata is
-advisory because static opcode/section inspection remains authoritative. ABI
-1.14 keeps browser-visible required features separate from the inspector-only
-`bulk-memory-opt` opcode-subset marker.
-The build workflow invokes the reviewer in strict mode after persisting its
-bounded observation, so any mismatch fails both cached validation and clean
-reproducibility before browser execution.
-Production run `29674599138` at `348d7373` completed in 4 minutes 44 seconds and
-reviewed a 31,307,826-byte module with SHA-256
-`b7a5daf6d121c306a2d07b5d3c14c00a664aaa2ff4ae3357a8b389326eeeb06f`, zero
-ABI mismatches, raw-Wasm verification, and exact interface conformance. This
-does not grant Worker or release authority: reproducibility, header-license,
-valid Worker-instantiation, and production execution evidence remain separate
-gates.
-
-Exact-primary run `29680831101` produced a 31,641,378-byte module with SHA-256
-`20cf9ee448af03cd91395eb098e29a9c04be741097f4fb8c7d41fc602b68fc0a`.
-Its first detached comparison exposed 14 additional generated `invoke_*`
-signatures and table growth from 14,549 to 15,166 entries. Review of the exact
-generated factory confirmed the additions remain bounded exception-control-flow
-bridges without ambient capabilities. Runtime ABI 1.8 now hash-pins the 66
-generated imports and table projection; local detached review of those exact
-Wasm bytes passes with zero mismatches. Exact-source run `29681607575` then
-rebuilt the repinned source in 5 minutes, including 3 minutes 19 seconds for the
-isolated build. Its 31,641,377-byte module has SHA-256
-`5fc425bbc051a2f5be588c2acbb164efb5e43f949afb48a373f3ed022c3b8758` and
-passes raw review with zero mismatches. The ABI 1.8 local fast gate passes 30
-files/338 tests in 24.7 seconds on Node 25; the later controller-complete gate
-passed 34 files/381 tests in 25.26 seconds, and the current reproducibility-,
-archive-, extraction-, and header-capable gate passes 50 files/437 tests in
-35.32 seconds.
-
-The harness audit found strong isolation, exact-input closure, bounded logs,
-independent Wasm parsing, and separate authority tiers. It also records real
-maintenance debt: the JavaScript executor sits close to its line-count ratchet,
-native producer files remain large, and several semantic TypeScript modules are
-5,000 to 8,000 lines. Observed uncached locked builds now range from 24 minutes
-51 seconds to 45 minutes 37 seconds, while the cached link loop still spends
-about 29 seconds regenerating Emscripten system
-libraries. Current diagnostic cache selection excludes extractor CMake and
-final-link changes are reapplied by mandatory exact configuration, every
-BrowserGrad-owned object is invalidated, and generated flags are independently
-reviewed before compilation. They therefore do not invalidate reusable
-LLVM/Clang objects; upstream, builder, recipe compiler inputs, platform, and
-selected Clang libraries still do. Local
-entrypoints that clean `dist` are not safe to run concurrently in one worktree;
-the canonical sequential fast command avoids that race. The expanded fast gate
-also prevents runtime-ABI/profile/asset fixture drift, while the native gate
-retains platform-libc signature coverage. Generated upstream source compiled
-from a different directory MUST have every private relative-include root
-represented in the CMake target and independently required by configured-target
-review; the `clang/lib/AST` regression is the first enforced instance. These are explicit follow-on
-optimization and decomposition tasks; they do not weaken the current
-fail-closed boundary or turn cached diagnostics into release evidence.
-
-Cross-runtime CI run `29674595640` confirms the source and harness on Node 20,
-24, and 25. In particular, the Node 24 native gate passes after the BrowserHost
-`rename` and `renameat` shims were made to inherit the selected libc exception
-specification instead of assuming one platform declaration.
-
-An active or failed run is not build, ABI, reproducibility, Worker, browser, or
-release evidence. The Worker-local runtime executes the generated factory and
-C ABI, verifies exact frontend-work/VFS/runtime observations, and emits
-canonical control plus artifact bytes. The package-owned Worker graph is pinned
-at SHA-256
-`c69678649bd3c152b4381cadec5b570a239d9e7ac8c4f302e897cea47d2bab50`
-and 583,032 bytes. Worker controller protocol v2 preserves one bounded,
-sanitized deepest failure detail. Failed C-ABI invocations snapshot exact
-frontend-work, allocator, and VFS state before cleanup without minting Worker
-execution or lowering authority.
-The native producer, Artifact V3 composer, and runtime also emit only fixed
-source-independent first-cause codes through the already-pinned bounded stderr
-capability. Allocator-integrity state retains the first poison reason for the
-module lifetime. These codes do not change the C ABI, contain no caller source,
-path, or rendered diagnostic text, and cannot authorize an artifact or mask
-the fail-closed status.
-The clean diagnostic host path first consumed those bytes through the captured
-platform and package invocation. Chromium compiled unchanged C++17/CuTe source
-in 22.369 seconds and authenticated accepted Artifact V3
-`bg.artifact.cpp-cute-frontend.sha256.4489656ea0da6faef2a37164fd73e36e201e15f4fba640fa88395a46deb81991`.
-The prior package-pinned two-clean-build Wasm repeated that same accepted
-Artifact V3 in Chromium: compilation took 21.133 seconds and total browser
-execution took 24.331 seconds. Its historical strict Worker evidence is
-`bg.cpp.browser-worker-execution.sha256.fbff539a3f5a3ad532e21d24ab07665f1f7b5b434b8aec74d57b7ba5e3b69019`;
-the shared rank-2 candidate is
-`bg.cpp.browser-worker-layout-candidate.sha256.72f3b5933de96569359767f19fdaaed3eaadadc56ca5c297238abcc149c0d34d`.
-The exact 2,886-byte observation is package-pinned at SHA-256
-`bf4d378a92eda260a120da15651deac8d42c7324de490ad1009224a3e7761496`.
-Runtime ABI 1.16 and the exact Worker bundle have since changed. The package
-verifier therefore rejects that prior observation rather than treating it as
-current authority. Successive exact first-cause diagnostics closed declaration
-identity and proved that the remaining rejection was the 8 MiB Artifact V3
-serialization/result ceiling rather than Clang, VFS, Wasm heap growth, or
-allocation. Runtime ABI 1.16 raises only that closed result ceiling to 32 MiB,
-retains the independent 8 MiB normalized-diagnostic cap, and accounts for an
-exact 564 MiB maximum Worker reservation. The fast gate passes 85 files/742
-tests and the required native boundary passes 49 files/263 tests with 9
-explicit platform skips. Exact-source run `30062037424` completed the cached
-isolated build in 4 minutes 23 seconds and produced a 31,839,835-byte Wasm with
-SHA-256
-`c5e40d131c4ab004a1b70fb7a0ba56c2f0379afd65da5add47ec4330e5bc6ae8`.
-That diagnostic module opened 1,168 headers from the five package-matched
-packs and compiled unchanged source SHA-256
-`4134804a9892ed1f0a2778fae305e957b5a981afccf2a096f1585f3b1d4e6f06`
-in 18.774 seconds. The real Worker accepted Artifact V3
-`bg.artifact.cpp-cute-frontend.sha256.9586262a68581d0c1bcddcc8eea50f5499a5fc3cfd2c5eee819cfc3788a745ee`
-and prepared source-derived candidate
-`bg.cpp.browser-worker-view-copy-candidate.sha256.a5c97510863338b8a2fe70f77caf5f1c1129450dbe7af736f3c19d7f598fe432`.
-The current build lock is
-`bg.cpp.browser-build-input-lock.sha256.3e6742cde1fd6fa984d70af6b6b818e901696e666d4490475cd65f00dd53ca9c`.
-Two-clean reproducibility run `30062294974` is the remaining package-promotion
-gate for these exact extractor bytes. Externally trusted producer, header
-redistribution approval, lowering authority, backend execution, and release
-authorities remain separate and false.
-Use the linked implementation ledger
-for exact chronology, failures, and evidence. This checkpoint is informational: the
-remainder of this document continues to define the normative target and does
-not become a mutable status dashboard.
+Gate 7 remains separate future work. Its absence does not weaken the completed
+closed profiles, but no host-graph, dynamic-control, collective, transport, or
+native distributed-systems claim may be inferred from Gates 0 through 6.
 
 ## Purpose
 
