@@ -68,9 +68,9 @@ describe("package-pinned strict browser compile observation", () => {
     expect(CPP_CUTE_BROWSER_STRICT_COMPILE_VERIFIER_WORKER_BUNDLE_SHA256)
       .toBe("06ffb66e4e808e9df030cc3fe2981fa3adddf13d03780680abb091cbcbd4b9eb");
     expect(CPP_CUTE_BROWSER_STRICT_COMPILE_SOURCE_REVISION)
-      .toBe("6691bde4137efd6f0522e5f86f2863e46461549f");
+      .toBe("e9062c20f2a070774743e4d839c275c05df47225");
     expect(CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_SHA256)
-      .toBe("5d60c80c5aec6b2164b80769f800a6fda931efabf43859c7a22db06910f0768d");
+      .toBe("4d8b956050834e550405b15f1c7d52b16927ee3e8d4bc7b7da4035d430edc80a");
     expect(() =>
       requireVerifiedCppCuteBrowserStrictCompileObservation({} as never)
     ).toThrowError(/STRICT-COMPILE-EVIDENCE-UNVERIFIED/u);
