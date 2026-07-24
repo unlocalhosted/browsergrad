@@ -43,8 +43,8 @@ function supportExport(
  */
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
-  version: { major: 1, minor: 16 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.a5ee4863dfe4a551d72f61dbf58033d2b21d101456da7f42f48d668fd82bdb1a",
+  version: { major: 1, minor: 17 },
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.73131ff8285e0e66e4c7d74786b85c5cc565c937acb6923c1b1a91df5ae4137a",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -173,7 +173,7 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
           declaredMaximumRequired: true,
           maximumElementsCeiling: 65_536,
           exactReviewedProjection: [
-            { elementType: "funcref", minimum: 15_304, maximum: 15_304 },
+            { elementType: "funcref", minimum: 15_301, maximum: 15_301 },
           ],
         },
         globals: {

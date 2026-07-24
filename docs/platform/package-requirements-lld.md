@@ -44,7 +44,7 @@ The 90-minute build is no longer an engineering iteration loop:
   tests.
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
   exact build lock, verifies both zero-import Worker bundles, and passes 86
-  files/748 tests. Its Vitest portion takes 13.47 seconds on current `main`.
+  files/748 tests. Its recent Vitest portions take 13–19 seconds.
 - The complete compiler unit suite passes 97 files/1,623 tests in 15.96
   seconds.
 - The required native boundary passes 50 files/267 tests with nine explicit
@@ -75,7 +75,7 @@ build/parity machinery and are not runtime dependencies. The controller:
   producer trust, distribution approval, and release as distinct authorities.
 
 The current extractor build lock is
-`bg.cpp.browser-build-input-lock.sha256.bf3150e48e3bd748a9e7814bfa1c7933f629acdf3463f06fdbea0f53b18dc22c`.
+`bg.cpp.browser-build-input-lock.sha256.5a96def9bac1db052108142dfe4c82e729f4b41f450d459406a4f3c5227daad7`.
 The package factory remains 27,884 bytes with SHA-256
 `2eaa4ce31951cd5eff989679fd8d63c4ae74df0293f8f727209a3ce0f681764d`.
 Before the current reproducibility promotion, the compiler Worker is 584,660
@@ -83,17 +83,17 @@ bytes and the raw-Wasm verifier Worker is 158,314 bytes; both have zero static
 or dynamic imports. Updating package-pinned reproducibility identity requires a
 deterministic Worker re-author and repin.
 
-The package-pinned strict browser observation currently proves unchanged
-C++17/CuTe f32 rank-2, rank-3, positive strided-slice, and read-only broadcast
-source compiling in the real Worker into accepted Artifact V3 candidates. The
-current extractor source additionally recognizes exact `float`, `int`, and
-`unsigned int` 32-bit device ABI facts. Its strict eight-case promotion adds
-rank-1, rank-4, i32 rank-2, and u32 broadcast source cases. Two concurrent
-cache-free builds for exact source revision
-`85778e8f23a81f5ca08fac44a923a91296ea09a5` are active in workflow run
-`30067229885`; until they match and are package-pinned, the new source cases
-remain implementation plus diagnostic evidence rather than promoted package
-authority.
+The prior package-pinned strict browser observation records unchanged C++17/CuTe
+f32 rank-2, rank-3, positive strided-slice, and read-only broadcast execution,
+but now fails closed against the current regenerated Worker. Workflow run
+`30067229885` compiled the expanded extractor, and the exact ABI review rejected
+its exception-dispatch table shrinking from 15,304 to 15,301 entries. Runtime
+ABI 1.17 pins that smaller table with no import, export, memory, tag, or ambient
+authority expansion. The current source additionally recognizes exact `float`,
+`int`, and `unsigned int` 32-bit device ABI facts; the next strict eight-case
+promotion adds rank-1, rank-4, i32 rank-2, and u32 broadcast. Until the new lock
+has matching clean builds and that matrix is rerun, these cases remain
+implementation plus diagnostic evidence rather than promoted package authority.
 
 ### Shared dtype and layout execution
 

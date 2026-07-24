@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.bf3150e48e3bd748a9e7814bfa1c7933f629acdf3463f06fdbea0f53b18dc22c",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.5a96def9bac1db052108142dfe4c82e729f4b41f450d459406a4f3c5227daad7",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -30,8 +30,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
       outputPath: "assets/browsergrad-cpp-cute/runtime-abi-manifest.json",
       mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
       runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
-      manifestId: "bg.cpp.browser-runtime-abi.sha256.a5ee4863dfe4a551d72f61dbf58033d2b21d101456da7f42f48d668fd82bdb1a",
-      resourceSha256: "e41d149bbb65329bd0a9bf0355ddc6fea8eae24070660e26ab5dc743787f6f37",
+      manifestId: "bg.cpp.browser-runtime-abi.sha256.73131ff8285e0e66e4c7d74786b85c5cc565c937acb6923c1b1a91df5ae4137a",
+      resourceSha256: "7370bace059b3790f868a9802197a6b2baed6a9b99c76b4f4f09ecb72b14591a",
       resourceByteLength: "44478",
       byteIdentity: "must-equal-package-canonical-resource",
       authority: "design-reference-only-no-wasm-conformance-worker-or-release-authority",
@@ -253,7 +253,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
         },
       ],
       extractorSource: {
-        sourceSetSha256: "57216ff72658ca39c369a515ea684c640049d3e4042aad43901b8882c01ce01f",
+        sourceSetSha256: "25ec50f4e2e6300978db67692e1fa7a033b0fb77b66fec79cfe933625c61b298",
         hashDomain: "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1",
         files: [
           {
@@ -343,7 +343,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteCompileSession.cpp",
-            sha256: "2f60b03163af6487195ad43aca90e27a329930459db399225a879ccd24006de3",
+            sha256: "42a6a66068ae4e20f407dc84fa444527f0c8eaae0ecfafa08e48a217c7936d0b",
             byteLength: "98093",
           },
           {

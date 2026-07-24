@@ -82,7 +82,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     });
     expect(canonicalCppCuteBrowserRuntimeAbiManifestBytes(prepared)).toEqual(resource);
     const record = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(prepared);
-    expect(record.manifest.version).toEqual({ major: 1, minor: 16 });
+    expect(record.manifest.version).toEqual({ major: 1, minor: 17 });
     expect(record.manifest.body.wasm.cAbiVersion).toBe(65_541);
     expect(await deriveCppCuteBrowserRuntimeAbiManifestId(record.manifest.body)).toBe(
       CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
@@ -508,7 +508,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
         declaredMaximumRequired: true,
         maximumElementsCeiling: 65_536,
         exactReviewedProjection: [
-          { elementType: "funcref", minimum: 15_304, maximum: 15_304 },
+          { elementType: "funcref", minimum: 15_301, maximum: 15_301 },
         ],
       },
       globals: {
@@ -808,7 +808,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
   });
 
   it("rejects unsupported versions before accepting a closed contract", async () => {
-    for (const [field, value] of [["major", 2], ["minor", 17]] as const) {
+    for (const [field, value] of [["major", 2], ["minor", 18]] as const) {
       const resource = mutableResource();
       objectField(resource, "version")[field] = value;
       await expectDecodeError(

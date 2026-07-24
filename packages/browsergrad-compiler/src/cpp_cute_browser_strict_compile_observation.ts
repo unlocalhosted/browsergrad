@@ -237,7 +237,8 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
     ),
     verifyCppCuteBrowserWorkerBundle(),
   ]);
-  if (worker.sha256 !== CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256) {
+  if (String(worker.sha256) !==
+      String(CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256)) {
     mismatch("$.workerBundle", "observation does not bind the current package Worker");
   }
   if (headers.reproducibilityId !==
@@ -400,7 +401,7 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
     loweringAuthorityMinted: false,
     backendExecutionAuthorized: false,
     releaseReady: false,
-  }) as VerifiedCppCuteBrowserStrictCompileObservation;
+  }) as unknown as VerifiedCppCuteBrowserStrictCompileObservation;
   VERIFIED_OBSERVATIONS.add(authority);
   return authority;
 }
