@@ -40,6 +40,7 @@ describe("strict browser compile observation authoring", () => {
     ).toEqual({ check: true, inputPath: undefined });
     expect(
       parseCppCuteBrowserStrictCompileObservationAuthoringArguments([
+        "--",
         "--input=/private/tmp/matrix.json",
       ]),
     ).toEqual({
@@ -49,6 +50,7 @@ describe("strict browser compile observation authoring", () => {
     for (const arguments_ of [
       [],
       ["--input=relative.json"],
+      ["--", "--check", "--input=/tmp/a"],
       ["--input=/tmp/a", "--check"],
       ["--unknown"],
     ]) {

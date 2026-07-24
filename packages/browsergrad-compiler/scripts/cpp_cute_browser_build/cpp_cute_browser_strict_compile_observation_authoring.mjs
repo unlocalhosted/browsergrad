@@ -71,11 +71,12 @@ export class CppCuteBrowserStrictCompileObservationAuthoringError
 export function parseCppCuteBrowserStrictCompileObservationAuthoringArguments(
   argv,
 ) {
-  if (argv.length === 1 && argv[0] === "--check") {
+  const arguments_ = argv[0] === "--" ? argv.slice(1) : argv;
+  if (arguments_.length === 1 && arguments_[0] === "--check") {
     return Object.freeze({ check: true, inputPath: undefined });
   }
-  if (argv.length === 1 && argv[0].startsWith("--input=")) {
-    const inputPath = argv[0].slice("--input=".length);
+  if (arguments_.length === 1 && arguments_[0].startsWith("--input=")) {
+    const inputPath = arguments_[0].slice("--input=".length);
     if (!isAbsolute(inputPath) || inputPath.includes("\0")) {
       invalid(
         "$.arguments[0]",

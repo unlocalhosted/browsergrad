@@ -20,15 +20,21 @@ import {
 import {
   CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE,
 } from "./resources/cpp_cute_browser_strict_compile_observation_v1.js";
+import {
+  CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_SHA256,
+  CPP_CUTE_BROWSER_STRICT_COMPILE_SOURCE_REVISION,
+  CPP_CUTE_BROWSER_STRICT_COMPILE_VERIFIER_WORKER_BUNDLE_SHA256,
+  CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256,
+} from "./resources/cpp_cute_browser_strict_compile_observation_identity_v1.js";
 
-export const CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_SHA256 =
-  "853b0c1007049ba0a22141c481565d90bbe64f333edd163215f050522b6c1d07";
-export const CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_BYTE_LENGTH =
-  13_151;
-export const CPP_CUTE_BROWSER_STRICT_COMPILE_SOURCE_REVISION =
-  "bf337adf89219489ec46b4e72e463bba9cd06268";
-export const CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256 =
-  "8c47f72a003cb1d420c1920d67bee2c3c9482134dda54a08c0ef6d57b9feb0a2";
+export {
+  CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_SHA256,
+  CPP_CUTE_BROWSER_STRICT_COMPILE_SOURCE_REVISION,
+  CPP_CUTE_BROWSER_STRICT_COMPILE_VERIFIER_WORKER_BUNDLE_SHA256,
+  CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256,
+};
 const STRICT_OBSERVATION_HEADER_REPRODUCIBILITY_ID =
   "bg.cpp.browser-header-distribution-reproducibility.sha256.4d4c054fd4c93dbdbdef9581eeac52b037af3425e6a1c7eff8acc585abce1e55";
 const STRICT_OBSERVATION_HEADER_OUTPUT_VERIFICATION_ID =
@@ -63,6 +69,7 @@ const STRICT_OBSERVATION_HEADER_PACKS = Object.freeze([
 const EXPECTED_CASES = Object.freeze([
   Object.freeze({
     caseId: "rank2",
+    dtype: "f32",
     rank: 2,
     sourceSpanElements: "6",
     destinationSpanElements: "6",
@@ -72,6 +79,7 @@ const EXPECTED_CASES = Object.freeze([
   }),
   Object.freeze({
     caseId: "rank3",
+    dtype: "f32",
     rank: 3,
     sourceSpanElements: "24",
     destinationSpanElements: "24",
@@ -80,7 +88,28 @@ const EXPECTED_CASES = Object.freeze([
     virtualPath: "/workspace/src/real-view-copy-rank3.cu",
   }),
   Object.freeze({
+    caseId: "rank1",
+    dtype: "f32",
+    rank: 1,
+    sourceSpanElements: "7",
+    destinationSpanElements: "4",
+    sourceSha256:
+      "7c8fc9f261fab7181e9c25d124f2604d31a48a5c9bc49e043c42f9371a27c1c7",
+    virtualPath: "/workspace/src/real-view-copy-rank1.cu",
+  }),
+  Object.freeze({
+    caseId: "rank4",
+    dtype: "f32",
+    rank: 4,
+    sourceSpanElements: "16",
+    destinationSpanElements: "16",
+    sourceSha256:
+      "28d6094af10254112f25ea717739c836c2c74a4c3f35c7b88dcc45ad60e5a05a",
+    virtualPath: "/workspace/src/real-view-copy-rank4.cu",
+  }),
+  Object.freeze({
     caseId: "strided-slice",
+    dtype: "f32",
     rank: 2,
     sourceSpanElements: "12",
     destinationSpanElements: "6",
@@ -90,12 +119,33 @@ const EXPECTED_CASES = Object.freeze([
   }),
   Object.freeze({
     caseId: "broadcast",
+    dtype: "f32",
     rank: 2,
     sourceSpanElements: "2",
     destinationSpanElements: "6",
     sourceSha256:
       "bfd91bdaac57ef7314570a8de56f26165a7b263593f319d728c53c13ef7c6376",
     virtualPath: "/workspace/src/real-view-copy-broadcast.cu",
+  }),
+  Object.freeze({
+    caseId: "i32-rank2",
+    dtype: "i32",
+    rank: 2,
+    sourceSpanElements: "6",
+    destinationSpanElements: "6",
+    sourceSha256:
+      "88a083b141a5b7a85a9a1f2420873029f891cc1738e74ababe849a58bb839577",
+    virtualPath: "/workspace/src/real-view-copy-i32-rank2.cu",
+  }),
+  Object.freeze({
+    caseId: "u32-broadcast",
+    dtype: "u32",
+    rank: 2,
+    sourceSpanElements: "2",
+    destinationSpanElements: "6",
+    sourceSha256:
+      "c21158f1cb394377b5b8057435bfaad64b515689a8b04391a1bcae643a567536",
+    virtualPath: "/workspace/src/real-view-copy-u32-broadcast.cu",
   }),
 ]);
 
@@ -108,8 +158,24 @@ declare const verifiedCppCuteBrowserStrictCompileObservationBrand:
   unique symbol;
 
 /**
- * Exact package authority for the strict rank-2/rank-3/strided/broadcast
- * browser compilation matrix. It proves source execution and candidate
+ * One exact case admitted from the package-pinned strict browser compilation
+ * matrix. The identities remain observation-only and cannot authorize
+ * lowering or execution.
+ */
+export interface VerifiedCppCuteBrowserStrictCompileCase {
+  readonly caseId: (typeof EXPECTED_CASES)[number]["caseId"];
+  readonly dtype: (typeof EXPECTED_CASES)[number]["dtype"];
+  readonly coordinateRank: number;
+  readonly sourceSpanElements: string;
+  readonly destinationSpanElements: string;
+  readonly evidenceId: string;
+  readonly artifactId: string;
+  readonly candidateId: string;
+}
+
+/**
+ * Exact package authority for the strict eight-case layout and dtype browser
+ * compilation matrix. It proves source execution and semantic-candidate
  * preparation only. Producer trust, licensing, lowering, backend execution,
  * and release stay false.
  */
@@ -125,34 +191,18 @@ export interface VerifiedCppCuteBrowserStrictCompileObservation {
     typeof CPP_CUTE_BROWSER_STRICT_COMPILE_SOURCE_REVISION;
   readonly workerBundleSha256:
     typeof CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256;
-  readonly rank2EvidenceId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[0]["execution"]["evidenceId"];
-  readonly rank3EvidenceId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[1]["execution"]["evidenceId"];
-  readonly stridedSliceEvidenceId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[2]["execution"]["evidenceId"];
-  readonly broadcastEvidenceId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[3]["execution"]["evidenceId"];
-  readonly rank2ArtifactId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[0]["execution"]["artifactId"];
-  readonly rank3ArtifactId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[1]["execution"]["artifactId"];
-  readonly stridedSliceArtifactId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[2]["execution"]["artifactId"];
-  readonly broadcastArtifactId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[3]["execution"]["artifactId"];
-  readonly rank2CandidateId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[0]["semanticCandidate"]["candidateId"];
-  readonly rank3CandidateId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[1]["semanticCandidate"]["candidateId"];
-  readonly stridedSliceCandidateId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[2]["semanticCandidate"]["candidateId"];
-  readonly broadcastCandidateId:
-    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE.cases[3]["semanticCandidate"]["candidateId"];
+  readonly verifierWorkerBundleSha256:
+    typeof CPP_CUTE_BROWSER_STRICT_COMPILE_VERIFIER_WORKER_BUNDLE_SHA256;
+  readonly caseCount: 8;
+  readonly cases: readonly VerifiedCppCuteBrowserStrictCompileCase[];
+  readonly unchangedCpp17CuteRank1Compiled: true;
   readonly unchangedCpp17CuteRank2Compiled: true;
   readonly unchangedCpp17CuteRank3Compiled: true;
+  readonly unchangedCpp17CuteRank4Compiled: true;
   readonly unchangedCpp17CuteStridedSliceCompiled: true;
   readonly unchangedCpp17CuteBroadcastCompiled: true;
+  readonly unchangedCpp17CuteI32Rank2Compiled: true;
+  readonly unchangedCpp17CuteU32BroadcastCompiled: true;
   readonly canonicalGate2LayoutFixturesMatched: true;
   readonly reproducibleWasmMatched: true;
   readonly packagePinnedHeaderPacksMatched: true;
@@ -252,12 +302,26 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
   const resource = CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE;
   if (resource.schema !==
         "browsergrad.compiler.cpp-cute.browser-real-compile-matrix-observation" ||
-      resource.version !== 1 ||
+      resource.version !== 2 ||
       resource.authority !==
         "local-real-browser-worker-matrix-observation-only" ||
       resource.caseCount !== EXPECTED_CASES.length ||
       resource.cases.length !== EXPECTED_CASES.length) {
     mismatch("$", "strict matrix envelope is inconsistent");
+  }
+  if (resource.packageBinding.compilerWorkerSha256 !== worker.sha256 ||
+      resource.packageBinding.compilerWorkerSha256 !==
+        CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256 ||
+      resource.packageBinding.verifierWorkerSha256 !==
+        CPP_CUTE_BROWSER_STRICT_COMPILE_VERIFIER_WORKER_BUNDLE_SHA256 ||
+      resource.packageBinding.matrixSourceRevision !==
+        CPP_CUTE_BROWSER_STRICT_COMPILE_SOURCE_REVISION ||
+      resource.packageBinding.workerBundleAuthority !==
+        "package-owned-zero-import-module-bytes") {
+    mismatch(
+      "$.packageBinding",
+      "strict matrix does not bind the current package Worker pair and source",
+    );
   }
   const headerPackByteLength = strictObservationHeaderPackByteLength();
   const evidenceIds = new Set<string>();
@@ -317,6 +381,7 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
           expected.sourceSpanElements ||
         observed.semanticCandidate.destinationSpanElements !==
           expected.destinationSpanElements ||
+        observed.semanticCandidate.dtype !== expected.dtype ||
         !observed.semanticCandidate.sharedViewCopySemanticsPrepared) {
       mismatch(
         `$.cases[${index}].semanticCandidate`,
@@ -342,10 +407,14 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
       assetSetIds.size !== 1) {
     mismatch("$.cases", "strict matrix identities are reused or divergent");
   }
-  if (!resource.claims.unchangedCpp17CuteRank2Compiled ||
+  if (!resource.claims.unchangedCpp17CuteRank1Compiled ||
+      !resource.claims.unchangedCpp17CuteRank2Compiled ||
       !resource.claims.unchangedCpp17CuteRank3Compiled ||
+      !resource.claims.unchangedCpp17CuteRank4Compiled ||
       !resource.claims.unchangedCpp17CuteStridedSliceCompiled ||
       !resource.claims.unchangedCpp17CuteBroadcastCompiled ||
+      !resource.claims.unchangedCpp17CuteI32Rank2Compiled ||
+      !resource.claims.unchangedCpp17CuteU32BroadcastCompiled ||
       !resource.claims.canonicalGate2LayoutFixturesMatched ||
       !resource.claims.packagePinnedHeaderPacksMatched ||
       !resource.claims.pinnedReproducibleWasmMatched ||
@@ -359,10 +428,17 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
     mismatch("$.claims", "strict matrix claims are inconsistent");
   }
 
-  const rank2 = resource.cases[0];
-  const rank3 = resource.cases[1];
-  const stridedSlice = resource.cases[2];
-  const broadcast = resource.cases[3];
+  const cases = Object.freeze(resource.cases.map((observed) => Object.freeze({
+    caseId: observed.source.caseId,
+    dtype: observed.semanticCandidate.dtype,
+    coordinateRank: observed.semanticCandidate.sourceCoordinateRank,
+    sourceSpanElements: observed.semanticCandidate.sourceSpanElements,
+    destinationSpanElements:
+      observed.semanticCandidate.destinationSpanElements,
+    evidenceId: observed.execution.evidenceId,
+    artifactId: observed.execution.artifactId,
+    candidateId: observed.semanticCandidate.candidateId,
+  })));
   const authority = Object.freeze({
     authority:
       "package-pinned-strict-browser-compile-matrix-observation-only",
@@ -373,22 +449,18 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
     sourceRevision: CPP_CUTE_BROWSER_STRICT_COMPILE_SOURCE_REVISION,
     workerBundleSha256:
       CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256,
-    rank2EvidenceId: rank2.execution.evidenceId,
-    rank3EvidenceId: rank3.execution.evidenceId,
-    stridedSliceEvidenceId: stridedSlice.execution.evidenceId,
-    broadcastEvidenceId: broadcast.execution.evidenceId,
-    rank2ArtifactId: rank2.execution.artifactId,
-    rank3ArtifactId: rank3.execution.artifactId,
-    stridedSliceArtifactId: stridedSlice.execution.artifactId,
-    broadcastArtifactId: broadcast.execution.artifactId,
-    rank2CandidateId: rank2.semanticCandidate.candidateId,
-    rank3CandidateId: rank3.semanticCandidate.candidateId,
-    stridedSliceCandidateId: stridedSlice.semanticCandidate.candidateId,
-    broadcastCandidateId: broadcast.semanticCandidate.candidateId,
+    verifierWorkerBundleSha256:
+      CPP_CUTE_BROWSER_STRICT_COMPILE_VERIFIER_WORKER_BUNDLE_SHA256,
+    caseCount: 8,
+    cases,
+    unchangedCpp17CuteRank1Compiled: true,
     unchangedCpp17CuteRank2Compiled: true,
     unchangedCpp17CuteRank3Compiled: true,
+    unchangedCpp17CuteRank4Compiled: true,
     unchangedCpp17CuteStridedSliceCompiled: true,
     unchangedCpp17CuteBroadcastCompiled: true,
+    unchangedCpp17CuteI32Rank2Compiled: true,
+    unchangedCpp17CuteU32BroadcastCompiled: true,
     canonicalGate2LayoutFixturesMatched: true,
     reproducibleWasmMatched: true,
     packagePinnedHeaderPacksMatched: true,
