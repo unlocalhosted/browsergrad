@@ -170,6 +170,7 @@ int main() {
   BG_CHECK(accepted_work.completed_semantic_passes == 2U);
 
   constexpr std::string_view view_copy_header_source =
+      "#define __device__ __attribute__((device))\n"
       "namespace cute {\n"
       "template <auto Value> struct C {};\n"
       "template <class... Values> struct tuple {};\n"
@@ -192,9 +193,7 @@ int main() {
       "using DestinationLayout = cute::Layout<\n"
       "  cute::Shape<cute::C<2>, cute::C<3>>,\n"
       "  cute::Stride<cute::C<3>, cute::C<1>>>;\n"
-      "__attribute__((device))\n"
-      "void copy_views(const float* source, float* destination);\n"
-      "__attribute__((device))\n"
+      "__device__\n"
       "void copy_views(const float* source, float* destination) {\n"
       "  auto source_tensor = cute::make_tensor(source, SourceLayout{});\n"
       "  auto destination_tensor =\n"
@@ -328,7 +327,7 @@ int main() {
   spoofed_header.erase(upstream_copy_begin, upstream_copy.size());
   std::string spoofed_copy_source(view_copy_source);
   constexpr std::string_view selected_function_marker =
-      "__attribute__((device))\n"
+      "__device__\n"
       "void copy_views";
   const std::size_t selected_function_begin =
       spoofed_copy_source.find(selected_function_marker);

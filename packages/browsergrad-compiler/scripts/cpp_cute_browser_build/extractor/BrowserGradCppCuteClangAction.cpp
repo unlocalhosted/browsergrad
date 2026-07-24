@@ -541,9 +541,9 @@ class SemanticTraceVisitor final
                     std::uint32_t& end_byte) const {
     const clang::SourceManager& source_manager = context_.getSourceManager();
     const clang::SourceLocation begin =
-        source_manager.getSpellingLoc(range.getBegin());
+        source_manager.getExpansionLoc(range.getBegin());
     const clang::SourceLocation end_token =
-        source_manager.getSpellingLoc(range.getEnd());
+        source_manager.getExpansionLoc(range.getEnd());
     if (begin.isInvalid() || end_token.isInvalid() ||
         source_manager.getFilename(begin) !=
             llvm::StringRef(anchor_.virtual_path) ||
