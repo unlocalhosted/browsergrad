@@ -7,14 +7,17 @@ import type { ViewCopyOperation } from "./model.js";
 export const INITIAL_PORTABLE_VIEW_COPY_PROFILE = "browsergrad.view-copy.positive-affine-f32@1";
 export const PORTABLE_WORD32_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.positive-affine-word32@1";
+export const PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.positive-affine-rank1-rank4-word32@1";
 
 export type PortableViewCopyDType = "f32" | "i32" | "u32";
 
 export interface PortableViewCopyProfile {
   readonly profileId:
     | typeof INITIAL_PORTABLE_VIEW_COPY_PROFILE
-    | typeof PORTABLE_WORD32_VIEW_COPY_PROFILE;
-  readonly rank: 2 | 3;
+    | typeof PORTABLE_WORD32_VIEW_COPY_PROFILE
+    | typeof PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE;
+  readonly rank: 1 | 2 | 3 | 4;
   readonly dtype: PortableViewCopyDType;
 }
 
@@ -43,8 +46,13 @@ export function verifyInitialPortableViewCopyProfile(
       "portable integer view-copy requires reject-on-invalid-source",
     );
   }
-  if ((source.logicalShape.length !== 2 && source.logicalShape.length !== 3) || destination.logicalShape.length !== source.logicalShape.length) {
-    unsupported("$.operation", "initial portable view-copy profile requires equal rank-2 or rank-3 views");
+  const rank = source.logicalShape.length;
+  if ((rank < 1 || rank > 4) ||
+      destination.logicalShape.length !== rank) {
+    unsupported(
+      "$.operation",
+      "portable view-copy requires equal source and destination ranks in [1, 4]",
+    );
   }
   if (source.memorySpace.kind !== "global" || destination.memorySpace.kind !== "global") {
     unsupported("$.operation", "initial portable view-copy profile requires global-memory allocations");
@@ -63,10 +71,12 @@ export function verifyInitialPortableViewCopyProfile(
   requirePositiveAffine(destinationMap.location, symbolMinima, "$.operation.destination.indexMap.location");
   requirePortablePredicate(destinationMap.inBounds, symbolMinima, "$.operation.destination.indexMap.inBounds");
   return Object.freeze({
-    profileId: operation.dtype === "f32"
-      ? INITIAL_PORTABLE_VIEW_COPY_PROFILE
-      : PORTABLE_WORD32_VIEW_COPY_PROFILE,
-    rank: source.logicalShape.length as 2 | 3,
+    profileId: rank === 1 || rank === 4
+      ? PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE
+      : operation.dtype === "f32"
+        ? INITIAL_PORTABLE_VIEW_COPY_PROFILE
+        : PORTABLE_WORD32_VIEW_COPY_PROFILE,
+    rank: rank as 1 | 2 | 3 | 4,
     dtype: operation.dtype,
   });
 }

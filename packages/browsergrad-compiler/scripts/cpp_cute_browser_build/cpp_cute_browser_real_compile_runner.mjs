@@ -27,6 +27,8 @@ const MAX_CAPTURED_OUTPUT_BYTES = 8 * 1024 * 1024;
 const REAL_COMPILE_CASE_IDS = new Set([
   "rank2",
   "rank3",
+  "rank1",
+  "rank4",
   "strided-slice",
   "broadcast",
   "i32-rank2",
@@ -381,7 +383,7 @@ function exactInput(value) {
   if (typeof caseId !== "string" || !REAL_COMPILE_CASE_IDS.has(caseId)) {
     invalid(
       "$.caseId",
-      "expected rank2, rank3, strided-slice, broadcast, i32-rank2, or u32-broadcast",
+      "expected rank2, rank3, rank1, rank4, strided-slice, broadcast, i32-rank2, or u32-broadcast",
     );
   }
   return {

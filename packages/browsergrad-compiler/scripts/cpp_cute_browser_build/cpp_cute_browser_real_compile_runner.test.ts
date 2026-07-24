@@ -48,7 +48,7 @@ describe("real browser C++/CuTe compile runner", () => {
     await expect(preflightCppCuteBrowserRealCompileInputs({
       wasmPath: "/clang-extractor.wasm",
       packRoot: "/packs",
-      caseId: "rank4",
+      caseId: "rank5",
     } as never)).rejects.toMatchObject({
       code: "BG-COMPILER-CPP-CUTE-BROWSER-REAL-COMPILE-RUNNER",
       path: "$.caseId",

@@ -1,6 +1,7 @@
 import {
   kernelArtifactPayload,
   prepareViewCopyCpu,
+  prepareViewCopySpecialization,
 } from "@unlocalhosted/browsergrad-semantic-core/kernel";
 import { layoutArtifactPayload } from "@unlocalhosted/browsergrad-semantic-core/layout";
 import { parseWireU64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
@@ -20,6 +21,7 @@ import {
 import {
   mutateCppCutePayloadToBroadcastViewCopy,
   mutateCppCutePayloadToI32ViewCopy,
+  mutateCppCutePayloadToRank1ViewCopy,
   mutateCppCutePayloadToViewCopy,
   mutateCppCutePayloadToRank3ViewCopy,
   mutateCppCutePayloadToRank4ViewCopy,
@@ -282,17 +284,59 @@ describe("authorized C++/CuTe view-copy lowering", () => {
     }
   });
 
-  it("rejects an otherwise valid positive-affine rank-4 view-copy artifact", async () => {
-    const rank4 = await createAuthorizedCppCuteProvenanceFixture({
-      mutatePayload: mutateCppCutePayloadToRank4ViewCopy,
-    });
-    await expect(lowerAuthorizedCppCuteViewCopyEntry(
-      rank4.authorization,
-      requestFor(rank4),
-    )).rejects.toMatchObject({
-      code: "BG-COMPILER-CPP-CUTE-VIEW-COPY-UNSUPPORTED-LAYOUT",
-      path: "$.artifact.entry",
-    });
+  it("executes source-derived rank-1 and rank-4 layouts through the edge-rank profile", async () => {
+    const cases = [
+      {
+        mutatePayload: mutateCppCutePayloadToRank1ViewCopy,
+        sourceWords: Array.from({ length: 7 }, (_, index) => index + 1),
+        expected: [1, 3, 5, 7],
+      },
+      {
+        mutatePayload: mutateCppCutePayloadToRank4ViewCopy,
+        sourceWords: Array.from({ length: 16 }, (_, index) => index + 1),
+        expected: [1, 9, 5, 13, 3, 11, 7, 15, 2, 10, 6, 14, 4, 12, 8, 16],
+      },
+    ] as const;
+    for (const testCase of cases) {
+      const candidate = await createAuthorizedCppCuteProvenanceFixture({
+        mutatePayload: testCase.mutatePayload,
+      });
+      const byteLength = testCase.sourceWords.length * 4;
+      const artifacts = await lowerAuthorizedCppCuteViewCopyEntry(
+        candidate.authorization,
+        {
+          ...requestFor(candidate),
+          sourceAllocationByteLength: wire(byteLength),
+          destinationAllocationByteLength: wire(
+            testCase.expected.length * 4,
+          ),
+          sourceByteOffset: wire(0),
+          destinationByteOffset: wire(0),
+        },
+      );
+      const cpu = await prepareViewCopyCpu(artifacts.layout, artifacts.kernel, {
+        operationId: artifacts.operationId,
+      });
+      const specialization = await prepareViewCopySpecialization(
+        artifacts.layout,
+        artifacts.kernel,
+        { operationId: artifacts.operationId },
+      );
+      const source = Uint32Array.from(testCase.sourceWords);
+      const destination = new Uint32Array(testCase.expected.length);
+      cpu.execute({
+        source: new Uint8Array(source.buffer),
+        destination: new Uint8Array(destination.buffer),
+      });
+      expect(specialization.portableProfile).toMatchObject({
+        profileId:
+          "browsergrad.view-copy.positive-affine-rank1-rank4-word32@1",
+        rank: testCase.mutatePayload === mutateCppCutePayloadToRank1ViewCopy
+          ? 1
+          : 4,
+      });
+      expect([...destination]).toEqual(testCase.expected);
+    }
   });
 
   it("keeps authorization opaque and refuses caller semantic IDs or implicit storage capacity", async () => {

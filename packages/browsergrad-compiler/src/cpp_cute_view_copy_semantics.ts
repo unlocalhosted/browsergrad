@@ -342,10 +342,10 @@ function validateProfile(
     "$.artifact.destination.engine",
   );
   if (sourceLayout.rank !== destinationLayout.rank ||
-      (sourceLayout.rank !== 2 && sourceLayout.rank !== 3)) {
+      sourceLayout.rank < 1 || sourceLayout.rank > 4) {
     unsupportedLayout(
       "$.artifact.entry",
-      "view-copy lowering requires equal source and destination ranks of exactly 2 or 3",
+      "view-copy lowering requires equal source and destination ranks in [1, 4]",
     );
   }
   if (intrinsic.operation.kind !== "copy" || intrinsic.operation.sourceSpace !== "global" ||
@@ -398,7 +398,7 @@ function staticAffineSpanElements(
   path: string,
   allowBroadcast: boolean,
 ): bigint {
-  if (expectedRank !== 2 && expectedRank !== 3) {
+  if (expectedRank < 1 || expectedRank > 4) {
     inconsistent(path, "unsupported view-copy rank reached affine span projection");
   }
   if (layout.kind !== "strided" ||

@@ -19,6 +19,8 @@ interface ExternalInputs {
   readonly caseId:
     | "rank2"
     | "rank3"
+    | "rank1"
+    | "rank4"
     | "strided-slice"
     | "broadcast"
     | "i32-rank2"
@@ -120,6 +122,8 @@ function parseInputs(value: string | undefined): ExternalInputs {
       parsed.authority !== "local-exact-byte-preflight-only" ||
       (parsed.caseId !== "rank2" &&
        parsed.caseId !== "rank3" &&
+       parsed.caseId !== "rank1" &&
+       parsed.caseId !== "rank4" &&
        parsed.caseId !== "strided-slice" &&
        parsed.caseId !== "broadcast" &&
        parsed.caseId !== "i32-rank2" &&

@@ -56,6 +56,8 @@ const COMPARISON_POLICY_ID = "browsergrad.comparison.bit-exact-u32-complete-dest
 const PLANNED_CASE_IDS = Object.freeze([
   "rank2-transpose",
   "rank3-permutation",
+  "rank1-positive-stride",
+  "rank4-permutation",
   "positive-strided-slice",
   "read-only-broadcast",
   "byte-map-nonzero-offsets",
@@ -366,6 +368,35 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     sequenceWords(24, 0x3f000000),
   );
 
+  const rank1PositiveStride = await makeCase(
+    "rank1-positive-stride",
+    {
+      shape: dims("4"),
+      sourceLocation: multiply(coordinate(0), indexConstant("2")),
+      sourceBytes: dimConstant("28"),
+      destinationBytes: dimConstant("16"),
+    },
+    { kind: "reject" },
+    sequenceWords(7, 0x40000000),
+  );
+
+  const rank4Permutation = await makeCase(
+    "rank4-permutation",
+    {
+      shape: dims("2", "2", "2", "2"),
+      sourceLocation: add(
+        coordinate(0),
+        multiply(coordinate(1), indexConstant("2")),
+        multiply(coordinate(2), indexConstant("4")),
+        multiply(coordinate(3), indexConstant("8")),
+      ),
+      sourceBytes: dimConstant("64"),
+      destinationBytes: dimConstant("64"),
+    },
+    { kind: "reject" },
+    sequenceWords(16, 0x41000000),
+  );
+
   const sliceShape = dims("2", "2");
   const stridedSlice = await makeCase(
     "positive-strided-slice",
@@ -513,6 +544,8 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
   return Object.freeze([
     transpose,
     rank3Permutation,
+    rank1PositiveStride,
+    rank4Permutation,
     stridedSlice,
     broadcast,
     byteOffsets,

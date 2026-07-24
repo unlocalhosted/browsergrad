@@ -212,6 +212,9 @@ function emitCoordinates(shape: readonly bigint[]): readonly string[] {
   if (shape.some((extent) => extent === 0n)) {
     return shape.map((_, axis) => `  let coordinate_${axis}: i32 = 0i;`);
   }
+  if (shape.length === 1) {
+    return ["  let coordinate_0: i32 = i32(linear_index);"];
+  }
   if (shape.length === 2) {
     const inner = asU32(shape[1] as bigint, "$.shape[1]");
     return [
@@ -230,7 +233,28 @@ function emitCoordinates(shape: readonly bigint[]): readonly string[] {
       `  let coordinate_2: i32 = i32(plane_remainder % ${inner}u);`,
     ];
   }
-  return unsupported("$.shape", "WGSL view-copy supports rank 2 or 3 only");
+  if (shape.length === 4) {
+    const second = asU32(shape[1] as bigint, "$.shape[1]");
+    const third = asU32(shape[2] as bigint, "$.shape[2]");
+    const fourth = asU32(shape[3] as bigint, "$.shape[3]");
+    const innerPlane = asU32(
+      BigInt(third) * BigInt(fourth),
+      "$.shape[2:4]",
+    );
+    const outerPlane = asU32(
+      BigInt(second) * BigInt(innerPlane),
+      "$.shape[1:4]",
+    );
+    return [
+      `  let coordinate_0: i32 = i32(linear_index / ${outerPlane}u);`,
+      `  let outer_remainder: u32 = linear_index % ${outerPlane}u;`,
+      `  let coordinate_1: i32 = i32(outer_remainder / ${innerPlane}u);`,
+      `  let inner_remainder: u32 = outer_remainder % ${innerPlane}u;`,
+      `  let coordinate_2: i32 = i32(inner_remainder / ${fourth}u);`,
+      `  let coordinate_3: i32 = i32(inner_remainder % ${fourth}u);`,
+    ];
+  }
+  return unsupported("$.shape", "WGSL view-copy supports ranks in [1, 4] only");
 }
 
 function requiredIndexMap(layout: LayoutArtifactPayloadV1, indexMapId: string, role: string): IndexMap {

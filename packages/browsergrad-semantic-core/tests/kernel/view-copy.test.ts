@@ -285,6 +285,55 @@ describe("verified materializing view-copy", () => {
     }
   });
 
+  it("executes rank-1 and rank-4 positive-affine views under the edge-rank profile", async () => {
+    const cases = [
+      {
+        layout: {
+          shape: ["4"],
+          sourceLocation: mul(c(0), k("2")),
+          sourceBytes: "28",
+          destinationBytes: "16",
+        },
+        input: [1, 2, 3, 4, 5, 6, 7],
+        expected: [1, 3, 5, 7],
+      },
+      {
+        layout: {
+          shape: ["2", "2", "2", "2"],
+          sourceLocation: add(
+            c(0),
+            mul(c(1), k("2")),
+            mul(c(2), k("4")),
+            mul(c(3), k("8")),
+          ),
+          sourceBytes: "64",
+          destinationBytes: "64",
+        },
+        input: Array.from({ length: 16 }, (_, index) => index + 1),
+        expected: [1, 9, 5, 13, 3, 11, 7, 15, 2, 10, 6, 14, 4, 12, 8, 16],
+      },
+    ] as const;
+    for (const testCase of cases) {
+      const layout = await verifiedLayout(testCase.layout);
+      const kernel = await verifiedKernel(layout);
+      const plan = await prepare(layout, kernel);
+      const specialization = await prepareViewCopySpecialization(
+        layout,
+        kernel,
+        { operationId: plan.operationId },
+      );
+      const destination = new Uint8Array(Number(BigInt(testCase.layout.destinationBytes)));
+      plan.execute({ source: f32Bytes(testCase.input), destination });
+      expect(specialization.portableProfile).toMatchObject({
+        profileId:
+          "browsergrad.view-copy.positive-affine-rank1-rank4-word32@1",
+        rank: testCase.layout.shape.length,
+        dtype: "f32",
+      });
+      expect(f32Values(destination)).toEqual(testCase.expected);
+    }
+  });
+
   it("guards padded reads and preserves exact f32 fill bits", async () => {
     const predicate: PredicateExpr = {
       kind: "and",
@@ -397,8 +446,15 @@ describe("verified materializing view-copy", () => {
     });
     expect((await diagnostic(() => verifiedKernel(aliasedLayout))).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.aliasConflict);
 
-    const rankOne = await verifiedLayout({ shape: ["4"], sourceLocation: c(0), sourceBytes: "16", destinationBytes: "16" });
-    expect((await diagnostic(async () => prepare(rankOne, await verifiedKernel(rankOne)))).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
+    const rankFive = await verifiedLayout({
+      shape: ["1", "1", "1", "1", "1"],
+      sourceLocation: rowMajorLocation(["1", "1", "1", "1", "1"]),
+      sourceBytes: "4",
+      destinationBytes: "4",
+    });
+    expect((await diagnostic(async () =>
+      prepare(rankFive, await verifiedKernel(rankFive))
+    )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
 
     const hostSource = await verifiedLayout({
       shape: ["2", "2"], sourceLocation: rowMajorLocation(["2", "2"]), sourceBytes: "16", destinationBytes: "16", sourceSpace: { kind: "host" },

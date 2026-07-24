@@ -89,6 +89,18 @@ export async function mutateCppCutePayloadToRank3ViewCopy(
   });
 }
 
+/** Exact positive-stride rank-1 view-copy fixture. */
+export async function mutateCppCutePayloadToRank1ViewCopy(
+  payload: CppCuteFrontendPayloadV3,
+): Promise<void> {
+  await mutateCppCutePayloadToViewCopy(payload);
+  mutateCppCuteViewCopyFlatLayouts(payload, {
+    shape: [4],
+    sourceStrides: [2],
+    destinationStrides: [1],
+  });
+}
+
 /** Static source broadcast over the leading mode with one dense destination. */
 export async function mutateCppCutePayloadToBroadcastViewCopy(
   payload: CppCuteFrontendPayloadV3,
@@ -137,7 +149,7 @@ export async function mutateCppCutePayloadToU32ViewCopy(
   });
 }
 
-/** Valid producer artifact used to prove that lowering rejects ranks above its explicit profile. */
+/** Exact positive-affine rank-4 axis-reversal fixture. */
 export async function mutateCppCutePayloadToRank4ViewCopy(
   payload: CppCuteFrontendPayloadV3,
 ): Promise<void> {

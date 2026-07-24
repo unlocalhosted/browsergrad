@@ -8,6 +8,8 @@ export interface CppCuteBrowserRealCompileRunnerInput {
   readonly caseId?:
     | "rank2"
     | "rank3"
+    | "rank1"
+    | "rank4"
     | "strided-slice"
     | "broadcast"
     | "i32-rank2"
@@ -29,6 +31,8 @@ export interface CppCuteBrowserRealCompilePreflight {
   readonly caseId:
     | "rank2"
     | "rank3"
+    | "rank1"
+    | "rank4"
     | "strided-slice"
     | "broadcast"
     | "i32-rank2"

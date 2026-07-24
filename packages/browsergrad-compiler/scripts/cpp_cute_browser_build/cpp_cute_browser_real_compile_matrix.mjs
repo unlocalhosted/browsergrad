@@ -10,6 +10,8 @@ const ERROR_CODE =
 const CASE_PROFILES = Object.freeze([
   Object.freeze({ caseId: "rank2", rank: 2, dtype: "f32" }),
   Object.freeze({ caseId: "rank3", rank: 3, dtype: "f32" }),
+  Object.freeze({ caseId: "rank1", rank: 1, dtype: "f32" }),
+  Object.freeze({ caseId: "rank4", rank: 4, dtype: "f32" }),
   Object.freeze({ caseId: "strided-slice", rank: 2, dtype: "f32" }),
   Object.freeze({ caseId: "broadcast", rank: 2, dtype: "f32" }),
   Object.freeze({ caseId: "i32-rank2", rank: 2, dtype: "i32" }),
@@ -89,7 +91,7 @@ export function prepareCppCuteBrowserRealCompileMatrix(observations) {
       observations.length !== CASE_PROFILES.length) {
     invalid(
       "$.observations",
-      "expected exactly rank2, rank3, strided-slice, broadcast, i32-rank2, and u32-broadcast observations",
+      "expected exactly rank2, rank3, rank1, rank4, strided-slice, broadcast, i32-rank2, and u32-broadcast observations",
     );
   }
   const cases = CASE_PROFILES.map(({ caseId, rank, dtype }, index) => {
@@ -161,6 +163,8 @@ export function prepareCppCuteBrowserRealCompileMatrix(observations) {
     claims: Object.freeze({
       unchangedCpp17CuteRank2Compiled: true,
       unchangedCpp17CuteRank3Compiled: true,
+      unchangedCpp17CuteRank1Compiled: true,
+      unchangedCpp17CuteRank4Compiled: true,
       unchangedCpp17CuteStridedSliceCompiled: true,
       unchangedCpp17CuteBroadcastCompiled: true,
       unchangedCpp17CuteI32Rank2Compiled: true,

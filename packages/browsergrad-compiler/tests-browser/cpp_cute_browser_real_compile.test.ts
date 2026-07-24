@@ -108,6 +108,8 @@ import {
 type RealCompileCaseId =
   | "rank2"
   | "rank3"
+  | "rank1"
+  | "rank4"
   | "strided-slice"
   | "broadcast"
   | "i32-rank2"
@@ -187,6 +189,52 @@ const REAL_COMPILE_CASES = Object.freeze({
       "using DestinationLayout = cute::Layout<",
       "  cute::Shape<cute::Int<2>, cute::Int<3>, cute::Int<4>>,",
       "  cute::Stride<cute::Int<12>, cute::Int<4>, cute::Int<1>>>;",
+      "__device__ void copy_views(const float* source, float* destination) {",
+      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
+      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
+      "  cute::copy(source_tensor, destination_tensor);",
+      "}",
+      "",
+    ].join("\n"),
+  }),
+  rank1: Object.freeze({
+    caseId: "rank1" as const,
+    virtualPath: "/workspace/src/real-view-copy-rank1.cu",
+    coordinateRank: 1,
+    dtype: "f32" as const,
+    sourceSpanElements: 7n,
+    destinationSpanElements: 4n,
+    source: [
+      "#include <cute/tensor.hpp>",
+      "using SourceLayout = cute::Layout<",
+      "  cute::Shape<cute::Int<4>>,",
+      "  cute::Stride<cute::Int<2>>>;",
+      "using DestinationLayout = cute::Layout<",
+      "  cute::Shape<cute::Int<4>>,",
+      "  cute::Stride<cute::Int<1>>>;",
+      "__device__ void copy_views(const float* source, float* destination) {",
+      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
+      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
+      "  cute::copy(source_tensor, destination_tensor);",
+      "}",
+      "",
+    ].join("\n"),
+  }),
+  rank4: Object.freeze({
+    caseId: "rank4" as const,
+    virtualPath: "/workspace/src/real-view-copy-rank4.cu",
+    coordinateRank: 4,
+    dtype: "f32" as const,
+    sourceSpanElements: 16n,
+    destinationSpanElements: 16n,
+    source: [
+      "#include <cute/tensor.hpp>",
+      "using SourceLayout = cute::Layout<",
+      "  cute::Shape<cute::Int<2>, cute::Int<2>, cute::Int<2>, cute::Int<2>>,",
+      "  cute::Stride<cute::Int<1>, cute::Int<2>, cute::Int<4>, cute::Int<8>>>;",
+      "using DestinationLayout = cute::Layout<",
+      "  cute::Shape<cute::Int<2>, cute::Int<2>, cute::Int<2>, cute::Int<2>>,",
+      "  cute::Stride<cute::Int<8>, cute::Int<4>, cute::Int<2>, cute::Int<1>>>;",
       "__device__ void copy_views(const float* source, float* destination) {",
       "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
       "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
@@ -293,6 +341,58 @@ const REAL_COMPILE_CASE =
 const CONVERGENCE_FIXTURES = Object.freeze({
   rank2: CPP_CUTE_BROWSER_VIEW_COPY_RANK2_CONVERGENCE_FIXTURE,
   rank3: CPP_CUTE_BROWSER_VIEW_COPY_RANK3_CONVERGENCE_FIXTURE,
+  rank1: Object.freeze({
+    construction: Object.freeze({
+      source: Object.freeze({
+        layout: Object.freeze({
+          shape: Object.freeze([{ value: "4" }]),
+          strides: Object.freeze([{ value: "2" }]),
+        }),
+      }),
+      destination: Object.freeze({
+        layout: Object.freeze({
+          shape: Object.freeze([{ value: "4" }]),
+          strides: Object.freeze([{ value: "1" }]),
+        }),
+      }),
+    }),
+  }),
+  rank4: Object.freeze({
+    construction: Object.freeze({
+      source: Object.freeze({
+        layout: Object.freeze({
+          shape: Object.freeze([
+            { value: "2" },
+            { value: "2" },
+            { value: "2" },
+            { value: "2" },
+          ]),
+          strides: Object.freeze([
+            { value: "1" },
+            { value: "2" },
+            { value: "4" },
+            { value: "8" },
+          ]),
+        }),
+      }),
+      destination: Object.freeze({
+        layout: Object.freeze({
+          shape: Object.freeze([
+            { value: "2" },
+            { value: "2" },
+            { value: "2" },
+            { value: "2" },
+          ]),
+          strides: Object.freeze([
+            { value: "8" },
+            { value: "4" },
+            { value: "2" },
+            { value: "1" },
+          ]),
+        }),
+      }),
+    }),
+  }),
   "strided-slice":
     CPP_CUTE_BROWSER_VIEW_COPY_STRIDED_SLICE_CONVERGENCE_FIXTURE,
   broadcast: CPP_CUTE_BROWSER_VIEW_COPY_BROADCAST_CONVERGENCE_FIXTURE,
