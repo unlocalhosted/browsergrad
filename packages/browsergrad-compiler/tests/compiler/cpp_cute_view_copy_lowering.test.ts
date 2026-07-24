@@ -18,16 +18,21 @@ import {
   CPP_CUTE_FIXTURE_TEMPLATE_DECLARATION_ID,
 } from "./support/cpp_cute_frontend_fixtures.js";
 import {
+  mutateCppCutePayloadToBroadcastViewCopy,
   mutateCppCutePayloadToViewCopy,
   mutateCppCutePayloadToRank3ViewCopy,
   mutateCppCutePayloadToRank4ViewCopy,
+  mutateCppCutePayloadToStridedSliceViewCopy,
 } from "./support/cpp_cute_frontend_view_copy_fixtures.js";
 import {
   createAuthorizedCppCuteProvenanceFixture,
   type AuthorizedCppCuteProvenanceFixture,
 } from "./support/cpp_cute_provenance_fixtures.js";
-import { CPP_CUTE_BROWSER_VIEW_COPY_RANK3_CONVERGENCE_FIXTURE as rank3Convergence } from
-  "../fixtures/cpp_cute_browser_view_copy_convergence.js";
+import {
+  CPP_CUTE_BROWSER_VIEW_COPY_BROADCAST_CONVERGENCE_FIXTURE as broadcastConvergence,
+  CPP_CUTE_BROWSER_VIEW_COPY_RANK3_CONVERGENCE_FIXTURE as rank3Convergence,
+  CPP_CUTE_BROWSER_VIEW_COPY_STRIDED_SLICE_CONVERGENCE_FIXTURE as stridedSliceConvergence,
+} from "../fixtures/cpp_cute_browser_view_copy_convergence.js";
 
 const wire = (value: number) => parseWireU64(String(value));
 
@@ -168,6 +173,65 @@ describe("authorized C++/CuTe view-copy lowering", () => {
     expect(trace).toMatchObject(rank3Convergence.expected.cpuTrace);
   });
 
+  it("executes source strided-slice and read-only broadcast layouts through the same view ABI", async () => {
+    const cases = [
+      {
+        mutatePayload: mutateCppCutePayloadToStridedSliceViewCopy,
+        convergence: stridedSliceConvergence,
+      },
+      {
+        mutatePayload: mutateCppCutePayloadToBroadcastViewCopy,
+        convergence: broadcastConvergence,
+      },
+    ] as const;
+    for (const { mutatePayload, convergence } of cases) {
+      const candidate = await createAuthorizedCppCuteProvenanceFixture({
+        mutatePayload,
+      });
+      const artifacts = await lowerAuthorizedCppCuteViewCopyEntry(
+        candidate.authorization,
+        {
+          ...requestFor(candidate),
+          sourceAllocationByteLength: parseWireU64(
+            convergence.storage.sourceAllocationByteLength,
+          ),
+          destinationAllocationByteLength: parseWireU64(
+            convergence.storage.destinationAllocationByteLength,
+          ),
+        },
+      );
+      const cpu = await prepareViewCopyCpu(artifacts.layout, artifacts.kernel, {
+        operationId: artifacts.operationId,
+      });
+      const sourceWords = Uint32Array.from(convergence.expected.sourceWords);
+      const destinationWords = Uint32Array.from(
+        convergence.expected.initialDestinationWords,
+      );
+      const trace = cpu.execute({
+        source: new Uint8Array(sourceWords.buffer),
+        destination: new Uint8Array(destinationWords.buffer),
+      });
+
+      expect(artifacts.layoutSemanticHash).toBe(
+        convergence.expected.layoutSemanticHash,
+      );
+      expect(artifacts.kernelSemanticHash).toBe(
+        convergence.expected.kernelSemanticHash,
+      );
+      expect(layoutArtifactPayload(artifacts.layout)).toEqual(
+        convergence.expected.layoutPayload,
+      );
+      expect(kernelArtifactPayload(artifacts.kernel)).toEqual(
+        convergence.expected.kernelPayload,
+      );
+      expect([...sourceWords]).toEqual(convergence.expected.sourceWords);
+      expect([...destinationWords]).toEqual(
+        convergence.expected.destinationWords,
+      );
+      expect(trace).toMatchObject(convergence.expected.cpuTrace);
+    }
+  });
+
   it("rejects an otherwise valid positive-affine rank-4 view-copy artifact", async () => {
     const rank4 = await createAuthorizedCppCuteProvenanceFixture({
       mutatePayload: mutateCppCutePayloadToRank4ViewCopy,
@@ -242,7 +306,7 @@ describe("authorized C++/CuTe view-copy lowering", () => {
       });
   });
 
-  it("rejects dynamic and non-positive affine layouts", async () => {
+  it("rejects dynamic, negative-source, and non-positive destination strides", async () => {
     const dynamicStride = await viewCopyFixture((payload) => {
       for (const layout of payload.facts.filter((fact) => fact.kind === "affine-layout")) {
         if (layout.kind !== "affine-layout" || layout.stride.kind !== "tuple") continue;
@@ -272,6 +336,30 @@ describe("authorized C++/CuTe view-copy lowering", () => {
     });
     await expect(lowerAuthorizedCppCuteViewCopyEntry(negativeStride.authorization, requestFor(negativeStride)))
       .rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-VIEW-COPY-UNSUPPORTED-LAYOUT" });
+
+    const broadcastDestination = await viewCopyFixture((payload) => {
+      const entry = payload.entries.find((candidate) => candidate.kind === "view-copy");
+      const destination = entry?.kind === "view-copy"
+        ? payload.facts.find((fact) => fact.factId === entry.destinationTensorFactId)
+        : undefined;
+      const layout = destination?.kind === "tensor"
+        ? payload.facts.find((fact) => fact.factId === destination.layoutFactId)
+        : undefined;
+      if (layout?.kind !== "affine-layout" || layout.stride.kind !== "tuple") {
+        throw new Error("fixture lost destination layout");
+      }
+      const first = layout.stride.elements[0];
+      if (first?.kind !== "scalar") throw new Error("fixture lost flat layout stride");
+      (first as { value: unknown }).value = { kind: "integer", value: "0" };
+      (layout as { cosize: unknown }).cosize = { kind: "integer", value: "2" };
+    });
+    await expect(lowerAuthorizedCppCuteViewCopyEntry(
+      broadcastDestination.authorization,
+      requestFor(broadcastDestination),
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-VIEW-COPY-UNSUPPORTED-LAYOUT",
+      path: "$.artifact.destination.layout.strides[0]",
+    });
   });
 
   it("fails closed for cancellation, accessors, malformed wire values, and limits", async () => {

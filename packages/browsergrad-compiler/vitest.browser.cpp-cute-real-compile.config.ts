@@ -16,7 +16,7 @@ interface ExternalInputs {
   readonly schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs";
   readonly version: 3;
   readonly authority: "local-exact-byte-preflight-only";
-  readonly caseId: "rank2" | "rank3";
+  readonly caseId: "rank2" | "rank3" | "strided-slice" | "broadcast";
   readonly assets: readonly ExternalAsset[];
   readonly wasmAuthority:
     | "package-pinned-two-clean-build-output"
@@ -112,7 +112,10 @@ function parseInputs(value: string | undefined): ExternalInputs {
   if (parsed.schema !== "browsergrad.compiler.cpp-cute.browser-real-compile-inputs" ||
       parsed.version !== 3 ||
       parsed.authority !== "local-exact-byte-preflight-only" ||
-      (parsed.caseId !== "rank2" && parsed.caseId !== "rank3") ||
+      (parsed.caseId !== "rank2" &&
+       parsed.caseId !== "rank3" &&
+       parsed.caseId !== "strided-slice" &&
+       parsed.caseId !== "broadcast") ||
       (!pinned && !diagnostic) ||
       !/^bg\.cpp\.browser-header-distribution-reproducibility\.sha256\.[0-9a-f]{64}$/u
         .test(parsed.headerDistributionReproducibilityId ?? "") ||

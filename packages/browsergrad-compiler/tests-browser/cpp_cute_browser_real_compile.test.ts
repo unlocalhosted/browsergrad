@@ -99,9 +99,17 @@ import {
   createCppCuteBrowserProfileInput,
 } from "../tests/compiler/support/cpp_cute_frontend_fixtures.js";
 import {
+  CPP_CUTE_BROWSER_VIEW_COPY_BROADCAST_CONVERGENCE_FIXTURE,
   CPP_CUTE_BROWSER_VIEW_COPY_RANK2_CONVERGENCE_FIXTURE,
   CPP_CUTE_BROWSER_VIEW_COPY_RANK3_CONVERGENCE_FIXTURE,
+  CPP_CUTE_BROWSER_VIEW_COPY_STRIDED_SLICE_CONVERGENCE_FIXTURE,
 } from "../tests/fixtures/cpp_cute_browser_view_copy_convergence.js";
+
+type RealCompileCaseId =
+  | "rank2"
+  | "rank3"
+  | "strided-slice"
+  | "broadcast";
 
 interface ExternalAssetInput {
   readonly assetId: string;
@@ -114,7 +122,7 @@ interface BrowserExternalInputs {
   readonly schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs";
   readonly version: 3;
   readonly authority: "local-exact-byte-preflight-only";
-  readonly caseId: "rank2" | "rank3";
+  readonly caseId: RealCompileCaseId;
   readonly assets: readonly ExternalAssetInput[];
   readonly wasmAuthority:
     | "package-pinned-two-clean-build-output"
@@ -141,7 +149,8 @@ const REAL_COMPILE_CASES = Object.freeze({
     caseId: "rank2" as const,
     virtualPath: "/workspace/src/real-view-copy-rank2.cu",
     coordinateRank: 2,
-    spanElements: 6n,
+    sourceSpanElements: 6n,
+    destinationSpanElements: 6n,
     source: [
       "#include <cute/tensor.hpp>",
       "using SourceLayout = cute::Layout<",
@@ -162,7 +171,8 @@ const REAL_COMPILE_CASES = Object.freeze({
     caseId: "rank3" as const,
     virtualPath: "/workspace/src/real-view-copy-rank3.cu",
     coordinateRank: 3,
-    spanElements: 24n,
+    sourceSpanElements: 24n,
+    destinationSpanElements: 24n,
     source: [
       "#include <cute/tensor.hpp>",
       "using SourceLayout = cute::Layout<",
@@ -179,12 +189,62 @@ const REAL_COMPILE_CASES = Object.freeze({
       "",
     ].join("\n"),
   }),
+  "strided-slice": Object.freeze({
+    caseId: "strided-slice" as const,
+    virtualPath: "/workspace/src/real-view-copy-strided-slice.cu",
+    coordinateRank: 2,
+    sourceSpanElements: 12n,
+    destinationSpanElements: 6n,
+    source: [
+      "#include <cute/tensor.hpp>",
+      "using SourceLayout = cute::Layout<",
+      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
+      "  cute::Stride<cute::Int<2>, cute::Int<7>>>;",
+      "using DestinationLayout = cute::Layout<",
+      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
+      "  cute::Stride<cute::Int<2>, cute::Int<1>>>;",
+      "__device__ void copy_views(const float* source, float* destination) {",
+      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
+      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
+      "  cute::copy(source_tensor, destination_tensor);",
+      "}",
+      "",
+    ].join("\n"),
+  }),
+  broadcast: Object.freeze({
+    caseId: "broadcast" as const,
+    virtualPath: "/workspace/src/real-view-copy-broadcast.cu",
+    coordinateRank: 2,
+    sourceSpanElements: 2n,
+    destinationSpanElements: 6n,
+    source: [
+      "#include <cute/tensor.hpp>",
+      "using SourceLayout = cute::Layout<",
+      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
+      "  cute::Stride<cute::Int<0>, cute::Int<1>>>;",
+      "using DestinationLayout = cute::Layout<",
+      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
+      "  cute::Stride<cute::Int<2>, cute::Int<1>>>;",
+      "__device__ void copy_views(const float* source, float* destination) {",
+      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
+      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
+      "  cute::copy(source_tensor, destination_tensor);",
+      "}",
+      "",
+    ].join("\n"),
+  }),
 });
 const REAL_COMPILE_CASE =
   REAL_COMPILE_CASES[__BG_CPP_CUTE_REAL_COMPILE_INPUTS__.caseId];
-const CONVERGENCE_FIXTURE = REAL_COMPILE_CASE.caseId === "rank2"
-  ? CPP_CUTE_BROWSER_VIEW_COPY_RANK2_CONVERGENCE_FIXTURE
-  : CPP_CUTE_BROWSER_VIEW_COPY_RANK3_CONVERGENCE_FIXTURE;
+const CONVERGENCE_FIXTURES = Object.freeze({
+  rank2: CPP_CUTE_BROWSER_VIEW_COPY_RANK2_CONVERGENCE_FIXTURE,
+  rank3: CPP_CUTE_BROWSER_VIEW_COPY_RANK3_CONVERGENCE_FIXTURE,
+  "strided-slice":
+    CPP_CUTE_BROWSER_VIEW_COPY_STRIDED_SLICE_CONVERGENCE_FIXTURE,
+  broadcast: CPP_CUTE_BROWSER_VIEW_COPY_BROADCAST_CONVERGENCE_FIXTURE,
+});
+const CONVERGENCE_FIXTURE =
+  CONVERGENCE_FIXTURES[REAL_COMPILE_CASE.caseId];
 const MAIN_PATH = REAL_COMPILE_CASE.virtualPath;
 const MAIN_SOURCE = REAL_COMPILE_CASE.source;
 const MAIN_BYTES = new TextEncoder().encode(MAIN_SOURCE);
@@ -450,10 +510,10 @@ it("observes unchanged CuTe view-copy source in the exact package Worker", async
     leafRank: REAL_COMPILE_CASE.coordinateRank,
   });
   expect(candidateRecord.semantics.sourceSpanElements).toBe(
-    REAL_COMPILE_CASE.spanElements,
+    REAL_COMPILE_CASE.sourceSpanElements,
   );
   expect(candidateRecord.semantics.destinationSpanElements).toBe(
-    REAL_COMPILE_CASE.spanElements,
+    REAL_COMPILE_CASE.destinationSpanElements,
   );
   expect(staticLayoutProjection(
     candidateRecord.semantics.sourceLayoutFact,

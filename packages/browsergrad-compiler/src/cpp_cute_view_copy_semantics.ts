@@ -134,15 +134,17 @@ export async function prepareVerifiedCppCuteViewCopySemantics(
         : "BG-COMPILER-CPP-CUTE-VIEW-COPY-UNSUPPORTED-LAYOUT";
     cppCuteViewCopyFailure(code, cause.path, cause.message, { cause });
   }
-  const sourceSpanElements = positiveAffineSpanElements(
+  const sourceSpanElements = staticAffineSpanElements(
     sourceLayout,
     sourceLayoutFact.rank,
     "$.artifact.source.layout",
+    true,
   );
-  const destinationSpanElements = positiveAffineSpanElements(
+  const destinationSpanElements = staticAffineSpanElements(
     destinationLayout,
     destinationLayoutFact.rank,
     "$.artifact.destination.layout",
+    false,
   );
   throwIfCppCuteViewCopyAborted(normalizedOptions.signal);
   let entrySubjectHash: string;
@@ -351,10 +353,11 @@ function validateF32Pointer(
   }
 }
 
-function positiveAffineSpanElements(
+function staticAffineSpanElements(
   layout: LayoutExpr,
   expectedRank: number,
   path: string,
+  allowBroadcast: boolean,
 ): bigint {
   if (expectedRank !== 2 && expectedRank !== 3) {
     inconsistent(path, "unsupported view-copy rank reached affine span projection");
@@ -364,7 +367,7 @@ function positiveAffineSpanElements(
     unsupportedLayout(path, `view-copy lowering requires ${expectedRank} flat static affine modes`);
   }
 
-  const positiveStaticValues = (
+  const staticValues = (
     expressions: typeof layout.shape,
     component: "shape" | "strides",
   ): readonly bigint[] => expressions.map((expression, index) => {
@@ -375,17 +378,20 @@ function positiveAffineSpanElements(
       );
     }
     const value = wireIntegerToBigInt(expression.value);
-    if (value <= 0n) {
+    const minimum = component === "strides" && allowBroadcast ? 0n : 1n;
+    if (value < minimum) {
       unsupportedLayout(
         `${path}.${component}[${index}]`,
-        "view-copy layout shape and strides must be positive",
+        component === "strides" && allowBroadcast
+          ? "view-copy source layout strides must be non-negative"
+          : "view-copy layout shape and destination strides must be positive",
       );
     }
     return value;
   });
 
-  const shape = positiveStaticValues(layout.shape, "shape");
-  const strides = positiveStaticValues(layout.strides, "strides");
+  const shape = staticValues(layout.shape, "shape");
+  const strides = staticValues(layout.strides, "strides");
   let spanElements = 1n;
   for (let axis = 0; axis < expectedRank; axis += 1) {
     const extent = shape[axis];

@@ -7,7 +7,12 @@ import {
 
 const ERROR_CODE =
   "BG-COMPILER-CPP-CUTE-BROWSER-REAL-COMPILE-MATRIX";
-const CASE_IDS = Object.freeze(["rank2", "rank3"]);
+const CASE_PROFILES = Object.freeze([
+  Object.freeze({ caseId: "rank2", rank: 2 }),
+  Object.freeze({ caseId: "rank3", rank: 3 }),
+  Object.freeze({ caseId: "strided-slice", rank: 2 }),
+  Object.freeze({ caseId: "broadcast", rank: 2 }),
+]);
 
 export class CppCuteBrowserRealCompileMatrixError extends Error {
   constructor(path, message, options) {
@@ -79,10 +84,13 @@ export function parseCppCuteBrowserRealCompileMatrixArguments(argv) {
 
 export function prepareCppCuteBrowserRealCompileMatrix(observations) {
   if (!Array.isArray(observations) ||
-      observations.length !== CASE_IDS.length) {
-    invalid("$.observations", "expected exactly rank2 and rank3 observations");
+      observations.length !== CASE_PROFILES.length) {
+    invalid(
+      "$.observations",
+      "expected exactly rank2, rank3, strided-slice, and broadcast observations",
+    );
   }
-  const cases = CASE_IDS.map((caseId, index) => {
+  const cases = CASE_PROFILES.map(({ caseId, rank }, index) => {
     const observation = observations[index];
     if (typeof observation !== "object" || observation === null ||
         observation.schema !==
@@ -91,8 +99,8 @@ export function prepareCppCuteBrowserRealCompileMatrix(observations) {
         observation.outcome !== "compiled" ||
         observation.source?.caseId !== caseId ||
         observation.execution?.artifactOutcome !== "accepted" ||
-        observation.semanticCandidate?.sourceCoordinateRank !== index + 2 ||
-        observation.semanticCandidate?.destinationCoordinateRank !== index + 2 ||
+        observation.semanticCandidate?.sourceCoordinateRank !== rank ||
+        observation.semanticCandidate?.destinationCoordinateRank !== rank ||
         observation.semanticCandidate?.sharedViewCopySemanticsPrepared !== true ||
         observation.inputs?.packagePinnedHeaderPacksMatched !== true ||
         observation.execution?.rawWasmVerified !== true ||
@@ -119,9 +127,9 @@ export function prepareCppCuteBrowserRealCompileMatrix(observations) {
     entry.semanticCandidate.candidateId));
   if (wasmIdentities.size !== 1 ||
       assetSets.size !== 1 ||
-      workerEvidence.size !== CASE_IDS.length ||
-      artifacts.size !== CASE_IDS.length ||
-      candidates.size !== CASE_IDS.length) {
+      workerEvidence.size !== CASE_PROFILES.length ||
+      artifacts.size !== CASE_PROFILES.length ||
+      candidates.size !== CASE_PROFILES.length) {
     invalid("$.observations", "matrix identities are inconsistent or reused");
   }
   const pinnedReproducibleWasmMatched = cases.every(
@@ -145,11 +153,13 @@ export function prepareCppCuteBrowserRealCompileMatrix(observations) {
       "browsergrad.compiler.cpp-cute.browser-real-compile-matrix-observation",
     version: 1,
     authority: "local-real-browser-worker-matrix-observation-only",
-    caseCount: 2,
+    caseCount: CASE_PROFILES.length,
     cases: Object.freeze(cases),
     claims: Object.freeze({
       unchangedCpp17CuteRank2Compiled: true,
       unchangedCpp17CuteRank3Compiled: true,
+      unchangedCpp17CuteStridedSliceCompiled: true,
+      unchangedCpp17CuteBroadcastCompiled: true,
       canonicalGate2LayoutFixturesMatched: true,
       packagePinnedHeaderPacksMatched: true,
       pinnedReproducibleWasmMatched,
@@ -169,9 +179,9 @@ export async function runCppCuteBrowserRealCompileMatrix(
 ) {
   const options = parseCppCuteBrowserRealCompileMatrixArguments(argv);
   const observations = [];
-  // Each compiler Worker reserves a bounded large memory. Keep the two cases
+  // Each compiler Worker reserves a bounded large memory. Keep the cases
   // sequential so a coverage matrix cannot double peak browser memory.
-  for (const caseId of CASE_IDS) {
+  for (const { caseId } of CASE_PROFILES) {
     const caseArguments = [
       `--wasm=${options.wasmPath}`,
       `--pack-root=${options.packRoot}`,

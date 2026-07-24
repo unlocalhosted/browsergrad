@@ -31,7 +31,6 @@ interface ConvergenceFixtureSpec {
   readonly shape: readonly string[];
   readonly sourceStrides: readonly string[];
   readonly destinationStrides: readonly string[];
-  readonly allocationByteLength: string;
   readonly sourceWords: readonly number[];
   readonly destinationWords: readonly number[];
 }
@@ -40,15 +39,28 @@ function createConvergenceFixture(spec: ConvergenceFixtureSpec) {
   if ((spec.shape.length !== 2 && spec.shape.length !== 3) ||
       spec.sourceStrides.length !== spec.shape.length ||
       spec.destinationStrides.length !== spec.shape.length ||
-      [...spec.shape, ...spec.sourceStrides, ...spec.destinationStrides]
-        .some((value) => !/^[1-9][0-9]*$/u.test(value))) {
+      [...spec.shape, ...spec.destinationStrides]
+        .some((value) => !/^[1-9][0-9]*$/u.test(value)) ||
+      spec.sourceStrides.some((value) => !/^(?:0|[1-9][0-9]*)$/u.test(value))) {
     throw new Error(`invalid positive flat fixture geometry for ${spec.caseId}`);
   }
   const elementCount = spec.shape.reduce((product, extent) => product * Number(extent), 1);
+  const spanElements = (strides: readonly string[]) => spec.shape.reduce(
+    (span, extent, index) =>
+      span + (Number(extent) - 1) * Number(strides[index]),
+    1,
+  );
+  const sourceSpanElements = spanElements(spec.sourceStrides);
+  const destinationSpanElements = spanElements(spec.destinationStrides);
+  const sourceAllocationByteLength =
+    String((sourceSpanElements + 2) * Uint32Array.BYTES_PER_ELEMENT);
+  const destinationAllocationByteLength =
+    String((destinationSpanElements + 2) * Uint32Array.BYTES_PER_ELEMENT);
   if (!Number.isSafeInteger(elementCount) ||
-      spec.sourceWords.length !== elementCount ||
-      spec.destinationWords.length !== elementCount ||
-      Number(spec.allocationByteLength) !== (elementCount + 2) * Uint32Array.BYTES_PER_ELEMENT) {
+      !Number.isSafeInteger(sourceSpanElements) ||
+      !Number.isSafeInteger(destinationSpanElements) ||
+      spec.sourceWords.length !== sourceSpanElements ||
+      spec.destinationWords.length !== destinationSpanElements) {
     throw new Error(`invalid storage/case cardinality for ${spec.caseId}`);
   }
   if ([
@@ -79,11 +91,18 @@ function createConvergenceFixture(spec: ConvergenceFixtureSpec) {
       lessEqual(add(coordinate(axis), constant("1")), constant(extent)),
     ])),
   });
-  const location = (strides: readonly string[]) => add(...strides.map((stride, axis) => (
-    stride === "1"
-      ? coordinate(axis)
-      : multiply(coordinate(axis), constant(stride))
-  )));
+  const location = (strides: readonly string[]) => {
+    const terms = strides.flatMap((stride, axis) => (
+      stride === "0"
+        ? []
+        : [stride === "1"
+            ? coordinate(axis)
+            : multiply(coordinate(axis), constant(stride))]
+    ));
+    if (terms.length === 0) return constant("0");
+    if (terms.length === 1) return terms[0]!;
+    return add(...terms);
+  };
   const construction = Object.freeze({
     dtype: "f32" as const,
     symbols: Object.freeze([]),
@@ -95,7 +114,7 @@ function createConvergenceFixture(spec: ConvergenceFixtureSpec) {
         strides: Object.freeze(spec.sourceStrides.map(constant)),
       }),
       allocation: Object.freeze({
-        byteLength: constant(spec.allocationByteLength),
+        byteLength: constant(sourceAllocationByteLength),
         memorySpace: Object.freeze({ kind: "global" as const }),
         alignmentBytes: 4,
       }),
@@ -109,7 +128,7 @@ function createConvergenceFixture(spec: ConvergenceFixtureSpec) {
         strides: Object.freeze(spec.destinationStrides.map(constant)),
       }),
       allocation: Object.freeze({
-        byteLength: constant(spec.allocationByteLength),
+        byteLength: constant(destinationAllocationByteLength),
         memorySpace: Object.freeze({ kind: "global" as const }),
         alignmentBytes: 4,
       }),
@@ -124,14 +143,14 @@ function createConvergenceFixture(spec: ConvergenceFixtureSpec) {
     allocations: Object.freeze([
       Object.freeze({
         allocationId: sourceAllocationId,
-        byteLength: constant(spec.allocationByteLength),
+        byteLength: constant(sourceAllocationByteLength),
         memorySpace: Object.freeze({ kind: "global" as const }),
         alignmentBytes: 4,
         aliasSetId: sourceAliasSetId,
       }),
       Object.freeze({
         allocationId: destinationAllocationId,
-        byteLength: constant(spec.allocationByteLength),
+        byteLength: constant(destinationAllocationByteLength),
         memorySpace: Object.freeze({ kind: "global" as const }),
         alignmentBytes: 4,
         aliasSetId: destinationAliasSetId,
@@ -210,8 +229,8 @@ function createConvergenceFixture(spec: ConvergenceFixtureSpec) {
       cudaLiteRunnerUsed: false as const,
     }),
     storage: Object.freeze({
-      sourceAllocationByteLength: spec.allocationByteLength,
-      destinationAllocationByteLength: spec.allocationByteLength,
+      sourceAllocationByteLength,
+      destinationAllocationByteLength,
       sourceByteOffset: "4",
       destinationByteOffset: "4",
     }),
@@ -282,7 +301,6 @@ export const CPP_CUTE_BROWSER_VIEW_COPY_RANK2_CONVERGENCE_FIXTURE =
     shape: ["3", "2"],
     sourceStrides: ["1", "3"],
     destinationStrides: ["2", "1"],
-    allocationByteLength: "32",
     sourceWords: FLOAT_1_TO_24_WORDS.slice(0, 6),
     destinationWords: [
       FLOAT_1_TO_24_WORDS[0]!, FLOAT_1_TO_24_WORDS[3]!,
@@ -301,12 +319,41 @@ export const CPP_CUTE_BROWSER_VIEW_COPY_RANK3_CONVERGENCE_FIXTURE =
     shape: ["2", "3", "4"],
     sourceStrides: ["1", "2", "6"],
     destinationStrides: ["12", "4", "1"],
-    allocationByteLength: "104",
     sourceWords: FLOAT_1_TO_24_WORDS,
     destinationWords: [
       0, 6, 12, 18, 2, 8, 14, 20, 4, 10, 16, 22,
       1, 7, 13, 19, 3, 9, 15, 21, 5, 11, 17, 23,
     ].map((index) => FLOAT_1_TO_24_WORDS[index]!),
+  });
+
+export const CPP_CUTE_BROWSER_VIEW_COPY_STRIDED_SLICE_CONVERGENCE_FIXTURE =
+  createConvergenceFixture({
+    caseId: "canonical-rank2-cute-view-copy-strided-slice-payload",
+    layoutScope: "545542349e264444b09ed2a91e8628149eda790205793ca4d488207f785c4f3c",
+    kernelScope: "36cb74affc6fa96cf3800da5b5f9b7b2df72f933e342e31477929f1da5e83ace",
+    layoutSemanticHash: "c43e46d9b4a2fe623b70c5ff67ce5b35e260b5a498a2ede0bf67984d1cc46399",
+    kernelSemanticHash: "939d9e9ec1125485b71ac28aa5bf491928c0721e7642a72d6dc18e6734187d73",
+    shape: ["3", "2"],
+    sourceStrides: ["2", "7"],
+    destinationStrides: ["2", "1"],
+    sourceWords: FLOAT_1_TO_24_WORDS.slice(0, 12),
+    destinationWords: [0, 7, 2, 9, 4, 11]
+      .map((index) => FLOAT_1_TO_24_WORDS[index]!),
+  });
+
+export const CPP_CUTE_BROWSER_VIEW_COPY_BROADCAST_CONVERGENCE_FIXTURE =
+  createConvergenceFixture({
+    caseId: "canonical-rank2-cute-view-copy-broadcast-payload",
+    layoutScope: "c0203996afc8e09b1c84aa9f8234f52bd4f32f935e637191fa7ea99c66b2563c",
+    kernelScope: "874c5b7312efa44e3d5fcd79ce3d00733d81f7e06f11b5a3fe916413033bdf17",
+    layoutSemanticHash: "5e72e11b9dc901e8c9f4cc05221c3f24fced5f2701bd129aa3dd2c183631a718",
+    kernelSemanticHash: "bfa123e13a4d162ee02a736490494d5ee5d3577d875c819283f0f2243c5fea16",
+    shape: ["3", "2"],
+    sourceStrides: ["0", "1"],
+    destinationStrides: ["2", "1"],
+    sourceWords: FLOAT_1_TO_24_WORDS.slice(0, 2),
+    destinationWords: [0, 1, 0, 1, 0, 1]
+      .map((index) => FLOAT_1_TO_24_WORDS[index]!),
   });
 
 export const CPP_CUTE_BROWSER_VIEW_COPY_CONVERGENCE_FIXTURE =
@@ -315,4 +362,6 @@ export const CPP_CUTE_BROWSER_VIEW_COPY_CONVERGENCE_FIXTURE =
 export const CPP_CUTE_BROWSER_VIEW_COPY_CONVERGENCE_FIXTURES = Object.freeze([
   CPP_CUTE_BROWSER_VIEW_COPY_RANK2_CONVERGENCE_FIXTURE,
   CPP_CUTE_BROWSER_VIEW_COPY_RANK3_CONVERGENCE_FIXTURE,
+  CPP_CUTE_BROWSER_VIEW_COPY_STRIDED_SLICE_CONVERGENCE_FIXTURE,
+  CPP_CUTE_BROWSER_VIEW_COPY_BROADCAST_CONVERGENCE_FIXTURE,
 ]);

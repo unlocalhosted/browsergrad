@@ -24,7 +24,12 @@ const ANSI_COLOR_PATTERN = new RegExp(
   "gu",
 );
 const MAX_CAPTURED_OUTPUT_BYTES = 8 * 1024 * 1024;
-const REAL_COMPILE_CASE_IDS = new Set(["rank2", "rank3"]);
+const REAL_COMPILE_CASE_IDS = new Set([
+  "rank2",
+  "rank3",
+  "strided-slice",
+  "broadcast",
+]);
 const PACK_FILES = Object.freeze({
   "clang-resource": "clang-resource.headers.bgvfs",
   cuda: "cuda-12.6.3.headers.bgvfs",
@@ -372,7 +377,10 @@ function exactInput(value) {
   }
   const caseId = descriptors.caseId?.value ?? "rank2";
   if (typeof caseId !== "string" || !REAL_COMPILE_CASE_IDS.has(caseId)) {
-    invalid("$.caseId", "expected rank2 or rank3");
+    invalid(
+      "$.caseId",
+      "expected rank2, rank3, strided-slice, or broadcast",
+    );
   }
   return {
     wasmPath,

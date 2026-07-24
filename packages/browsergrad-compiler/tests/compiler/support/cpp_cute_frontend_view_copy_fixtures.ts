@@ -89,6 +89,30 @@ export async function mutateCppCutePayloadToRank3ViewCopy(
   });
 }
 
+/** Static source broadcast over the leading mode with one dense destination. */
+export async function mutateCppCutePayloadToBroadcastViewCopy(
+  payload: CppCuteFrontendPayloadV3,
+): Promise<void> {
+  await mutateCppCutePayloadToViewCopy(payload);
+  mutateCppCuteViewCopyFlatLayouts(payload, {
+    shape: [3, 2],
+    sourceStrides: [0, 1],
+    destinationStrides: [2, 1],
+  });
+}
+
+/** Positive-affine source slice with gaps lowered through the same view ABI. */
+export async function mutateCppCutePayloadToStridedSliceViewCopy(
+  payload: CppCuteFrontendPayloadV3,
+): Promise<void> {
+  await mutateCppCutePayloadToViewCopy(payload);
+  mutateCppCuteViewCopyFlatLayouts(payload, {
+    shape: [3, 2],
+    sourceStrides: [2, 7],
+    destinationStrides: [2, 1],
+  });
+}
+
 /** Valid producer artifact used to prove that lowering rejects ranks above its explicit profile. */
 export async function mutateCppCutePayloadToRank4ViewCopy(
   payload: CppCuteFrontendPayloadV3,

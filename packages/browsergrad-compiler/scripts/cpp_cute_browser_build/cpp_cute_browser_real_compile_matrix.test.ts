@@ -5,8 +5,10 @@ import {
   prepareCppCuteBrowserRealCompileMatrix,
 } from "./cpp_cute_browser_real_compile_matrix.mjs";
 
-function observation(caseId: "rank2" | "rank3", diagnostic = false) {
-  const rank = caseId === "rank2" ? 2 : 3;
+type CaseId = "rank2" | "rank3" | "strided-slice" | "broadcast";
+
+function observation(caseId: CaseId, diagnostic = false) {
+  const rank = caseId === "rank3" ? 3 : 2;
   return {
     schema: "browsergrad.compiler.cpp-cute.browser-real-compile-observation",
     version: 2,
@@ -48,19 +50,23 @@ function observation(caseId: "rank2" | "rank3", diagnostic = false) {
 }
 
 describe("real browser C++/CuTe compile matrix", () => {
-  it("retains two distinct compiled layouts under one closed authority tier", () => {
+  it("retains four distinct compiled layouts under one closed authority tier", () => {
     const matrix = prepareCppCuteBrowserRealCompileMatrix([
       observation("rank2"),
       observation("rank3"),
+      observation("strided-slice"),
+      observation("broadcast"),
     ]);
     expect(matrix).toMatchObject({
       schema:
         "browsergrad.compiler.cpp-cute.browser-real-compile-matrix-observation",
       version: 1,
-      caseCount: 2,
+      caseCount: 4,
       claims: {
         unchangedCpp17CuteRank2Compiled: true,
         unchangedCpp17CuteRank3Compiled: true,
+        unchangedCpp17CuteStridedSliceCompiled: true,
+        unchangedCpp17CuteBroadcastCompiled: true,
         canonicalGate2LayoutFixturesMatched: true,
         pinnedReproducibleWasmMatched: true,
         untrustedDiagnosticWasm: false,
@@ -77,6 +83,8 @@ describe("real browser C++/CuTe compile matrix", () => {
     expect(() => prepareCppCuteBrowserRealCompileMatrix([
       observation("rank3"),
       observation("rank2"),
+      observation("strided-slice"),
+      observation("broadcast"),
     ])).toThrow();
     expect(() => prepareCppCuteBrowserRealCompileMatrix([
       observation("rank2"),
@@ -84,10 +92,14 @@ describe("real browser C++/CuTe compile matrix", () => {
         ...observation("rank3"),
         execution: observation("rank2").execution,
       },
+      observation("strided-slice"),
+      observation("broadcast"),
     ])).toThrow();
     expect(() => prepareCppCuteBrowserRealCompileMatrix([
       observation("rank2"),
       observation("rank3", true),
+      observation("strided-slice"),
+      observation("broadcast"),
     ])).toThrow();
   });
 
