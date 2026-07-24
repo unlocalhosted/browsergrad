@@ -66,6 +66,8 @@ import {
 import {
   CPP_CUTE_FRONTEND_ARTIFACT_MAJOR,
   CPP_CUTE_FRONTEND_ARTIFACT_MINOR,
+  type CppCuteAffineLayoutFactV1,
+  type CppCuteHierarchyV1,
 } from "../src/cpp_cute_frontend_types.js";
 import {
   unwrapVerifiedCppCuteFrontendArtifact,
@@ -96,6 +98,10 @@ import {
 import {
   createCppCuteBrowserProfileInput,
 } from "../tests/compiler/support/cpp_cute_frontend_fixtures.js";
+import {
+  CPP_CUTE_BROWSER_VIEW_COPY_RANK2_CONVERGENCE_FIXTURE,
+  CPP_CUTE_BROWSER_VIEW_COPY_RANK3_CONVERGENCE_FIXTURE,
+} from "../tests/fixtures/cpp_cute_browser_view_copy_convergence.js";
 
 interface ExternalAssetInput {
   readonly assetId: string;
@@ -161,10 +167,10 @@ const REAL_COMPILE_CASES = Object.freeze({
       "#include <cute/tensor.hpp>",
       "using SourceLayout = cute::Layout<",
       "  cute::Shape<cute::Int<2>, cute::Int<3>, cute::Int<4>>,",
-      "  cute::Stride<cute::Int<12>, cute::Int<4>, cute::Int<1>>>;",
+      "  cute::Stride<cute::Int<1>, cute::Int<2>, cute::Int<6>>>;",
       "using DestinationLayout = cute::Layout<",
       "  cute::Shape<cute::Int<2>, cute::Int<3>, cute::Int<4>>,",
-      "  cute::Stride<cute::Int<1>, cute::Int<2>, cute::Int<6>>>;",
+      "  cute::Stride<cute::Int<12>, cute::Int<4>, cute::Int<1>>>;",
       "__device__ void copy_views(const float* source, float* destination) {",
       "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
       "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
@@ -176,6 +182,9 @@ const REAL_COMPILE_CASES = Object.freeze({
 });
 const REAL_COMPILE_CASE =
   REAL_COMPILE_CASES[__BG_CPP_CUTE_REAL_COMPILE_INPUTS__.caseId];
+const CONVERGENCE_FIXTURE = REAL_COMPILE_CASE.caseId === "rank2"
+  ? CPP_CUTE_BROWSER_VIEW_COPY_RANK2_CONVERGENCE_FIXTURE
+  : CPP_CUTE_BROWSER_VIEW_COPY_RANK3_CONVERGENCE_FIXTURE;
 const MAIN_PATH = REAL_COMPILE_CASE.virtualPath;
 const MAIN_SOURCE = REAL_COMPILE_CASE.source;
 const MAIN_BYTES = new TextEncoder().encode(MAIN_SOURCE);
@@ -446,6 +455,26 @@ it("observes unchanged CuTe view-copy source in the exact package Worker", async
   expect(candidateRecord.semantics.destinationSpanElements).toBe(
     REAL_COMPILE_CASE.spanElements,
   );
+  expect(staticLayoutProjection(
+    candidateRecord.semantics.sourceLayoutFact,
+  )).toEqual({
+    shape: CONVERGENCE_FIXTURE.construction.source.layout.shape.map(
+      (extent) => extent.value,
+    ),
+    strides: CONVERGENCE_FIXTURE.construction.source.layout.strides.map(
+      (stride) => stride.value,
+    ),
+  });
+  expect(staticLayoutProjection(
+    candidateRecord.semantics.destinationLayoutFact,
+  )).toEqual({
+    shape: CONVERGENCE_FIXTURE.construction.destination.layout.shape.map(
+      (extent) => extent.value,
+    ),
+    strides: CONVERGENCE_FIXTURE.construction.destination.layout.strides.map(
+      (stride) => stride.value,
+    ),
+  });
   const wasmConformance = inspectObservedCppCuteBrowserPackageWasmConformance(
     executionRecord.packageInvocationLineage.observedWasmConformance,
   );
@@ -923,4 +952,28 @@ function requireExternalAsset(
 
 function wire(value: number): WireU64 {
   return encodeWireU64(BigInt(value));
+}
+
+function staticLayoutProjection(
+  fact: CppCuteAffineLayoutFactV1,
+): Readonly<{ shape: readonly string[]; strides: readonly string[] }> {
+  const flatten = (
+    hierarchy: CppCuteHierarchyV1,
+    path: string,
+  ): readonly string[] => {
+    if (hierarchy.kind !== "tuple") {
+      throw new Error(`${path} is not one flat static tuple`);
+    }
+    return Object.freeze(hierarchy.elements.map((element, index) => {
+      if (element.kind !== "scalar" ||
+          element.value.kind !== "integer") {
+        throw new Error(`${path}[${index}] is not one static integer leaf`);
+      }
+      return element.value.value;
+    }));
+  };
+  return Object.freeze({
+    shape: flatten(fact.shape, "$.shape"),
+    strides: flatten(fact.stride, "$.stride"),
+  });
 }
