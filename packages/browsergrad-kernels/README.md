@@ -29,7 +29,7 @@ Drop it in for WGSL primitives; layer in JIT for the PyTorch-shaped surface.
 | `defineKernel1DProgram` / `runKernel1DProgramReference` / `emitKernel1DProgramWgsl` / `runKernel1DProgramWebGpu` | BrowserGrad-owned 1D kernel IR with reference executor, WGSL lowering, and browser WebGPU dispatch | ✅ |
 | `runThreadGrid`, `referenceSaxpy`, `referenceExclusiveScan`, `referenceFindRepeats`, `referenceOrderedCircleRender` | Thread-grid teaching references for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
 | `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` / `simulateCuda1DGrid` | CUDA-shaped compatibility aliases for labs and rubrics that teach CUDA vocabulary | ✅ |
-| `prepareSemanticViewCopyWgsl` / `runSemanticViewCopyWebGpu` | Verified `view-copy@1.0` lowering over canonical layout/index artifacts, with bit-exact u32 storage and structured guarded padding | ✅ nine-case strict CPU/WebGPU parity on Apple Metal 3; release evidence remains commit-scoped |
+| `prepareSemanticViewCopyWgsl` / `runSemanticViewCopyWebGpu` | Verified `view-copy@1.0` lowering over canonical layout/index artifacts, with exact 32-bit-word storage and structured guarded padding | ✅ 13-case strict CPU/WebGPU parity on Apple Metal 3 across f32/i32/u32, ranks 1–4, striding, broadcast, offsets, and float padding; release evidence remains commit-scoped |
 | `prepareSemanticGemmWgsl` / `runSemanticGemmWebGpu` | Verified logical GEMM plus independent schedule lowering with cooperative workgroup staging, uniform barriers, and masked boundary tiles | ✅ bit-exact only for semantic-core certified exact f32 inputs; required irregular two-schedule WebGPU evidence |
 | `prepareSemanticAttentionWgsl` / `runSemanticAttentionWebGpu` | Verified attention plus independent online K/V-tile schedule lowering/execution with cooperative staging, uniform barriers, and causal/tail masks before state updates | ✅ required causal/non-causal two-schedule CPU/WebGPU comparison plus separate observational host-API performance record on Apple Metal 3 |
 | `rowWiseOnlineAttentionDirect` | Fused row-wise online-softmax attention baseline with strict real-WebGPU parity vs composed reference; not block-tiled FlashAttention. | ✅ |
@@ -139,11 +139,15 @@ The semantic view-copy surface accepts only opaque verified layout/kernel
 artifacts from `@unlocalhosted/browsergrad-semantic-core`. Shared preparation
 resolves bindings, proves every guarded access and dense destination write,
 and derives one semantic specialization hash. Kernels then lowers the same
-canonical index/predicate expressions into a signed-i32 WebGPU profile.
+canonical index/predicate expressions into the
+`browsergrad.webgpu.view-copy.word32@2` profile. This profile uses signed-i32
+address expressions while preserving same-dtype f32, i32, or u32 storage
+bit-for-bit for ranks 1 through 4.
 
 Root allocations are bound at offset zero as `array<u32>`, so ordinary values,
-signed zero, infinities, and NaN payloads copy bit-for-bit. Padding initializes
-exact fill bits and performs the source load only inside a structured `if`;
+signed zero, infinities, NaN payloads, and integer bit patterns copy exactly.
+Float padding initializes exact fill bits and performs the source load only
+inside a structured `if`; integer profiles reject invalid source coordinates.
 the lowerer never uses eager `select`, implicit robust-buffer zeroing, address
 clamping, or ignored writes as semantics. Device execution validates storage,
 dispatch, workgroup, and binding limits before submission and reports separate
