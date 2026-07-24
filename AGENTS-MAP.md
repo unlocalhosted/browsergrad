@@ -47,14 +47,17 @@ Use this as a fast navigation layer before diving into files.
 | `install_torch_alias()` | Allows PyTorch-shaped imports, but only for supported surfaces. |
 | `bg.register_webgpu_bridge(bridge)` | Connects JIT Python IR to JS/WebGPU kernels. |
 | `compileCudaLiteKernel*()` | Browser-native CUDA-lite frontend to Kernel IR/WGSL/reference/WebGPU. |
+| Browser-local C++/CuTe controller | Runs the pinned Clang-Wasm extractor in a verified Worker and lowers accepted Artifact V3 facts through semantic-core. |
 | Lab manifest `requires_browsergrad` | Version gate for platform exercises. |
 
-The current compiler seam is a CUDA-lite frontend, not a generic C++/CuTe
-frontend. Before adding syntax support, read the semantic requirements: the
-target seam is a versioned C++ frontend lowering layouts, `Tensor<Engine,
-Layout>`, views, index maps, and tiles through the layered value/layout, kernel,
-schedule, and host-graph contracts defined by the platform LLD.
-Do not add source-spelling handlers as a substitute for that work.
+CUDA-lite remains the shipping default frontend. A closed pre-release
+browser-local C++/CuTe profile now runs a real Clang-Wasm extractor and lowers
+accepted view-copy facts through the same semantic-core CPU/WebGPU seams; it is
+not a generic full-C++ claim. Before adding syntax support, read the semantic
+requirements: extend the versioned frontend through layouts,
+`Tensor<Engine, Layout>`, views, index maps, tiles, kernel meaning, schedules,
+and host graphs. Do not add source-spelling handlers as a substitute for those
+abstractions.
 
 ## Curriculum Compatibility Pointers
 

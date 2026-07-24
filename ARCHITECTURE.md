@@ -44,13 +44,14 @@ How the packages compose, what each layer owns, and why the calls were made the 
 ```
 
 The runtime knows nothing about tensors. The kernels package knows nothing about Python. The two ML libraries pick their own backends — grad is eager NumPy, jit is lazy IR with pluggable realizers. Each piece composes with the others but doesn't depend on them at runtime.
-The compiler currently owns CUDA-lite semantics and lowers those kernels to
-Kernel IR, CPU reference execution, WGSL, and real WebGPU dispatch through the
-kernels package. It is course-agnostic; corpus support lives in generic source
-normalization, diagnostics, and compatibility gates. CUDA-lite is the shipping
-frontend, not the architectural destination: the next semantic layer is a
-versioned C++/CuTe frontend lowering actual layout/tensor meaning into the same
-canonical program.
+The compiler owns CUDA-lite semantics and lowers those kernels to Kernel IR,
+CPU reference execution, WGSL, and real WebGPU dispatch through the kernels
+package. It also owns a closed pre-release browser-local Clang-Wasm C++/CuTe
+profile that emits accepted Artifact V3 view-copy facts into the same canonical
+semantic-core path. It is course-agnostic; corpus support lives in generic
+source normalization, diagnostics, and compatibility gates. CUDA-lite remains
+the shipping default, while the C++/CuTe profile is expanded only through
+versioned layout/tensor semantics and explicit evidence.
 
 For the multi-course guided-lab layer that sits above these packages, see
 `docs/platform/curriculum-platform-architecture.md`.
@@ -100,18 +101,22 @@ a fused row-wise online-softmax baseline; it must not be presented as
 block-tiled FlashAttention until it implements and proves that algorithm.
 
 ### `browsergrad-compiler` — compiler and semantic execution layer
-Owns the current CUDA-lite parser, source/context normalization, semantic
-analysis, Kernel IR lowering, lockstep CPU reference execution, WGSL emission,
-and WebGPU runner orchestration. It consumes `browsergrad-kernels` dispatch
-helpers but keeps frontend/C++ compatibility facts out of platform code. Its
-real-world corpus gates compile/codegen pinned CUDA corpora and execute selected
-fixtures in Chromium/WebGPU against CPU reference outputs.
+Owns the CUDA-lite parser, source/context normalization, semantic analysis,
+Kernel IR lowering, lockstep CPU reference execution, WGSL emission, and WebGPU
+runner orchestration. It also owns the pinned browser-local Clang-Wasm
+extractor, closed VFS/Worker boundary, Artifact V3 verification, and
+producer-neutral C++/CuTe semantic candidates. It consumes
+`browsergrad-kernels` dispatch helpers but keeps frontend/C++ compatibility
+facts out of platform code. Its real-world corpus gates compile/codegen pinned
+CUDA corpora and execute selected fixtures in Chromium/WebGPU against CPU
+reference outputs.
 
-The required expansion is a versioned C++/CuTe source frontend plus layered
-value/layout, effectful-kernel, schedule, and host-graph domains. They must model
-`Tensor<Engine, Layout>`, dynamic `TensorView` bindings, general `IndexMap`
-composition, logical and physical tiles, uniformity, and host graphs. These are
-shared semantic requirements, not a set of parser aliases or one monolithic IR.
+The required expansion is broader coverage within the versioned C++/CuTe
+frontend plus layered value/layout, effectful-kernel, schedule, and host-graph
+domains. They must model broader `Tensor<Engine, Layout>` and `TensorView`
+bindings, general `IndexMap` composition, logical and physical tiles,
+uniformity, and host graphs. These are shared semantic requirements, not a set
+of parser aliases or one monolithic IR.
 
 ### `browsergrad-grad` — eager autograd
 Closure-based reverse-mode autograd in Python. Each op carries a closure that runs at `.backward()` time. NumPy-backed by default, no IR, no lazy semantics. Stable; designed to be readable source code. It now covers the classic eager teaching surface — Conv1d/2d/3d, ConvTranspose2d, pooling, BatchNorm1d/2d/3d, GroupNorm/InstanceNorm2d, LayerNorm, Dropout, Embedding, MultiHeadAttention, single-layer RNN/LSTM/GRU, optimizers, schedulers, state_dict, hooks, and torch-alias shims. A small explicit `device=` path can run forward matmul / softmax / layernorm / unmasked 2D attention through `browsergrad-kernels`; CPU autograd still owns backward.
