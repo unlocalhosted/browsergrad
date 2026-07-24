@@ -176,9 +176,10 @@ int main() {
       "template <class... Values> using Shape = tuple<Values...>;\n"
       "template <class... Values> using Stride = tuple<Values...>;\n"
       "template <class ShapeType, class StrideType> struct Layout {};\n"
+      "template <class Iterator> struct ViewEngine {};\n"
       "template <class Engine, class LayoutType> struct Tensor {};\n"
       "template <class Engine, class LayoutType>\n"
-      "__attribute__((host, device)) Tensor<Engine, LayoutType>\n"
+      "__attribute__((host, device)) Tensor<ViewEngine<Engine>, LayoutType>\n"
       "make_tensor(Engine, LayoutType) { return {}; }\n"
       "template <class Source, class Destination>\n"
       "__attribute__((device)) void copy(const Source&, Destination&) {}\n"
@@ -333,8 +334,10 @@ int main() {
   spoofed_copy_source.insert(selected_function_begin,
                              "namespace cute {\n"
                              "__attribute__((device)) void copy(\n"
-                             "    Tensor<const float*, ::SourceLayout>&,\n"
-                             "    Tensor<float*, ::DestinationLayout>&) {}\n"
+                             "    Tensor<ViewEngine<const float*>, "
+                             "::SourceLayout>&,\n"
+                             "    Tensor<ViewEngine<float*>, "
+                             "::DestinationLayout>&) {}\n"
                              "}\n");
   reset_frontend_work_metrics();
   BG_CHECK(begin_frontend_work_invocation(frontend_limits));

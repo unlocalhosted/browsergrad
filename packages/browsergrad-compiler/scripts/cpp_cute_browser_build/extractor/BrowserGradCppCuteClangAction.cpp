@@ -95,6 +95,32 @@ bool decode_resolved_cute_tensor(
   return true;
 }
 
+bool decode_cute_view_iterator(clang::QualType engine_type,
+                               clang::QualType& iterator_type) {
+  engine_type = engine_type.getCanonicalType();
+  if (engine_type->isPointerType()) {
+    iterator_type = engine_type;
+    return true;
+  }
+  const auto* record = engine_type->getAsCXXRecordDecl();
+  const auto* specialization =
+      llvm::dyn_cast_or_null<clang::ClassTemplateSpecializationDecl>(record);
+  if (specialization == nullptr) return false;
+  const std::string name =
+      specialization->getSpecializedTemplate()->getQualifiedNameAsString();
+  if (name != "cute::ViewEngine" && name != "cute::ConstViewEngine") {
+    return false;
+  }
+  const clang::TemplateArgumentList& arguments =
+      specialization->getTemplateArgs();
+  if (arguments.size() != 1U ||
+      arguments[0].getKind() != clang::TemplateArgument::Type) {
+    return false;
+  }
+  iterator_type = arguments[0].getAsType().getCanonicalType();
+  return iterator_type->isPointerType();
+}
+
 std::string canonical_usr(const clang::Decl* declaration) {
   llvm::SmallString<128> usr;
   if (declaration == nullptr ||
@@ -585,10 +611,12 @@ class SemanticTraceVisitor final
 
   void capture_tensor(clang::VarDecl* declaration) {
     clang::QualType engine_type;
+    clang::QualType iterator_type;
     clang::QualType layout_type;
     const clang::ClassTemplateDecl* tensor_template = nullptr;
     if (!decode_resolved_cute_tensor(declaration->getType(), engine_type,
-                                     layout_type, tensor_template)) {
+                                     layout_type, tensor_template) ||
+        !decode_cute_view_iterator(engine_type, iterator_type)) {
       return;
     }
     if (view_copy_trace_.tensors.size() >= 2U) {
@@ -630,7 +658,7 @@ class SemanticTraceVisitor final
       trace.shape = std::move(layout.shape);
       trace.stride = std::move(layout.stride);
     }
-    if (const auto* pointer = engine_type->getAs<clang::PointerType>()) {
+    if (const auto* pointer = iterator_type->getAs<clang::PointerType>()) {
       trace.engine_pointee_const =
           pointer->getPointeeType().getCanonicalType().isConstQualified();
     }
@@ -660,7 +688,7 @@ class SemanticTraceVisitor final
               trace.engine_parameter_ordinal =
                   static_cast<std::uint32_t>(ordinal);
               trace.initializer_parameter_bound =
-                  context_.hasSameType(engine_type, parameter->getType());
+                  context_.hasSameType(iterator_type, parameter->getType());
               break;
             }
           }

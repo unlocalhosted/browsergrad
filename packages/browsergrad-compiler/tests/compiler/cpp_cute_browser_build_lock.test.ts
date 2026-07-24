@@ -22,10 +22,10 @@ import {
 } from "../../src/cpp_cute_browser_runtime_abi.js";
 
 const LOCK_ID =
-  "bg.cpp.browser-build-input-lock.sha256.2ba2736bfd84e2243f6f019bbabc0c7b9ce486df714cef9b6b2ba9035ee48b22";
-const RESOURCE_SHA256 = "91b845b92332f236274e40a1f7ba6040bc75694e0b7b5dede28cbdc84c57ce1d";
-const RECIPE_SHA256 = "6b850b4b12ef6633c5b89f8c6da55e1cca5bdacbe30727bbd1b0ddaba55fe7b8";
-const EXTRACTOR_SOURCE_SHA256 = "4e2c72a7e84299493d7627b52c1ef2aa1fa1137552b33a352aae31dc45086d62";
+  "bg.cpp.browser-build-input-lock.sha256.a1288cdfb532e91a32a8fd50699b9713b377a5b441876ab455610882180b09d3";
+const RESOURCE_SHA256 = "dd1800332371ed35c2e5716e8a161e0777dc5357841043d17075b655600ce61f";
+const RECIPE_SHA256 = "90b5ad0f3a7ab063313ac483d8649591403ff42ce023b52fecc35f59ee707334";
+const EXTRACTOR_SOURCE_SHA256 = "cce77b55130f7c56492a8a0311ed056f054b302bda9bcf0a9875fc5f1b4f37e6";
 const NOTICE_SHA256 = "ae94cc9272e8d3458778dda90db035388450075d5404f736f6daadc7192163d1";
 const BLOCKERS = [
   "browsergrad-extractor-distributed-materialization",
