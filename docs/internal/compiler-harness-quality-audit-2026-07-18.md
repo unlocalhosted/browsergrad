@@ -2,22 +2,23 @@
 
 ## Verdict
 
-The BrowserGrad compiler harness is not a fake execution path, but its current
-shape is uneven. Its container containment is strong and its locked input
-integrity is good but incomplete. Its evidence vocabulary is deliberately
-conservative. Its feedback loop and maintainability are not yet at the same
-standard.
+As of 2026-07-24, the BrowserGrad compiler harness is strong on correctness,
+security boundaries, and iteration speed. It separately proves parser,
+native-Clang, raw-Wasm ABI, two-clean-build, browser Worker, semantic lowering,
+CPU, and real-WebGPU tiers; a lower tier cannot silently satisfy a higher one.
+The ordinary compiler loop is seconds-scale and no longer invokes clean LLVM/
+Clang production.
 
-The "hacked upon" impression is justified by accumulated orchestration,
-manual authoring steps, duplicated native-test discovery, and several large
-modules. It is not justified as a claim that successful parser tests are being
-presented as real Clang, Wasm, Worker, or WebGPU execution. Those authorities
-remain explicitly separate and incomplete.
+Maintainability remains the weak dimension. Several native and orchestration
+modules are large, generated identity changes require coordinated authoring,
+and the clean evidence lane still takes roughly 40–47 minutes per concurrent
+builder. Line ratchets, dependency-cycle checks, generated-resource checks, and
+focused test routing constrain that debt, but do not make it disappear.
 
-Completed cached Clang-Wasm builds and detached raw-Wasm ABI review now exist.
-No current-source cache-free clean build, two-build reproducibility result,
-valid production Worker compile, or browser-local C++ execution is claimed by
-this audit.
+Overall rating: A for fail-closed evidence integrity, A- for feedback topology,
+B for maintainability, and incomplete for production authority. Externally
+rooted producer signing, file-level redistribution approval, full release
+output reproducibility, and final release authorization remain false.
 
 ## 2026-07-19 follow-up
 
@@ -166,7 +167,7 @@ The 90-minute compiler feedback loop is closed. On current `main`,
 `verify:browser-clang-wasm:fast` builds the package, verifies the exact build
 lock, verifies both zero-import Worker bundles, and passes 86 files/748 tests;
 the Vitest portion takes 13.47 seconds. The complete compiler unit suite passes
-97 files/1,623 tests in 15.96 seconds. The intentionally broader native
+97 files/1,624 tests in 17.05 seconds. The intentionally broader native
 boundary, including optimized, UBSan, and platform-gated ASan work, passes 50
 files/267 tests with nine explicit skips in 67.62 seconds. Cache-free LLVM/Clang
 reproducibility remains an evidence-production lane and runs as two concurrent
@@ -189,6 +190,17 @@ and final release authority remain separate and false. The large compiler
 modules and native producer files also remain maintainability debt even though
 their line ratchets, dependency-cycle checks, and single-path architecture
 prevent further ungoverned growth.
+
+Run `30067229885` demonstrates the current fail-closed behavior. Both clean
+builders compiled byte-identical 31,841,010-byte Wasm, taking about 39.6 and
+46.7 minutes, but the post-build ABI review rejected the exception-dispatch
+table shrinking from 15,304 to 15,301 entries. No import, export, memory, tag,
+or ambient capability changed. Runtime ABI 1.17 now pins the independently
+reviewed smaller table, the downloaded Wasm passes exact local review with zero
+mismatches, and both zero-import Worker resources were deterministically
+regenerated. The previous four-case strict browser observation fails closed
+against that Worker change. Current-lock run `30069614333` is producing the new
+clean-build authority before any strict observation is repinned.
 
 ## Why feedback was slow
 
