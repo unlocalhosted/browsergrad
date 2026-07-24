@@ -1853,30 +1853,69 @@ ArtifactV3WriteStatus write_cpp_cute_artifact_v3(
         maximum_byte_length > ArtifactV3ResultSink::kAbiMaximumByteLength) {
       return ArtifactV3WriteStatus::kInvalidObservation;
     }
-    Json payload =
-        producer.status == ProducerReviewStatus::kReviewComplete
-            ? build_accepted_payload(producer, session, maximum_byte_length)
-            : build_rejected_payload(producer, session, maximum_byte_length);
-    const std::string artifact_hash = hash_json(
-        object(
-            {{"domain", "browsergrad.compiler.cpp-cute.frontend-artifact.v3"},
-             {"payload", payload},
-             {"requiredExtensions", Json::Array{}},
-             {"schema", "browsergrad.compiler.cpp-cute.frontend-artifact"},
-             {"version", object({{"major", 3U}, {"minor", 0U}})}}),
-        maximum_byte_length);
-    Json envelope = object(
-        {{"artifactId",
-          std::string("bg.artifact.cpp-cute-frontend.sha256.") + artifact_hash},
-         {"payload", std::move(payload)},
-         {"producer", object({{"id", "browsergrad-tools/cpp-cute-frontend"},
-                              {"version", "0.1.0"}})},
-         {"requiredExtensions", Json::Array{}},
-         {"schema", "browsergrad.compiler.cpp-cute.frontend-artifact"},
-         {"version", object({{"major", 3U}, {"minor", 0U}})}});
-    const std::string bytes = canonical_json(envelope, maximum_byte_length);
+    Json payload;
+    try {
+      payload =
+          producer.status == ProducerReviewStatus::kReviewComplete
+              ? build_accepted_payload(producer, session, maximum_byte_length)
+              : build_rejected_payload(producer, session, maximum_byte_length);
+    } catch (const ArtifactResourceLimit&) {
+      report_native_diagnostic(
+          NativeDiagnosticCode::kArtifactWriterPayloadResourceLimit);
+      return ArtifactV3WriteStatus::kResourceLimit;
+    } catch (const std::bad_alloc&) {
+      report_native_diagnostic(
+          NativeDiagnosticCode::kArtifactWriterAllocationFailure);
+      return ArtifactV3WriteStatus::kResourceLimit;
+    }
+
+    Json envelope;
+    try {
+      const std::string artifact_hash = hash_json(
+          object(
+              {{"domain",
+                "browsergrad.compiler.cpp-cute.frontend-artifact.v3"},
+               {"payload", payload},
+               {"requiredExtensions", Json::Array{}},
+               {"schema", "browsergrad.compiler.cpp-cute.frontend-artifact"},
+               {"version", object({{"major", 3U}, {"minor", 0U}})}}),
+          maximum_byte_length);
+      envelope = object(
+          {{"artifactId",
+            std::string("bg.artifact.cpp-cute-frontend.sha256.") +
+                artifact_hash},
+           {"payload", std::move(payload)},
+           {"producer", object({{"id", "browsergrad-tools/cpp-cute-frontend"},
+                                {"version", "0.1.0"}})},
+           {"requiredExtensions", Json::Array{}},
+           {"schema", "browsergrad.compiler.cpp-cute.frontend-artifact"},
+           {"version", object({{"major", 3U}, {"minor", 0U}})}});
+    } catch (const ArtifactResourceLimit&) {
+      report_native_diagnostic(
+          NativeDiagnosticCode::kArtifactWriterSerializationResourceLimit);
+      return ArtifactV3WriteStatus::kResourceLimit;
+    } catch (const std::bad_alloc&) {
+      report_native_diagnostic(
+          NativeDiagnosticCode::kArtifactWriterAllocationFailure);
+      return ArtifactV3WriteStatus::kResourceLimit;
+    }
+
+    std::string bytes;
+    try {
+      bytes = canonical_json(envelope, maximum_byte_length);
+    } catch (const ArtifactResourceLimit&) {
+      report_native_diagnostic(
+          NativeDiagnosticCode::kArtifactWriterSerializationResourceLimit);
+      return ArtifactV3WriteStatus::kResourceLimit;
+    } catch (const std::bad_alloc&) {
+      report_native_diagnostic(
+          NativeDiagnosticCode::kArtifactWriterAllocationFailure);
+      return ArtifactV3WriteStatus::kResourceLimit;
+    }
     if (bytes.empty() ||
         bytes.size() > std::numeric_limits<std::uint32_t>::max()) {
+      report_native_diagnostic(
+          NativeDiagnosticCode::kArtifactWriterSerializationResourceLimit);
       return ArtifactV3WriteStatus::kResourceLimit;
     }
     const CanonicalJsonLimits limits = {
@@ -1891,6 +1930,8 @@ ArtifactV3WriteStatus write_cpp_cute_artifact_v3(
         reinterpret_cast<const std::uint8_t*>(bytes.data()),
         static_cast<std::uint32_t>(bytes.size()), limits);
     if (validation.status == CanonicalJsonStatus::kResourceLimit) {
+      report_native_diagnostic(
+          NativeDiagnosticCode::kArtifactWriterSerializationResourceLimit);
       return ArtifactV3WriteStatus::kResourceLimit;
     }
     if (validation.status != CanonicalJsonStatus::kValid) {
@@ -1898,15 +1939,23 @@ ArtifactV3WriteStatus write_cpp_cute_artifact_v3(
     }
     std::uint8_t* destination =
         result_sink.allocate(static_cast<std::uint32_t>(bytes.size()));
-    if (destination == nullptr) return ArtifactV3WriteStatus::kResourceLimit;
+    if (destination == nullptr) {
+      report_native_diagnostic(
+          NativeDiagnosticCode::kArtifactWriterResultAllocationLimit);
+      return ArtifactV3WriteStatus::kResourceLimit;
+    }
     std::memcpy(destination, bytes.data(), bytes.size());
     if (!result_sink.commit()) return ArtifactV3WriteStatus::kInternalError;
     return ArtifactV3WriteStatus::kReady;
   } catch (const ArtifactResourceLimit&) {
+    report_native_diagnostic(
+        NativeDiagnosticCode::kArtifactWriterPayloadResourceLimit);
     return ArtifactV3WriteStatus::kResourceLimit;
   } catch (const InvalidObservation&) {
     return ArtifactV3WriteStatus::kInvalidObservation;
   } catch (const std::bad_alloc&) {
+    report_native_diagnostic(
+        NativeDiagnosticCode::kArtifactWriterAllocationFailure);
     return ArtifactV3WriteStatus::kResourceLimit;
   } catch (...) {
     return ArtifactV3WriteStatus::kInternalError;

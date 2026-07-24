@@ -43,8 +43,8 @@ function supportExport(
  */
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
-  version: { major: 1, minor: 14 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.d2a18b132528aa3dcde74effc007b732c9083c4ffdf6ae06da18f39e2cbd68de",
+  version: { major: 1, minor: 15 },
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.ca26cb6a191c943c49b5b3ab4ea8f6587557add274fdeacf1c63e78fedf14b00",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -925,6 +925,10 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         { code: 44, name: "producer-vfs-invalid-include-source-ordinal" },
         { code: 45, name: "producer-vfs-invalid-forced-include-shape" },
         { code: 46, name: "producer-vfs-invalid-include-kind" },
+        { code: 47, name: "artifact-writer-payload-resource-limit" },
+        { code: 48, name: "artifact-writer-serialization-resource-limit" },
+        { code: 49, name: "artifact-writer-result-allocation-limit" },
+        { code: 50, name: "artifact-writer-allocation-failure" },
       ],
     },
     lifecycle: {

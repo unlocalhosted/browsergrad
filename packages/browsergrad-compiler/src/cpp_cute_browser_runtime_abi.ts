@@ -21,14 +21,14 @@ import {
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
-export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 14;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 15;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.d2a18b132528aa3dcde74effc007b732c9083c4ffdf6ae06da18f39e2cbd68de";
+  "bg.cpp.browser-runtime-abi.sha256.ca26cb6a191c943c49b5b3ab4ea8f6587557add274fdeacf1c63e78fedf14b00";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "375be060931c57b8016b2b3655d77a9ff618e826b917bbad031bccdc28c56541";
+  "836c70584bdfc4713799ce9c05c8366fd52d7157ae71cada2a84caab3094e347";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "5b1646d576c49c2702ec16aff79ae5b96be94de9a9fabe3e40d9fbdfe67dd159";
+  "2dc86b733937c7ace8487ac7d3fc3824215c1f49c245d46f24803c0dc15e0885";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "20214c6cd9f968c1a298f5f3749a3fc0fcceb7a364d201f96f9d3d546864949d";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 =
@@ -1074,6 +1074,10 @@ function validateBodyInvariants(value: JsonObject): void {
       "producer-vfs-invalid-include-source-ordinal",
       "producer-vfs-invalid-forced-include-shape",
       "producer-vfs-invalid-include-kind",
+      "artifact-writer-payload-resource-limit",
+      "artifact-writer-serialization-resource-limit",
+      "artifact-writer-result-allocation-limit",
+      "artifact-writer-allocation-failure",
     ], "$.body.nativeDiagnostics.codes[*].name");
     if (body.lifecycle.initialState !== "idle") invalid("$.body.lifecycle.initialState", "initial state must be idle");
     assertExactStrings(body.lifecycle.states, [

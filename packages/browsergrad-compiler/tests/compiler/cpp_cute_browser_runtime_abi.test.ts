@@ -74,7 +74,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256,
       supportFunctionAllowlistSha256:
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256,
-      resourceByteLength: 44_233,
+      resourceByteLength: 44_476,
       designAuthority: true,
       interfaceReviewReady: false,
       observedWasmVerified: false,
@@ -82,7 +82,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     });
     expect(canonicalCppCuteBrowserRuntimeAbiManifestBytes(prepared)).toEqual(resource);
     const record = unwrapPreparedCppCuteBrowserRuntimeAbiManifest(prepared);
-    expect(record.manifest.version).toEqual({ major: 1, minor: 14 });
+    expect(record.manifest.version).toEqual({ major: 1, minor: 15 });
     expect(record.manifest.body.wasm.cAbiVersion).toBe(65_541);
     expect(await deriveCppCuteBrowserRuntimeAbiManifestId(record.manifest.body)).toBe(
       CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
@@ -146,7 +146,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
       reset: "reset-clears-unless-sticky-allocator-integrity-failure-reports-again",
       authority: "diagnostic-only-never-artifact-or-lowering-authority",
     });
-    expect(contract.codes).toHaveLength(47);
+    expect(contract.codes).toHaveLength(51);
     expect(contract.codes[0]).toEqual({ code: 0, name: "none" });
     expect(contract.codes[13]).toEqual({
       code: 13,
@@ -159,6 +159,14 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
     expect(contract.codes[46]).toEqual({
       code: 46,
       name: "producer-vfs-invalid-include-kind",
+    });
+    expect(contract.codes[47]).toEqual({
+      code: 47,
+      name: "artifact-writer-payload-resource-limit",
+    });
+    expect(contract.codes[50]).toEqual({
+      code: 50,
+      name: "artifact-writer-allocation-failure",
     });
   });
 
@@ -800,7 +808,7 @@ describe("browser Clang-WASM runtime ABI manifest", () => {
   });
 
   it("rejects unsupported versions before accepting a closed contract", async () => {
-    for (const [field, value] of [["major", 2], ["minor", 15]] as const) {
+    for (const [field, value] of [["major", 2], ["minor", 16]] as const) {
       const resource = mutableResource();
       objectField(resource, "version")[field] = value;
       await expectDecodeError(

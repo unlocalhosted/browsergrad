@@ -480,6 +480,22 @@ void report_native_diagnostic(const NativeDiagnosticCode code) noexcept {
       write_native_diagnostic(
           "BG-CPP-CUTE-DIAGNOSTIC:producer-vfs-invalid-include-kind\n");
       return;
+    case NativeDiagnosticCode::kArtifactWriterPayloadResourceLimit:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:artifact-writer-payload-resource-limit\n");
+      return;
+    case NativeDiagnosticCode::kArtifactWriterSerializationResourceLimit:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:artifact-writer-serialization-resource-limit\n");
+      return;
+    case NativeDiagnosticCode::kArtifactWriterResultAllocationLimit:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:artifact-writer-result-allocation-limit\n");
+      return;
+    case NativeDiagnosticCode::kArtifactWriterAllocationFailure:
+      write_native_diagnostic(
+          "BG-CPP-CUTE-DIAGNOSTIC:artifact-writer-allocation-failure\n");
+      return;
   }
 }
 

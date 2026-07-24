@@ -316,7 +316,7 @@ describe("C++/CuTe local Wasm C ABI compiler execution", () => {
     const fixture = runtimeFixture({
       compileReturn: 106,
       readableCompileStatus: 106,
-      lastDiagnosticCode: 47,
+      lastDiagnosticCode: 51,
     });
     expect(() => executeCppCuteBrowserWasmCompiler({
       factory: fixture.factory,

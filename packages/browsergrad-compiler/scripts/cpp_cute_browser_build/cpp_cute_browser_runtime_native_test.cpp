@@ -354,6 +354,9 @@ int run_runtime_tests() {
   static_assert(
       static_cast<std::uint32_t>(
           NativeDiagnosticCode::kProducerVfsInvalidIncludeKind) == 46U);
+  static_assert(
+      static_cast<std::uint32_t>(
+          NativeDiagnosticCode::kArtifactWriterAllocationFailure) == 50U);
   g_runtime_test_allocation_hooks = {
       test_allocate,
       test_release,

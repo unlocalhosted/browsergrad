@@ -71,6 +71,10 @@ enum class NativeDiagnosticCode : std::uint32_t {
   kProducerVfsInvalidIncludeSourceOrdinal = 44U,
   kProducerVfsInvalidForcedIncludeShape = 45U,
   kProducerVfsInvalidIncludeKind = 46U,
+  kArtifactWriterPayloadResourceLimit = 47U,
+  kArtifactWriterSerializationResourceLimit = 48U,
+  kArtifactWriterResultAllocationLimit = 49U,
+  kArtifactWriterAllocationFailure = 50U,
 };
 
 void report_native_diagnostic(NativeDiagnosticCode code) noexcept;
