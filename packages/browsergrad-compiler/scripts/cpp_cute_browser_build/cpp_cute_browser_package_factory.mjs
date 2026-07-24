@@ -10,9 +10,15 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import {
+  CPP_CUTE_BROWSER_REVIEWED_FACTORY_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_REVIEWED_FACTORY_SHA256,
+} from "../../dist/resources/cpp_cute_browser_factory_identity.js";
+
 export const CPP_CUTE_BROWSER_PACKAGE_FACTORY_SHA256 =
-  "f64d5239d5c258f44e859834b57e1ea330b7efdf7a405dead3126b53330a5534";
-export const CPP_CUTE_BROWSER_PACKAGE_FACTORY_BYTE_LENGTH = 27_285;
+  CPP_CUTE_BROWSER_REVIEWED_FACTORY_SHA256;
+export const CPP_CUTE_BROWSER_PACKAGE_FACTORY_BYTE_LENGTH =
+  CPP_CUTE_BROWSER_REVIEWED_FACTORY_BYTE_LENGTH;
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-PACKAGE-FACTORY";
 const SCRIPT_ROOT = dirname(fileURLToPath(import.meta.url));

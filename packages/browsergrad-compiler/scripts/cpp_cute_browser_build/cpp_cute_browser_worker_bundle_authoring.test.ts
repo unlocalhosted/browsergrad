@@ -7,6 +7,9 @@ import {
   buildCppCuteBrowserWorkerBundleProjection,
   renderCppCuteBrowserWorkerBundleResource,
 } from "./cpp_cute_browser_worker_bundle_authoring.mjs";
+import {
+  CPP_CUTE_BROWSER_REPRODUCIBILITY_V3_RESOURCE,
+} from "../../dist/resources/cpp_cute_browser_reproducibility_v3.js";
 
 const RESOURCE_URL = new URL(
   "../../src/resources/cpp_cute_browser_worker_bundle_v1.ts",
@@ -38,6 +41,12 @@ describe("C++/CuTe package Worker bundle authoring", () => {
       verifierSha256: "8e346123d86cc18c1c6acbdc7e97ca981f4de6e4c4969291c92e1e3aa668e5ad",
       verifierByteLength: 157_830,
     });
+    expect(projection.factorySha256).toBe(
+      CPP_CUTE_BROWSER_REPRODUCIBILITY_V3_RESOURCE.builds[0].factoryModuleSha256,
+    );
+    expect(projection.factoryByteLength).toBe(
+      CPP_CUTE_BROWSER_REPRODUCIBILITY_V3_RESOURCE.builds[0].factoryModuleByteLength,
+    );
     expect(projection.source).not.toContain("sourceMappingURL=");
     expect(projection.source).not.toContain("//#region");
     expect(renderCppCuteBrowserWorkerBundleResource(projection)).toBe(

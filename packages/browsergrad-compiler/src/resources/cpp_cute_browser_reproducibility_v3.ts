@@ -2,6 +2,10 @@ import {
   deepFreezeJson,
   type JsonObject,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import {
+  CPP_CUTE_BROWSER_REVIEWED_FACTORY_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_REVIEWED_FACTORY_SHA256,
+} from "./cpp_cute_browser_factory_identity.js";
 
 /**
  * Canonical verifier output for the two clean Clang-Wasm builds produced by
@@ -16,9 +20,8 @@ const CPP_CUTE_BROWSER_REPRODUCIBILITY_V3_VALUE = {
       buildExecutionEvidenceByteLength: 32_532,
       buildExecutionEvidenceSha256:
         "0ea352100bc6fd35b2d4a7cd4ed85c5eb22ff179a435fbbf3ee92a2a2e3adb6e",
-      factoryModuleByteLength: 27_285,
-      factoryModuleSha256:
-        "f64d5239d5c258f44e859834b57e1ea330b7efdf7a405dead3126b53330a5534",
+      factoryModuleByteLength: CPP_CUTE_BROWSER_REVIEWED_FACTORY_BYTE_LENGTH,
+      factoryModuleSha256: CPP_CUTE_BROWSER_REVIEWED_FACTORY_SHA256,
       linkMapByteLength: 24_476_842,
       linkMapCanonicalByteLength: 24_427_906,
       linkMapCanonicalSha256:
@@ -51,9 +54,8 @@ const CPP_CUTE_BROWSER_REPRODUCIBILITY_V3_VALUE = {
       buildExecutionEvidenceByteLength: 32_532,
       buildExecutionEvidenceSha256:
         "66af1562e0661cb11e0ef8cdaea2fa175da35153969d0385955f4eda9a4e129e",
-      factoryModuleByteLength: 27_285,
-      factoryModuleSha256:
-        "f64d5239d5c258f44e859834b57e1ea330b7efdf7a405dead3126b53330a5534",
+      factoryModuleByteLength: CPP_CUTE_BROWSER_REVIEWED_FACTORY_BYTE_LENGTH,
+      factoryModuleSha256: CPP_CUTE_BROWSER_REVIEWED_FACTORY_SHA256,
       linkMapByteLength: 24_476_842,
       linkMapCanonicalByteLength: 24_427_906,
       linkMapCanonicalSha256:

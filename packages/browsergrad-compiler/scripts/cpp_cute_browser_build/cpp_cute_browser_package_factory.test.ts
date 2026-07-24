@@ -11,6 +11,9 @@ import {
   CppCuteBrowserPackageFactoryError,
   materializeCppCuteBrowserPackageFactory,
 } from "./cpp_cute_browser_package_factory.mjs";
+import {
+  CPP_CUTE_BROWSER_REPRODUCIBILITY_V3_RESOURCE,
+} from "../../dist/resources/cpp_cute_browser_reproducibility_v3.js";
 
 const TEST_ROOTS: string[] = [];
 const SCRIPT_ROOT = dirname(fileURLToPath(import.meta.url));
@@ -22,6 +25,16 @@ afterEach(async () => {
 });
 
 describe("package-owned generated factory materialization", () => {
+  it("derives its exact factory identity from the reviewed reproducibility resource", () => {
+    const reproducible = CPP_CUTE_BROWSER_REPRODUCIBILITY_V3_RESOURCE.builds[0];
+    expect(CPP_CUTE_BROWSER_PACKAGE_FACTORY_SHA256).toBe(
+      reproducible.factoryModuleSha256,
+    );
+    expect(CPP_CUTE_BROWSER_PACKAGE_FACTORY_BYTE_LENGTH).toBe(
+      reproducible.factoryModuleByteLength,
+    );
+  });
+
   it("copies the exact reviewed source once into an immutable fresh dist tree", async () => {
     const { destinationRoot } = await fixture();
     const report = await materializeCppCuteBrowserPackageFactory({ destinationRoot });

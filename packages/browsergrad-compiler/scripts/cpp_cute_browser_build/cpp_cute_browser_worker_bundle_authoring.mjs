@@ -4,6 +4,9 @@ import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { build } from "vite";
+import {
+  CPP_CUTE_BROWSER_REVIEWED_FACTORY_SHA256,
+} from "../../dist/resources/cpp_cute_browser_factory_identity.js";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const SCRIPT_DIRECTORY = dirname(SCRIPT_PATH);
@@ -23,7 +26,7 @@ const VERIFIER_RESOURCE_PATH = resolve(
   "src/resources/cpp_cute_browser_wasm_verifier_bundle_v1.ts",
 );
 const FACTORY_SHA256 =
-  "f64d5239d5c258f44e859834b57e1ea330b7efdf7a405dead3126b53330a5534";
+  CPP_CUTE_BROWSER_REVIEWED_FACTORY_SHA256;
 const RESOURCE_SCHEMA = "browsergrad.compiler.cpp-cute.package-worker-bundle-resource";
 const VERIFIER_RESOURCE_SCHEMA =
   "browsergrad.compiler.cpp-cute.package-wasm-verifier-bundle-resource";

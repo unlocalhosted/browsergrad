@@ -1,11 +1,16 @@
 import createBrowserGradCppCuteExtractor from "./resources/clang-extractor.mjs";
+import {
+  CPP_CUTE_BROWSER_REVIEWED_FACTORY_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_REVIEWED_FACTORY_SHA256,
+} from "./resources/cpp_cute_browser_factory_identity.js";
 import type {
   CppCuteBrowserGeneratedEmscriptenFactory,
 } from "./cpp_cute_browser_emscripten_factory.js";
 
 export const CPP_CUTE_BROWSER_GENERATED_FACTORY_SHA256 =
-  "f64d5239d5c258f44e859834b57e1ea330b7efdf7a405dead3126b53330a5534";
-export const CPP_CUTE_BROWSER_GENERATED_FACTORY_BYTE_LENGTH = 27_285;
+  CPP_CUTE_BROWSER_REVIEWED_FACTORY_SHA256;
+export const CPP_CUTE_BROWSER_GENERATED_FACTORY_BYTE_LENGTH =
+  CPP_CUTE_BROWSER_REVIEWED_FACTORY_BYTE_LENGTH;
 export const CPP_CUTE_BROWSER_GENERATED_FACTORY_ID =
   `bg.cpp.browser-emscripten-factory.sha256.${CPP_CUTE_BROWSER_GENERATED_FACTORY_SHA256}`;
 export const CPP_CUTE_BROWSER_GENERATED_FACTORY_AUTHORITY = Object.freeze({
