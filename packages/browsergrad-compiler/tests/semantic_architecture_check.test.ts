@@ -25,6 +25,7 @@ import {
   validateJitOpaqueOperationInventory,
   validateAssignmentRequirementRegistrySource,
   validateGradFrameworkPlatformSupportSource,
+  validateImplementationCheckpoint,
   validatePlatformVocabularySnapshot,
   validateProgramCapabilityRegistrySource,
   validateSemanticFreezeManifest,
@@ -104,6 +105,26 @@ describe("semantic architecture guardrails", () => {
     semanticRoutingCollision.contracts[0]!.excludedRoutingFields.push("axes");
     expect(validateSharedSemanticFixtureContracts(repoRoot, semanticRoutingCollision))
       .toContainEqual(expect.stringContaining("contains excluded routing field axes"));
+  });
+
+  it("keeps implementation chronology out of the normative requirements checkpoint", () => {
+    const source = readFileSync(
+      join(repoRoot, "docs/platform/package-requirements-lld.md"),
+      "utf8",
+    );
+    expect(validateImplementationCheckpoint(source)).toEqual([]);
+    expect(validateImplementationCheckpoint(
+      source.replace(
+        "## Purpose",
+        `${"historical evidence\n".repeat(181)}\n## Purpose`,
+      ),
+    )).toContainEqual(expect.stringContaining("move chronology to the implementation ledger"));
+    expect(validateImplementationCheckpoint(
+      `${source}\n## Implementation Checkpoint — Active duplicate\n`,
+    )).toContainEqual(expect.stringContaining("exactly one active implementation checkpoint"));
+    expect(validateImplementationCheckpoint(
+      source.replace("This checkpoint is informational.", "Current status follows."),
+    )).toContainEqual(expect.stringContaining("must state that it is informational"));
   });
 
   it("rejects cross-package implementation imports", () => {

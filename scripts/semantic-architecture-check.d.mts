@@ -54,6 +54,11 @@ export function validateSharedSemanticFixtureContracts(
   manifest: unknown,
 ): string[];
 
+export function validateImplementationCheckpoint(
+  source: string,
+  maxLines?: number,
+): string[];
+
 export function extractModuleSpecifiers(
   typescript: typeof ts,
   source: string,

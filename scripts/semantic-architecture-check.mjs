@@ -61,6 +61,7 @@ export function runSemanticArchitectureCheck(root = repoRoot) {
     fs.readFileSync(architectureDeclaration, "utf8"),
   ));
   validateManifest(root, manifest, failures);
+  checkImplementationCheckpoint(root, failures);
   checkSharedSemanticFixtureContracts(root, failures);
   checkWorkspaceDependencies(root, failures);
   checkWorkspaceImports(root, ts, failures);
@@ -206,6 +207,56 @@ export function checkFrozenCuteSourceNormalizerFiles(
 export function validateSharedSemanticFixtureContracts(root, manifest) {
   const failures = [];
   validateSharedSemanticFixtureManifest(path.resolve(root), manifest, failures);
+  return failures;
+}
+
+export function validateImplementationCheckpoint(
+  source,
+  maxLines = 180,
+) {
+  const failures = [];
+  if (typeof source !== "string") {
+    return ["package requirements LLD must be text"];
+  }
+  if (!Number.isSafeInteger(maxLines) || maxLines < 1) {
+    return ["implementation checkpoint line budget must be a positive safe integer"];
+  }
+  const startMarker = "## Implementation Checkpoint — Active ";
+  const endMarker = "## Purpose";
+  const startOffsets = [...source.matchAll(/^## Implementation Checkpoint — Active .+$/gmu)]
+    .map((match) => match.index);
+  const endOffsets = [...source.matchAll(/^## Purpose$/gmu)]
+    .map((match) => match.index);
+  if (startOffsets.length !== 1) {
+    failures.push(
+      `package requirements LLD must contain exactly one active implementation checkpoint; got ${startOffsets.length}`,
+    );
+  }
+  if (endOffsets.length !== 1) {
+    failures.push(
+      `package requirements LLD must contain exactly one Purpose boundary; got ${endOffsets.length}`,
+    );
+  }
+  const start = startOffsets[0];
+  const end = endOffsets[0];
+  if (start === undefined || end === undefined || end <= start) return failures;
+  const checkpoint = source.slice(start, end);
+  const lineCount = checkpoint.split("\n").length;
+  if (lineCount > maxLines) {
+    failures.push(
+      `package requirements implementation checkpoint has ${lineCount} lines; maximum is ${maxLines}; move chronology to the implementation ledger`,
+    );
+  }
+  if (!checkpoint.includes("This checkpoint is informational.")) {
+    failures.push(
+      "package requirements implementation checkpoint must state that it is informational",
+    );
+  }
+  if (!checkpoint.includes("[implementation ledger]")) {
+    failures.push(
+      "package requirements implementation checkpoint must link the implementation ledger",
+    );
+  }
   return failures;
 }
 
@@ -1311,6 +1362,20 @@ function checkSharedSemanticFixtureContracts(root, failures) {
   const manifestFile = path.join(root, "architecture/semantic-fixture-contracts.json");
   const manifest = readJson(manifestFile, failures);
   if (manifest !== undefined) validateSharedSemanticFixtureManifest(root, manifest, failures);
+}
+
+function checkImplementationCheckpoint(root, failures) {
+  const file = path.join(root, "docs/platform/package-requirements-lld.md");
+  let source;
+  try {
+    source = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    failures.push(
+      `docs/platform/package-requirements-lld.md cannot be read: ${errorMessage(error)}`,
+    );
+    return;
+  }
+  failures.push(...validateImplementationCheckpoint(source));
 }
 
 function validateSharedSemanticFixtureManifest(root, manifest, failures) {
