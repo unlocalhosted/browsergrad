@@ -42,6 +42,11 @@ import {
   cppCuteBrowserRuntimeAbiManifestResourceBytes,
 } from "../src/cpp_cute_browser_runtime_abi.js";
 import {
+  cppCuteBrowserRealCompileCase,
+  type CppCuteBrowserRealCompileCaseId,
+  type CppCuteBrowserRealCompileDType,
+} from "../src/cpp_cute_browser_real_compile_cases.js";
+import {
   CPP_CUTE_DIAGNOSTIC_NORMALIZATION_V1_RESOURCE_SHA256,
   cppCuteDiagnosticNormalizationResourceBytes,
 } from "../src/cpp_cute_diagnostic_normalization.js";
@@ -98,24 +103,6 @@ import {
 import {
   createCppCuteBrowserProfileInput,
 } from "../tests/compiler/support/cpp_cute_frontend_fixtures.js";
-import {
-  CPP_CUTE_BROWSER_VIEW_COPY_BROADCAST_CONVERGENCE_FIXTURE,
-  CPP_CUTE_BROWSER_VIEW_COPY_RANK2_CONVERGENCE_FIXTURE,
-  CPP_CUTE_BROWSER_VIEW_COPY_RANK3_CONVERGENCE_FIXTURE,
-  CPP_CUTE_BROWSER_VIEW_COPY_STRIDED_SLICE_CONVERGENCE_FIXTURE,
-} from "../tests/fixtures/cpp_cute_browser_view_copy_convergence.js";
-
-type RealCompileCaseId =
-  | "rank2"
-  | "rank3"
-  | "rank1"
-  | "rank4"
-  | "strided-slice"
-  | "broadcast"
-  | "i32-rank2"
-  | "u32-broadcast";
-
-type RealCompileDType = "f32" | "i32" | "u32";
 
 interface ExternalAssetInput {
   readonly assetId: string;
@@ -128,7 +115,7 @@ interface BrowserExternalInputs {
   readonly schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs";
   readonly version: 3;
   readonly authority: "local-exact-byte-preflight-only";
-  readonly caseId: RealCompileCaseId;
+  readonly caseId: CppCuteBrowserRealCompileCaseId;
   readonly assets: readonly ExternalAssetInput[];
   readonly wasmAuthority:
     | "package-pinned-two-clean-build-output"
@@ -150,257 +137,8 @@ declare const __BG_CPP_CUTE_REAL_COMPILE_ROUTE_PREFIX__: string;
 const BUILD_PROVENANCE_POLICY_BUILDER =
   "https://browsergrad.dev/local-observation/untrusted-builder";
 const EVIDENCE_MARKER = "BROWSERGRAD_CPP_CUTE_REAL_COMPILE_EVIDENCE=";
-const REAL_COMPILE_CASES = Object.freeze({
-  rank2: Object.freeze({
-    caseId: "rank2" as const,
-    virtualPath: "/workspace/src/real-view-copy-rank2.cu",
-    coordinateRank: 2,
-    dtype: "f32" as const,
-    sourceSpanElements: 6n,
-    destinationSpanElements: 6n,
-    source: [
-      "#include <cute/tensor.hpp>",
-      "using SourceLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
-      "  cute::Stride<cute::Int<1>, cute::Int<3>>>;",
-      "using DestinationLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
-      "  cute::Stride<cute::Int<2>, cute::Int<1>>>;",
-      "__device__ void copy_views(const float* source, float* destination) {",
-      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
-      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
-      "  cute::copy(source_tensor, destination_tensor);",
-      "}",
-      "",
-    ].join("\n"),
-  }),
-  rank3: Object.freeze({
-    caseId: "rank3" as const,
-    virtualPath: "/workspace/src/real-view-copy-rank3.cu",
-    coordinateRank: 3,
-    dtype: "f32" as const,
-    sourceSpanElements: 24n,
-    destinationSpanElements: 24n,
-    source: [
-      "#include <cute/tensor.hpp>",
-      "using SourceLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<2>, cute::Int<3>, cute::Int<4>>,",
-      "  cute::Stride<cute::Int<1>, cute::Int<2>, cute::Int<6>>>;",
-      "using DestinationLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<2>, cute::Int<3>, cute::Int<4>>,",
-      "  cute::Stride<cute::Int<12>, cute::Int<4>, cute::Int<1>>>;",
-      "__device__ void copy_views(const float* source, float* destination) {",
-      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
-      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
-      "  cute::copy(source_tensor, destination_tensor);",
-      "}",
-      "",
-    ].join("\n"),
-  }),
-  rank1: Object.freeze({
-    caseId: "rank1" as const,
-    virtualPath: "/workspace/src/real-view-copy-rank1.cu",
-    coordinateRank: 1,
-    dtype: "f32" as const,
-    sourceSpanElements: 7n,
-    destinationSpanElements: 4n,
-    source: [
-      "#include <cute/tensor.hpp>",
-      "using SourceLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<4>>,",
-      "  cute::Stride<cute::Int<2>>>;",
-      "using DestinationLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<4>>,",
-      "  cute::Stride<cute::Int<1>>>;",
-      "__device__ void copy_views(const float* source, float* destination) {",
-      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
-      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
-      "  cute::copy(source_tensor, destination_tensor);",
-      "}",
-      "",
-    ].join("\n"),
-  }),
-  rank4: Object.freeze({
-    caseId: "rank4" as const,
-    virtualPath: "/workspace/src/real-view-copy-rank4.cu",
-    coordinateRank: 4,
-    dtype: "f32" as const,
-    sourceSpanElements: 16n,
-    destinationSpanElements: 16n,
-    source: [
-      "#include <cute/tensor.hpp>",
-      "using SourceLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<2>, cute::Int<2>, cute::Int<2>, cute::Int<2>>,",
-      "  cute::Stride<cute::Int<1>, cute::Int<2>, cute::Int<4>, cute::Int<8>>>;",
-      "using DestinationLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<2>, cute::Int<2>, cute::Int<2>, cute::Int<2>>,",
-      "  cute::Stride<cute::Int<8>, cute::Int<4>, cute::Int<2>, cute::Int<1>>>;",
-      "__device__ void copy_views(const float* source, float* destination) {",
-      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
-      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
-      "  cute::copy(source_tensor, destination_tensor);",
-      "}",
-      "",
-    ].join("\n"),
-  }),
-  "strided-slice": Object.freeze({
-    caseId: "strided-slice" as const,
-    virtualPath: "/workspace/src/real-view-copy-strided-slice.cu",
-    coordinateRank: 2,
-    dtype: "f32" as const,
-    sourceSpanElements: 12n,
-    destinationSpanElements: 6n,
-    source: [
-      "#include <cute/tensor.hpp>",
-      "using SourceLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
-      "  cute::Stride<cute::Int<2>, cute::Int<7>>>;",
-      "using DestinationLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
-      "  cute::Stride<cute::Int<2>, cute::Int<1>>>;",
-      "__device__ void copy_views(const float* source, float* destination) {",
-      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
-      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
-      "  cute::copy(source_tensor, destination_tensor);",
-      "}",
-      "",
-    ].join("\n"),
-  }),
-  broadcast: Object.freeze({
-    caseId: "broadcast" as const,
-    virtualPath: "/workspace/src/real-view-copy-broadcast.cu",
-    coordinateRank: 2,
-    dtype: "f32" as const,
-    sourceSpanElements: 2n,
-    destinationSpanElements: 6n,
-    source: [
-      "#include <cute/tensor.hpp>",
-      "using SourceLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
-      "  cute::Stride<cute::Int<0>, cute::Int<1>>>;",
-      "using DestinationLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
-      "  cute::Stride<cute::Int<2>, cute::Int<1>>>;",
-      "__device__ void copy_views(const float* source, float* destination) {",
-      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
-      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
-      "  cute::copy(source_tensor, destination_tensor);",
-      "}",
-      "",
-    ].join("\n"),
-  }),
-  "i32-rank2": Object.freeze({
-    caseId: "i32-rank2" as const,
-    virtualPath: "/workspace/src/real-view-copy-i32-rank2.cu",
-    coordinateRank: 2,
-    dtype: "i32" as const,
-    sourceSpanElements: 6n,
-    destinationSpanElements: 6n,
-    source: [
-      "#include <cute/tensor.hpp>",
-      "using SourceLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
-      "  cute::Stride<cute::Int<1>, cute::Int<3>>>;",
-      "using DestinationLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
-      "  cute::Stride<cute::Int<2>, cute::Int<1>>>;",
-      "__device__ void copy_views(const int* source, int* destination) {",
-      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
-      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
-      "  cute::copy(source_tensor, destination_tensor);",
-      "}",
-      "",
-    ].join("\n"),
-  }),
-  "u32-broadcast": Object.freeze({
-    caseId: "u32-broadcast" as const,
-    virtualPath: "/workspace/src/real-view-copy-u32-broadcast.cu",
-    coordinateRank: 2,
-    dtype: "u32" as const,
-    sourceSpanElements: 2n,
-    destinationSpanElements: 6n,
-    source: [
-      "#include <cute/tensor.hpp>",
-      "using SourceLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
-      "  cute::Stride<cute::Int<0>, cute::Int<1>>>;",
-      "using DestinationLayout = cute::Layout<",
-      "  cute::Shape<cute::Int<3>, cute::Int<2>>,",
-      "  cute::Stride<cute::Int<2>, cute::Int<1>>>;",
-      "__device__ void copy_views(const unsigned int* source, unsigned int* destination) {",
-      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
-      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
-      "  cute::copy(source_tensor, destination_tensor);",
-      "}",
-      "",
-    ].join("\n"),
-  }),
-});
 const REAL_COMPILE_CASE =
-  REAL_COMPILE_CASES[__BG_CPP_CUTE_REAL_COMPILE_INPUTS__.caseId];
-const CONVERGENCE_FIXTURES = Object.freeze({
-  rank2: CPP_CUTE_BROWSER_VIEW_COPY_RANK2_CONVERGENCE_FIXTURE,
-  rank3: CPP_CUTE_BROWSER_VIEW_COPY_RANK3_CONVERGENCE_FIXTURE,
-  rank1: Object.freeze({
-    construction: Object.freeze({
-      source: Object.freeze({
-        layout: Object.freeze({
-          shape: Object.freeze([{ value: "4" }]),
-          strides: Object.freeze([{ value: "2" }]),
-        }),
-      }),
-      destination: Object.freeze({
-        layout: Object.freeze({
-          shape: Object.freeze([{ value: "4" }]),
-          strides: Object.freeze([{ value: "1" }]),
-        }),
-      }),
-    }),
-  }),
-  rank4: Object.freeze({
-    construction: Object.freeze({
-      source: Object.freeze({
-        layout: Object.freeze({
-          shape: Object.freeze([
-            { value: "2" },
-            { value: "2" },
-            { value: "2" },
-            { value: "2" },
-          ]),
-          strides: Object.freeze([
-            { value: "1" },
-            { value: "2" },
-            { value: "4" },
-            { value: "8" },
-          ]),
-        }),
-      }),
-      destination: Object.freeze({
-        layout: Object.freeze({
-          shape: Object.freeze([
-            { value: "2" },
-            { value: "2" },
-            { value: "2" },
-            { value: "2" },
-          ]),
-          strides: Object.freeze([
-            { value: "8" },
-            { value: "4" },
-            { value: "2" },
-            { value: "1" },
-          ]),
-        }),
-      }),
-    }),
-  }),
-  "strided-slice":
-    CPP_CUTE_BROWSER_VIEW_COPY_STRIDED_SLICE_CONVERGENCE_FIXTURE,
-  broadcast: CPP_CUTE_BROWSER_VIEW_COPY_BROADCAST_CONVERGENCE_FIXTURE,
-  "i32-rank2": CPP_CUTE_BROWSER_VIEW_COPY_RANK2_CONVERGENCE_FIXTURE,
-  "u32-broadcast": CPP_CUTE_BROWSER_VIEW_COPY_BROADCAST_CONVERGENCE_FIXTURE,
-});
-const CONVERGENCE_FIXTURE =
-  CONVERGENCE_FIXTURES[REAL_COMPILE_CASE.caseId];
+  cppCuteBrowserRealCompileCase(__BG_CPP_CUTE_REAL_COMPILE_INPUTS__.caseId);
 const MAIN_PATH = REAL_COMPILE_CASE.virtualPath;
 const MAIN_SOURCE = REAL_COMPILE_CASE.source;
 const MAIN_BYTES = new TextEncoder().encode(MAIN_SOURCE);
@@ -425,6 +163,7 @@ interface RealCompileEnvironment {
 
 it("observes unchanged CuTe view-copy source in the exact package Worker", async () => {
   const started = performance.now();
+  expect(await sha256Hex(MAIN_BYTES)).toBe(REAL_COMPILE_CASE.sourceSha256);
   const externalAssets = await fetchExternalAssets();
   const environment = await prepareRealCompileEnvironment(externalAssets);
   const request = await prepareRealViewCopyRequest(environment.profile);
@@ -672,28 +411,14 @@ it("observes unchanged CuTe view-copy source in the exact package Worker", async
     REAL_COMPILE_CASE.destinationSpanElements,
   );
   expect(candidateRecord.semantics.dtype).toBe(
-    REAL_COMPILE_CASE.dtype satisfies RealCompileDType,
+    REAL_COMPILE_CASE.dtype satisfies CppCuteBrowserRealCompileDType,
   );
   expect(staticLayoutProjection(
     candidateRecord.semantics.sourceLayoutFact,
-  )).toEqual({
-    shape: CONVERGENCE_FIXTURE.construction.source.layout.shape.map(
-      (extent) => extent.value,
-    ),
-    strides: CONVERGENCE_FIXTURE.construction.source.layout.strides.map(
-      (stride) => stride.value,
-    ),
-  });
+  )).toEqual(REAL_COMPILE_CASE.sourceLayout);
   expect(staticLayoutProjection(
     candidateRecord.semantics.destinationLayoutFact,
-  )).toEqual({
-    shape: CONVERGENCE_FIXTURE.construction.destination.layout.shape.map(
-      (extent) => extent.value,
-    ),
-    strides: CONVERGENCE_FIXTURE.construction.destination.layout.strides.map(
-      (stride) => stride.value,
-    ),
-  });
+  )).toEqual(REAL_COMPILE_CASE.destinationLayout);
   const wasmConformance = inspectObservedCppCuteBrowserPackageWasmConformance(
     executionRecord.packageInvocationLineage.observedWasmConformance,
   );

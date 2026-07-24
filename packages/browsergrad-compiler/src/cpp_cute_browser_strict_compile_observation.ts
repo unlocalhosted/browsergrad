@@ -15,6 +15,10 @@ import {
   verifyCppCuteBrowserReproducibilityResource,
 } from "./cpp_cute_browser_reproducibility.js";
 import {
+  CPP_CUTE_BROWSER_REAL_COMPILE_CASES,
+  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS,
+} from "./cpp_cute_browser_real_compile_cases.js";
+import {
   verifyCppCuteBrowserWorkerBundle,
 } from "./cpp_cute_browser_worker_bundle.js";
 import {
@@ -66,88 +70,11 @@ const STRICT_OBSERVATION_HEADER_PACKS = Object.freeze([
     byteLength: "8927070",
   }),
 ]);
-const EXPECTED_CASES = Object.freeze([
-  Object.freeze({
-    caseId: "rank2",
-    dtype: "f32",
-    rank: 2,
-    sourceSpanElements: "6",
-    destinationSpanElements: "6",
-    sourceSha256:
-      "4134804a9892ed1f0a2778fae305e957b5a981afccf2a096f1585f3b1d4e6f06",
-    virtualPath: "/workspace/src/real-view-copy-rank2.cu",
-  }),
-  Object.freeze({
-    caseId: "rank3",
-    dtype: "f32",
-    rank: 3,
-    sourceSpanElements: "24",
-    destinationSpanElements: "24",
-    sourceSha256:
-      "6a7beae44e88d7fe8749cb5b485dc7d51d30ed285d33314895be461d428550dd",
-    virtualPath: "/workspace/src/real-view-copy-rank3.cu",
-  }),
-  Object.freeze({
-    caseId: "rank1",
-    dtype: "f32",
-    rank: 1,
-    sourceSpanElements: "7",
-    destinationSpanElements: "4",
-    sourceSha256:
-      "7c8fc9f261fab7181e9c25d124f2604d31a48a5c9bc49e043c42f9371a27c1c7",
-    virtualPath: "/workspace/src/real-view-copy-rank1.cu",
-  }),
-  Object.freeze({
-    caseId: "rank4",
-    dtype: "f32",
-    rank: 4,
-    sourceSpanElements: "16",
-    destinationSpanElements: "16",
-    sourceSha256:
-      "28d6094af10254112f25ea717739c836c2c74a4c3f35c7b88dcc45ad60e5a05a",
-    virtualPath: "/workspace/src/real-view-copy-rank4.cu",
-  }),
-  Object.freeze({
-    caseId: "strided-slice",
-    dtype: "f32",
-    rank: 2,
-    sourceSpanElements: "12",
-    destinationSpanElements: "6",
-    sourceSha256:
-      "55f4f5fcf55093a05cb977e3b83479098f6ddc42b830ec63f44b97f27fe3264a",
-    virtualPath: "/workspace/src/real-view-copy-strided-slice.cu",
-  }),
-  Object.freeze({
-    caseId: "broadcast",
-    dtype: "f32",
-    rank: 2,
-    sourceSpanElements: "2",
-    destinationSpanElements: "6",
-    sourceSha256:
-      "bfd91bdaac57ef7314570a8de56f26165a7b263593f319d728c53c13ef7c6376",
-    virtualPath: "/workspace/src/real-view-copy-broadcast.cu",
-  }),
-  Object.freeze({
-    caseId: "i32-rank2",
-    dtype: "i32",
-    rank: 2,
-    sourceSpanElements: "6",
-    destinationSpanElements: "6",
-    sourceSha256:
-      "88a083b141a5b7a85a9a1f2420873029f891cc1738e74ababe849a58bb839577",
-    virtualPath: "/workspace/src/real-view-copy-i32-rank2.cu",
-  }),
-  Object.freeze({
-    caseId: "u32-broadcast",
-    dtype: "u32",
-    rank: 2,
-    sourceSpanElements: "2",
-    destinationSpanElements: "6",
-    sourceSha256:
-      "c21158f1cb394377b5b8057435bfaad64b515689a8b04391a1bcae643a567536",
-    virtualPath: "/workspace/src/real-view-copy-u32-broadcast.cu",
-  }),
-]);
+const EXPECTED_CASES = Object.freeze(
+  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.map(
+    (caseId) => CPP_CUTE_BROWSER_REAL_COMPILE_CASES[caseId],
+  ),
+);
 
 const BUILTIN_RESOURCE_BYTES = canonicalJsonBytes(
   CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_V1_RESOURCE,
@@ -375,12 +302,14 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
           observed.execution.compileElapsedMilliseconds) {
       mismatch(`$.cases[${index}].execution`, "strict execution is inconsistent");
     }
-    if (observed.semanticCandidate.sourceCoordinateRank !== expected.rank ||
-        observed.semanticCandidate.destinationCoordinateRank !== expected.rank ||
+    if (observed.semanticCandidate.sourceCoordinateRank !==
+          expected.coordinateRank ||
+        observed.semanticCandidate.destinationCoordinateRank !==
+          expected.coordinateRank ||
         observed.semanticCandidate.sourceSpanElements !==
-          expected.sourceSpanElements ||
+          expected.sourceSpanElements.toString(10) ||
         observed.semanticCandidate.destinationSpanElements !==
-          expected.destinationSpanElements ||
+          expected.destinationSpanElements.toString(10) ||
         observed.semanticCandidate.dtype !== expected.dtype ||
         !observed.semanticCandidate.sharedViewCopySemanticsPrepared) {
       mismatch(
