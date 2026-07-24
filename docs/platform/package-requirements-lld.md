@@ -652,6 +652,17 @@ positive-affine indexing, and a dense injective destination. Signed strides and
 integer division/modulo remain unavailable until the target integer profile is
 proved. These are lowering decisions, not restrictions of the L1 or L2 model.
 
+Follow-on portable profiles preserve that operation meaning while admitting
+same-dtype `i32` and `u32` exact-word copies plus equal source/destination ranks
+1 through 4. Rank-2/rank-3 f32 retains
+`browsergrad.view-copy.positive-affine-f32@1`; rank-2/rank-3 integer storage
+uses `browsergrad.view-copy.positive-affine-word32@1`; rank-1/rank-4 32-bit
+storage uses
+`browsergrad.view-copy.positive-affine-rank1-rank4-word32@1`. Integer profiles
+require `reject` for an invalid source coordinate, while f32 may use an exact
+fill bit pattern. These profiles do not admit signed/negative strides, 16-bit
+packed storage, bf16, f64, overlap, or a non-global memory space.
+
 CPU reference and WGSL lowering consume the same verified normalized
 expressions or a specialization accompanied by a differential proof against
 the canonical evaluator. Preparation compiles coordinate evaluators once,
@@ -667,8 +678,10 @@ rejected until synchronization and ownership are explicit. Artifact hashing,
 expression compilation, and coordinate proofs stay outside per-dispatch copy
 loops.
 
-The initial WGSL backend profile uses interval-proved signed `i32` arithmetic
-for canonical index and predicate expressions. Positive affine maps may still
+The current WGSL backend profile
+`browsergrad.webgpu.view-copy.word32@2` uses interval-proved signed `i32`
+arithmetic for canonical index and predicate expressions. Positive affine maps
+may still
 have negative intercepts outside a padding predicate, so lowering the whole
 expression as `u32` would be incorrect. Conversion to a word index occurs only
 inside the proved true source guard. Whole root allocations bind at offset zero
