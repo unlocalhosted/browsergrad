@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { lstat, open, realpath, stat, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  canonicalJsonBytes,
+} from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
   cppCuteBrowserHeaderDistributionReproducibilityResourceBytes,
   verifyCppCuteBrowserHeaderDistributionReproducibilityResource,
@@ -206,15 +210,80 @@ export async function runCppCuteBrowserRealCompile(argv = process.argv.slice(2))
     );
   }
   if (options.evidenceOutput !== undefined) {
-    const outputPath = await canonicalOutputPath(options.evidenceOutput);
-    await writeFile(outputPath, `${JSON.stringify(evidence, null, 2)}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
-    process.stdout.write(`Browser compile evidence: ${outputPath}\n`);
+    const written = await persistCppCuteBrowserRealCompileEvidence(
+      options.evidenceOutput,
+      evidence,
+    );
+    process.stdout.write(`Browser compile evidence: ${written.outputPath}\n`);
   }
   return evidence;
+}
+
+export async function persistCppCuteBrowserRealCompileEvidence(
+  outputPath,
+  evidence,
+) {
+  const path = requiredAbsolutePath(outputPath, "$.evidenceOutput");
+  await canonicalDirectory(dirname(path), "$.evidenceOutput.parent");
+  let bytes;
+  try {
+    bytes = canonicalJsonBytes(evidence);
+  } catch (cause) {
+    invalid("$.evidence", "browser evidence is not canonical JSON data", {
+      cause,
+    });
+  }
+  let handle;
+  let identity;
+  try {
+    handle = await open(
+      path,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL |
+        constants.O_NOFOLLOW,
+      0o400,
+    );
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.size !== 0) {
+      invalid("$.evidenceOutput", "new evidence inode is not one empty file");
+    }
+    identity = Object.freeze({ dev: opened.dev, ino: opened.ino });
+    await handle.writeFile(bytes);
+    await handle.sync();
+    await handle.chmod(0o444);
+    const written = await handle.stat();
+    if (!written.isFile() ||
+        written.dev !== identity.dev ||
+        written.ino !== identity.ino ||
+        written.size !== bytes.byteLength) {
+      invalid("$.evidenceOutput", "evidence inode changed while it was written");
+    }
+  } catch (cause) {
+    if (cause instanceof CppCuteBrowserRealCompileRunnerError) throw cause;
+    if (cause?.code === "EEXIST" || cause?.code === "ELOOP") {
+      invalid("$.evidenceOutput", "refusing to overwrite an existing evidence file", {
+        cause,
+      });
+    }
+    invalid("$.evidenceOutput", "failed to persist browser evidence", { cause });
+  } finally {
+    await handle?.close();
+  }
+  let directory;
+  try {
+    directory = await open(dirname(path), constants.O_RDONLY | constants.O_DIRECTORY);
+    await directory.sync();
+  } catch (cause) {
+    invalid("$.evidenceOutput.parent", "failed to sync the evidence directory", {
+      cause,
+    });
+  } finally {
+    await directory?.close();
+  }
+  return Object.freeze({
+    outputPath: path,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    byteLength: bytes.byteLength,
+  });
 }
 
 function parseArguments(argv) {
@@ -374,21 +443,6 @@ async function hashRegularFile(path, diagnosticPath) {
   } finally {
     await handle?.close();
   }
-}
-
-async function canonicalOutputPath(path) {
-  const parent = dirname(path);
-  await canonicalDirectory(parent, "$.evidenceOutput.parent");
-  try {
-    await stat(path);
-    invalid("$.evidenceOutput", "refusing to overwrite an existing evidence file");
-  } catch (cause) {
-    if (cause instanceof CppCuteBrowserRealCompileRunnerError) throw cause;
-    if (cause?.code !== "ENOENT") {
-      invalid("$.evidenceOutput", "evidence output could not be admitted", { cause });
-    }
-  }
-  return path;
 }
 
 /**

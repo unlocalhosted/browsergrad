@@ -1,10 +1,22 @@
-import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
+import { canonicalJsonBytes } from
+  "@unlocalhosted/browsergrad-semantic-core/schema";
 
 import {
   CppCuteBrowserRealCompileRunnerError,
+  persistCppCuteBrowserRealCompileEvidence,
   preflightCppCuteBrowserRealCompileInputs,
 } from "./cpp_cute_browser_real_compile_runner.mjs";
 
@@ -110,6 +122,36 @@ describe("real browser C++/CuTe compile runner", () => {
       code: "BG-COMPILER-CPP-CUTE-BROWSER-REAL-COMPILE-RUNNER",
       path: "$.assets[0]",
       message: expect.stringContaining("strict compile requires"),
+    });
+  });
+
+  it("persists canonical immutable no-clobber evidence", async () => {
+    const root = await temporaryRoot();
+    const outputPath = join(root, "real-compile-evidence.json");
+    const evidence = Object.freeze({
+      schema: "browsergrad.compiler.cpp-cute.browser-real-compile-observation",
+      version: 2,
+      outcome: "compiled",
+    });
+    const written = await persistCppCuteBrowserRealCompileEvidence(
+      outputPath,
+      evidence,
+    );
+    const bytes = await readFile(outputPath);
+
+    expect([...bytes]).toEqual([...canonicalJsonBytes(evidence)]);
+    expect(written).toEqual({
+      outputPath,
+      sha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      byteLength: bytes.byteLength,
+    });
+    expect((await stat(outputPath)).mode & 0o222).toBe(0);
+    await expect(persistCppCuteBrowserRealCompileEvidence(
+      outputPath,
+      evidence,
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-BROWSER-REAL-COMPILE-RUNNER",
+      path: "$.evidenceOutput",
     });
   });
 });

@@ -44,6 +44,15 @@ export function preflightCppCuteBrowserRealCompileInputs(
   input: CppCuteBrowserRealCompileRunnerInput,
 ): Promise<CppCuteBrowserRealCompilePreflight>;
 
+export function persistCppCuteBrowserRealCompileEvidence(
+  outputPath: string,
+  evidence: unknown,
+): Promise<Readonly<{
+  readonly outputPath: string;
+  readonly sha256: string;
+  readonly byteLength: number;
+}>>;
+
 export function runCppCuteBrowserRealCompile(
   argv?: readonly string[],
 ): Promise<unknown>;
