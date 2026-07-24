@@ -26,7 +26,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
 | 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. |
-| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor and strict eight-case Worker matrix are package-pinned; externally rooted trust, legal approval, exact-payload lowering/backend convergence, and release authority remain open. |
+| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, and complete-output reproducibility verifier are package-pinned; live full-distribution evidence, externally rooted trust, legal approval, exact-payload lowering/backend convergence, and release authority remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
@@ -45,8 +45,8 @@ The 90-minute build is no longer an engineering iteration loop:
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
   exact build lock, verifies both zero-import Worker bundles, verifies that the
   checked-in strict matrix matches its deterministic authoring projection, and
-  passes 89 files/754 tests. Its latest Vitest portion took 13.74 seconds.
-- The complete compiler unit suite passes 99 files/1,627 tests in 14.42
+  passes 90 files/758 tests. Its latest Vitest portion took 15.49 seconds.
+- The complete compiler unit suite passes 99 files/1,627 tests in 12.91
   seconds.
 - The required native boundary passes 50 files/267 tests with nine explicit
   platform skips in 67.62 seconds. It intentionally includes optimized, UBSan,
@@ -107,6 +107,18 @@ and binds source revision `e9062c20f2a070774743e4d839c275c05df47225`.
 Compilation took 23.228–24.768 seconds per isolated browser case. The matrix
 deliberately retains producer trust, license approval, lowering authority,
 backend execution, and release readiness as false.
+
+The build lock declares one exact 24-path distributed-output plan: 23
+deterministic subjects plus the detached DSSE provenance envelope. The
+package-owned full-distribution verifier now rehashes two distinct private
+trees against that exact plan, requires every deterministic subject to be
+byte-identical, strict-decodes both detached envelopes, and requires their
+build subjects and build-lock references to match. Its opaque result grants
+only complete-output reproducibility authority; signature verification,
+license review, distribution approval, producer trust, Worker execution,
+lowering, backend execution, and release readiness remain false. This verifier
+has adversarial fixture coverage, but no live complete 24-output distribution
+has yet produced that authority.
 
 ### Shared dtype and layout execution
 
@@ -169,9 +181,10 @@ satisfied:
 3. An external reviewer approves the exact file-level header-pack map, notices,
    CUDA index, and upstream evidence; package-generated hashes and license text
    cannot self-approve redistribution.
-4. The complete distributed output set is reproducible and final release
-   authority is issued without collapsing build, legal, trust, execution, or
-   backend evidence into one claim.
+4. Two live complete 24-output distribution trees pass the package-owned
+   reproducibility verifier, and final release authority is issued without
+   collapsing build, legal, trust, execution, or backend evidence into one
+   claim.
 
 Gate 7 remains separate future work. Its absence does not weaken the completed
 closed profiles, but no host-graph, dynamic-control, collective, transport, or
