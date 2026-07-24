@@ -280,7 +280,7 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
         observed.source.selectedDeclaration !== "copy_views") {
       mismatch(`$.cases[${index}].source`, "strict source identity is inconsistent");
     }
-    if (observed.inputs.wasmSha256 !== wasm.wasmSha256 ||
+    if (String(observed.inputs.wasmSha256) !== wasm.wasmSha256 ||
         observed.inputs.wasmAuthority !==
           "package-pinned-two-clean-build-output" ||
         !observed.inputs.pinnedReproducibleWasmMatched ||

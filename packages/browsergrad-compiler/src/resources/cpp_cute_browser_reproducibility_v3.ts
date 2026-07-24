@@ -9,7 +9,7 @@ import {
 
 /**
  * Canonical verifier output for the two clean Clang-Wasm builds produced by
- * workflow run 30062294974. The package separately records the source and
+ * workflow run 30069614333. The package separately records the source and
  * verifier workflow identities; this value contains only the path-independent
  * build observation emitted by the v3 verifier.
  */
@@ -17,17 +17,17 @@ const CPP_CUTE_BROWSER_REPRODUCIBILITY_V3_VALUE = {
   authority: "clang-wasm-extractor-reproducibility-observation-only",
   builds: [
     {
-      buildExecutionEvidenceByteLength: 33_457,
+      buildExecutionEvidenceByteLength: 33_928,
       buildExecutionEvidenceSha256:
-        "cde07a9f012e210badebe4099be13e3917037eb8ba5e30ec0e188398ea72c158",
+        "75abf8fd81aa2885e32140566da489a3867fe024c85ca313f4261053c2383d78",
       factoryModuleByteLength: CPP_CUTE_BROWSER_REVIEWED_FACTORY_BYTE_LENGTH,
       factoryModuleSha256: CPP_CUTE_BROWSER_REVIEWED_FACTORY_SHA256,
-      linkMapByteLength: 24_636_625,
-      linkMapCanonicalByteLength: 24_587_689,
+      linkMapByteLength: 24_635_354,
+      linkMapCanonicalByteLength: 24_586_418,
       linkMapCanonicalSha256:
-        "78dbe3bb9093fe39bb4cc0d20b7273b35368252c2f50359b06b541a5049205d3",
+        "059857f0e49d7091e57e5dd3032a7b8f148e1d58e5212d4c720542d0187713b6",
       linkMapSha256:
-        "3d854834ca1da5ed616bdc9c1f026da49bfdab2798a24deed7918b3cfb8aa812",
+        "7eaa8f4c1f06ab60e4990ed8c65d9d06bb719263473b733a0f65e113d02744d6",
       nativeTools: {
         clangTablegenByteLength: 2_571_848,
         clangTablegenSha256:
@@ -37,31 +37,31 @@ const CPP_CUTE_BROWSER_REPRODUCIBILITY_V3_VALUE = {
           "b13c84826686062917c3fbb5bb7165c7a5512c7c35eae4128d07b960f8fba163",
       },
       ordinal: 1,
-      runtimeAbiReviewByteLength: 1_681_605,
+      runtimeAbiReviewByteLength: 1_681_553,
       runtimeAbiReviewExactInterfaceConformance: true,
       runtimeAbiReviewSha256:
-        "6497d851782bd59b7efab0966e8baee57bcfef93ce3c1dfcdc6709bcdc735234",
-      runtimeClosureObservationByteLength: 16_519,
+        "7a00df98b475f15d7bcf0e44a6874315478f91cfd18758f5f1de29bfe7b69e42",
+      runtimeClosureObservationByteLength: 16_990,
       runtimeClosureObservationSha256:
-        "05312e331fe6a4d78195345c854efd88d85ba98d3e6e21c36e10782e88ff0af8",
+        "f0b9ca747d1d287f94a95c39057b7111648215af312a8c79d2f4a930d0582198",
       runtimeClosureSha256:
-        "37dc03f8bb360029133171c4b8c4cbe625f2ba71a5113ece4c91513d1354e33e",
-      wasmByteLength: 31_839_835,
+        "923dac08515f373a0b3ed5ad2da3ad5644d8d11e0211458c1cc2f68fabd776ee",
+      wasmByteLength: 31_841_008,
       wasmSha256:
-        "c5e40d131c4ab004a1b70fb7a0ba56c2f0379afd65da5add47ec4330e5bc6ae8",
+        "19edd5622461b2308e83f10fb90f9f029241a5ba706e4c1741b194cb52a82138",
     },
     {
-      buildExecutionEvidenceByteLength: 33_457,
+      buildExecutionEvidenceByteLength: 33_928,
       buildExecutionEvidenceSha256:
-        "82a12463884e757d0c28cd2270bdd6b76e682730ce758a1b7dd5e57a8f7cfb90",
+        "cd9c8899199799ce4fee44811753cd6706d4cc20cb3c83a70c8aab536885dd42",
       factoryModuleByteLength: CPP_CUTE_BROWSER_REVIEWED_FACTORY_BYTE_LENGTH,
       factoryModuleSha256: CPP_CUTE_BROWSER_REVIEWED_FACTORY_SHA256,
-      linkMapByteLength: 24_636_625,
-      linkMapCanonicalByteLength: 24_587_689,
+      linkMapByteLength: 24_635_354,
+      linkMapCanonicalByteLength: 24_586_418,
       linkMapCanonicalSha256:
-        "78dbe3bb9093fe39bb4cc0d20b7273b35368252c2f50359b06b541a5049205d3",
+        "059857f0e49d7091e57e5dd3032a7b8f148e1d58e5212d4c720542d0187713b6",
       linkMapSha256:
-        "2c43bb4b9c623448e08fce97f9da1b16b69d63abea6ae58ea90bb873e910de1a",
+        "6bd80734b30230e6c9af7412d4a808fd2694442892d4c0b3697fc4fb3e667382",
       nativeTools: {
         clangTablegenByteLength: 2_571_848,
         clangTablegenSha256:
@@ -71,18 +71,18 @@ const CPP_CUTE_BROWSER_REPRODUCIBILITY_V3_VALUE = {
           "b13c84826686062917c3fbb5bb7165c7a5512c7c35eae4128d07b960f8fba163",
       },
       ordinal: 2,
-      runtimeAbiReviewByteLength: 1_681_605,
+      runtimeAbiReviewByteLength: 1_681_553,
       runtimeAbiReviewExactInterfaceConformance: true,
       runtimeAbiReviewSha256:
-        "6497d851782bd59b7efab0966e8baee57bcfef93ce3c1dfcdc6709bcdc735234",
-      runtimeClosureObservationByteLength: 16_519,
+        "7a00df98b475f15d7bcf0e44a6874315478f91cfd18758f5f1de29bfe7b69e42",
+      runtimeClosureObservationByteLength: 16_990,
       runtimeClosureObservationSha256:
-        "05312e331fe6a4d78195345c854efd88d85ba98d3e6e21c36e10782e88ff0af8",
+        "f0b9ca747d1d287f94a95c39057b7111648215af312a8c79d2f4a930d0582198",
       runtimeClosureSha256:
-        "37dc03f8bb360029133171c4b8c4cbe625f2ba71a5113ece4c91513d1354e33e",
-      wasmByteLength: 31_839_835,
+        "923dac08515f373a0b3ed5ad2da3ad5644d8d11e0211458c1cc2f68fabd776ee",
+      wasmByteLength: 31_841_008,
       wasmSha256:
-        "c5e40d131c4ab004a1b70fb7a0ba56c2f0379afd65da5add47ec4330e5bc6ae8",
+        "19edd5622461b2308e83f10fb90f9f029241a5ba706e4c1741b194cb52a82138",
     },
   ],
   claims: {
@@ -105,10 +105,10 @@ const CPP_CUTE_BROWSER_REPRODUCIBILITY_V3_VALUE = {
     wasmBytesMatched: true,
   },
   lockId:
-    "bg.cpp.browser-build-input-lock.sha256.3e6742cde1fd6fa984d70af6b6b818e901696e666d4490475cd65f00dd53ca9c",
+    "bg.cpp.browser-build-input-lock.sha256.5a96def9bac1db052108142dfe4c82e729f4b41f450d459406a4f3c5227daad7",
   schema: "browsergrad.compiler.cpp-cute.clang-wasm-reproducibility",
   sourceSetSha256:
-    "00eeade403122cbec5213429df2311d5968db4f55d0d861956e195dff51d422e",
+    "25ec50f4e2e6300978db67692e1fa7a033b0fb77b66fec79cfe933625c61b298",
   version: 3,
 } as const satisfies JsonObject;
 

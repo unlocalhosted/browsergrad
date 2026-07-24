@@ -33,17 +33,17 @@ it("pins the exact package-owned generated factory without widening its authorit
     source: "reviewed-two-clean-build-reproducible-output",
     packageOwned: true,
     exactSourcePinned: true,
-    cleanBuildRunId: "30062294974",
+    cleanBuildRunId: "30069614333",
     cleanBuildSourceRevision:
-      "6d5c8bca3d6255c550d29f2a67c1a90bd52e2a4e",
-    reproducibilityVerifierRunId: "30062294974",
+      "9479fcdfba172f56fff93498f72ea33bd449ac7e",
+    reproducibilityVerifierRunId: "30069614333",
     reproducibilityVerifierSourceRevision:
-      "6d5c8bca3d6255c550d29f2a67c1a90bd52e2a4e",
+      "9479fcdfba172f56fff93498f72ea33bd449ac7e",
     reproducibilityResourceSha256:
-      "b76f81d04d7be76e6a28867b465e86dd0a5ebbbc28acec764b469c419945c1ac",
+      "b8ab918d667d68a8effcdcd14a79691a92e7d3466e9041906e5039c9993e028d",
     cleanBuildWasmSha256:
-      "c5e40d131c4ab004a1b70fb7a0ba56c2f0379afd65da5add47ec4330e5bc6ae8",
-    cleanBuildWasmByteLength: 31_839_835,
+      "19edd5622461b2308e83f10fb90f9f029241a5ba706e4c1741b194cb52a82138",
+    cleanBuildWasmByteLength: 31_841_008,
     exactReproducibleFactoryMatch: true,
     exactInterfaceConformance: true,
     cleanBuildVerified: true,
@@ -73,8 +73,8 @@ it("admits only the exact package-pinned reproducibility evidence", async () => 
       "2eaa4ce31951cd5eff989679fd8d63c4ae74df0293f8f727209a3ce0f681764d",
     factoryModuleByteLength: 27_884,
     wasmSha256:
-      "c5e40d131c4ab004a1b70fb7a0ba56c2f0379afd65da5add47ec4330e5bc6ae8",
-    wasmByteLength: 31_839_835,
+      "19edd5622461b2308e83f10fb90f9f029241a5ba706e4c1741b194cb52a82138",
+    wasmByteLength: 31_841_008,
     extractorOutputsReproducible: true,
     fullDistributedOutputSetReproducible: false,
     producerAttested: false,
