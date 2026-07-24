@@ -42,6 +42,7 @@ interface LayoutInput {
   readonly sourceBytes: DimExpr;
   readonly destinationBytes: DimExpr;
   readonly symbols?: readonly { readonly id: string; readonly domain: { readonly min: string; readonly max: string } }[];
+  readonly dtype?: "f32" | "i32" | "u32";
 }
 
 async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifact> {
@@ -90,7 +91,7 @@ async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifac
         {
           viewId: "sourceView",
           allocationId: "sourceAllocation",
-          dtype: "f32",
+          dtype: input.dtype ?? "f32",
           byteOffset: input.sourceByteOffset ?? constant("0"),
           shape: input.shape,
           indexMapId: "sourceMap",
@@ -99,7 +100,7 @@ async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifac
         {
           viewId: "destinationView",
           allocationId: "destinationAllocation",
-          dtype: "f32",
+          dtype: input.dtype ?? "f32",
           byteOffset: input.destinationByteOffset ?? constant("0"),
           shape: input.shape,
           indexMapId: "destinationMap",
@@ -130,7 +131,7 @@ async function verifiedKernel(
         operationId: "copy",
         kind: "view-copy",
         version: { major: 1, minor: 0 },
-        dtype: "f32",
+        dtype: source.dtype,
         source: { viewId: source.viewId, access: "read", invalidSource },
         destination: { viewId: destination.viewId, access: "write" },
         overlap: { kind: "forbid" },
@@ -181,6 +182,32 @@ describe("semantic view-copy WGSL lowering", () => {
     expect(Object.isFrozen(wgsl.program.bindings[0])).toBe(true);
     expect(Object.isFrozen(wgsl.program.workgroupSize)).toBe(true);
     expect(Object.isFrozen(wgsl.launch.dispatchCount)).toBe(true);
+  });
+
+  it("lowers i32 and u32 through the same bit-exact word backend", async () => {
+    const modules = new Map<string, string>();
+    for (const dtype of ["i32", "u32"] as const) {
+      const shape = [constant("2"), constant("3")] as const;
+      const layout = await verifiedLayout({
+        shape,
+        sourceLocation: add(
+          multiply(coordinate(1), constant("2")),
+          coordinate(0),
+        ),
+        sourceBytes: constant("24"),
+        destinationBytes: constant("24"),
+        dtype,
+      });
+      const prepared = await prepare(layout, await verifiedKernel(layout));
+      expect(prepared.semantic.portableProfile).toMatchObject({
+        profileId: "browsergrad.view-copy.positive-affine-word32@1",
+        dtype,
+      });
+      expect(prepared.program.wgsl)
+        .toContain("destination_words[destination_word] = copied_bits");
+      modules.set(dtype, prepared.program.wgsl);
+    }
+    expect(modules.get("i32")).toBe(modules.get("u32"));
   });
 
   it("keeps signed padding arithmetic and exact fill bits inside a structured guard", async () => {

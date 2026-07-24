@@ -39,7 +39,7 @@ import {
 } from "./semantic_view_copy_wgsl.js";
 
 export const SEMANTIC_VIEW_COPY_WEBGPU_PROFILE = "browsergrad.webgpu.view-copy.i32@1";
-export const SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION = "1.0.0";
+export const SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION = "1.1.0";
 const DEFAULT_WORKGROUP_SIZE = 64;
 const MAX_CONFIGURABLE_WORKGROUP_SIZE = 256;
 const DEFAULT_MAX_WGSL_BYTES = 64 * 1024;
@@ -442,7 +442,7 @@ export async function runSemanticViewCopyWebGpu(
 function verifyStaticWebGpuProfile(prepared: PreparedViewCopySpecialization): void {
   for (const [role, accessor] of [["source", prepared.source], ["destination", prepared.destination]] as const) {
     if (accessor.allocationByteLength % 4n !== 0n) {
-      fail("BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE", `$.${role}.allocationByteLength`, "f32 root allocation length must be a multiple of four bytes");
+      fail("BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE", `$.${role}.allocationByteLength`, "32-bit scalar root allocation length must be a multiple of four bytes");
     }
     if (prepared.elementCount > 0n && accessor.allocationByteLength === 0n) {
       fail("BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE", `$.${role}.allocationByteLength`, "nonempty WebGPU view-copy requires nonempty root allocations");

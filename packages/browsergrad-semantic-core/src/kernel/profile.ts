@@ -5,11 +5,17 @@ import { KERNEL_DIAGNOSTIC_CODES, SemanticSchemaError } from "../schema/diagnost
 import type { ViewCopyOperation } from "./model.js";
 
 export const INITIAL_PORTABLE_VIEW_COPY_PROFILE = "browsergrad.view-copy.positive-affine-f32@1";
+export const PORTABLE_WORD32_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.positive-affine-word32@1";
+
+export type PortableViewCopyDType = "f32" | "i32" | "u32";
 
 export interface PortableViewCopyProfile {
-  readonly profileId: typeof INITIAL_PORTABLE_VIEW_COPY_PROFILE;
+  readonly profileId:
+    | typeof INITIAL_PORTABLE_VIEW_COPY_PROFILE
+    | typeof PORTABLE_WORD32_VIEW_COPY_PROFILE;
   readonly rank: 2 | 3;
-  readonly dtype: "f32";
+  readonly dtype: PortableViewCopyDType;
 }
 
 /**
@@ -22,8 +28,20 @@ export function verifyInitialPortableViewCopyProfile(
   source: PreparedViewAccessor,
   destination: PreparedViewAccessor,
 ): PortableViewCopyProfile {
-  if (operation.dtype !== "f32") {
-    unsupported("$.operation.dtype", "initial portable view-copy profile supports f32 only");
+  if (operation.dtype !== "f32" &&
+      operation.dtype !== "i32" &&
+      operation.dtype !== "u32") {
+    unsupported(
+      "$.operation.dtype",
+      "portable view-copy supports exact 32-bit f32, i32, or u32 storage only",
+    );
+  }
+  if (operation.dtype !== "f32" &&
+      operation.source.invalidSource.kind !== "reject") {
+    unsupported(
+      "$.operation.source.invalidSource",
+      "portable integer view-copy requires reject-on-invalid-source",
+    );
   }
   if ((source.logicalShape.length !== 2 && source.logicalShape.length !== 3) || destination.logicalShape.length !== source.logicalShape.length) {
     unsupported("$.operation", "initial portable view-copy profile requires equal rank-2 or rank-3 views");
@@ -45,9 +63,11 @@ export function verifyInitialPortableViewCopyProfile(
   requirePositiveAffine(destinationMap.location, symbolMinima, "$.operation.destination.indexMap.location");
   requirePortablePredicate(destinationMap.inBounds, symbolMinima, "$.operation.destination.indexMap.inBounds");
   return Object.freeze({
-    profileId: INITIAL_PORTABLE_VIEW_COPY_PROFILE,
+    profileId: operation.dtype === "f32"
+      ? INITIAL_PORTABLE_VIEW_COPY_PROFILE
+      : PORTABLE_WORD32_VIEW_COPY_PROFILE,
     rank: source.logicalShape.length as 2 | 3,
-    dtype: "f32",
+    dtype: operation.dtype,
   });
 }
 

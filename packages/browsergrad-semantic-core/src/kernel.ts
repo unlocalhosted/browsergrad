@@ -40,7 +40,9 @@ export {
 } from "./kernel/cpu.js";
 export {
   INITIAL_PORTABLE_VIEW_COPY_PROFILE,
+  PORTABLE_WORD32_VIEW_COPY_PROFILE,
   verifyInitialPortableViewCopyProfile,
+  type PortableViewCopyDType,
   type PortableViewCopyProfile,
 } from "./kernel/profile.js";
 export type {

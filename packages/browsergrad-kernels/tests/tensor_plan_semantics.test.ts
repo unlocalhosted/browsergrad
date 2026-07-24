@@ -33,7 +33,7 @@ describe("tensor-plan semantic request preparation", () => {
         layoutSemanticHash: fixture.layoutSemanticHash,
         kernelSemanticHash: fixture.kernelSemanticHash,
         backendProfile: "browsergrad.webgpu.view-copy.i32@1",
-        backendVersion: "1.0.0",
+        backendVersion: "1.1.0",
         workgroupSize: 64,
         logicalInvocationCount: [fixture.expectedOutputWords.length, 1, 1],
         plannedWorkgroupCount: [1, 1, 1],

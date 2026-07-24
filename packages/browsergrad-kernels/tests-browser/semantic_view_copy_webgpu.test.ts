@@ -49,7 +49,7 @@ const TRUE: PredicateExpr = { kind: "bool", value: true };
 const EVIDENCE_PREFIX = "[browsergrad-webgpu-evidence]";
 const EVIDENCE_SCHEMA = EXECUTION_EVIDENCE_SCHEMA;
 const ENVIRONMENT_SCHEMA = EXECUTION_ENVIRONMENT_SCHEMA;
-const SUITE_ID = "browsergrad.kernels.view-copy.webgpu-conformance@1";
+const SUITE_ID = "browsergrad.kernels.view-copy.webgpu-conformance@2";
 const CAPABILITY_ID = "browsergrad.kernel.view-copy";
 const BACKEND_ID = "browsergrad.backend.webgpu.core";
 const COMPARISON_POLICY_ID = "browsergrad.comparison.bit-exact-u32-complete-destination.v1";
@@ -62,6 +62,8 @@ const PLANNED_CASE_IDS = Object.freeze([
   "rank2-padding-exact-nan",
   "rank3-padding-exact-nan",
   "dynamic-rank2-specialization",
+  "i32-rank2-transpose",
+  "u32-read-only-broadcast",
   "zero-extent-no-submit",
 ]);
 const PRODUCER_VERSIONS = Object.freeze({
@@ -90,6 +92,7 @@ interface LayoutInput {
   readonly sourceBytes: DimExpr;
   readonly destinationBytes: DimExpr;
   readonly symbols?: readonly { readonly id: string; readonly domain: { readonly min: string; readonly max: string } }[];
+  readonly dtype?: "f32" | "i32" | "u32";
 }
 
 interface EvidenceCase {
@@ -460,6 +463,35 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     { bindings: { n: parseWireI64("2") }, destinationWordLength: 4 },
   );
 
+  const i32Transpose = await makeCase(
+    "i32-rank2-transpose",
+    {
+      shape: dims("2", "3"),
+      sourceLocation: add(
+        multiply(coordinate(1), indexConstant("2")),
+        coordinate(0),
+      ),
+      sourceBytes: dimConstant("24"),
+      destinationBytes: dimConstant("24"),
+      dtype: "i32",
+    },
+    { kind: "reject" },
+    words(0x80000000, 0xffffffff, 0, 1, 0x7fffffff, 0xdeadbeef),
+  );
+
+  const u32Broadcast = await makeCase(
+    "u32-read-only-broadcast",
+    {
+      shape: dims("2", "3"),
+      sourceLocation: coordinate(1),
+      sourceBytes: dimConstant("12"),
+      destinationBytes: dimConstant("24"),
+      dtype: "u32",
+    },
+    { kind: "reject" },
+    words(0, 0x80000000, 0xffffffff),
+  );
+
   const zero = await makeCase(
     "zero-extent-no-submit",
     {
@@ -487,6 +519,8 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     padding2,
     padding3,
     dynamic,
+    i32Transpose,
+    u32Broadcast,
     zero,
   ]);
 }
@@ -543,8 +577,8 @@ async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifac
         { indexMapId: "destinationMap", coordinateRank: input.shape.length, locationUnit: input.destinationLocationUnit ?? "element", location: destinationLocation, inBounds: TRUE },
       ],
       views: [
-        { viewId: "sourceView", allocationId: "source", dtype: "f32", byteOffset: input.sourceByteOffset ?? dimConstant("0"), shape: input.shape, indexMapId: "sourceMap", requiredAlignmentBytes: 4 },
-        { viewId: "destinationView", allocationId: "destination", dtype: "f32", byteOffset: input.destinationByteOffset ?? dimConstant("0"), shape: input.shape, indexMapId: "destinationMap", requiredAlignmentBytes: 4 },
+        { viewId: "sourceView", allocationId: "source", dtype: input.dtype ?? "f32", byteOffset: input.sourceByteOffset ?? dimConstant("0"), shape: input.shape, indexMapId: "sourceMap", requiredAlignmentBytes: 4 },
+        { viewId: "destinationView", allocationId: "destination", dtype: input.dtype ?? "f32", byteOffset: input.destinationByteOffset ?? dimConstant("0"), shape: input.shape, indexMapId: "destinationMap", requiredAlignmentBytes: 4 },
       ],
     },
   })));
@@ -564,7 +598,7 @@ async function verifiedKernel(layout: VerifiedLayoutArtifact, invalidSource: Inv
         operationId: "copy",
         kind: "view-copy",
         version: { major: 1, minor: 0 },
-        dtype: "f32",
+        dtype: payload.views[0]!.dtype,
         source: { viewId: payload.views[0]!.viewId, access: "read", invalidSource },
         destination: { viewId: payload.views[1]!.viewId, access: "write" },
         overlap: { kind: "forbid" },

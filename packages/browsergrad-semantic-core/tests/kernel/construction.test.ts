@@ -35,6 +35,21 @@ function values(buffer: Uint8Array): number[] {
   return Array.from({ length: buffer.byteLength / 4 }, (_, index) => view.getFloat32(index * 4, true));
 }
 
+function wordBytes(values: readonly number[]): Uint8Array {
+  const result = new Uint8Array(values.length * 4);
+  const view = new DataView(result.buffer);
+  values.forEach((value, index) => view.setUint32(index * 4, value, true));
+  return result;
+}
+
+function wordValues(buffer: Uint8Array): number[] {
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  return Array.from(
+    { length: buffer.byteLength / 4 },
+    (_, index) => view.getUint32(index * 4, true),
+  );
+}
+
 async function error(run: () => Promise<unknown>): Promise<SemanticSchemaError> {
   try {
     await run();
@@ -92,6 +107,41 @@ describe("canonical view-copy construction", () => {
       bytesWritten: "24",
     });
     expect(values(destination)).toEqual([1, 4, 2, 5, 3, 6]);
+  });
+
+  it("executes i32 and u32 permutations as exact portable 32-bit words", async () => {
+    for (const dtype of ["i32", "u32"] as const) {
+      const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
+        inputShape: [wire("2"), wire("3")],
+        axes: [1, 0],
+        dtype,
+      });
+      const prepared = await prepareViewCopyCpu(
+        artifacts.layout,
+        artifacts.kernel,
+        { operationId: artifacts.operationId },
+      );
+      const destination = new Uint8Array(24);
+      const input = [
+        0x8000_0000,
+        0xffff_ffff,
+        0,
+        1,
+        0x7fff_ffff,
+        0xdead_beef,
+      ];
+      prepared.execute({ source: wordBytes(input), destination });
+      expect(wordValues(destination)).toEqual([
+        input[0],
+        input[3],
+        input[1],
+        input[4],
+        input[2],
+        input[5],
+      ]);
+      expect(kernelArtifactPayload(artifacts.kernel).operations[0]?.dtype)
+        .toBe(dtype);
+    }
   });
 
   it("keeps semantic hashes and canonical IDs independent of transport metadata", async () => {
