@@ -123,8 +123,10 @@ bool decode_cute_view_iterator(clang::QualType engine_type,
 
 std::string canonical_usr(const clang::Decl* declaration) {
   llvm::SmallString<128> usr;
-  if (declaration == nullptr ||
-      clang::index::generateUSRForDecl(declaration, usr)) {
+  if (declaration == nullptr) return {};
+  const clang::Decl* canonical = declaration->getCanonicalDecl();
+  if (canonical == nullptr ||
+      clang::index::generateUSRForDecl(canonical, usr)) {
     return {};
   }
   return std::string(usr);

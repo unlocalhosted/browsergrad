@@ -193,6 +193,8 @@ int main() {
       "  cute::Shape<cute::C<2>, cute::C<3>>,\n"
       "  cute::Stride<cute::C<3>, cute::C<1>>>;\n"
       "__attribute__((device))\n"
+      "void copy_views(const float* source, float* destination);\n"
+      "__attribute__((device))\n"
       "void copy_views(const float* source, float* destination) {\n"
       "  auto source_tensor = cute::make_tensor(source, SourceLayout{});\n"
       "  auto destination_tensor =\n"
@@ -203,7 +205,7 @@ int main() {
   BG_CHECK(begin_frontend_work_invocation(frontend_limits));
   install_source(view_copy_source, "/toolchain/cutlass/include/cute/tensor.hpp",
                  view_copy_header_source);
-  const std::size_t view_copy_begin = view_copy_source.find("copy_views");
+  const std::size_t view_copy_begin = view_copy_source.rfind("copy_views");
   BG_CHECK(view_copy_begin != std::string_view::npos);
   const SourceAnchor view_copy_anchor{
       "/workspace/main.cu",
@@ -344,7 +346,7 @@ int main() {
   install_source(spoofed_copy_source,
                  "/toolchain/cutlass/include/cute/tensor.hpp", spoofed_header);
   const std::size_t spoofed_anchor_begin =
-      spoofed_copy_source.find("copy_views");
+      spoofed_copy_source.rfind("copy_views");
   BG_CHECK(spoofed_anchor_begin != std::string::npos);
   const SourceAnchor spoofed_anchor{
       "/workspace/main.cu",
