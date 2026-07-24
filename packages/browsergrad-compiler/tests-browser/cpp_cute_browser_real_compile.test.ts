@@ -38,6 +38,7 @@ import {
 } from "../src/cpp_cute_browser_reproducibility.js";
 import {
   createCppCuteBrowserCompileProfileInput,
+  deriveCppCuteBrowserEmptySourceIncludeRootManifestSha256,
 } from "../src/cpp_cute_browser_compile_profile.js";
 import {
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
@@ -556,14 +557,8 @@ async function prepareRealCompileEnvironment(
       byteLength: workerBundle.byteLength,
     },
   });
-  const sourceRootManifestSha256 = await hashCanonicalJson({
-    domain: "browsergrad.compiler.cpp-cute.real-compile-source-root.v1",
-    files: [{
-      virtualPath: MAIN_PATH,
-      sourceSha256: REAL_COMPILE_CASE.sourceSha256,
-      byteLength: String(MAIN_BYTES.byteLength),
-    }],
-  });
+  const sourceRootManifestSha256 =
+    await deriveCppCuteBrowserEmptySourceIncludeRootManifestSha256();
   const provisionalAssetSetSha256 = await hashCanonicalJson({
     domain:
       "browsergrad.compiler.cpp-cute.real-compile-provisional-asset-set.v1",

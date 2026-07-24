@@ -1,4 +1,7 @@
 import {
+  hashCanonicalJson,
+} from "@unlocalhosted/browsergrad-semantic-core/schema";
+import {
   CPP_CUTE_FRONTEND_TEMPORAL_MACRO_POLICY_ID,
   CPP_CUTE_FRONTEND_WARNING_BASELINE,
   CPP_CUTE_FRONTEND_WARNING_POLICY_REGISTRY_ID,
@@ -36,6 +39,22 @@ export type CppCuteBrowserCompileProfile =
   CppCuteFrontendProfileV2 & {
     readonly deployment: CppCuteFrontendBrowserDeploymentProfile;
   };
+
+/**
+ * The real compile lane supplies no project headers. Main-source bytes remain
+ * request-bound and must not change the compiler profile or header asset-set
+ * identity from one user program to another.
+ */
+export function deriveCppCuteBrowserEmptySourceIncludeRootManifestSha256():
+Promise<string> {
+  return hashCanonicalJson({
+    domain:
+      "browsergrad.compiler.cpp-cute.empty-source-include-root-manifest.v1",
+    includeRootId: "workspace-source",
+    virtualPath: "/workspace/src",
+    files: [],
+  });
+}
 
 /**
  * Constructs the one closed browser-local profile input used by the real

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createCppCuteBrowserCompileProfileInput,
+  deriveCppCuteBrowserEmptySourceIncludeRootManifestSha256,
 } from "../../src/cpp_cute_browser_compile_profile.js";
 import {
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
@@ -19,6 +20,11 @@ import {
 
 describe("package-owned browser C++/CuTe compile profile", () => {
   it("constructs the closed exact production shape without fixture identities", async () => {
+    const sourceRootManifestSha256 =
+      await deriveCppCuteBrowserEmptySourceIncludeRootManifestSha256();
+    expect(sourceRootManifestSha256).toBe(
+      "6076ac6ed221c1ce33a656d14113c1099c60bd6781ae65928cdb85ed55ab9c91",
+    );
     const input = createCppCuteBrowserCompileProfileInput({
       assetSetSha256: "1".repeat(64),
       buildProvenanceLockSha256: "2".repeat(64),
@@ -27,7 +33,7 @@ describe("package-owned browser C++/CuTe compile profile", () => {
         CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
       semanticAdapterManifestSha256:
         CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256,
-      sourceRootManifestSha256: "4".repeat(64),
+      sourceRootManifestSha256,
       workerModuleSha256: "5".repeat(64),
       workerModuleByteLength: 584_660,
       headerContentSets: {
@@ -76,7 +82,7 @@ describe("package-owned browser C++/CuTe compile profile", () => {
     ]);
     expect(input.virtualFileSystem.includeRoots[0]).toMatchObject({
       includeRootId: "workspace-source",
-      manifestSha256: "4".repeat(64),
+      manifestSha256: sourceRootManifestSha256,
       owner: { kind: "source" },
     });
     expect(input.deployment).toMatchObject({
