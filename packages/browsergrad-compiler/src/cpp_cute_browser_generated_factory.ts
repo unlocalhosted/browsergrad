@@ -3,6 +3,15 @@ import {
   CPP_CUTE_BROWSER_REVIEWED_FACTORY_BYTE_LENGTH,
   CPP_CUTE_BROWSER_REVIEWED_FACTORY_SHA256,
 } from "./resources/cpp_cute_browser_factory_identity.js";
+import {
+  CPP_CUTE_BROWSER_REPRODUCIBILITY_BUILD_RUN_ID,
+  CPP_CUTE_BROWSER_REPRODUCIBILITY_BUILD_SOURCE_REVISION,
+  CPP_CUTE_BROWSER_REPRODUCIBILITY_RESOURCE_SHA256,
+  CPP_CUTE_BROWSER_REPRODUCIBILITY_VERIFIER_RUN_ID,
+  CPP_CUTE_BROWSER_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION,
+  CPP_CUTE_BROWSER_REPRODUCIBILITY_WASM_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_REPRODUCIBILITY_WASM_SHA256,
+} from "./resources/cpp_cute_browser_reproducibility_identity_v1.js";
 import type {
   CppCuteBrowserGeneratedEmscriptenFactory,
 } from "./cpp_cute_browser_emscripten_factory.js";
@@ -17,17 +26,18 @@ export const CPP_CUTE_BROWSER_GENERATED_FACTORY_AUTHORITY = Object.freeze({
   source: "reviewed-two-clean-build-reproducible-output",
   packageOwned: true,
   exactSourcePinned: true,
-  cleanBuildRunId: "30055588624",
+  cleanBuildRunId: CPP_CUTE_BROWSER_REPRODUCIBILITY_BUILD_RUN_ID,
   cleanBuildSourceRevision:
-    "15f26e5d9191320fbc29216f02dec6042df902aa",
-  reproducibilityVerifierRunId: "30057685177",
+    CPP_CUTE_BROWSER_REPRODUCIBILITY_BUILD_SOURCE_REVISION,
+  reproducibilityVerifierRunId:
+    CPP_CUTE_BROWSER_REPRODUCIBILITY_VERIFIER_RUN_ID,
   reproducibilityVerifierSourceRevision:
-    "de6d0f98fc354ed200cb5d5353a76b876e4274fb",
+    CPP_CUTE_BROWSER_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION,
   reproducibilityResourceSha256:
-    "f8e7fd51ec5122f40cf03d7ab53d1674f6482f5000cc6b2b81493243dc880ac9",
-  cleanBuildWasmSha256:
-    "c789fb45a2a849f82b0bce6bfaf3c501722764a0ecc3f0015efaeb2770c3a5cf",
-  cleanBuildWasmByteLength: 31_835_141,
+    CPP_CUTE_BROWSER_REPRODUCIBILITY_RESOURCE_SHA256,
+  cleanBuildWasmSha256: CPP_CUTE_BROWSER_REPRODUCIBILITY_WASM_SHA256,
+  cleanBuildWasmByteLength:
+    CPP_CUTE_BROWSER_REPRODUCIBILITY_WASM_BYTE_LENGTH,
   exactReproducibleFactoryMatch: true,
   exactInterfaceConformance: true,
   cleanBuildVerified: true,

@@ -14,6 +14,8 @@ import {
   CPP_CUTE_BROWSER_REPRODUCIBILITY_RESOURCE_SHA256,
   CPP_CUTE_BROWSER_REPRODUCIBILITY_VERIFIER_RUN_ID,
   CPP_CUTE_BROWSER_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION,
+  CPP_CUTE_BROWSER_REPRODUCIBILITY_WASM_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_REPRODUCIBILITY_WASM_SHA256,
   cppCuteBrowserReproducibilityResourceBytes,
   requireVerifiedCppCuteBrowserReproducibility,
   verifyCppCuteBrowserReproducibilityResource,
@@ -81,6 +83,12 @@ it("admits only the exact package-pinned reproducibility evidence", async () => 
   });
   expect(authority.factoryModuleSha256).toBe(
     CPP_CUTE_BROWSER_GENERATED_FACTORY_SHA256,
+  );
+  expect(authority.wasmSha256).toBe(
+    CPP_CUTE_BROWSER_REPRODUCIBILITY_WASM_SHA256,
+  );
+  expect(authority.wasmByteLength).toBe(
+    CPP_CUTE_BROWSER_REPRODUCIBILITY_WASM_BYTE_LENGTH,
   );
   expect(() => requireVerifiedCppCuteBrowserReproducibility(authority)).not.toThrow();
   expect(() => requireVerifiedCppCuteBrowserReproducibility({ ...authority })).toThrowError(
