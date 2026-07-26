@@ -26,7 +26,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
 | 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. |
-| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-clobber producer/reviewer exchange, and distinct backend-composition boundary are package-pinned; production external approval, externally rooted producer trust, actual production authority issuance, and final release authority remain open. |
+| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-clobber producer/reviewer exchange, and distinct backend/final-release composition boundaries are package-pinned; unified in-process production orchestration, external evidence, and actual issuance remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
@@ -45,8 +45,8 @@ The 90-minute build is no longer an engineering iteration loop:
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
   exact build lock, verifies both zero-import Worker bundles, verifies that the
   checked-in strict matrix matches its deterministic authoring projection, and
-  passes 99 files/798 tests. Its latest Vitest portion took 18.63 seconds.
-- The complete compiler unit suite passes 105 files/1,652 tests in 16.76 seconds.
+  passes 100 files/801 tests. Its latest Vitest portion took 15.97 seconds.
+- The complete compiler unit suite passes 106 files/1,655 tests in 16.37 seconds.
 - The required native boundary passes 55 files/289 tests with nine explicit
   skips in 67.05 seconds; optimized, UBSan, and ASan stay outside the edit loop.
 - Cache-free LLVM/Clang builds exist only to mint clean-build and
@@ -117,10 +117,10 @@ envelopes, and persists no reusable authority. Only externally controlled
 production evidence can authorize the build or header distribution.
 
 Backend composition binds opaque producer, reproducibility, and exact-payload
-convergence authorities through the stable build subject, lock, Worker, output
-set, and matrix. Producer and execution control-plane identities remain
-separate across trust-root migration. It grants no legal or release authority;
-its synthetic fixture is not production external-key evidence.
+convergence through the stable build subject, lock, Worker, output set, and
+matrix. Final release separately binds that backend result to opaque legal
+approval for the same lock and reproduced header subset. Synthetic fixtures
+prove both transitions but are not production external evidence.
 
 ### Shared dtype and layout execution
 
@@ -182,11 +182,9 @@ the local-engineering build and is no longer an implementation blocker.
    externally issued decision over the exact current header-distribution
    subject. Package-generated hashes, license text, signing material, or
    signatures cannot self-approve redistribution.
-3. Run the implemented backend composition with the externally rooted exact
-   producer, current reproducibility, and package-pinned exact-payload
-   convergence authorities. Then issue a separate final release authority from
-   that backend result plus external legal approval without collapsing those
-   inputs into one claim.
+3. Add one unified host operation that re-verifies both returned statements
+   and runs the implemented backend and final-release compositions in the same
+   process. No serialized observation may substitute for an opaque authority.
 
 Gate 7 remains separate future work. Its absence does not weaken the completed
 closed profiles, but no host-graph, dynamic-control, collective, transport, or
