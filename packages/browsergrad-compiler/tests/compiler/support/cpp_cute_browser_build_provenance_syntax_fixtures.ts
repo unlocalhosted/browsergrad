@@ -21,6 +21,7 @@ import {
 } from "../../../src/cpp_cute_browser_build_provenance_syntax.js";
 import {
   prepareCppCuteAttestationTrustStore,
+  type CppCuteAttestationTrustStoreV1,
   type PreparedCppCuteAttestationTrustStore,
 } from "../../../src/cpp_cute_frontend_provenance.js";
 import {
@@ -48,6 +49,7 @@ export interface CppCuteBrowserBuildProvenanceSyntaxFixture {
 export interface SignedCppCuteBrowserBuildProvenanceFixture extends
   CppCuteBrowserBuildProvenanceSyntaxFixture {
   readonly trustStore: PreparedCppCuteAttestationTrustStore;
+  readonly trustStoreInput: CppCuteAttestationTrustStoreV1;
   readonly privateKey: CryptoKey;
 }
 
@@ -68,7 +70,7 @@ Promise<SignedCppCuteBrowserBuildProvenanceFixture> {
   );
   const spki = new Uint8Array(await subtle.exportKey("spki", keyPair.publicKey));
   const keyId = `sha256:${await sha256Hex(spki)}`;
-  const trustStore = await prepareCppCuteAttestationTrustStore({
+  const trustStoreInput: CppCuteAttestationTrustStoreV1 = {
     schema: "browsergrad.compiler.cpp-cute.attestation-trust-store",
     version: { major: 1, minor: 0 },
     keys: [{
@@ -77,7 +79,8 @@ Promise<SignedCppCuteBrowserBuildProvenanceFixture> {
       algorithm: "ecdsa-p256-sha256",
       spkiDerBase64: encodeBase64(spki),
     }],
-  });
+  };
+  const trustStore = await prepareCppCuteAttestationTrustStore(trustStoreInput);
   const fixture = await createSyntaxFixture(trustStore.trustStoreHash);
   const signature = new Uint8Array(await subtle.sign(
     { name: "ECDSA", hash: "SHA-256" },
@@ -92,6 +95,7 @@ Promise<SignedCppCuteBrowserBuildProvenanceFixture> {
       signatures: [{ keyid: keyId, sig: encodeBase64(signature) }],
     },
     trustStore,
+    trustStoreInput,
     privateKey: keyPair.privateKey,
   };
 }
