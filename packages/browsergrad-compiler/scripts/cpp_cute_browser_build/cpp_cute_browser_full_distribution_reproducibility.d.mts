@@ -54,8 +54,8 @@ export interface CppCuteBrowserFullDistributionReproducibility {
     buildSubjectSha256: string;
   }>;
   readonly totals: Readonly<{
-    outputCount: 24;
-    deterministicSubjectCount: 23;
+    outputCount: 25;
+    deterministicSubjectCount: 24;
     detachedEvidenceCount: 1;
     firstByteLength: string;
     secondByteLength: string;

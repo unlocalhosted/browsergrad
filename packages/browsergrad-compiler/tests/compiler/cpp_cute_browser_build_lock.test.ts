@@ -22,9 +22,9 @@ import {
 } from "../../src/cpp_cute_browser_runtime_abi.js";
 
 const LOCK_ID =
-  "bg.cpp.browser-build-input-lock.sha256.5a96def9bac1db052108142dfe4c82e729f4b41f450d459406a4f3c5227daad7";
-const RESOURCE_SHA256 = "2de8d75c63487bc52e2603aa19728d0802d3b2506fcf739b8c7273cf4194bafc";
-const RECIPE_SHA256 = "35c157019c6537e2314e4d0b4b6a56732a27da8ea9142eb8ed544e6c7e844b3e";
+  "bg.cpp.browser-build-input-lock.sha256.fa21cfe45dec6b4869662cd613a7a300848657518f375c04f7f2193f3a874ad4";
+const RESOURCE_SHA256 = "fd0f4f978399c6e52ebdb0489f35ce6b0a88e289dce8cfdfa112e52d6217cf3c";
+const RECIPE_SHA256 = "63b5641553ff707dc50a7184781973c16aec8f660251901aaedbe550e64b3b66";
 const EXTRACTOR_SOURCE_SHA256 = "25ec50f4e2e6300978db67692e1fa7a033b0fb77b66fec79cfe933625c61b298";
 const NOTICE_SHA256 = "ae94cc9272e8d3458778dda90db035388450075d5404f736f6daadc7192163d1";
 const BLOCKERS = [
@@ -52,7 +52,7 @@ describe("browser Clang-WASM build-input lock", () => {
       runtimeAbiManifestId: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID,
       runtimeAbiResourceSha256: CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
       runtimeAbiResourceByteLength: cppCuteBrowserRuntimeAbiManifestResourceBytes().byteLength,
-      resourceByteLength: 26_374,
+      resourceByteLength: 26_662,
       releaseReady: false,
       releaseBlockerIds: BLOCKERS,
     });
@@ -283,6 +283,7 @@ describe("browser Clang-WASM build-input lock", () => {
       "assets/browsergrad-cpp-cute/cpp-cute-browser-worker.mjs",
       "assets/browsergrad-cpp-cute/cuda-12.6.3.headers.bgvfs",
       "assets/browsergrad-cpp-cute/cutlass-3.7.0.headers.bgvfs",
+      "assets/browsergrad-cpp-cute/diagnostic-normalization.json",
       "assets/browsergrad-cpp-cute/libcxx-22.1.8.headers.bgvfs",
       "assets/browsergrad-cpp-cute/license-inventory.json",
       "assets/browsergrad-cpp-cute/linux-sysroot.headers.bgvfs",
@@ -322,6 +323,31 @@ describe("browser Clang-WASM build-input lock", () => {
     )).toMatchObject({
       path: "assets/browsergrad-cpp-cute/runtime-abi-manifest.json",
       mediaType: "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
+      reproducibilityClass: "deterministic-subject",
+    });
+    expect(recipe.distributedOutputPlan.outputs.filter((output) =>
+      output.mediaType === "application/octet-stream",
+    ).map((output) => output.role)).toEqual([
+      "clang-resource-header-vfs",
+      "cuda-header-vfs",
+      "cutlass-header-vfs",
+      "libcxx-header-vfs",
+      "linux-sysroot-header-vfs",
+    ]);
+    expect(recipe.distributedOutputPlan.outputs.find(
+      (output) => output.role === "diagnostic-normalization-manifest",
+    )).toMatchObject({
+      path: "assets/browsergrad-cpp-cute/diagnostic-normalization.json",
+      mediaType:
+        "application/vnd.browsergrad.cpp-cute.diagnostic-normalization.v1+json",
+      reproducibilityClass: "deterministic-subject",
+    });
+    expect(recipe.distributedOutputPlan.outputs.find(
+      (output) => output.role === "semantic-adapter-manifest",
+    )).toMatchObject({
+      path: "assets/browsergrad-cpp-cute/semantic-adapter-manifest.json",
+      mediaType:
+        "application/vnd.browsergrad.cpp-cute.semantic-adapter.v1+json",
       reproducibilityClass: "deterministic-subject",
     });
   });

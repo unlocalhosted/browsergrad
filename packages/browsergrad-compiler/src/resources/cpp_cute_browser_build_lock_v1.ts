@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.5a96def9bac1db052108142dfe4c82e729f4b41f450d459406a4f3c5227daad7",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.fa21cfe45dec6b4869662cd613a7a300848657518f375c04f7f2193f3a874ad4",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -587,6 +587,12 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
             reproducibilityClass: "deterministic-subject",
           },
           {
+            path: "assets/browsergrad-cpp-cute/diagnostic-normalization.json",
+            role: "diagnostic-normalization-manifest",
+            mediaType: "application/vnd.browsergrad.cpp-cute.diagnostic-normalization.v1+json",
+            reproducibilityClass: "deterministic-subject",
+          },
+          {
             path: "assets/browsergrad-cpp-cute/libcxx-22.1.8.headers.bgvfs",
             role: "libcxx-header-vfs",
             mediaType: "application/octet-stream",
@@ -613,7 +619,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           {
             path: "assets/browsergrad-cpp-cute/semantic-adapter-manifest.json",
             role: "semantic-adapter-manifest",
-            mediaType: "application/json",
+            mediaType: "application/vnd.browsergrad.cpp-cute.semantic-adapter.v1+json",
             reproducibilityClass: "deterministic-subject",
           },
           {

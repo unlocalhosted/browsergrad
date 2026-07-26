@@ -28,8 +28,8 @@ const HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.browser-full-distribution-reproducibility.v1";
 const EXPECTED_DETACHED_OUTPUT_PATH =
   "assets/browsergrad-cpp-cute/build-provenance.dsse.json";
-const EXPECTED_OUTPUT_COUNT = 24;
-const EXPECTED_DETERMINISTIC_SUBJECT_COUNT = 23;
+const EXPECTED_OUTPUT_COUNT = 25;
+const EXPECTED_DETERMINISTIC_SUBJECT_COUNT = 24;
 const REPRODUCIBILITY_AUTHORITIES = new WeakSet();
 
 export class CppCuteBrowserFullDistributionReproducibilityError extends Error {

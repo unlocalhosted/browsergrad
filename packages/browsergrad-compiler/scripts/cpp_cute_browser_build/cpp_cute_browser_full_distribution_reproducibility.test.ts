@@ -61,7 +61,7 @@ afterEach(async () => {
 });
 
 describe("full browser C++/CuTe distribution reproducibility", () => {
-  it("reverifies all 24 outputs across two roots while separating detached evidence", async () => {
+  it("reverifies all 25 outputs across two roots while separating detached evidence", async () => {
     const fixture = await createFixture();
     const first = await createDistributionTree(
       "first",
@@ -88,8 +88,8 @@ describe("full browser C++/CuTe distribution reproducibility", () => {
       authority:
         "two-root-complete-distribution-output-reproducibility-only",
       totals: {
-        outputCount: 24,
-        deterministicSubjectCount: 23,
+        outputCount: 25,
+        deterministicSubjectCount: 24,
         detachedEvidenceCount: 1,
       },
       claims: {
@@ -109,7 +109,7 @@ describe("full browser C++/CuTe distribution reproducibility", () => {
         releaseReady: false,
       },
     });
-    expect(report.deterministicOutputs).toHaveLength(23);
+    expect(report.deterministicOutputs).toHaveLength(24);
     expect(report.detachedEvidence.firstSha256)
       .not.toBe(report.detachedEvidence.secondSha256);
     expect(report.detachedEvidence.buildSubjectId)

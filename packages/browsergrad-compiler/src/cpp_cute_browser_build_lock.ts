@@ -55,6 +55,56 @@ const HEADER_DISTRIBUTION_OUTPUT_ROLES = new Set([
   "linux-sysroot-header-vfs",
   "third-party-notices",
 ]);
+const REQUIRED_BROWSER_ASSET_OUTPUTS = Object.freeze([
+  Object.freeze({
+    path: "assets/browsergrad-cpp-cute/clang-extractor.wasm",
+    role: "clang-extractor",
+    mediaType: "application/wasm",
+  }),
+  Object.freeze({
+    path: "assets/browsergrad-cpp-cute/clang-resource.headers.bgvfs",
+    role: "clang-resource-header-vfs",
+    mediaType: "application/octet-stream",
+  }),
+  Object.freeze({
+    path: "assets/browsergrad-cpp-cute/cuda-12.6.3.headers.bgvfs",
+    role: "cuda-header-vfs",
+    mediaType: "application/octet-stream",
+  }),
+  Object.freeze({
+    path: "assets/browsergrad-cpp-cute/cutlass-3.7.0.headers.bgvfs",
+    role: "cutlass-header-vfs",
+    mediaType: "application/octet-stream",
+  }),
+  Object.freeze({
+    path: "assets/browsergrad-cpp-cute/diagnostic-normalization.json",
+    role: "diagnostic-normalization-manifest",
+    mediaType:
+      "application/vnd.browsergrad.cpp-cute.diagnostic-normalization.v1+json",
+  }),
+  Object.freeze({
+    path: "assets/browsergrad-cpp-cute/libcxx-22.1.8.headers.bgvfs",
+    role: "libcxx-header-vfs",
+    mediaType: "application/octet-stream",
+  }),
+  Object.freeze({
+    path: "assets/browsergrad-cpp-cute/linux-sysroot.headers.bgvfs",
+    role: "linux-sysroot-header-vfs",
+    mediaType: "application/octet-stream",
+  }),
+  Object.freeze({
+    path: "assets/browsergrad-cpp-cute/runtime-abi-manifest.json",
+    role: "runtime-abi-manifest",
+    mediaType:
+      "application/vnd.browsergrad.cpp-cute.runtime-abi-manifest.v1+json",
+  }),
+  Object.freeze({
+    path: "assets/browsergrad-cpp-cute/semantic-adapter-manifest.json",
+    role: "semantic-adapter-manifest",
+    mediaType:
+      "application/vnd.browsergrad.cpp-cute.semantic-adapter.v1+json",
+  }),
+]);
 const PREPARED_LOCKS = new WeakMap<object, StoredCppCuteBrowserBuildInputLock>();
 const ABORT_SIGNAL_ABORTED_GETTER = typeof AbortSignal === "undefined"
   ? undefined
@@ -579,6 +629,17 @@ function validateBodyInvariants(value: JsonObject): void {
         "$.body.runtimeAbiResource.outputPath",
         "runtime-ABI resource must bind one exact deterministic distribution output",
       );
+    }
+    for (const [index, expected] of REQUIRED_BROWSER_ASSET_OUTPUTS.entries()) {
+      const output = outputByPath.get(expected.path);
+      if (output?.role !== expected.role ||
+          output.mediaType !== expected.mediaType ||
+          output.reproducibilityClass !== "deterministic-subject") {
+        invalid(
+          `$.body.recipe.distributedOutputPlan.outputs[asset:${index}]`,
+          "every required browser asset must have one exact deterministic distribution output with its build-selected media type",
+        );
+      }
     }
 
     assertSortedUniqueStrings(
