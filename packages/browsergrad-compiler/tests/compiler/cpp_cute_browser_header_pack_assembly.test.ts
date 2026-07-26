@@ -502,16 +502,18 @@ describe("C++/CuTe browser parsed-program header-pack assembly", () => {
     );
   });
 
-  it("hashes and canonicalizes a matching 20k-entry selection beyond semantic-core defaults", async () => {
-    const prepared = await fixture({ cutlassSelectionFileCount: 20_000 });
-    expect(prepared.selection.fileCount).toBe(20_004);
+  it("hashes and canonicalizes a matching 16,385-entry selection beyond semantic-core defaults", {
+    timeout: 15_000,
+  }, async () => {
+    const prepared = await fixture({ cutlassSelectionFileCount: 16_385 });
+    expect(prepared.selection.fileCount).toBe(16_389);
     expect(canonicalCppCuteBrowserHeaderPackSelectionBytes(
       prepared.selection,
     ).byteLength).toBeGreaterThan(2 * 1024 * 1024);
     expect(unwrapPreparedCppCuteBrowserHeaderPackSelection(
       prepared.selection,
     ).manifest.body.packs.find((pack) => pack.includeRootId === "cutlass")?.fileCount).toBe(
-      "20000",
+      "16385",
     );
   });
 

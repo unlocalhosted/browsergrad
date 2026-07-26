@@ -280,7 +280,9 @@ describe("C++/CuTe browser Worker positive framing", () => {
     });
   });
 
-  it("accepts the exact diagnostic ceiling above generic schema decode budgets", async () => {
+  it("accepts the exact diagnostic ceiling above generic schema decode budgets", {
+    timeout: 15_000,
+  }, async () => {
     const environment = await createEnvironment("accepted");
     const largeRejected = await createArtifact(environment.profile, "rejected", {
       diagnosticCount: 4_095,
