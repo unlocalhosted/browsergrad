@@ -145,6 +145,7 @@ try {
   assert(semanticCorePkg.exports?.["./layout"], "semantic-core package missing ./layout export");
   assert(semanticCorePkg.exports?.["./kernel"], "semantic-core package missing ./kernel export");
   assert(semanticCorePkg.exports?.["./schedule"], "semantic-core package missing ./schedule export");
+  assert(semanticCorePkg.exports?.["./graph"], "semantic-core package missing ./graph export");
   assert(semanticCorePkg.exports?.["./requirement"], "semantic-core package missing ./requirement export");
   assert(semanticCorePkg.exports?.["./capability"], "semantic-core package missing ./capability export");
   const densePermutationFixtureExport = "./fixtures/kernel-v1/dense-permutation-view-copy.cases.json";
@@ -163,6 +164,8 @@ try {
     "dist/kernel.d.ts",
     "dist/schedule.js",
     "dist/schedule.d.ts",
+    "dist/graph.js",
+    "dist/graph.d.ts",
     "dist/requirement.js",
     "dist/requirement.d.ts",
     "dist/capability.js",
@@ -198,6 +201,7 @@ try {
   const semanticLayout = await import(pathToFileURL(join(semanticCore, "dist/layout.js")));
   const semanticKernel = await import(pathToFileURL(join(semanticCore, "dist/kernel.js")));
   const semanticSchedule = await import(pathToFileURL(join(semanticCore, "dist/schedule.js")));
+  const semanticGraph = await import(pathToFileURL(join(semanticCore, "dist/graph.js")));
   const semanticRequirement = await import(pathToFileURL(join(semanticCore, "dist/requirement.js")));
   const semanticCapability = await import(pathToFileURL(join(semanticCore, "dist/capability.js")));
   for (const exportName of ["canonicalizeJson", "hashSemanticArtifact", "SCHEDULE_DIAGNOSTIC_CODES", "validateWireEnvelope"]) {
@@ -235,6 +239,14 @@ try {
     "verifyAttentionOnlineKvTileScheduleArtifact",
   ]) {
     assert(exportName in semanticSchedule, `semantic-core schedule export missing ${exportName}`);
+  }
+  for (const exportName of [
+    "createVerifiedHostGraphArtifact",
+    "hostGraphArtifactPayload",
+    "prepareHostGraphProgram",
+    "verifyHostGraphArtifact",
+  ]) {
+    assert(exportName in semanticGraph, `semantic-core graph export missing ${exportName}`);
   }
   for (const exportName of [
     "createAssignmentRequirementDefinition",
@@ -1389,12 +1401,14 @@ function verifyInstalledSemanticViewCopyConsumer(consumer) {
   const source = `
 import { layoutArtifactPayload } from "@unlocalhosted/browsergrad-semantic-core/layout";
 import { createVerifiedDensePermutationViewCopyArtifacts, prepareViewCopyCpu } from "@unlocalhosted/browsergrad-semantic-core/kernel";
+import { hostGraphArtifactPayload } from "@unlocalhosted/browsergrad-semantic-core/graph";
 import { hashSemanticArtifact, parseWireI64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import densePermutationFixtures from "@unlocalhosted/browsergrad-semantic-core/fixtures/kernel-v1/dense-permutation-view-copy.cases.json" with { type: "json" };
 import { prepareSemanticViewCopyWgsl } from "@unlocalhosted/browsergrad-kernels/semantic_view_copy";
 import {
   compileCudaLiteKernelWithLayoutBindings,
   compileCudaLiteKernelWithViewCopyBinding,
+  createCudaLiteViewCopyHostGraph,
   createCudaLiteLayoutBindingCompileCacheKey,
   prepareCudaLiteLayoutBindings,
   prepareCudaLiteViewCopyBinding,
@@ -1453,6 +1467,11 @@ const compiledViewCopyResult = runCompiledKernelSemanticReference(
   },
   { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
 );
+const hostGraph = await createCudaLiteViewCopyHostGraph([
+  viewCopyBinding,
+  viewCopyBinding,
+]);
+const hostGraphPayload = hostGraphArtifactPayload(hostGraph.artifact);
 if (cpu.specializationHash !== wgsl.semantic.specializationHash) throw new Error("fresh consumer CPU/WGSL specialization mismatch");
 if (!wgsl.program.wgsl.includes("destination_words[destination_word] = copied_bits")) throw new Error("fresh consumer lowering missing copy");
 if (compilerBinding.layoutSemanticHash !== await hashSemanticArtifact(layout)) throw new Error("fresh consumer compiler binding lost semantic layout identity");
@@ -1463,6 +1482,8 @@ if (!compiledView.wgslProgram?.name.includes(compilerBinding.layoutSemanticHash)
 if (![0x3f800000, 0x40400000, 0x40000000, 0x40800000].every((value, index) => compiledViewCopyResult.buffers.output[index] === value)) throw new Error("fresh consumer compiler L2 view-copy produced wrong raw-word transpose");
 if (compiledViewCopy.preparedViewCopyBinding !== viewCopyBinding || !compiledViewCopy.viewCopyBindingCompileCacheKey.includes(viewCopyBinding.bindingProjectionHash)) throw new Error("fresh consumer compiler L2 result lost prepared binding authority");
 if (!compiledViewCopy.wgslProgram?.name.includes(viewCopyBinding.layoutSemanticHash) || !compiledViewCopy.wgslProgram.name.includes(viewCopyBinding.kernelSemanticHash) || !compiledViewCopy.wgslProgram.name.includes(viewCopyBinding.specializationHash) || !compiledViewCopy.wgslProgram.name.includes(viewCopyBinding.bindingProjectionHash)) throw new Error("fresh consumer compiler L2 WGSL identity lost semantic binding hashes");
+const hostGraphTemporary = hostGraphPayload.program.resources.find((resource) => resource.resourceId === "temporary/0");
+if (hostGraph.dispatchCount !== 2 || hostGraphPayload.program.nodes.length !== 2 || hostGraphTemporary?.byteLength !== "16" || hostGraphTemporary.multiplicity !== "per-rank") throw new Error("fresh consumer compiler host graph lost multi-dispatch resource meaning");
 `;
   writeFileSync(join(consumer, "consumer.mjs"), source);
   writeFileSync(join(consumer, "consumer.ts"), source);

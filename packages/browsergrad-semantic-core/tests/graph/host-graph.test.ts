@@ -1,0 +1,523 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  GRAPH_DIAGNOSTIC_CODES,
+  SCHEMA_DIAGNOSTIC_CODES,
+  SemanticSchemaError,
+  canonicalJsonBytes,
+  hashSemanticArtifact,
+  parseWireI64,
+  parseWireU64,
+  type WireU64,
+} from "../../src/schema";
+import {
+  HOST_GRAPH_ARTIFACT_SCHEMA,
+  HOST_GRAPH_FAILURE_MODEL,
+  HOST_GRAPH_MAX_RESOURCES,
+  HOST_GRAPH_MAX_TOTAL_RESOURCE_BYTES,
+  createVerifiedHostGraphArtifact,
+  decodeHostGraphArtifact,
+  hostGraphArtifactPayload,
+  prepareHostGraphProgram,
+  requirePreparedHostGraphProgram,
+  verifyHostGraphArtifact,
+  type HostGraphProgram,
+} from "../../src/graph";
+import {
+  createVerifiedDensePermutationViewCopyArtifacts,
+  type VerifiedViewCopyArtifacts,
+} from "../../src/kernel";
+
+async function semantic(): Promise<VerifiedViewCopyArtifacts> {
+  return createVerifiedDensePermutationViewCopyArtifacts({
+    inputShape: [parseWireI64("2"), parseWireI64("3")],
+    axes: [1, 0],
+    dtype: "f32",
+  });
+}
+
+const wire = (value: string): WireU64 => parseWireU64(value);
+
+function program(artifacts: VerifiedViewCopyArtifacts): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 0 },
+    failureModel: HOST_GRAPH_FAILURE_MODEL,
+    rankCount: wire("2"),
+    resources: [
+      {
+        resourceId: "output",
+        role: "output",
+        multiplicity: "per-rank",
+        dtype: "f32",
+        byteLength: wire("24"),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "input",
+        role: "input",
+        multiplicity: "per-rank",
+        dtype: "f32",
+        byteLength: wire("24"),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "bucket",
+        role: "temporary",
+        multiplicity: "per-rank",
+        dtype: "f32",
+        byteLength: wire("24"),
+        alignmentBytes: 4,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "store",
+        kind: "dispatch",
+        dependsOn: ["synchronize"],
+        semanticArtifactHash: artifacts.kernelSemanticHash,
+        entrypointId: artifacts.operationId,
+        dimensionBindings: {},
+        bindings: [
+          {
+            semanticResourceId: artifacts.source.viewId,
+            graphResourceId: "bucket",
+          },
+          {
+            semanticResourceId: artifacts.destination.viewId,
+            graphResourceId: "output",
+          },
+        ],
+      },
+      {
+        nodeId: "transform",
+        kind: "dispatch",
+        dependsOn: [],
+        semanticArtifactHash: artifacts.kernelSemanticHash,
+        entrypointId: artifacts.operationId,
+        dimensionBindings: {},
+        bindings: [
+          {
+            semanticResourceId: artifacts.source.viewId,
+            graphResourceId: "input",
+          },
+          {
+            semanticResourceId: artifacts.destination.viewId,
+            graphResourceId: "bucket",
+          },
+        ],
+      },
+      {
+        nodeId: "synchronize",
+        kind: "all-reduce",
+        dependsOn: ["transform"],
+        resourceId: "bucket",
+        reduction: "sum",
+        dtype: "f32",
+        numericalPolicy: "rank-order-f32",
+        participants: [wire("1"), wire("0")],
+        result: "replicated-to-all-participants",
+      },
+    ],
+  };
+}
+
+async function diagnostic(
+  run: () => Promise<unknown> | unknown,
+): Promise<SemanticSchemaError> {
+  try {
+    await run();
+    throw new Error("expected semantic failure");
+  } catch (error) {
+    expect(error).toBeInstanceOf(SemanticSchemaError);
+    return error as SemanticSchemaError;
+  }
+}
+
+type Mutable<T> = T extends string | number | boolean | bigint | symbol |
+  null | undefined
+  ? T
+  : T extends readonly (infer Item)[]
+    ? Mutable<Item>[]
+    : T extends object
+      ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
+      : T;
+
+function clone<T>(value: T): Mutable<T> {
+  return JSON.parse(JSON.stringify(value)) as Mutable<T>;
+}
+
+function artifactsFor(artifacts: VerifiedViewCopyArtifacts) {
+  return {
+    kernelArtifacts: [artifacts.kernel],
+    layoutArtifacts: [artifacts.layout],
+  };
+}
+
+describe("host graph artifact", () => {
+  it("normalizes a multi-dispatch DAG with explicit collective meaning", async () => {
+    const artifacts = await semantic();
+    const constructed = await createVerifiedHostGraphArtifact(
+      program(artifacts),
+      {
+        ...artifactsFor(artifacts),
+        producer: { id: "graph-builder", version: "7" },
+        artifactId: "training-step",
+      },
+    );
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+
+    expect(payload.program.resources.map((item) => item.resourceId)).toEqual([
+      "bucket",
+      "input",
+      "output",
+    ]);
+    expect(payload.program.nodes.map((item) => item.nodeId)).toEqual([
+      "store",
+      "synchronize",
+      "transform",
+    ]);
+    expect(payload.program.nodes[1]).toMatchObject({
+      kind: "all-reduce",
+      participants: ["0", "1"],
+      numericalPolicy: "rank-order-f32",
+      result: "replicated-to-all-participants",
+    });
+    expect(prepared).toMatchObject({
+      artifact: constructed.artifact,
+      graphSemanticHash: constructed.graphSemanticHash,
+      failureModel: HOST_GRAPH_FAILURE_MODEL,
+      rankCount: 2n,
+      resourceCount: 3,
+      nodeCount: 3,
+      edgeCount: 2,
+      dispatchCount: 2,
+      collectiveCount: 1,
+      topologicalNodeIds: ["transform", "synchronize", "store"],
+      outputResourceIds: ["output"],
+    });
+    expect(() => requirePreparedHostGraphProgram(prepared)).not.toThrow();
+  });
+
+  it("round-trips canonical bytes and excludes transport metadata from identity", async () => {
+    const artifacts = await semantic();
+    const first = await createVerifiedHostGraphArtifact(
+      program(artifacts),
+      {
+        ...artifactsFor(artifacts),
+        producer: { id: "producer-a", version: "1" },
+        artifactId: "transport-a",
+      },
+    );
+    const envelope = {
+      schema: HOST_GRAPH_ARTIFACT_SCHEMA,
+      version: { major: 1, minor: 0 },
+      producer: { id: "producer-b", version: "99" },
+      artifactId: "transport-b",
+      requiredExtensions: [],
+      payload: hostGraphArtifactPayload(first.artifact),
+    };
+    const second = await decodeHostGraphArtifact(
+      canonicalJsonBytes(envelope),
+      artifactsFor(artifacts),
+    );
+
+    expect(await hashSemanticArtifact(second)).toBe(first.graphSemanticHash);
+    expect(
+      JSON.stringify(hostGraphArtifactPayload(second)).toLowerCase(),
+    ).not.toContain("transport");
+  });
+
+  it("rejects copied authority and semantic artifacts absent from the verifier set", async () => {
+    const artifacts = await semantic();
+    const constructed = await createVerifiedHostGraphArtifact(
+      program(artifacts),
+      artifactsFor(artifacts),
+    );
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+    expect((await diagnostic(() =>
+      hostGraphArtifactPayload(
+        hostGraphArtifactPayload(constructed.artifact) as never,
+      ))).diagnostic.code).toBe(SCHEMA_DIAGNOSTIC_CODES.unverifiedArtifact);
+    expect((await diagnostic(() =>
+      requirePreparedHostGraphProgram({ ...prepared })
+    )).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+
+    const envelope = {
+      schema: HOST_GRAPH_ARTIFACT_SCHEMA,
+      version: { major: 1, minor: 0 },
+      producer: { id: "test", version: "1" },
+      artifactId: "missing-semantic",
+      requiredExtensions: [],
+      payload: { program: program(artifacts) },
+    };
+    expect((await diagnostic(() => verifyHostGraphArtifact(envelope, {
+      kernelArtifacts: [],
+      layoutArtifacts: [artifacts.layout],
+    }))).diagnostic.code).toBe(
+      GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
+    );
+    expect((await diagnostic(() => verifyHostGraphArtifact(envelope, {
+      kernelArtifacts: [artifacts.kernel],
+      layoutArtifacts: [],
+    }))).diagnostic.code).toBe(
+      GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
+    );
+  });
+
+  it("rejects dangling dependencies, cycles, and unordered resource hazards", async () => {
+    const artifacts = await semantic();
+    const dangling = clone(program(artifacts));
+    dangling.nodes[0]!.dependsOn = ["missing"];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      dangling,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.danglingReference);
+
+    const cycle = clone(program(artifacts));
+    cycle.nodes.find((node) => node.nodeId === "transform")!.dependsOn = [
+      "store",
+    ];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      cycle,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.cycle);
+
+    const hazard = clone(program(artifacts));
+    hazard.nodes.find((node) => node.nodeId === "store")!.dependsOn = [
+      "transform",
+    ];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      hazard,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.effectConflict);
+  });
+
+  it("rejects read-before-write, input mutation, and unwritten outputs", async () => {
+    const artifacts = await semantic();
+    const beforeWrite = clone(program(artifacts));
+    const transform = beforeWrite.nodes.find(
+      (node) => node.nodeId === "transform",
+    );
+    if (transform?.kind !== "dispatch") throw new Error("missing transform");
+    transform.bindings[0]!.graphResourceId = "bucket";
+    transform.bindings[1]!.graphResourceId = "output";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      beforeWrite,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.readBeforeWrite);
+
+    const inputWrite = clone(program(artifacts));
+    const inputWriter = inputWrite.nodes.find(
+      (node) => node.nodeId === "transform",
+    );
+    if (inputWriter?.kind !== "dispatch") throw new Error("missing transform");
+    inputWriter.bindings[1]!.graphResourceId = "input";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      inputWrite,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidAccess);
+
+    const unwritten = clone(program(artifacts));
+    const store = unwritten.nodes.find((node) => node.nodeId === "store");
+    if (store?.kind !== "dispatch") throw new Error("missing store");
+    unwritten.resources.push({
+      resourceId: "sink",
+      role: "temporary",
+      multiplicity: "per-rank",
+      dtype: "f32",
+      byteLength: wire("24"),
+      alignmentBytes: 4,
+    });
+    store.bindings[1]!.graphResourceId = "sink";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      unwritten,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.readBeforeWrite);
+  });
+
+  it("derives effects and resource geometry from verified kernel meaning", async () => {
+    const artifacts = await semantic();
+    const forgedBinding = clone(program(artifacts));
+    const forgedDispatch = forgedBinding.nodes.find(
+      (node) => node.nodeId === "transform",
+    );
+    if (forgedDispatch?.kind !== "dispatch") {
+      throw new Error("missing transform");
+    }
+    forgedDispatch.bindings[0]!.semanticResourceId = "forgedView";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      forgedBinding,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(
+      GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
+    );
+
+    const callerEffects = clone(program(artifacts)) as unknown as
+      HostGraphProgram;
+    const callerDispatch = callerEffects.nodes[0] as unknown as {
+      effects?: unknown;
+    };
+    callerDispatch.effects = [{ resourceId: "input", access: "read" }];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      callerEffects,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unknownField);
+
+    const dispatchDtype = clone(program(artifacts));
+    dispatchDtype.resources.find(
+      (resource) => resource.resourceId === "bucket",
+    )!.dtype = "i32";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      dispatchDtype,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+
+    const dispatchLength = clone(program(artifacts));
+    dispatchLength.resources.find(
+      (resource) => resource.resourceId === "bucket",
+    )!.byteLength = wire("28");
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      dispatchLength,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+
+    const dispatchAlignment = clone(program(artifacts));
+    dispatchAlignment.resources.find(
+      (resource) => resource.resourceId === "bucket",
+    )!.alignmentBytes = 2;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      dispatchAlignment,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+
+    const collectiveDtype = clone(program(artifacts));
+    const collective = collectiveDtype.nodes.find(
+      (node) => node.nodeId === "synchronize",
+    );
+    if (collective?.kind !== "all-reduce") {
+      throw new Error("missing collective");
+    }
+    collective.dtype = "i32";
+    collective.numericalPolicy = "rank-order-wrapping-32";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      collectiveDtype,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+  });
+
+  it("rejects invalid collective ranks and numerical policies", async () => {
+    const artifacts = await semantic();
+    const rank = clone(program(artifacts));
+    const rankCollective = rank.nodes.find(
+      (node) => node.nodeId === "synchronize",
+    );
+    if (rankCollective?.kind !== "all-reduce") {
+      throw new Error("missing collective");
+    }
+    rankCollective.participants = [wire("0"), wire("2")];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      rank,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidCollective);
+
+    const policy = clone(program(artifacts));
+    const policyCollective = policy.nodes.find(
+      (node) => node.nodeId === "synchronize",
+    );
+    if (policyCollective?.kind !== "all-reduce") {
+      throw new Error("missing collective");
+    }
+    policyCollective.numericalPolicy = "exact-32-bit";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      policy,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+  });
+
+  it("enforces graph resource ceilings and closed records", async () => {
+    const artifacts = await semantic();
+    const oversized = clone(program(artifacts));
+    oversized.resources = Array.from(
+      { length: HOST_GRAPH_MAX_RESOURCES + 1 },
+      (_, index) => ({
+        resourceId: `r${index}`,
+        role: index === 0 ? "output" as const : "temporary" as const,
+        multiplicity: "per-rank" as const,
+        dtype: "f32" as const,
+        byteLength: wire("24"),
+        alignmentBytes: 4,
+      }),
+    );
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      oversized,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.resourceLimit);
+
+    const excessiveRankLocalBytes = clone(program(artifacts));
+    excessiveRankLocalBytes.resources[0]!.byteLength = parseWireU64(
+      HOST_GRAPH_MAX_TOTAL_RESOURCE_BYTES.toString(),
+    );
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      excessiveRankLocalBytes,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.resourceLimit);
+
+    const sharedResource = clone(program(artifacts));
+    sharedResource.resources[0]!.multiplicity = "shared" as "per-rank";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      sharedResource,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const unknown = clone(program(artifacts)) as unknown as
+      HostGraphProgram & { surprise?: boolean };
+    unknown.surprise = true;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      unknown,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unknownField);
+  });
+
+  it("snapshots caller input and rejects accessors without invoking them", async () => {
+    const artifacts = await semantic();
+    const mutable = clone(program(artifacts));
+    const pending = createVerifiedHostGraphArtifact(mutable, {
+      ...artifactsFor(artifacts),
+    });
+    mutable.nodes[0]!.dependsOn = ["mutated"];
+    expect((await pending).graphSemanticHash).toMatch(/^[0-9a-f]{64}$/u);
+
+    let reads = 0;
+    const hostile = clone(program(artifacts));
+    Object.defineProperty(hostile, "rankCount", {
+      enumerable: true,
+      get() {
+        reads += 1;
+        return "2";
+      },
+    });
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      hostile,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(SCHEMA_DIAGNOSTIC_CODES.nonCanonicalValue);
+    expect(reads).toBe(0);
+
+    const hostileOptions = {
+      ...artifactsFor(artifacts),
+    };
+    Object.defineProperty(hostileOptions, "artifactId", {
+      enumerable: true,
+      get() {
+        reads += 1;
+        return "hostile";
+      },
+    });
+    await expect(createVerifiedHostGraphArtifact(
+      program(artifacts),
+      hostileOptions,
+    )).rejects.toThrow(/enumerable data property/u);
+    expect(reads).toBe(0);
+  });
+});

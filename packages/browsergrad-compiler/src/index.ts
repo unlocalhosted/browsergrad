@@ -256,6 +256,11 @@ export {
   type PreparedCudaLiteViewCopyBinding,
 } from "./semantic_view_copy_bindings.js";
 export {
+  CUDA_LITE_VIEW_COPY_HOST_GRAPH_PROFILE,
+  createCudaLiteViewCopyHostGraph,
+  type ConstructedCudaLiteViewCopyHostGraph,
+} from "./semantic_view_copy_host_graph.js";
+export {
   mapCudaLiteDiagnosticToSourceProvenance,
   prepareCudaLiteCompilationUnit,
   type CudaLiteAppliedSourceTransform,

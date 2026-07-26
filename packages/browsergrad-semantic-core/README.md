@@ -11,6 +11,7 @@ Only explicit subpaths exist:
 - `@unlocalhosted/browsergrad-semantic-core/layout`
 - `@unlocalhosted/browsergrad-semantic-core/kernel`
 - `@unlocalhosted/browsergrad-semantic-core/schedule`
+- `@unlocalhosted/browsergrad-semantic-core/graph`
 - `@unlocalhosted/browsergrad-semantic-core/capability`
 - `@unlocalhosted/browsergrad-semantic-core/requirement`
 
@@ -101,6 +102,27 @@ product, sum, scale, exponential result, probability, and weighted-value step.
 The accompanying comparator implements the declared `1e-4` absolute-or-
 relative policy and rejects non-finite outputs. This is CPU reference evidence,
 not WebGPU execution or preservation evidence.
+
+`/graph` defines the initial closed `browsergrad.host-graph@1` profile for
+bounded, backend-neutral multi-dispatch DAGs and explicit all-reduce meaning.
+Each resource carries per-rank multiplicity, exact dtype, allocation byte
+length, alignment, and input/temporary/output role. Dispatches reference opaque
+verified kernel and layout artifacts, retain exact dimension bindings, and
+derive their read/write effects and resource geometry from those artifacts;
+callers cannot declare effects independently. Verification rejects cycles,
+dangling references, read-before-write, input mutation, unordered hazards,
+incompatible dtype or allocation bindings, invalid collective
+participants/numerical policy, and graphs above the fixed node, edge, rank,
+artifact, or 1 GiB aggregate-resource ceilings; the byte ceiling accounts for
+rank multiplicity. The failure model is fail-stop with no partial output
+commit.
+
+This first graph profile does not claim execution, transport, topology,
+retries, copies, readback, events, dynamic control, or a backend pipeline.
+Compiler owns the first concrete consumer: it lowers one or more opaque
+prepared view-copy bindings into a verified linear host graph with derived
+intermediate resources. Backend execution and collective adapters require
+separate authority and evidence.
 
 Frontends construct the operation through one `/kernel` sink rather than
 assembling allocation, alias, index-map, view, and operation IDs themselves.

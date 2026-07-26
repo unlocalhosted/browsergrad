@@ -9,6 +9,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Explicit `/graph` export with the closed `browsergrad.host-graph@1`
+  multi-dispatch DAG profile. Per-rank resources bind exact dtype, resolved
+  allocation bytes, alignment, and lifetime role; dispatch effects and geometry
+  derive from supplied opaque verified kernel/layout artifacts plus exact
+  dimension bindings. Verification bounds nodes, edges, ranks, semantic
+  artifacts, and aggregate bytes; rejects cycles, dangling references, input
+  mutation, read-before-write, unordered hazards, incompatible bindings, and
+  invalid all-reduce rank/numerical contracts; and fixes a fail-stop,
+  no-partial-output-commit failure model without claiming execution, transport,
+  topology, retries, or backend pipelines.
 - Explicit `/capability` export with immutable versioned semantic capability
   and backend definitions plus program/artifact-scoped lowering decisions.
   Positive decisions require a registered preservation level; conditional

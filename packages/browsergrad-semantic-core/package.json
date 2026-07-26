@@ -1,7 +1,7 @@
 {
   "name": "@unlocalhosted/browsergrad-semantic-core",
   "version": "0.3.0",
-  "description": "Versioned BrowserGrad semantic schemas, canonical wire formats, and verified layout, kernel, schedule, capability, and requirement protocols.",
+  "description": "Versioned BrowserGrad semantic schemas, canonical wire formats, and verified layout, kernel, schedule, graph, capability, and requirement protocols.",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -25,6 +25,10 @@
     "./schedule": {
       "types": "./dist/schedule.d.ts",
       "import": "./dist/schedule.js"
+    },
+    "./graph": {
+      "types": "./dist/graph.d.ts",
+      "import": "./dist/graph.js"
     },
     "./requirement": {
       "types": "./dist/requirement.d.ts",

@@ -73,9 +73,30 @@ export const SCHEDULE_DIAGNOSTIC_CODES = {
 export type ScheduleDiagnosticCode =
   (typeof SCHEDULE_DIAGNOSTIC_CODES)[keyof typeof SCHEDULE_DIAGNOSTIC_CODES];
 
+export const GRAPH_DIAGNOSTIC_CODES = {
+  invalidArtifact: "BG-GRAPH-INVALID-ARTIFACT",
+  unknownField: "BG-GRAPH-UNKNOWN-FIELD",
+  duplicateId: "BG-GRAPH-DUPLICATE-ID",
+  danglingReference: "BG-GRAPH-DANGLING-REFERENCE",
+  semanticArtifactMismatch: "BG-GRAPH-SEMANTIC-ARTIFACT-MISMATCH",
+  unsupportedProfile: "BG-GRAPH-UNSUPPORTED-PROFILE",
+  cycle: "BG-GRAPH-CYCLE",
+  invalidAccess: "BG-GRAPH-INVALID-ACCESS",
+  readBeforeWrite: "BG-GRAPH-READ-BEFORE-WRITE",
+  effectConflict: "BG-GRAPH-EFFECT-CONFLICT",
+  invalidCollective: "BG-GRAPH-INVALID-COLLECTIVE",
+  invalidBinding: "BG-GRAPH-INVALID-BINDING",
+  resourceLimit: "BG-GRAPH-RESOURCE-LIMIT",
+} as const;
+
+export type GraphDiagnosticCode =
+  (typeof GRAPH_DIAGNOSTIC_CODES)[keyof typeof GRAPH_DIAGNOSTIC_CODES];
+
 export interface SemanticDiagnostic {
-  readonly code: SchemaDiagnosticCode | LayoutDiagnosticCode | KernelDiagnosticCode | ScheduleDiagnosticCode
-    | `BG-LAYOUT-${string}` | `BG-KERNEL-${string}` | `BG-SCHEDULE-${string}`;
+  readonly code: SchemaDiagnosticCode | LayoutDiagnosticCode |
+    KernelDiagnosticCode | ScheduleDiagnosticCode | GraphDiagnosticCode |
+    `BG-LAYOUT-${string}` | `BG-KERNEL-${string}` |
+    `BG-SCHEDULE-${string}` | `BG-GRAPH-${string}`;
   readonly stage: "verification";
   readonly severity: "error" | "warning" | "note";
   readonly message: string;

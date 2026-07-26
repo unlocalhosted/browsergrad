@@ -4,12 +4,18 @@ import {
   prepareViewCopyCpu,
   type VerifiedViewCopyArtifacts,
 } from "@unlocalhosted/browsergrad-semantic-core/kernel";
+import {
+  hostGraphArtifactPayload,
+  prepareHostGraphProgram,
+} from "@unlocalhosted/browsergrad-semantic-core/graph";
 import { parseWireI64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
   CUDA_LITE_VIEW_COPY_BINDING_PROFILE,
+  CUDA_LITE_VIEW_COPY_HOST_GRAPH_PROFILE,
   CudaLiteCompilerError,
   CudaLiteViewCopyBindingError,
   compileCudaLiteKernelWithViewCopyBinding,
+  createCudaLiteViewCopyHostGraph,
   createCudaLiteViewCopyBindingCompileCacheKey,
   prepareCudaLiteViewCopyBinding,
   runCompiledKernelSemanticReference,
@@ -111,6 +117,153 @@ describe("prepared CUDA-lite view-copy bindings", () => {
     await expect(prepareCudaLiteViewCopyBinding(artifacts.layout, artifacts.kernel, request(artifacts), {
       signal: controller.signal,
     })).rejects.toMatchObject({ code: "BG-COMPILER-VIEW-COPY-BINDING-INVALID-ARTIFACT" });
+  });
+});
+
+describe("CUDA-lite view-copy host graphs", () => {
+  it("constructs a bounded multi-dispatch pipeline from opaque bindings", async () => {
+    const artifacts = await denseRank2Artifacts();
+    const first = await prepareCudaLiteViewCopyBinding(
+      artifacts.layout,
+      artifacts.kernel,
+      request(artifacts),
+    );
+    const second = await prepareCudaLiteViewCopyBinding(
+      artifacts.layout,
+      artifacts.kernel,
+      request(artifacts),
+    );
+    const constructed = await createCudaLiteViewCopyHostGraph([
+      first,
+      second,
+    ]);
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+
+    expect(constructed).toMatchObject({
+      profile: CUDA_LITE_VIEW_COPY_HOST_GRAPH_PROFILE,
+      dispatchCount: 2,
+      inputResourceId: "input",
+      outputResourceId: "output",
+      temporaryResourceIds: ["temporary/0"],
+    });
+    expect(payload.program.resources).toEqual([
+      {
+        resourceId: "input",
+        role: "input",
+        multiplicity: "per-rank",
+        dtype: "f32",
+        byteLength: "24",
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "output",
+        role: "output",
+        multiplicity: "per-rank",
+        dtype: "f32",
+        byteLength: "24",
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "temporary/0",
+        role: "temporary",
+        multiplicity: "per-rank",
+        dtype: "f32",
+        byteLength: "24",
+        alignmentBytes: 4,
+      },
+    ]);
+    expect(prepared).toMatchObject({
+      graphSemanticHash: constructed.graphSemanticHash,
+      dispatchCount: 2,
+      collectiveCount: 0,
+      topologicalNodeIds: ["dispatch/0", "dispatch/1"],
+    });
+  });
+
+  it("retains resolved dimension bindings and allocation geometry", async () => {
+    const artifacts = await dynamicRank2Artifacts();
+    const binding = await prepareCudaLiteViewCopyBinding(
+      artifacts.layout,
+      artifacts.kernel,
+      {
+        ...request(artifacts),
+        dimensionBindings: { n: parseWireI64("3") },
+      },
+    );
+    const constructed = await createCudaLiteViewCopyHostGraph([binding]);
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+
+    expect(payload.program.resources).toEqual([
+      {
+        resourceId: "input",
+        role: "input",
+        multiplicity: "per-rank",
+        dtype: "f32",
+        byteLength: "24",
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "output",
+        role: "output",
+        multiplicity: "per-rank",
+        dtype: "f32",
+        byteLength: "24",
+        alignmentBytes: 4,
+      },
+    ]);
+    expect(payload.program.nodes[0]).toMatchObject({
+      kind: "dispatch",
+      dimensionBindings: { n: "3" },
+    });
+  });
+
+  it("rejects empty, forged, hostile, and incompatible pipelines", async () => {
+    await expect(createCudaLiteViewCopyHostGraph([])).rejects.toMatchObject({
+      code: "BG-COMPILER-VIEW-COPY-BINDING-INVALID-REQUEST",
+    });
+
+    const dense = await denseRank2Artifacts();
+    const denseBinding = await prepareCudaLiteViewCopyBinding(
+      dense.layout,
+      dense.kernel,
+      request(dense),
+    );
+    const forged = Object.freeze({
+      profile: CUDA_LITE_VIEW_COPY_BINDING_PROFILE,
+    }) as unknown as PreparedCudaLiteViewCopyBinding;
+    await expect(createCudaLiteViewCopyHostGraph([forged]))
+      .rejects.toMatchObject({
+        code: "BG-COMPILER-VIEW-COPY-BINDING-UNVERIFIED-PREPARED",
+      });
+
+    const padded = await paddedRank2Artifacts("7fc01234");
+    const paddedBinding = await prepareCudaLiteViewCopyBinding(
+      padded.layout,
+      padded.kernel,
+      request(padded),
+    );
+    await expect(createCudaLiteViewCopyHostGraph([
+      paddedBinding,
+      denseBinding,
+    ])).rejects.toMatchObject({
+      code: "BG-COMPILER-VIEW-COPY-BINDING-INVALID-REQUEST",
+    });
+
+    let reads = 0;
+    const hostile = [denseBinding];
+    Object.defineProperty(hostile, "0", {
+      enumerable: true,
+      get() {
+        reads += 1;
+        return denseBinding;
+      },
+    });
+    await expect(createCudaLiteViewCopyHostGraph(hostile))
+      .rejects.toMatchObject({
+        code: "BG-COMPILER-VIEW-COPY-BINDING-INVALID-REQUEST",
+      });
+    expect(reads).toBe(0);
   });
 });
 
@@ -454,6 +607,46 @@ async function denseRank2Artifacts(): Promise<VerifiedViewCopyArtifacts> {
     destination: {
       layout: strided([2, 3]),
       allocation: globalAllocation(24),
+      byteOffset: constant(0),
+      requiredAlignmentBytes: 4,
+    },
+    invalidSource: { kind: "reject" },
+  }, { producer: { id: "compiler-view-copy-binding-test", version: "1" } });
+}
+
+async function dynamicRank2Artifacts(): Promise<VerifiedViewCopyArtifacts> {
+  const symbol = () => ({ kind: "symbol" as const, id: "n" });
+  const byteLength = () => ({
+    kind: "mul" as const,
+    lhs: symbol(),
+    rhs: constant(8),
+  });
+  const layout = () => ({
+    kind: "strided" as const,
+    shape: [symbol(), constant(2)],
+    strides: [constant(2), constant(1)],
+  });
+  return createVerifiedViewCopyArtifacts({
+    dtype: "f32",
+    symbols: [{ id: "n", domain: { min: parseWireI64("0"), max: parseWireI64("4") } }],
+    constraints: [],
+    source: {
+      layout: layout(),
+      allocation: {
+        byteLength: byteLength(),
+        memorySpace: { kind: "global" },
+        alignmentBytes: 4,
+      },
+      byteOffset: constant(0),
+      requiredAlignmentBytes: 4,
+    },
+    destination: {
+      layout: layout(),
+      allocation: {
+        byteLength: byteLength(),
+        memorySpace: { kind: "global" },
+        alignmentBytes: 4,
+      },
       byteOffset: constant(0),
       requiredAlignmentBytes: 4,
     },

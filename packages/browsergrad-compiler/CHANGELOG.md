@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Adds compiler-owned construction of bounded linear multi-dispatch view-copy
+  host graphs from opaque prepared binding authority. Intermediate allocation
+  dtype, byte length, and alignment must agree exactly; graph effects,
+  dimension bindings, semantic view IDs, and dependencies are derived rather
+  than caller-declared. The result is a verified semantic-core host graph and
+  makes no backend execution, transport, retry, or release claim.
 - Repairs the real-browser compile observation path at three actual boundaries:
   Emscripten stdout/stderr are snapshotted when a failure occurs instead of
   being frozen before compilation; the unchanged CuTe request receives a

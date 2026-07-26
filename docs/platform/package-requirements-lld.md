@@ -30,7 +30,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | not started | No Gate 7 production claim exists. |
+| 7 — host graphs and optional systems | in progress | The initial verified multi-dispatch DAG and explicit all-reduce semantic profile is implemented with one compiler-owned view-copy pipeline consumer; execution, dynamic control, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every exit criterion for the declared gate profile is
 complete. Verification of a closed initial profile does not imply broader
@@ -188,9 +188,8 @@ exact-payload CPU/required-WebGPU convergence is no longer a blocker.
    No serialized observation may substitute for an opaque authority, and the
    synthetic composition fixture establishes no current production status.
 
-Gate 7 remains separate future work. Its absence does not weaken the completed
-closed profiles, but no host-graph, dynamic-control, collective, transport, or
-native distributed-systems claim may be inferred from Gates 0 through 6.
+Gate 7 remains incomplete: semantic verification grants no graph execution,
+dynamic-control, transport/topology, worker-mesh, or native-systems claim.
 
 ## Purpose
 
@@ -1452,7 +1451,7 @@ Create an initially private workspace package
   interfaces.
 - `/schedule` — schedule representation and verification, not schedule-selection
   policy.
-- `/host` — host-graph representation, resource hazards, and verification.
+- `/graph` — host-graph representation, resource hazards, and verification.
 - `/schema` — wire envelopes, canonical serialization, and validators.
 - `/diagnostic` — universal diagnostic stages and structured diagnostic schema.
 - `/capability` — capability, lowering-decision, and evidence schemas only.
@@ -1460,7 +1459,7 @@ Create an initially private workspace package
   no semantic lowering policy.
 
 Gate 1 exports only `/schema`, `/layout`, and `/package.json`. `/kernel`,
-`/schedule`, `/host`, `/diagnostic`, `/capability`, and `/requirement` are added
+`/schedule`, `/graph`, `/diagnostic`, `/capability`, and `/requirement` are added
 only when concrete contracts and real consumers exist; empty placeholder
 barrels are prohibited.
 
@@ -1580,13 +1579,13 @@ Permitted dependency direction:
 ```text
 compiler frontends -> compiler-owned lowering --+
                                                  |
-JIT graph -> JIT-owned lowering -----------------+-> shared schedule/host artifacts
+JIT graph -> JIT-owned lowering -----------------+-> shared schedule/graph artifacts
                                                  |       -> kernels WebGPU legalization/execution
 explicit eager adapters -> validated bridge -----+
 
 shared artifact representation and verification:
   semantic-core/layout + semantic-core/kernel + semantic-core/schema
-  semantic-core/schedule + semantic-core/host where applicable
+  semantic-core/schedule + semantic-core/graph where applicable
 
 runtime -> semantic-core/diagnostic + semantic-core/capability + semantic-core/requirement only
 primitives remains outside the tensor/compiler dependency chain
@@ -2108,6 +2107,21 @@ contracts and regenerated records.
 
 **Exit:** each systems claim names failure model, transport/topology, semantic
 preservation, and actual execution evidence.
+
+**Current implemented profile:** `browsergrad.host-graph@1` is a bounded
+version-1 DAG with per-rank resource multiplicity, exact
+dtype/bytes/alignment, and input/temporary/output roles. Dispatch nodes bind
+opaque verified layout/kernel artifacts plus exact dimension bindings; the
+verifier derives view-copy read/write effects and allocation requirements,
+rejects cycles, dangling references, input mutation, read-before-write,
+unordered conflicts, and incompatible bindings, and admits only explicit
+f32/i32/u32 all-reduce contracts with deterministic numerical policy and
+participant ranks. The failure model is
+`fail-stop-no-partial-output-commit`. Compiler owns one bounded linear
+view-copy pipeline constructor over opaque prepared bindings. No backend
+executor, copy/readback/event node, bounded conditional/repetition node,
+pipeline authority, transport/topology adapter, worker mesh, native companion,
+or actual execution evidence exists yet, so Gate 7 remains `in progress`.
 
 ## Proof Matrix and Release Gates
 

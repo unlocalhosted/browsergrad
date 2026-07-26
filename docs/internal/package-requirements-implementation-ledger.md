@@ -6,7 +6,7 @@
 - **Last updated:** 2026-07-27
 - **Historical handover:**
   [`package-requirements-handover-2026-07-17.md`](./package-requirements-handover-2026-07-17.md)
-- **Current implementation slice:** Gate 3 production browser-local C++/CuTe execution
+- **Current implementation slice:** Gate 7 verified host-graph semantic foundation
 
 **Runtime boundary:** the portable product runs the Clang/extractor as Wasm in
 a browser Worker, then executes verified semantics through CPU or WebGPU. It
@@ -44,16 +44,16 @@ test does not make a gate verified unless every exit criterion is covered.
 | Gate 4 — tiled GEMM and schedule separation | `verified` | The initial closed portable profile separates canonical logical GEMM tile meaning from physical schedule artifacts and schedule specialization. It supports dense row-major 4-byte-aligned certified exact-input f32 only. Two derived schedules use scalar memory operations, one output per invocation, cooperative single-buffered workgroup staging, zero-filled boundary loads, suppressed boundary stores, and all-invocation uniform barriers. Compiler typed-artifact lowering converges on the same semantic constructor without claiming source-body equivalence. The kernels backend executes the exact certified snapshots after caller mutation and reports portable re-legalization plus bit-exact certified-input preservation. | None for the initial closed profile. General f32, additional dtypes/layouts/base offsets, resident-buffer provenance, vectorized/native MMA schedules, and source-produced schedule preservation require separately named future profiles and evidence. | Capability commits `2cb7cea3` through `fe5581d3`, with exact Worker repin `343523fe`; semantic-core 16 files/138 tests; kernels 18 files/147 tests plus 20 focused semantic-GEMM tests; compiler convergence tests and 96-file/1,602-test full suite; packed-release checks; required real-WebGPU irregular 17x23 by 23x19 execution under 8x8x8 and 16x16x16 schedules with complete byte equality. CI `29818182317` dedicated semantic-GEMM job passed. |
 | Gate 5 — tiled attention flagship | `verified` | The initial closed f32 profile owns frontend-neutral attention meaning, an independent online K/V-tile schedule, a schedule-independent CPU oracle, authority-bound specialization, exact scalar WGSL, and bounded host/WebGPU execution. The proved algorithm stages K/V cooperatively, carries online softmax across increasing tiles, excludes causal/tail keys before state updates, and uses uniform barriers. Required correctness and performance records are separate. | None for the initial closed profile. Additional dtypes/layouts, resident-buffer provenance, frontend schedule convergence, vectorized/native facilities, or a FlashAttention-v2 claim require separately named profiles and evidence. | Semantic-core 19 files/166 tests. Kernels passes 19 files/154 tests, build, Node/browser typecheck, lint, architecture, hostile binding/domain/authority/resource/device tests, and packed-release consumption. Required headed Chromium on Apple Metal 3 executes causal/non-causal `(B=1,H=2,Sq=9,Sk=11,D=4,Dv=6)` through 8x8 and 8x16 schedules with complete declared-policy CPU and cross-schedule comparison. A separate `(B=1,H=2,Sq=256,Sk=256,D=Dv=32)` host-API record uses 16 warmups and 20 alternating paired samples against `row-wise-online-softmax-baseline`; three final local runs observed candidate medians of 3.9–4.9 ms and baseline medians of 6.9–10.5 ms, retaining that variability without a superiority claim. Final local performance artifact `31d0656703465037204cec096a517ef20e9f28331868220f3c54c3c137c9bbf3` passed on headed Chromium/Apple Metal 3. Commit `f4e25d4f` passed eight-family CI `29824737993`; exact-commit correctness and performance release markers are both required. |
 | Gate 6 — framework convergence | `verified` | Thirty-six public operation records are retired from `CUSTOM` into typed IR with executable registry decisions. No advertised framework operation remains opaque; only the intentional user-authored WGSL extension stays opaque. JIT projects the same executable registry into detached JavaScript and framework-neutral platform records. Grad schema v2 has no remaining compatibility-debt behavior and generates a detached 22-record platform source from its frozen source- and fixture-bound eager inventory. Runtime generates all 53 requirement definitions, consumes complete provider-bound environments throughout readiness APIs, requires subject-bound lowering decisions for program support, and composes the generated Grad and JIT sources without importing either framework. Requirement, program, framework, and terminal-evidence facts remain distinct. Host-only typed operations explicitly refuse tensor-plan/WebGPU until their canonical portable lowerings exist. | None for the initial framework-convergence profile. New framework operations, dtype/layout contracts, or backend profiles require new executable contracts and regenerated support records; terminal execution evidence remains a separate authority. | ADR-0002 and ADR-0004 through ADR-0051; architecture freeze preserves the exact JIT partition, revised Grad contracts, byte-exact generated requirement, program-capability, and Grad platform registries, six direct resolution consumers, five resolution carriers, and architecture implementation/declaration parity. Node 25.9.0 passes Grad's 33 unit tests in 0.99 seconds and the seven-package build in 8.36 seconds; full JIT integration passes 55 files/336 tests and full Grad integration passes 59 files/362 tests. Semantic-core passes 21 files/174 tests, runtime passes 14 files/137 tests, the full compiler gate passes 96 files/1,602 tests plus parallel lanes, semantic architecture plus its 29-test mutation suite pass, and the release gate proves the packed 22-record Grad plus 36-record JIT runtime view. |
-| Gate 7 — host graphs and optional systems expansion | `not-started` | No implementation in this workstream. | All Gate 7 exit criteria. | None. |
+| Gate 7 — host graphs and optional systems expansion | `in-progress` | Semantic-core `browsergrad.host-graph@1` verifies bounded multi-dispatch DAGs, per-rank resource multiplicity with exact dtype/bytes/alignment and roles, exact dimension bindings, derived view-copy effects and geometry, dependency/lifetime hazards, explicit f32/i32/u32 all-reduce meaning, and the fixed fail-stop/no-partial-output-commit failure model. Compiler owns one concrete consumer that composes opaque prepared view-copy bindings into a bounded linear pipeline with derived intermediate resources. | CPU and WebGPU graph executors; copy/readback/event/materialization nodes; bounded conditional/repetition control and cancellation; pipeline authority; browser-worker transport/topology/failure evidence; named native companion profiles; actual execution and performance evidence. | Semantic-core 22 files/185 tests; compiler 106 files/1,658 tests plus focused 14-test construction/dynamic-binding coverage; strict typecheck/lint/build; packed fresh-consumer gate; root/compiler architecture checks with zero cycles/leaks. |
 
 ## Active Slice
 
 ### Objective
 
-Gates 0 through 2 and Gate 4 are verified. Gate 2 has one shared materializing
+Gates 0 through 2 and Gates 4 through 6 are verified. Gate 2 has one shared materializing
 view-copy contract, CPU evaluator, canonical WGSL lowering, and compiler/JIT tracer
 bullets through actual WebGPU, all re-proved at one exact clean revision. Gate
-3 now audits and implements the browser-local C++/CuTe frontend boundary. Its
+3 remains externally blocked at the browser-local C++/CuTe release boundary. Its
 primary producer is a pinned CUDA-capable Clang frontend running as WASM in a
 dedicated browser worker. Its first tracer must reuse the verified artifact,
 layout, and backend seams rather than add source-shaped execution or
@@ -73,9 +73,10 @@ implemented. Kernels WGSL preparation and authority-bound host/WebGPU execution
 are implemented, with required causal/non-causal two-schedule correctness and a
 separate observational performance record against the frozen row-wise baseline
 on a named device/browser. Gate 6's initial framework-convergence profile is
-verified. The current slice returns to Gate 3's real browser-local C++/CuTe
-producer; broader dtype/layout profiles remain independently named follow-on
-capabilities.
+verified. Gate 7 is now the active software-owned slice: establish one honest
+host-graph semantic and compiler-construction foundation before adding
+executors, bounded control, or transport. Broader dtype/layout profiles remain
+independently named follow-on capabilities.
 
 ### Work in flight
 
@@ -92,6 +93,7 @@ browser-local producer evidence or make Docker a product dependency.
 | Gate 0 architecture check | `verified` | Cross-package boundaries, generated-source parity, all six required freezes, exact runtime mapping/status unions, reviewed vocabulary, profile-usage parity, pinned inventories/harnesses, normalized definition fingerprints, and representative mutations are implemented and wired into delivery gates. |
 | Gate 1 schema/value core | `verified` | `/schema` and `/layout` only; all Gate 1 requirements and the explicit cross-language exit are covered. The Python code is a synchronized reference oracle, not a second runtime or stable public API. |
 | Semantic-core package adoption gate | `verified` | `0.2.0` is public-package shaped, dependency-free, subpath-only, locally packed, and now consumed through kernels' packed exact dependency. A fresh temporary consumer installs both tarballs, resolves bare public subpaths, typechecks, and prepares matching CPU/WGSL specializations. It has not been published. |
+| Gate 7 host-graph semantic foundation | `verified` | The new `/graph` subpath verifies bounded version-1 DAGs with per-rank resource multiplicity and exact geometry/roles, opaque kernel/layout references, dimension bindings, derived view-copy effects, dependency/lifetime hazards, explicit all-reduce meaning, and fail-stop/no-partial-output-commit failure semantics. Compiler's `createCudaLiteViewCopyHostGraph` is the first concrete cross-package consumer and derives a linear multi-dispatch pipeline solely from opaque prepared view-copy bindings. | Add an authority-bound reference executor without conflating semantic validity with execution. | Semantic-core 22 files/185 tests; compiler 106 files/1,658 tests and focused 14-test pipeline suite; strict typecheck/lint/build; packed fresh-consumer gate; zero-cycle/zero-leak root and compiler architecture checks. |
 | Gate 2 view-family selection | `verified` | Selected typed JIT `PERMUTE` plus compiler L1 read binding and sibling L2 guarded materializing view copy. The full required matrix and strict exact-source WebGPU proof now pass; broader view families must add typed operation variants rather than reinterpret frozen plans. |
 | Gate 3 legacy CuTe motif freeze | `verified` | Existing transpose, GEMV, GEMM, affine-tile, flash-attention, and WGMMA/TMA source-spelling normalizers are explicitly frozen compatibility debt. Exact exception-file membership and source hashes are architecture-guarded; new motifs, replacement bodies, files, or call sites require an accepted architecture decision. | Delete these adapters after pinned resolved frontend artifacts cover their retained fixtures through shared semantics. | Architecture guard and two mutation tests. |
 | Gate 3 browser-local Clang-WASM producer | `partial` | Closed browser-local profile 2.6, producer-neutral request, Artifact V3, compilation contract 1.2, CUDA-pass authorities, exact semantic-adapter binding, separate zero-import raw-Wasm verifier/compiler Workers, closed VFS, canonical transfer, one-shot entry, and typed terminal protocol compile source-derived view-copy graphs. ABI 1.17 retains the independent diagnostic cap and 32 MiB result ceiling. The package-pinned current extractor recognizes exact f32/i32/u32 rank-1-through-rank-4 view-copy facts without adding a source-spelling execution path. The real browser lane now constructs its exact profile through package source and imports no synthetic test-profile fixture. | Admit the exact promoted candidates through externally rooted producer trust, then cross the existing shared lowering, CPU, and required real-WebGPU boundaries. Distribution approval and release remain independent. | Green run `30069614333` produced byte-identical 31,841,008-byte Wasm. The exact package matrix covers eight real Worker compilations at resource SHA-256 `4d8b956050834e550405b15f1c7d52b16927ee3e8d4bc7b7da4035d430edc80a`. Compiler Worker SHA-256 `a3b8610fc116c7b4949379dbcdcdd55e06ce5f9f59f11bf692abd689b0f17916`; verifier Worker SHA-256 `06ffb66e4e808e9df030cc3fe2981fa3adddf13d03780680abb091cbcbd4b9eb`; both retain zero static/dynamic imports. |
@@ -418,6 +420,7 @@ Their `verified` labels apply only to synthetic optional-lane contracts.
 | D-161 | 2026-07-27 | accepted | Mint backend execution authority only from opaque independently admitted producer, full-distribution reproducibility, and exact-payload convergence authorities that bind the same stable build subject, build lock, Worker, output set, and case matrix. Retain the producer and execution profile, manifest, and asset-set identities separately because changing the external trust root intentionally changes those control-plane identities without changing the payload build subject. Keep legal approval, distribution authorization, and release false. | Equating the production producer profile or manifest to the local-engineering distribution makes external trust-root migration impossible; ignoring payload identity permits unrelated signed builds to reuse execution evidence. The cycle-free build subject already commits the exact assets, source ABI, roots, build lock, and Worker, so it is the correct convergence seam while the distinct control-plane identities remain auditable. |
 | D-162 | 2026-07-27 | accepted | Mint final release authority only from an opaque production backend execution authority plus an opaque independently verified distribution approval. Require both to bind the current build lock and require the approval's exact header-subset reproducibility and output-verification identities to equal those retained by the backend's complete-distribution authority. Retain both prerequisites opaquely; do not allow backend execution to imply legal approval or legal approval to imply producer, execution, or full-output reproducibility. | A flattened release boolean can silently substitute local execution for redistribution approval or approve headers unrelated to the executed package. One final two-input transition preserves the evidence graph, prevents structural-copy forgery, and makes `releaseReady: true` possible only after every independent authority has crossed its own verifier boundary. |
 | D-163 | 2026-07-27 | accepted | Deepen the existing hardened external-evidence exchange with one production-release operation. Read the producer and reviewer roots, requests, and returned envelopes as twelve distinct immutable inputs; independently rederive and verify both external statements; admit the package-pinned full-distribution and exact-convergence resources; and invoke backend plus final-release composition before process exit. Persist only one canonical no-clobber observation whose in-process facts are true but whose reusable producer, approval, backend, release, and `releaseReady` claims are all false. | Separate verification commands intentionally discard opaque authority and cannot later be composed from serialized observations. Reusing the existing deep host boundary preserves its path, inode, mutability, no-follow, cancellation, resource, and output-synchronization protections while closing the last software-owned Gate 3 release gap without creating a second trust adapter or turning JSON identifiers into authority. |
+| D-164 | 2026-07-27 | accepted | Introduce `browsergrad.host-graph@1` as a bounded semantic-core DAG, not a backend plan. Resources carry per-rank multiplicity plus exact dtype, resolved allocation byte length, alignment, and lifetime role. Dispatch nodes bind opaque verified kernel/layout artifacts, exact operation/view IDs, graph resources, and dimension bindings; the verifier derives effects and allocation requirements rather than trusting caller declarations. Admit only explicit f32/i32/u32 all-reduce meaning with canonical participants/numerical policy and fix the initial failure model to fail-stop with no partial output commit. Let compiler own the first concrete linear view-copy pipeline constructor over opaque prepared bindings. | A node list with caller-declared effects or untyped buffers could pass hazard checks while lying about kernel reads/writes, collective dtype, rank-local storage, or allocation compatibility. Putting verification in the shared L4 seam and construction in the compiler preserves package direction, closes cycles/read-before-write/input-mutation/resource-exhaustion and structural-forgery paths, and creates one reusable multi-dispatch meaning without pretending semantic validity is execution, pipeline, transport/topology, worker-mesh, native-distributed, performance, or release evidence. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -6858,6 +6861,36 @@ whether any files may be left partially changed.
   externally controlled keys, externally issued exact statements, and actual
   invocation with those external inputs are absent.
 
+### 2026-07-27 — Gate 7 verified host-graph semantic foundation
+
+- Semantic-core adds the explicit `/graph` subpath and closed
+  `browsergrad.host-graph@1` artifact. It canonicalizes bounded resources,
+  dispatches, dependencies, and all-reduce participants; retains exact
+  dimension bindings; and derives dispatch effects, dtype, allocation bytes,
+  and alignment from opaque verified layout/kernel artifacts.
+- Verification rejects cycles, missing references, duplicate IDs, input
+  mutation, read-before-write, unordered conflicting effects, incompatible
+  allocation/dtype/alignment bindings, invalid collective ranks or numerical
+  policy, unknown fields, copied authority, hostile accessors, and resource
+  graphs beyond 256 resources/nodes/ranks/artifacts, 4,096 edges, or 1 GiB
+  aggregate declared bytes across rank-local resource instances.
+- Compiler adds the first concrete cross-package consumer:
+  `createCudaLiteViewCopyHostGraph`. It composes one to 256 opaque prepared
+  view-copy bindings into a linear multi-dispatch graph, derives
+  input/temporary/output allocation contracts and dependencies, and rejects
+  incompatible intermediate resources or forged prepared authority.
+- Focused semantic-core graph verification passes nine tests; semantic-core
+  passes 22 files/185 tests, strict typecheck, lint, and build. Compiler
+  focused verification passes 14 tests, and the complete compiler suite passes
+  106 files/1,658 tests. Strict compiler typecheck, lint, and build pass.
+  The packed fresh-consumer gate imports `/graph`, constructs the compiler
+  pipeline, and passes all archive/security checks. Root and compiler
+  architecture checks report zero cycles or leaks.
+- This slice proves semantic construction only. No host-graph CPU/WebGPU
+  executor, copy/readback/event/materialization node, bounded dynamic control,
+  pipeline authority, transport/topology, worker mesh, native companion,
+  actual execution, performance, or release claim exists yet.
+
 ## Quick Resume Checklist
 
 1. Read this ledger, then the relevant gate and exit criteria in the normative
@@ -6954,6 +6987,13 @@ subject-bound lowering decisions without framework dependencies or inferred
 support booleans. Broader dtype/layout coverage and new framework/backend
 profiles remain capability work, not unrecorded widening of this profile.
 Terminal execution evidence remains separately authoritative.
+
+Gate 7 is now the active software-owned slice. Its initial semantic artifact
+represents bounded multi-dispatch DAGs and explicit all-reduce meaning without
+claiming a backend. The compiler's first consumer composes already prepared
+view-copy bindings into that graph. Graph execution, bounded control, pipeline
+authority, transport/topology, worker meshes, and native companion evidence
+remain separate follow-on capabilities.
 
 Install the production distribution-approval policy, issue the exact immutable
 request through the new exchange, and have the external reviewer sign only those
