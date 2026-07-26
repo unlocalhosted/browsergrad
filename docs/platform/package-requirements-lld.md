@@ -26,7 +26,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
 | 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. |
-| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, complete-output reproducibility verifier, and policy-rooted external distribution-approval verifier are package-pinned; production external approval, live full-distribution evidence, externally rooted producer trust, exact-payload lowering/backend convergence, and release authority remain open. |
+| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, complete-output reproducibility verifier, exact policy-scoped producer signing request, and policy-rooted external distribution-approval verifier are package-pinned; production external approval, live full-distribution evidence, externally rooted producer trust, exact-payload lowering/backend convergence, and release authority remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
@@ -45,8 +45,8 @@ The 90-minute build is no longer an engineering iteration loop:
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
   exact build lock, verifies both zero-import Worker bundles, verifies that the
   checked-in strict matrix matches its deterministic authoring projection, and
-  passes 91 files/765 tests. Its latest Vitest portion took 14.88 seconds.
-- The complete compiler unit suite passes 100 files/1,634 tests in 14.50
+  passes 92 files/771 tests. Its latest Vitest portion took 14.23 seconds.
+- The complete compiler unit suite passes 101 files/1,640 tests in 14.03
   seconds.
 - The required native boundary passes 50 files/267 tests with nine explicit
   platform skips in 67.62 seconds. It intentionally includes optimized, UBSan,
@@ -75,22 +75,11 @@ build/parity machinery and are not runtime dependencies. The controller:
 - keeps build, ABI, Worker execution, semantic lowering, backend execution,
   producer trust, distribution approval, and release as distinct authorities.
 
-The current extractor build lock is
-`bg.cpp.browser-build-input-lock.sha256.5a96def9bac1db052108142dfe4c82e729f4b41f450d459406a4f3c5227daad7`.
-The package factory remains 27,884 bytes with SHA-256
-`2eaa4ce31951cd5eff989679fd8d63c4ae74df0293f8f727209a3ce0f681764d`.
-Workflow run `30069614333` produced two byte-identical 31,841,008-byte
-extractors with SHA-256
-`19edd5622461b2308e83f10fb90f9f029241a5ba706e4c1741b194cb52a82138`.
-The cache-free build steps took 40 minutes 30 seconds and 45 minutes 55 seconds
-concurrently; the complete jobs took 41 minutes 45 seconds and 47 minutes 28
-seconds. The exact 3,470-byte reproducibility resource has SHA-256
-`b8ab918d667d68a8effcdcd14a79691a92e7d3466e9041906e5039c9993e028d`.
-The compiler Worker is 584,660 bytes with SHA-256
-`a3b8610fc116c7b4949379dbcdcdd55e06ce5f9f59f11bf692abd689b0f17916`;
-the 158,314-byte raw-Wasm verifier Worker has SHA-256
-`06ffb66e4e808e9df030cc3fe2981fa3adddf13d03780680abb091cbcbd4b9eb`.
-Both have zero static or dynamic imports.
+The package binds one exact build lock, factory, reproducible extractor, and
+zero-import verifier/compiler Worker pair. Workflow `30069614333` produced two
+byte-identical 31,841,008-byte extractors. Its concurrent cache-free jobs are
+release evidence only; exact identities, durations, and hashes remain in the
+implementation ledger rather than this normative checkpoint.
 
 The package-pinned strict browser observation now records eight unchanged
 C++17/CuTe compilations: f32 ranks 1 through 4, positive strided-slice,
@@ -104,9 +93,8 @@ contract; it no longer imports the synthetic test-profile fixture. The
 canonical 26,213-byte matrix has SHA-256
 `4d8b956050834e550405b15f1c7d52b16927ee3e8d4bc7b7da4035d430edc80a`
 and binds source revision `e9062c20f2a070774743e4d839c275c05df47225`.
-Compilation took 23.228–24.768 seconds per isolated browser case. The matrix
-deliberately retains producer trust, license approval, lowering authority,
-backend execution, and release readiness as false.
+The matrix deliberately retains producer trust, license approval, lowering
+authority, backend execution, and release readiness as false.
 
 The build lock declares one exact 24-path distributed-output plan: 23
 deterministic subjects plus the detached DSSE provenance envelope. The
@@ -120,22 +108,17 @@ lowering, backend execution, and release readiness remain false. This verifier
 has adversarial fixture coverage, but no live complete 24-output distribution
 has yet produced that authority.
 
-The package-owned external distribution-approval verifier independently
-reauthenticates the current package-pinned 17-output header distribution and
-derives one exact review subject over the build lock, header-input projection,
-all output identities, package resource, output verification and
-reproducibility identities, and the exact `license-inventory.json` hash and
-length. A bounded canonical host policy admits only an exact trust-store hash,
-reviewer allowlist, key allowlist, and policy identity. Verification requires
-one P-256 P1363 signature in a canonical DSSE/in-toto statement and mints an
-opaque authority whose legal and distribution claims are true only for that
-policy and exact current subject. Signing-request material is format-only and
-grants no approval. The repository currently contains only synthetic
-policy/key/statement test evidence: no package-controlled production approval
-policy, externally controlled reviewer key, or externally issued decision has
-been installed, so the promoted production distribution remains unapproved.
-Full-distribution reproducibility, producer trust, Worker execution, lowering,
-backend execution, and release readiness remain independent and false.
+The external distribution-approval verifier reauthenticates the package-pinned
+17-output header distribution and binds its exact build, output, reproducibility,
+and `license-inventory.json` identities to a policy-rooted P-256 DSSE/in-toto
+decision. Signing material grants no authority. Only synthetic policy/key/
+statement tests exist, so production distribution approval remains false;
+full-output reproducibility, producer trust, execution, lowering, backend, and
+release authority remain independent.
+
+The producer path derives format-only DSSE/in-toto signing material from the
+exact manifest, build lock, Worker, policy, trust store, builder, and key. It
+grants no trust; only external production evidence can authorize the build.
 
 ### Shared dtype and layout execution
 
