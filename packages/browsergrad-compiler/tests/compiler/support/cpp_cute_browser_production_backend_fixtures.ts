@@ -9,12 +9,14 @@ import {
   deriveCppCuteBrowserAssetManifestId,
   deriveCppCuteBrowserAssetSetSha256,
   prepareCppCuteBrowserAssetManifest,
+  type PreparedCppCuteBrowserAssetManifest,
   type CppCuteBrowserAssetManifestBodyV1,
   type CppCuteBrowserAssetManifestV1,
 } from "../../../src/cpp_cute_browser_assets.js";
 import {
   cppCuteBrowserBuildInputLockResourceBytes,
   decodeCppCuteBrowserBuildInputLock,
+  type PreparedCppCuteBrowserBuildInputLock,
 } from "../../../src/cpp_cute_browser_build_lock.js";
 import {
   createCppCuteBrowserBuildProvenanceSigningRequest,
@@ -39,10 +41,13 @@ import {
   CPP_CUTE_ATTESTATION_TRUST_STORE_MINOR,
   CPP_CUTE_FRONTEND_TRUST_STORE_SCHEMA,
   prepareCppCuteAttestationTrustStore,
+  type CppCuteAttestationTrustStoreV1,
+  type PreparedCppCuteAttestationTrustStore,
 } from "../../../src/cpp_cute_frontend_provenance.js";
 import {
   prepareCppCuteFrontendProfile,
   type CppCuteFrontendDependencyProfile,
+  type PreparedCppCuteFrontendProfile,
 } from "../../../src/cpp_cute_frontend_profile.js";
 import {
   verifyCppCuteBrowserBuildProducer,
@@ -50,6 +55,7 @@ import {
 } from "../../../src/cpp_cute_browser_producer_trust.js";
 import {
   admitCppCuteBrowserProducerTrustPolicy,
+  type AdmittedCppCuteBrowserProducerTrustPolicy,
 } from "../../../src/cpp_cute_browser_producer_trust_policy.js";
 import {
   cppCuteBrowserReproducibilityResourceBytes,
@@ -61,20 +67,82 @@ import {
 import {
   inspectVerifiedCppCuteBrowserWorkerBundle,
   verifyCppCuteBrowserWorkerBundle,
+  type VerifiedCppCuteBrowserWorkerBundle,
 } from "../../../src/cpp_cute_browser_worker_bundle.js";
 import {
   cppCuteBrowserProducerTrustPolicyBytes,
 } from "./cpp_cute_browser_producer_trust_fixtures.js";
 import exactAssetManifestJson from
-  "./resources/cpp_cute_browser_exact_asset_manifest.json";
+  "./resources/cpp_cute_browser_exact_asset_manifest.json"
+  with { type: "json" };
 
 const BUILDER_ID =
   "https://builders.browsergrad.dev/production-composition-test";
+
+export interface CurrentPayloadExternallyRootedProducerFixture {
+  readonly profile: PreparedCppCuteFrontendProfile;
+  readonly assetManifest: PreparedCppCuteBrowserAssetManifest;
+  readonly buildInputLock: PreparedCppCuteBrowserBuildInputLock;
+  readonly workerBundle: VerifiedCppCuteBrowserWorkerBundle;
+  readonly trustPolicy: AdmittedCppCuteBrowserProducerTrustPolicy;
+  readonly trustStore: PreparedCppCuteAttestationTrustStore;
+  readonly trustStoreInput: CppCuteAttestationTrustStoreV1;
+  readonly privateKey: CryptoKey;
+  readonly builderId: string;
+  readonly keyId: string;
+}
 
 export async function createCurrentPayloadExternallyRootedProducer(
   fullDistribution:
     VerifiedCppCuteBrowserFullDistributionReproducibility,
 ): Promise<VerifiedCppCuteBrowserBuildProducer> {
+  const fixture =
+    await createCurrentPayloadExternallyRootedProducerFixture(
+      fullDistribution,
+    );
+  const request = await createCppCuteBrowserBuildProvenanceSigningRequest({
+    assetManifest: fixture.assetManifest,
+    buildInputLock: fixture.buildInputLock,
+    workerBundle: fixture.workerBundle,
+    trustPolicy: fixture.trustPolicy,
+    trustStore: fixture.trustStore,
+    builderId: fixture.builderId,
+    keyId: fixture.keyId,
+  });
+  const subtle = globalThis.crypto?.subtle;
+  if (subtle === undefined) throw new Error("Web Crypto is required");
+  const signature = new Uint8Array(await subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    fixture.privateKey,
+    Uint8Array.from(request.signingBytes).buffer,
+  ));
+  const envelope: CppCuteBrowserBuildProvenanceEnvelopeV1 = {
+    payloadType: request.payloadType,
+    payload: request.payload,
+    signatures: [{
+      keyid: fixture.keyId,
+      sig: encodeBase64(signature),
+    }],
+  };
+  const signatureBinding = await verifyCppCuteBrowserBuildSignatureBinding(
+    envelope,
+    {
+      assetManifest: fixture.assetManifest,
+      buildInputLock: fixture.buildInputLock,
+      workerBundle: fixture.workerBundle,
+      trustStore: fixture.trustStore,
+    },
+  );
+  return await verifyCppCuteBrowserBuildProducer(
+    signatureBinding,
+    fixture.trustPolicy,
+  );
+}
+
+export async function createCurrentPayloadExternallyRootedProducerFixture(
+  fullDistribution:
+    VerifiedCppCuteBrowserFullDistributionReproducibility,
+): Promise<CurrentPayloadExternallyRootedProducerFixture> {
   const subtle = globalThis.crypto?.subtle;
   if (subtle === undefined) throw new Error("Web Crypto is required");
   const keyPair = await subtle.generateKey(
@@ -86,7 +154,7 @@ export async function createCurrentPayloadExternallyRootedProducer(
     await subtle.exportKey("spki", keyPair.publicKey),
   );
   const keyId = `sha256:${await sha256Hex(spki)}`;
-  const trustStore = await prepareCppCuteAttestationTrustStore({
+  const trustStoreInput: CppCuteAttestationTrustStoreV1 = {
     schema: CPP_CUTE_FRONTEND_TRUST_STORE_SCHEMA,
     version: {
       major: CPP_CUTE_ATTESTATION_TRUST_STORE_MAJOR,
@@ -98,7 +166,9 @@ export async function createCurrentPayloadExternallyRootedProducer(
       algorithm: "ecdsa-p256-sha256",
       spkiDerBase64: encodeBase64(spki),
     }],
-  });
+  };
+  const trustStore =
+    await prepareCppCuteAttestationTrustStore(trustStoreInput);
   const trustPolicy = await admitCppCuteBrowserProducerTrustPolicy(
     await cppCuteBrowserProducerTrustPolicyBytes({
       trustStoreSha256: trustStore.trustStoreHash,
@@ -186,33 +256,18 @@ export async function createCurrentPayloadExternallyRootedProducer(
       "test trust-root migration changed the exact payload build subject",
     );
   }
-  const request = await createCppCuteBrowserBuildProvenanceSigningRequest({
+  return {
+    profile,
     assetManifest,
     buildInputLock,
     workerBundle,
     trustPolicy,
     trustStore,
+    trustStoreInput,
+    privateKey: keyPair.privateKey,
     builderId: BUILDER_ID,
     keyId,
-  });
-  const signature = new Uint8Array(await subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    keyPair.privateKey,
-    Uint8Array.from(request.signingBytes).buffer,
-  ));
-  const envelope: CppCuteBrowserBuildProvenanceEnvelopeV1 = {
-    payloadType: request.payloadType,
-    payload: request.payload,
-    signatures: [{ keyid: keyId, sig: encodeBase64(signature) }],
   };
-  const signatureBinding = await verifyCppCuteBrowserBuildSignatureBinding(
-    envelope,
-    { assetManifest, buildInputLock, workerBundle, trustStore },
-  );
-  return await verifyCppCuteBrowserBuildProducer(
-    signatureBinding,
-    trustPolicy,
-  );
 }
 
 function exactAssetManifest(): CppCuteBrowserAssetManifestV1 {

@@ -442,9 +442,9 @@ v2 build, independent raw-Wasm review, and two matching clean v2 builds.
 2. Admit the browser-build signer through an independent package-owned trust
    root and verify one external exact-build statement; synthetic package keys
    remain insufficient.
-3. Add one unified host operation that verifies both external responses and
-   runs the implemented backend/release compositions before opaque authority
-   is lost at process exit.
+3. Run the implemented unified production-release operation with those exact
+   external responses; synthetic keys and serialized observations remain
+   insufficient.
 4. Add bounded descriptor-relative reclamation for owned failure residue,
    close or explicitly bound the final validated-inode unlink interval, and
    reduce repeated corpus-byte passes with corpus-scale evidence.
@@ -500,3 +500,32 @@ failure protocol are no longer the unknowns. The remaining local blocker is
 inside the producer or rejected Artifact V3 path. The observation command
 accepts and records that exact current blocker; the separate strict verification
 command fails until an authenticated Artifact V3 terminal is produced.
+
+## 2026-07-27 release-harness addendum
+
+The local harness is no longer the Gate 3 product blocker. The fast browser
+build lane passes 100 files/802 tests with a 16.52-second Vitest phase, while
+the complete compiler suite passes 106 files/1,655 tests in 21.89 seconds.
+Focused production-release exchange coverage passes 10 tests. Strict
+typecheck, lint, build, compiler architecture, and root semantic architecture
+remain green with zero cycles or leaks.
+
+The existing hardened external-evidence exchange now re-verifies the producer
+and reviewer responses, admits the exact package-pinned full distribution and
+eight-case CPU/required-WebGPU convergence evidence, and runs backend plus
+final-release composition before opaque authority is lost. Its output is
+canonical, exclusive, read-only, and observation-only: no producer, approval,
+backend, release, or `releaseReady` authority is serializable.
+
+One harness concurrency constraint is now explicit. A clean-build lane deletes
+and recreates the package `dist` directory, so it must not run concurrently
+with a raw test process consuming that same directory. Independent read-only
+test lanes remain parallelizable; clean-build lanes need separate worktrees or
+output roots. This is a scheduling boundary, not a 25–90-minute edit loop.
+
+The remaining Gate 3 blockers are external production trust and approval:
+package-controlled policies, externally controlled builder/reviewer keys,
+externally issued exact statements, and one actual invocation of the unified
+operation with those inputs. The separate corpus cleanup/sharding and large
+module decomposition findings remain quality work, not prerequisites for the
+already demonstrated browser-local C++/CuTe execution profile.

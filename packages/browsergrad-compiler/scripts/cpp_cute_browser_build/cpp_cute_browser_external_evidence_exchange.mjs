@@ -44,6 +44,14 @@ import {
   cppCuteBrowserHeaderDistributionReproducibilityResourceBytes,
 } from "../../dist/cpp_cute_browser_header_distribution_reproducibility.js";
 import {
+  cppCuteBrowserExactDistributionConvergenceResourceBytes,
+  verifyCppCuteBrowserExactDistributionConvergenceResource,
+} from "../../dist/cpp_cute_browser_exact_distribution_convergence.js";
+import {
+  cppCuteBrowserFullDistributionReproducibilityResourceBytes,
+  verifyCppCuteBrowserFullDistributionReproducibilityResource,
+} from "../../dist/cpp_cute_browser_full_distribution_reproducibility.js";
+import {
   verifyCppCuteBrowserBuildProducer,
 } from "../../dist/cpp_cute_browser_producer_trust.js";
 import {
@@ -62,6 +70,12 @@ import {
   copyVerifiedCppCuteBrowserWorkerBundleBytes,
   verifyCppCuteBrowserWorkerBundle,
 } from "../../dist/cpp_cute_browser_worker_bundle.js";
+import {
+  authorizeCppCuteBrowserProductionBackendExecution,
+} from "../../dist/cpp_cute_browser_production_backend_execution.js";
+import {
+  authorizeCppCuteBrowserProductionRelease,
+} from "../../dist/cpp_cute_browser_production_release.js";
 
 export const CPP_CUTE_BROWSER_BUILD_PROVENANCE_SIGNING_REQUEST_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-build-provenance-signing-request";
@@ -71,6 +85,8 @@ export const CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_SIGNING_REQUEST_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-distribution-approval-signing-request";
 export const CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_OBSERVATION_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-distribution-approval-verification-observation";
+export const CPP_CUTE_BROWSER_PRODUCTION_RELEASE_OBSERVATION_SCHEMA =
+  "browsergrad.compiler.cpp-cute.browser-production-release-verification-observation";
 
 const ERROR_PREFIX = "BG-COMPILER-CPP-CUTE-BROWSER-EXTERNAL-EVIDENCE-EXCHANGE";
 const SIGNING_REQUEST_DOMAIN =
@@ -81,6 +97,8 @@ const DISTRIBUTION_APPROVAL_SIGNING_REQUEST_DOMAIN =
   "browsergrad.compiler.cpp-cute.browser-distribution-approval-signing-request.v1";
 const DISTRIBUTION_APPROVAL_OBSERVATION_DOMAIN =
   "browsergrad.compiler.cpp-cute.browser-distribution-approval-verification-observation.v1";
+const PRODUCTION_RELEASE_OBSERVATION_DOMAIN =
+  "browsergrad.compiler.cpp-cute.browser-production-release-verification-observation.v1";
 const PROFILE_BYTE_LIMIT = 256 * 1024;
 const TRUST_STORE_BYTE_LIMIT = 256 * 1024;
 const MAX_ARGUMENT_COUNT = 16;
@@ -166,6 +184,22 @@ const ARGUMENTS = Object.freeze({
     "signing-request",
     "trust-store",
   ]),
+  "verify-production-release": Object.freeze([
+    "approval-envelope",
+    "approval-policy",
+    "approval-signing-request",
+    "approval-trust-store",
+    "asset-manifest",
+    "build-input-lock",
+    "operation",
+    "output",
+    "producer-envelope",
+    "producer-policy",
+    "producer-signing-request",
+    "producer-trust-store",
+    "profile",
+    "worker-module",
+  ]),
 });
 const ABORT_SIGNAL_ABORTED_GETTER = typeof AbortSignal === "undefined"
   ? undefined
@@ -195,22 +229,30 @@ export async function runCppCuteBrowserExternalEvidenceExchange(
   throwIfAborted(signal);
   const paths = exchangePaths(args);
   assertDistinctPaths(paths);
+  const productionReleaseOperation =
+    args.operation === "verify-production-release";
   const producerOperation = args.operation === "producer-signing-request" ||
     args.operation === "verify-producer-envelope";
-  const packageWorker = producerOperation
+  const workerOperation = producerOperation || productionReleaseOperation;
+  const packageWorker = workerOperation
     ? await verifyCppCuteBrowserWorkerBundle()
     : undefined;
   const packageWorkerBytes = packageWorker === undefined
     ? undefined
     : copyVerifiedCppCuteBrowserWorkerBundleBytes(packageWorker);
-  if (producerOperation &&
+  if (workerOperation &&
       (packageWorker === undefined || packageWorkerBytes === undefined)) {
     invalid(
       "$.packageWorker",
-      "producer exchange requires the exact verified package Worker",
+      "producer verification requires the exact verified package Worker",
     );
   }
-  const inputSpecifications = producerOperation
+  const inputSpecifications = productionReleaseOperation
+    ? productionReleaseInputSpecifications(
+      args,
+      packageWorkerBytes.byteLength,
+    )
+    : producerOperation
     ? producerInputSpecifications(
       args,
       packageWorkerBytes.byteLength,
@@ -221,7 +263,14 @@ export async function runCppCuteBrowserExternalEvidenceExchange(
   throwIfAborted(signal);
 
   let record;
-  if (producerOperation) {
+  if (productionReleaseOperation) {
+    record = await createProductionReleaseObservationRecord({
+      files,
+      packageWorker,
+      packageWorkerBytes,
+      signal,
+    });
+  } else if (producerOperation) {
     const authorities = await prepareProducerAuthorities(
       files,
       packageWorker,
@@ -328,6 +377,44 @@ async function createProducerSigningRequestRecord(input) {
 }
 
 async function createProducerObservationRecord(input) {
+  const verified = await verifyProducerEnvelope(input);
+  const body = {
+    schema: CPP_CUTE_BROWSER_BUILD_PRODUCER_OBSERVATION_SCHEMA,
+    version: 1,
+    authority: "host-verification-observation-only",
+    signingRequestId: verified.expectedRequest.requestId,
+    inputs: verified.inputs,
+    producer: producerProjection(verified.producer),
+    observed: {
+      signatureVerified: true,
+      manifestSignaturePolicyMatched: true,
+      independentTrustPolicyMatched: true,
+      producerTrustedInThisProcess: true,
+      buildSubjectBound: true,
+    },
+    claims: {
+      reusableProducerAuthority: false,
+      producerAuthoritySerialized: false,
+      exactAssetBytesVerified: false,
+      fullDistributedOutputSetReproducible: false,
+      licenseReviewComplete: false,
+      distributionAuthorized: false,
+      workerExecutionObserved: false,
+      loweringAuthorityMinted: false,
+      backendExecutionObserved: false,
+      releaseReady: false,
+    },
+  };
+  const observationId = `bg.cpp.browser-build-producer-observation.sha256.${
+    hashProjection(PRODUCER_OBSERVATION_DOMAIN, body)
+  }`;
+  return deepFreezeJson({
+    ...body,
+    observationId,
+  });
+}
+
+async function verifyProducerEnvelope(input) {
   const signingRequestFile = requiredFile(input.files, "signingRequest");
   const envelopeFile = requiredFile(input.files, "envelope");
   const signingRequestValue = decodeCanonicalJson(
@@ -384,39 +471,10 @@ async function createProducerObservationRecord(input) {
     signingRequest: fileIdentity(signingRequestFile),
     envelope: fileIdentity(envelopeFile),
   });
-  const body = {
-    schema: CPP_CUTE_BROWSER_BUILD_PRODUCER_OBSERVATION_SCHEMA,
-    version: 1,
-    authority: "host-verification-observation-only",
-    signingRequestId: expectedRequest.requestId,
+  return Object.freeze({
+    expectedRequest,
     inputs,
-    producer: producerProjection(producer),
-    observed: {
-      signatureVerified: true,
-      manifestSignaturePolicyMatched: true,
-      independentTrustPolicyMatched: true,
-      producerTrustedInThisProcess: true,
-      buildSubjectBound: true,
-    },
-    claims: {
-      reusableProducerAuthority: false,
-      producerAuthoritySerialized: false,
-      exactAssetBytesVerified: false,
-      fullDistributedOutputSetReproducible: false,
-      licenseReviewComplete: false,
-      distributionAuthorized: false,
-      workerExecutionObserved: false,
-      loweringAuthorityMinted: false,
-      backendExecutionObserved: false,
-      releaseReady: false,
-    },
-  };
-  const observationId = `bg.cpp.browser-build-producer-observation.sha256.${
-    hashProjection(PRODUCER_OBSERVATION_DOMAIN, body)
-  }`;
-  return deepFreezeJson({
-    ...body,
-    observationId,
+    producer,
   });
 }
 
@@ -484,6 +542,44 @@ async function createDistributionApprovalSigningRequestRecord(input) {
 }
 
 async function createDistributionApprovalObservationRecord(input) {
+  const verified = await verifyDistributionApprovalEnvelope(input);
+  const body = {
+    schema: CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_OBSERVATION_SCHEMA,
+    version: 1,
+    authority: "host-verification-observation-only",
+    signingRequestId: verified.expectedRequest.requestId,
+    inputs: verified.inputs,
+    approval: approvalProjection(verified.approval),
+    observed: {
+      signatureVerified: true,
+      independentApprovalPolicyMatched: true,
+      exactHeaderDistributionBound: true,
+      exactReviewInputBound: true,
+      licenseReviewCompleteInThisProcess: true,
+      distributionAuthorizedInThisProcess: true,
+    },
+    claims: {
+      reusableDistributionApprovalAuthority: false,
+      distributionApprovalAuthoritySerialized: false,
+      fullDistributedOutputSetReproducible: false,
+      producerTrusted: false,
+      workerExecutionObserved: false,
+      loweringAuthorityMinted: false,
+      backendExecutionObserved: false,
+      releaseReady: false,
+    },
+  };
+  const observationId =
+    `bg.cpp.browser-distribution-approval-observation.sha256.${
+      hashProjection(DISTRIBUTION_APPROVAL_OBSERVATION_DOMAIN, body)
+    }`;
+  return deepFreezeJson({
+    ...body,
+    observationId,
+  });
+}
+
+async function verifyDistributionApprovalEnvelope(input) {
   const signingRequestFile = requiredFile(input.files, "signingRequest");
   const envelopeFile = requiredFile(input.files, "envelope");
   const signingRequestValue = decodeCanonicalJson(
@@ -534,35 +630,111 @@ async function createDistributionApprovalObservationRecord(input) {
     signingRequest: fileIdentity(signingRequestFile),
     envelope: fileIdentity(envelopeFile),
   });
+  return Object.freeze({
+    approval,
+    expectedRequest,
+    inputs,
+  });
+}
+
+async function createProductionReleaseObservationRecord(input) {
+  const producerFiles = productionProducerFileView(input.files);
+  const approvalFiles = productionApprovalFileView(input.files);
+  const fullDistributionBytes =
+    cppCuteBrowserFullDistributionReproducibilityResourceBytes();
+  const convergenceBytes =
+    cppCuteBrowserExactDistributionConvergenceResourceBytes();
+  const [
+    producerAuthorities,
+    approvalAuthorities,
+    fullDistribution,
+    convergence,
+  ] = await Promise.all([
+    prepareProducerAuthorities(
+      producerFiles,
+      input.packageWorker,
+      input.packageWorkerBytes,
+      input.signal,
+    ),
+    prepareDistributionApprovalAuthorities(approvalFiles, input.signal),
+    verifyCppCuteBrowserFullDistributionReproducibilityResource(
+      fullDistributionBytes,
+    ),
+    verifyCppCuteBrowserExactDistributionConvergenceResource(
+      convergenceBytes,
+    ),
+  ]);
+  throwIfAborted(input.signal);
+  const [producerVerification, approvalVerification] = await Promise.all([
+    verifyProducerEnvelope({
+      authorities: producerAuthorities,
+      files: producerFiles,
+      inputIdentities: producerInputIdentities(producerFiles),
+      signal: input.signal,
+    }),
+    verifyDistributionApprovalEnvelope({
+      authorities: approvalAuthorities,
+      files: approvalFiles,
+      inputIdentities: distributionApprovalInputIdentities(approvalFiles),
+      signal: input.signal,
+    }),
+  ]);
+  const backend = await authorizeCppCuteBrowserProductionBackendExecution(
+    producerVerification.producer,
+    fullDistribution,
+    convergence,
+    input.signal === undefined ? {} : { signal: input.signal },
+  );
+  const release = await authorizeCppCuteBrowserProductionRelease(
+    backend,
+    approvalVerification.approval,
+    input.signal === undefined ? {} : { signal: input.signal },
+  );
+  throwIfAborted(input.signal);
+
   const body = {
-    schema: CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_OBSERVATION_SCHEMA,
+    schema: CPP_CUTE_BROWSER_PRODUCTION_RELEASE_OBSERVATION_SCHEMA,
     version: 1,
     authority: "host-verification-observation-only",
-    signingRequestId: expectedRequest.requestId,
-    inputs,
-    approval: approvalProjection(approval),
+    inputs: {
+      producer: producerVerification.inputs,
+      distributionApproval: approvalVerification.inputs,
+      packageFullDistribution: {
+        sha256: sha256(fullDistributionBytes),
+        byteLength: String(fullDistributionBytes.byteLength),
+      },
+      packageExactDistributionConvergence: {
+        sha256: sha256(convergenceBytes),
+        byteLength: String(convergenceBytes.byteLength),
+      },
+    },
+    release: productionReleaseProjection(release),
     observed: {
-      signatureVerified: true,
-      independentApprovalPolicyMatched: true,
-      exactHeaderDistributionBound: true,
-      exactReviewInputBound: true,
-      licenseReviewCompleteInThisProcess: true,
+      producerSignatureVerified: true,
+      producerTrustedInThisProcess: true,
+      distributionApprovalSignatureVerified: true,
       distributionAuthorizedInThisProcess: true,
+      fullDistributionReproducibilityVerifiedInThisProcess: true,
+      exactDistributionConvergenceVerifiedInThisProcess: true,
+      backendExecutionAuthorityMintedInThisProcess: true,
+      finalReleaseAuthorityMintedInThisProcess: true,
+      releaseReadyInThisProcess: true,
     },
     claims: {
+      reusableProducerAuthority: false,
       reusableDistributionApprovalAuthority: false,
+      reusableBackendExecutionAuthority: false,
+      reusableFinalReleaseAuthority: false,
+      producerAuthoritySerialized: false,
       distributionApprovalAuthoritySerialized: false,
-      fullDistributedOutputSetReproducible: false,
-      producerTrusted: false,
-      workerExecutionObserved: false,
-      loweringAuthorityMinted: false,
-      backendExecutionObserved: false,
+      backendExecutionAuthoritySerialized: false,
+      finalReleaseAuthoritySerialized: false,
       releaseReady: false,
     },
   };
   const observationId =
-    `bg.cpp.browser-distribution-approval-observation.sha256.${
-      hashProjection(DISTRIBUTION_APPROVAL_OBSERVATION_DOMAIN, body)
+    `bg.cpp.browser-production-release-observation.sha256.${
+      hashProjection(PRODUCTION_RELEASE_OBSERVATION_DOMAIN, body)
     }`;
   return deepFreezeJson({
     ...body,
@@ -762,6 +934,45 @@ function approvalProjection(approval) {
   });
 }
 
+function productionReleaseProjection(release) {
+  return deepFreezeJson({
+    authority: release.authority,
+    releaseAuthorityId: release.releaseAuthorityId,
+    backendExecutionAuthorityId: release.backendExecutionAuthorityId,
+    producerEvidenceId: release.producerEvidenceId,
+    producerPolicyId: release.producerPolicyId,
+    builderId: release.builderId,
+    producerKeyId: release.producerKeyId,
+    fullDistributionReproducibilityId:
+      release.fullDistributionReproducibilityId,
+    fullDistributionResourceSha256:
+      release.fullDistributionResourceSha256,
+    exactDistributionConvergenceMatrixId:
+      release.exactDistributionConvergenceMatrixId,
+    exactDistributionConvergenceResourceSha256:
+      release.exactDistributionConvergenceResourceSha256,
+    buildSubjectId: release.buildSubjectId,
+    buildSubjectSha256: release.buildSubjectSha256,
+    buildInputLockId: release.buildInputLockId,
+    buildInputLockResourceSha256:
+      release.buildInputLockResourceSha256,
+    distributionApprovalEvidenceId:
+      release.distributionApprovalEvidenceId,
+    distributionApprovalPolicyId:
+      release.distributionApprovalPolicyId,
+    reviewerId: release.reviewerId,
+    reviewerKeyId: release.reviewerKeyId,
+    distributionReviewSubjectId:
+      release.distributionReviewSubjectId,
+    headerDistributionResourceSha256:
+      release.headerDistributionResourceSha256,
+    headerDistributionReproducibilityId:
+      release.headerDistributionReproducibilityId,
+    headerDistributionOutputVerificationId:
+      release.headerDistributionOutputVerificationId,
+  });
+}
+
 function producerInputSpecifications(args, workerByteLength) {
   const specifications = [
     fileSpecification("profile", args.profile, PROFILE_BYTE_LIMIT),
@@ -850,6 +1061,85 @@ function distributionApprovalInputIdentities(files) {
   });
 }
 
+function productionReleaseInputSpecifications(args, workerByteLength) {
+  return [
+    fileSpecification("profile", args.profile, PROFILE_BYTE_LIMIT),
+    fileSpecification(
+      "assetManifest",
+      args["asset-manifest"],
+      CPP_CUTE_BROWSER_ASSET_MANIFEST_BYTE_LIMIT,
+    ),
+    fileSpecification(
+      "buildInputLock",
+      args["build-input-lock"],
+      CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_BYTE_LIMIT,
+    ),
+    fileSpecification("workerModule", args["worker-module"], workerByteLength),
+    fileSpecification(
+      "producerPolicy",
+      args["producer-policy"],
+      CPP_CUTE_BROWSER_PRODUCER_TRUST_POLICY_BYTE_LIMIT,
+    ),
+    fileSpecification(
+      "producerTrustStore",
+      args["producer-trust-store"],
+      TRUST_STORE_BYTE_LIMIT,
+    ),
+    fileSpecification(
+      "producerSigningRequest",
+      args["producer-signing-request"],
+      MAX_OUTPUT_BYTE_LENGTH,
+    ),
+    fileSpecification(
+      "producerEnvelope",
+      args["producer-envelope"],
+      CPP_CUTE_BROWSER_BUILD_PROVENANCE_BYTE_LIMIT,
+    ),
+    fileSpecification(
+      "approvalPolicy",
+      args["approval-policy"],
+      CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_POLICY_BYTE_LIMIT,
+    ),
+    fileSpecification(
+      "approvalTrustStore",
+      args["approval-trust-store"],
+      TRUST_STORE_BYTE_LIMIT,
+    ),
+    fileSpecification(
+      "approvalSigningRequest",
+      args["approval-signing-request"],
+      MAX_OUTPUT_BYTE_LENGTH,
+    ),
+    fileSpecification(
+      "approvalEnvelope",
+      args["approval-envelope"],
+      CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_BYTE_LIMIT,
+    ),
+  ];
+}
+
+function productionProducerFileView(files) {
+  return new Map([
+    ["profile", requiredFile(files, "profile")],
+    ["assetManifest", requiredFile(files, "assetManifest")],
+    ["buildInputLock", requiredFile(files, "buildInputLock")],
+    ["workerModule", requiredFile(files, "workerModule")],
+    ["producerPolicy", requiredFile(files, "producerPolicy")],
+    ["trustStore", requiredFile(files, "producerTrustStore")],
+    ["signingRequest", requiredFile(files, "producerSigningRequest")],
+    ["envelope", requiredFile(files, "producerEnvelope")],
+  ]);
+}
+
+function productionApprovalFileView(files) {
+  return new Map([
+    ["approvalPolicy", requiredFile(files, "approvalPolicy")],
+    ["trustStore", requiredFile(files, "approvalTrustStore")],
+    ["signingRequest", requiredFile(files, "approvalSigningRequest")],
+    ["envelope", requiredFile(files, "approvalEnvelope")],
+  ]);
+}
+
 function fileSpecification(name, path, maxByteLength) {
   return Object.freeze({
     name,
@@ -860,11 +1150,17 @@ function fileSpecification(name, path, maxByteLength) {
 
 function argumentName(name) {
   return {
+    approvalEnvelope: "approval-envelope",
     approvalPolicy: "approval-policy",
+    approvalSigningRequest: "approval-signing-request",
+    approvalTrustStore: "approval-trust-store",
     assetManifest: "asset-manifest",
     buildInputLock: "build-input-lock",
     envelope: "envelope",
+    producerEnvelope: "producer-envelope",
     producerPolicy: "producer-policy",
+    producerSigningRequest: "producer-signing-request",
+    producerTrustStore: "producer-trust-store",
     profile: "profile",
     signingRequest: "signing-request",
     trustStore: "trust-store",
@@ -1257,7 +1553,7 @@ function parseArguments(argv) {
   if (typeof operation !== "string" || !Object.hasOwn(ARGUMENTS, operation)) {
     invalid(
       "$.arguments.operation",
-      "operation must be producer-signing-request, verify-producer-envelope, distribution-approval-signing-request, or verify-distribution-approval-envelope",
+      "operation must be producer-signing-request, verify-producer-envelope, distribution-approval-signing-request, verify-distribution-approval-envelope, or verify-production-release",
     );
   }
   const expected = ARGUMENTS[operation];
@@ -1347,6 +1643,27 @@ function normalizeOptions(options) {
 }
 
 function exchangePaths(args) {
+  if (args.operation === "verify-production-release") {
+    return [
+      ["profile", args.profile],
+      ["asset-manifest", args["asset-manifest"]],
+      ["build-input-lock", args["build-input-lock"]],
+      ["worker-module", args["worker-module"]],
+      ["producer-policy", args["producer-policy"]],
+      ["producer-trust-store", args["producer-trust-store"]],
+      ["producer-signing-request", args["producer-signing-request"]],
+      ["producer-envelope", args["producer-envelope"]],
+      ["approval-policy", args["approval-policy"]],
+      ["approval-trust-store", args["approval-trust-store"]],
+      ["approval-signing-request", args["approval-signing-request"]],
+      ["approval-envelope", args["approval-envelope"]],
+      ["output", args.output],
+    ].map(([name, path]) =>
+      Object.freeze({
+        name,
+        path: absolutePath(path, `$.arguments.${name}`),
+      }));
+  }
   const producerOperation = args.operation === "producer-signing-request" ||
     args.operation === "verify-producer-envelope";
   const paths = producerOperation

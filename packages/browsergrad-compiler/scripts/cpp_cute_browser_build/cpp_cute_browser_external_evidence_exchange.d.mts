@@ -13,6 +13,8 @@ export const CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_SIGNING_REQUEST_SCHEMA:
 "browsergrad.compiler.cpp-cute.browser-distribution-approval-signing-request";
 export const CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_OBSERVATION_SCHEMA:
 "browsergrad.compiler.cpp-cute.browser-distribution-approval-verification-observation";
+export const CPP_CUTE_BROWSER_PRODUCTION_RELEASE_OBSERVATION_SCHEMA:
+"browsergrad.compiler.cpp-cute.browser-production-release-verification-observation";
 
 export type CppCuteBrowserExternalEvidenceExchangeErrorCode =
   | "BG-COMPILER-CPP-CUTE-BROWSER-EXTERNAL-EVIDENCE-EXCHANGE-CANCELLED"
@@ -234,18 +236,92 @@ export interface CppCuteBrowserDistributionApprovalObservationRecord {
   }>;
 }
 
+export interface CppCuteBrowserProductionReleaseObservationRecord {
+  readonly schema:
+    typeof CPP_CUTE_BROWSER_PRODUCTION_RELEASE_OBSERVATION_SCHEMA;
+  readonly version: 1;
+  readonly observationId: string;
+  readonly authority: "host-verification-observation-only";
+  readonly inputs: Readonly<{
+    producer: CppCuteBrowserBuildProvenanceExchangeCommonInputs &
+      Readonly<{
+        signingRequest: CppCuteBrowserExternalEvidenceExchangeFileIdentity;
+        envelope: CppCuteBrowserExternalEvidenceExchangeFileIdentity;
+      }>;
+    distributionApproval:
+      CppCuteBrowserDistributionApprovalExchangeCommonInputs &
+      Readonly<{
+        signingRequest: CppCuteBrowserExternalEvidenceExchangeFileIdentity;
+        envelope: CppCuteBrowserExternalEvidenceExchangeFileIdentity;
+      }>;
+    packageFullDistribution:
+      CppCuteBrowserExternalEvidenceExchangeFileIdentity;
+    packageExactDistributionConvergence:
+      CppCuteBrowserExternalEvidenceExchangeFileIdentity;
+  }>;
+  readonly release: Readonly<{
+    authority: "externally-approved-browser-cpp-cute-release";
+    releaseAuthorityId: string;
+    backendExecutionAuthorityId: string;
+    producerEvidenceId: string;
+    producerPolicyId: string;
+    builderId: string;
+    producerKeyId: string;
+    fullDistributionReproducibilityId: string;
+    fullDistributionResourceSha256: string;
+    exactDistributionConvergenceMatrixId: string;
+    exactDistributionConvergenceResourceSha256: string;
+    buildSubjectId: string;
+    buildSubjectSha256: string;
+    buildInputLockId: string;
+    buildInputLockResourceSha256: string;
+    distributionApprovalEvidenceId: string;
+    distributionApprovalPolicyId: string;
+    reviewerId: string;
+    reviewerKeyId: string;
+    distributionReviewSubjectId: string;
+    headerDistributionResourceSha256: string;
+    headerDistributionReproducibilityId: string;
+    headerDistributionOutputVerificationId: string;
+  }>;
+  readonly observed: Readonly<{
+    producerSignatureVerified: true;
+    producerTrustedInThisProcess: true;
+    distributionApprovalSignatureVerified: true;
+    distributionAuthorizedInThisProcess: true;
+    fullDistributionReproducibilityVerifiedInThisProcess: true;
+    exactDistributionConvergenceVerifiedInThisProcess: true;
+    backendExecutionAuthorityMintedInThisProcess: true;
+    finalReleaseAuthorityMintedInThisProcess: true;
+    releaseReadyInThisProcess: true;
+  }>;
+  readonly claims: Readonly<{
+    reusableProducerAuthority: false;
+    reusableDistributionApprovalAuthority: false;
+    reusableBackendExecutionAuthority: false;
+    reusableFinalReleaseAuthority: false;
+    producerAuthoritySerialized: false;
+    distributionApprovalAuthoritySerialized: false;
+    backendExecutionAuthoritySerialized: false;
+    finalReleaseAuthoritySerialized: false;
+    releaseReady: false;
+  }>;
+}
+
 export type CppCuteBrowserExternalEvidenceExchangeRecord =
   | CppCuteBrowserBuildProvenanceSigningRequestRecord
   | CppCuteBrowserBuildProducerObservationRecord
   | CppCuteBrowserDistributionApprovalSigningRequestRecord
-  | CppCuteBrowserDistributionApprovalObservationRecord;
+  | CppCuteBrowserDistributionApprovalObservationRecord
+  | CppCuteBrowserProductionReleaseObservationRecord;
 
 export interface CppCuteBrowserExternalEvidenceExchangeResult {
   readonly operation:
     | "producer-signing-request"
     | "verify-producer-envelope"
     | "distribution-approval-signing-request"
-    | "verify-distribution-approval-envelope";
+    | "verify-distribution-approval-envelope"
+    | "verify-production-release";
   readonly outputPath: string;
   readonly outputSha256: string;
   readonly outputByteLength: string;

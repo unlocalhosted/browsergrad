@@ -25,6 +25,10 @@ import {
   canonicalCppCuteBrowserBuildInputLockBytes,
 } from "../../src/cpp_cute_browser_build_lock.js";
 import {
+  cppCuteBrowserFullDistributionReproducibilityResourceBytes,
+  verifyCppCuteBrowserFullDistributionReproducibilityResource,
+} from "../../src/cpp_cute_browser_full_distribution_reproducibility.js";
+import {
   copyVerifiedCppCuteBrowserWorkerBundleBytes,
 } from "../../src/cpp_cute_browser_worker_bundle.js";
 import {
@@ -46,6 +50,13 @@ import {
   unwrapPreparedCppCuteBrowserFrontendProfile,
 } from "../../src/cpp_cute_frontend_profile.js";
 import {
+  copyAdmittedCppCuteBrowserProducerTrustPolicyBytes,
+} from "../../src/cpp_cute_browser_producer_trust_policy.js";
+import {
+  createCurrentPayloadExternallyRootedProducerFixture,
+  type CurrentPayloadExternallyRootedProducerFixture,
+} from "../../tests/compiler/support/cpp_cute_browser_production_backend_fixtures.js";
+import {
   createCppCuteBrowserProducerTrustFixture,
   type CppCuteBrowserProducerTrustFixture,
 } from "../../tests/compiler/support/cpp_cute_browser_producer_trust_fixtures.js";
@@ -54,10 +65,12 @@ import {
   CPP_CUTE_BROWSER_BUILD_PROVENANCE_SIGNING_REQUEST_SCHEMA,
   CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_OBSERVATION_SCHEMA,
   CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_SIGNING_REQUEST_SCHEMA,
+  CPP_CUTE_BROWSER_PRODUCTION_RELEASE_OBSERVATION_SCHEMA,
   CppCuteBrowserExternalEvidenceExchangeError,
   runCppCuteBrowserExternalEvidenceExchange,
   type CppCuteBrowserBuildProvenanceSigningRequestRecord,
   type CppCuteBrowserDistributionApprovalSigningRequestRecord,
+  type CppCuteBrowserProductionReleaseObservationRecord,
 } from "./cpp_cute_browser_external_evidence_exchange.mjs";
 
 interface ExchangeFixture {
@@ -81,6 +94,20 @@ interface DistributionExchangeFixture {
   readonly paths: Readonly<{
     approvalPolicy: string;
     trustStore: string;
+  }>;
+}
+
+interface ProductionReleaseExchangeFixture {
+  readonly root: string;
+  readonly producer: CurrentPayloadExternallyRootedProducerFixture;
+  readonly approval: DistributionExchangeFixture;
+  readonly paths: Readonly<{
+    profile: string;
+    assetManifest: string;
+    buildInputLock: string;
+    workerModule: string;
+    producerPolicy: string;
+    producerTrustStore: string;
   }>;
 }
 
@@ -591,6 +618,134 @@ describe("browser distribution approval exchange", () => {
   });
 });
 
+describe("browser production release exchange", () => {
+  it("re-verifies both external responses and composes final release authority in one process", async () => {
+    const fixture = await createProductionReleaseExchangeFixture("verify");
+    const producerRequestPath = join(
+      fixture.root,
+      "producer-signing-request.json",
+    );
+    const producerEnvelopePath = join(
+      fixture.root,
+      "producer-provenance.dsse.json",
+    );
+    const approvalRequestPath = join(
+      fixture.root,
+      "approval-signing-request.json",
+    );
+    const approvalEnvelopePath = join(
+      fixture.root,
+      "approval.dsse.json",
+    );
+    const outputPath = join(fixture.root, "production-release-observation.json");
+    const producerRequestResult =
+      await runCppCuteBrowserExternalEvidenceExchange(
+        productionProducerSigningRequestArguments(
+          fixture,
+          producerRequestPath,
+        ),
+      );
+    const producerRequest = producerRequestResult.record as
+      CppCuteBrowserBuildProvenanceSigningRequestRecord;
+    await writeImmutable(
+      producerEnvelopePath,
+      canonicalJsonBytes(await signRequestWithKey(
+        producerRequest,
+        fixture.producer.privateKey,
+      )),
+    );
+    const approvalRequestResult =
+      await runCppCuteBrowserExternalEvidenceExchange(
+        distributionSigningRequestArguments(
+          fixture.approval,
+          approvalRequestPath,
+        ),
+      );
+    const approvalRequest = approvalRequestResult.record as
+      CppCuteBrowserDistributionApprovalSigningRequestRecord;
+    await writeImmutable(
+      approvalEnvelopePath,
+      canonicalJsonBytes(
+        await signDistributionRequest(approvalRequest, fixture.approval),
+      ),
+    );
+
+    const verified = await runCppCuteBrowserExternalEvidenceExchange(
+      productionReleaseVerificationArguments(
+        fixture,
+        producerRequestPath,
+        producerEnvelopePath,
+        approvalRequestPath,
+        approvalEnvelopePath,
+        outputPath,
+      ),
+    );
+    const observation = verified.record as
+      CppCuteBrowserProductionReleaseObservationRecord;
+    const outputBytes = await readFile(outputPath);
+
+    expect(verified.operation).toBe("verify-production-release");
+    expect(observation.schema).toBe(
+      CPP_CUTE_BROWSER_PRODUCTION_RELEASE_OBSERVATION_SCHEMA,
+    );
+    expect(observation).toMatchObject({
+      authority: "host-verification-observation-only",
+      release: {
+        authority: "externally-approved-browser-cpp-cute-release",
+        releaseAuthorityId:
+          expect.stringMatching(
+            /^bg\.cpp\.browser-production-release\.sha256\.[0-9a-f]{64}$/u,
+          ),
+        backendExecutionAuthorityId:
+          expect.stringMatching(
+            /^bg\.cpp\.browser-production-backend-execution\.sha256\.[0-9a-f]{64}$/u,
+          ),
+      },
+      observed: {
+        producerSignatureVerified: true,
+        producerTrustedInThisProcess: true,
+        distributionApprovalSignatureVerified: true,
+        distributionAuthorizedInThisProcess: true,
+        fullDistributionReproducibilityVerifiedInThisProcess: true,
+        exactDistributionConvergenceVerifiedInThisProcess: true,
+        backendExecutionAuthorityMintedInThisProcess: true,
+        finalReleaseAuthorityMintedInThisProcess: true,
+        releaseReadyInThisProcess: true,
+      },
+      claims: {
+        reusableProducerAuthority: false,
+        reusableDistributionApprovalAuthority: false,
+        reusableBackendExecutionAuthority: false,
+        reusableFinalReleaseAuthority: false,
+        producerAuthoritySerialized: false,
+        distributionApprovalAuthoritySerialized: false,
+        backendExecutionAuthoritySerialized: false,
+        finalReleaseAuthoritySerialized: false,
+        releaseReady: false,
+      },
+    });
+    expect(Buffer.from(canonicalJsonBytes(observation))).toEqual(outputBytes);
+    expect(verified.outputSha256).toBe(sha256(outputBytes));
+    expect(JSON.stringify(observation)).not.toContain("privateKey");
+    expect(JSON.stringify(observation)).not.toContain('"releaseReady":true');
+    await expectReadOnly(outputPath);
+    await expect(runCppCuteBrowserExternalEvidenceExchange(
+      productionReleaseVerificationArguments(
+        fixture,
+        producerRequestPath,
+        producerEnvelopePath,
+        approvalRequestPath,
+        approvalEnvelopePath,
+        outputPath,
+      ),
+    )).rejects.toMatchObject({
+      code:
+        "BG-COMPILER-CPP-CUTE-BROWSER-EXTERNAL-EVIDENCE-EXCHANGE-CONFLICT",
+      path: "$.arguments.output",
+    });
+  });
+});
+
 async function createExchangeFixture(name: string): Promise<ExchangeFixture> {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), `browsergrad-provenance-${name}-`)),
@@ -699,6 +854,62 @@ async function createDistributionExchangeFixture(
   };
 }
 
+async function createProductionReleaseExchangeFixture(
+  name: string,
+): Promise<ProductionReleaseExchangeFixture> {
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), `browsergrad-release-${name}-`)),
+  );
+  temporaryRoots.push(root);
+  const fullDistribution =
+    await verifyCppCuteBrowserFullDistributionReproducibilityResource(
+      cppCuteBrowserFullDistributionReproducibilityResourceBytes(),
+    );
+  const [producer, approval] = await Promise.all([
+    createCurrentPayloadExternallyRootedProducerFixture(fullDistribution),
+    createDistributionExchangeFixture(`${name}-approval`),
+  ]);
+  const paths = {
+    profile: join(root, "profile.json"),
+    assetManifest: join(root, "asset-manifest.json"),
+    buildInputLock: join(root, "build-input-lock.json"),
+    workerModule: join(root, "cpp-cute-browser-worker.mjs"),
+    producerPolicy: join(root, "producer-policy.json"),
+    producerTrustStore: join(root, "producer-trust-store.json"),
+  };
+  await Promise.all([
+    writeImmutable(
+      paths.profile,
+      canonicalJsonBytes(
+        unwrapPreparedCppCuteBrowserFrontendProfile(producer.profile).profile,
+      ),
+    ),
+    writeImmutable(
+      paths.assetManifest,
+      canonicalCppCuteBrowserAssetManifestBytes(producer.assetManifest),
+    ),
+    writeImmutable(
+      paths.buildInputLock,
+      canonicalCppCuteBrowserBuildInputLockBytes(producer.buildInputLock),
+    ),
+    writeImmutable(
+      paths.workerModule,
+      copyVerifiedCppCuteBrowserWorkerBundleBytes(producer.workerBundle),
+    ),
+    writeImmutable(
+      paths.producerPolicy,
+      copyAdmittedCppCuteBrowserProducerTrustPolicyBytes(
+        producer.trustPolicy,
+      ),
+    ),
+    writeImmutable(
+      paths.producerTrustStore,
+      canonicalJsonBytes(producer.trustStoreInput),
+    ),
+  ]);
+  return { root, producer, approval, paths };
+}
+
 function signingRequestArguments(
   fixture: ExchangeFixture,
   output: string,
@@ -767,16 +978,67 @@ function distributionVerificationArguments(
   ];
 }
 
+function productionProducerSigningRequestArguments(
+  fixture: ProductionReleaseExchangeFixture,
+  output: string,
+): string[] {
+  return [
+    "--operation=producer-signing-request",
+    `--profile=${fixture.paths.profile}`,
+    `--asset-manifest=${fixture.paths.assetManifest}`,
+    `--build-input-lock=${fixture.paths.buildInputLock}`,
+    `--worker-module=${fixture.paths.workerModule}`,
+    `--producer-policy=${fixture.paths.producerPolicy}`,
+    `--trust-store=${fixture.paths.producerTrustStore}`,
+    `--builder-id=${fixture.producer.builderId}`,
+    `--key-id=${fixture.producer.keyId}`,
+    `--output=${output}`,
+  ];
+}
+
+function productionReleaseVerificationArguments(
+  fixture: ProductionReleaseExchangeFixture,
+  producerSigningRequest: string,
+  producerEnvelope: string,
+  approvalSigningRequest: string,
+  approvalEnvelope: string,
+  output: string,
+): string[] {
+  return [
+    "--operation=verify-production-release",
+    `--profile=${fixture.paths.profile}`,
+    `--asset-manifest=${fixture.paths.assetManifest}`,
+    `--build-input-lock=${fixture.paths.buildInputLock}`,
+    `--worker-module=${fixture.paths.workerModule}`,
+    `--producer-policy=${fixture.paths.producerPolicy}`,
+    `--producer-trust-store=${fixture.paths.producerTrustStore}`,
+    `--producer-signing-request=${producerSigningRequest}`,
+    `--producer-envelope=${producerEnvelope}`,
+    `--approval-policy=${fixture.approval.paths.approvalPolicy}`,
+    `--approval-trust-store=${fixture.approval.paths.trustStore}`,
+    `--approval-signing-request=${approvalSigningRequest}`,
+    `--approval-envelope=${approvalEnvelope}`,
+    `--output=${output}`,
+  ];
+}
+
 async function signRequest(
   request: CppCuteBrowserBuildProvenanceSigningRequestRecord,
   fixture: CppCuteBrowserProducerTrustFixture,
+) {
+  return await signRequestWithKey(request, fixture.build.privateKey);
+}
+
+async function signRequestWithKey(
+  request: CppCuteBrowserBuildProvenanceSigningRequestRecord,
+  privateKey: CryptoKey,
 ) {
   const signingBytes = Uint8Array.from(
     Buffer.from(request.signingBytesBase64, "base64"),
   );
   const signature = new Uint8Array(await crypto.subtle.sign(
     { name: "ECDSA", hash: "SHA-256" },
-    fixture.build.privateKey,
+    privateKey,
     signingBytes,
   ));
   expect(signature.byteLength).toBe(64);

@@ -1,7 +1,7 @@
 # BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
 - **Status:** normative platform architecture; implementation status is not implied
-- **Last reviewed:** 2026-07-26
+- **Last reviewed:** 2026-07-27
 - **Implementation ledger:**
   [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
 - **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
@@ -13,7 +13,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
 describe requirement strength. They are used deliberately rather than as
 general emphasis.
 
-## Implementation Checkpoint — Active 2026-07-26
+## Implementation Checkpoint — Active 2026-07-27
 
 This checkpoint is informational. The rest of this document is normative, and
 the [implementation ledger](../internal/package-requirements-implementation-ledger.md)
@@ -26,7 +26,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
 | 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. |
-| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-clobber producer/reviewer exchange, and distinct backend/final-release composition boundaries are package-pinned; unified in-process production orchestration, external evidence, and actual issuance remain open. |
+| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-clobber producer/reviewer exchange, and unified in-process backend/final-release composition are package-pinned; external evidence and actual production issuance remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
@@ -43,15 +43,16 @@ The 90-minute build is no longer an engineering iteration loop:
 - `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed` is the
   default compiler edit loop and routes changed files to owning tests.
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
-  exact build lock, verifies both zero-import Worker bundles, verifies that the
-  checked-in strict matrix matches its deterministic authoring projection, and
-  passes 100 files/801 tests. Its latest Vitest portion took 15.97 seconds.
-- The complete compiler unit suite passes 106 files/1,655 tests in 16.37 seconds.
+  exact build lock, both zero-import Worker bundles, and the strict matrix
+  authoring projection; it passes 100 files/802 tests in 16.52 seconds.
+- The complete compiler unit suite passes 106 files/1,655 tests in 21.89 seconds.
 - The required native boundary passes 55 files/289 tests with nine explicit
   skips in 67.05 seconds; optimized, UBSan, and ASan stay outside the edit loop.
 - Cache-free LLVM/Clang builds exist only to mint clean-build and
   reproducibility evidence. Their two jobs run concurrently and never replace
   the focused or fast local paths.
+- A `dist`-rebuilding lane and its consumer use separate worktrees/output roots
+  when parallelized; read-only test lanes remain independently parallelizable.
 
 An unavailable browser, native sanitizer, external approval, signer, or release
 authority is an explicit non-passing result. No parser, fixture, CPU reference,
@@ -111,16 +112,17 @@ approval, Worker execution, lowering, backend execution, and release
 readiness remain false. Reproducible bytes and a valid local signature do not
 substitute for those independent authorities.
 
-The no-clobber producer/reviewer exchange derives format-only material from
-exact immutable inputs, accepts no private key, rebinds returned canonical
-envelopes, and persists no reusable authority. Only externally controlled
-production evidence can authorize the build or header distribution.
+The no-clobber producer/reviewer exchange accepts no private key, rebinds exact
+immutable requests and returned envelopes, and persists no reusable authority.
+Its final mode re-verifies both responses, admits package-pinned distribution
+and convergence resources, and composes backend plus release before process
+exit. The observation keeps every reusable authority and `releaseReady` false;
+only external evidence can authorize the build or header distribution.
 
-Backend composition binds opaque producer, reproducibility, and exact-payload
-convergence through the stable build subject, lock, Worker, output set, and
-matrix. Final release separately binds that backend result to opaque legal
-approval for the same lock and reproduced header subset. Synthetic fixtures
-prove both transitions but are not production external evidence.
+Backend composition binds opaque producer, reproducibility, and convergence
+through the stable build subject, lock, Worker, output set, and matrix. Final
+release separately binds opaque legal approval for the same lock and headers.
+Synthetic fixtures prove the transitions but are not production evidence.
 
 ### Shared dtype and layout execution
 
@@ -171,9 +173,8 @@ operation uses an opaque callback.
 
 ### Remaining production blockers
 
-Gate 3 cannot become verified until all of the following are independently
-satisfied. Exact-payload shared CPU/required-WebGPU convergence is complete for
-the local-engineering build and is no longer an implementation blocker.
+Gate 3 cannot become verified until the following are independently satisfied;
+exact-payload CPU/required-WebGPU convergence is no longer a blocker.
 
 1. A package-controlled production policy admits an externally controlled key
    and an externally issued exact-build statement for the exact build subject.
@@ -182,9 +183,10 @@ the local-engineering build and is no longer an implementation blocker.
    externally issued decision over the exact current header-distribution
    subject. Package-generated hashes, license text, signing material, or
    signatures cannot self-approve redistribution.
-3. Add one unified host operation that re-verifies both returned statements
-   and runs the implemented backend and final-release compositions in the same
-   process. No serialized observation may substitute for an opaque authority.
+3. Run the implemented unified host operation against those exact external
+   responses so backend and final-release authority are minted in one process.
+   No serialized observation may substitute for an opaque authority, and the
+   synthetic composition fixture establishes no current production status.
 
 Gate 7 remains separate future work. Its absence does not weaken the completed
 closed profiles, but no host-graph, dynamic-control, collective, transport, or

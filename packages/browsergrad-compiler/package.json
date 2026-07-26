@@ -75,6 +75,7 @@
     "verify:browser-build-provenance-envelope": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_external_evidence_exchange.mjs --operation=verify-producer-envelope",
     "author:browser-distribution-approval-signing-request": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_external_evidence_exchange.mjs --operation=distribution-approval-signing-request",
     "verify:browser-distribution-approval-envelope": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_external_evidence_exchange.mjs --operation=verify-distribution-approval-envelope",
+    "verify:browser-production-release": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_external_evidence_exchange.mjs --operation=verify-production-release",
     "materialize:browser-full-distribution-deterministic": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_full_distribution_materialization.mjs --operation=materialize-deterministic",
     "finalize:browser-full-distribution": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_full_distribution_materialization.mjs --operation=finalize",
     "author:browser-clang-wasm-build-lock": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_build_lock_authoring.mjs",
