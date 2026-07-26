@@ -20,6 +20,8 @@
     "scripts/cpp_cute_browser_build/cpp_cute_browser_build_reproducibility.d.mts",
     "scripts/cpp_cute_browser_build/cpp_cute_browser_external_evidence_exchange.mjs",
     "scripts/cpp_cute_browser_build/cpp_cute_browser_external_evidence_exchange.d.mts",
+    "scripts/cpp_cute_browser_build/cpp_cute_browser_full_distribution_materialization.mjs",
+    "scripts/cpp_cute_browser_build/cpp_cute_browser_full_distribution_materialization.d.mts",
     "scripts/cpp_cute_browser_build/cpp_cute_browser_clean_build_admission.mjs",
     "scripts/cpp_cute_browser_build/cpp_cute_browser_worker_bundle_authoring.mjs",
     "scripts/cpp_cute_browser_build/cpp_cute_browser_worker_bundle_authoring.d.mts",
