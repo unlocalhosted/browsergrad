@@ -1,7 +1,7 @@
 # BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
 - **Status:** normative platform architecture; implementation status is not implied
-- **Last reviewed:** 2026-07-24
+- **Last reviewed:** 2026-07-26
 - **Implementation ledger:**
   [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
 - **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
@@ -13,7 +13,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
 describe requirement strength. They are used deliberately rather than as
 general emphasis.
 
-## Implementation Checkpoint — Active 2026-07-24
+## Implementation Checkpoint — Active 2026-07-26
 
 This checkpoint is informational. The rest of this document is normative, and
 the [implementation ledger](../internal/package-requirements-implementation-ledger.md)
@@ -26,7 +26,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
 | 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. |
-| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, and complete-output reproducibility verifier are package-pinned; live full-distribution evidence, externally rooted trust, legal approval, exact-payload lowering/backend convergence, and release authority remain open. |
+| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, complete-output reproducibility verifier, and policy-rooted external distribution-approval verifier are package-pinned; production external approval, live full-distribution evidence, externally rooted producer trust, exact-payload lowering/backend convergence, and release authority remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
@@ -40,13 +40,13 @@ dtype, layout, numerical, or backend coverage.
 
 The 90-minute build is no longer an engineering iteration loop:
 
-- `verify:changed` is the default edit loop and routes changed files to owning
-  tests.
+- `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed` is the
+  default compiler edit loop and routes changed files to owning tests.
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
   exact build lock, verifies both zero-import Worker bundles, verifies that the
   checked-in strict matrix matches its deterministic authoring projection, and
-  passes 90 files/758 tests. Its latest Vitest portion took 15.49 seconds.
-- The complete compiler unit suite passes 99 files/1,627 tests in 12.91
+  passes 91 files/765 tests. Its latest Vitest portion took 14.88 seconds.
+- The complete compiler unit suite passes 100 files/1,634 tests in 14.50
   seconds.
 - The required native boundary passes 50 files/267 tests with nine explicit
   platform skips in 67.62 seconds. It intentionally includes optimized, UBSan,
@@ -120,6 +120,23 @@ lowering, backend execution, and release readiness remain false. This verifier
 has adversarial fixture coverage, but no live complete 24-output distribution
 has yet produced that authority.
 
+The package-owned external distribution-approval verifier independently
+reauthenticates the current package-pinned 17-output header distribution and
+derives one exact review subject over the build lock, header-input projection,
+all output identities, package resource, output verification and
+reproducibility identities, and the exact `license-inventory.json` hash and
+length. A bounded canonical host policy admits only an exact trust-store hash,
+reviewer allowlist, key allowlist, and policy identity. Verification requires
+one P-256 P1363 signature in a canonical DSSE/in-toto statement and mints an
+opaque authority whose legal and distribution claims are true only for that
+policy and exact current subject. Signing-request material is format-only and
+grants no approval. The repository currently contains only synthetic
+policy/key/statement test evidence: no package-controlled production approval
+policy, externally controlled reviewer key, or externally issued decision has
+been installed, so the promoted production distribution remains unapproved.
+Full-distribution reproducibility, producer trust, Worker execution, lowering,
+backend execution, and release readiness remain independent and false.
+
 ### Shared dtype and layout execution
 
 The canonical view-copy path has one semantic construction and execution seam:
@@ -178,9 +195,11 @@ satisfied:
    source-shaped bypass.
 2. A package-controlled production policy admits an externally controlled key
    and an externally issued exact-build statement for the exact build subject.
-3. An external reviewer approves the exact file-level header-pack map, notices,
-   CUDA index, and upstream evidence; package-generated hashes and license text
-   cannot self-approve redistribution.
+3. A package-controlled production approval policy admits an externally
+   controlled reviewer key, and the package-owned approval verifier accepts an
+   externally issued decision over the exact current header-distribution
+   subject. Package-generated hashes, license text, signing material, or
+   signatures cannot self-approve redistribution.
 4. Two live complete 24-output distribution trees pass the package-owned
    reproducibility verifier, and final release authority is issued without
    collapsing build, legal, trust, execution, or backend evidence into one
