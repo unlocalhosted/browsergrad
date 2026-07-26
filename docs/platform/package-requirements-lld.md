@@ -45,8 +45,8 @@ The 90-minute build is no longer an engineering iteration loop:
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
   exact build lock, verifies both zero-import Worker bundles, verifies that the
   checked-in strict matrix matches its deterministic authoring projection, and
-  passes 92 files/771 tests. Its latest Vitest portion took 14.23 seconds.
-- The complete compiler unit suite passes 101 files/1,640 tests in 14.03
+  passes 92 files/771 tests. Its latest Vitest portion took 17.34 seconds.
+- The complete compiler unit suite passes 101 files/1,640 tests in 14.45
   seconds.
 - The required native boundary passes 50 files/267 tests with nine explicit
   platform skips in 67.62 seconds. It intentionally includes optimized, UBSan,
@@ -96,8 +96,8 @@ and binds source revision `e9062c20f2a070774743e4d839c275c05df47225`.
 The matrix deliberately retains producer trust, license approval, lowering
 authority, backend execution, and release readiness as false.
 
-The build lock declares one exact 24-path distributed-output plan: 23
-deterministic subjects plus the detached DSSE provenance envelope. The
+The build lock declares 24 deterministic subjects including diagnostic
+normalization plus one detached DSSE envelope across exactly 25 paths. The
 package-owned full-distribution verifier now rehashes two distinct private
 trees against that exact plan, requires every deterministic subject to be
 byte-identical, strict-decodes both detached envelopes, and requires their
@@ -105,7 +105,7 @@ build subjects and build-lock references to match. Its opaque result grants
 only complete-output reproducibility authority; signature verification,
 license review, distribution approval, producer trust, Worker execution,
 lowering, backend execution, and release readiness remain false. This verifier
-has adversarial fixture coverage, but no live complete 24-output distribution
+has adversarial fixture coverage, but no live complete 25-output distribution
 has yet produced that authority.
 
 The external distribution-approval verifier reauthenticates the package-pinned
@@ -183,7 +183,7 @@ satisfied:
    externally issued decision over the exact current header-distribution
    subject. Package-generated hashes, license text, signing material, or
    signatures cannot self-approve redistribution.
-4. Two live complete 24-output distribution trees pass the package-owned
+4. Two live complete 25-output distribution trees pass the package-owned
    reproducibility verifier, and final release authority is issued without
    collapsing build, legal, trust, execution, or backend evidence into one
    claim.
