@@ -26,7 +26,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
 | 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. |
-| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, complete-output reproducibility verifier, no-clobber external producer exchange, and policy-rooted distribution-approval verifier are package-pinned; production external approval, live full-distribution evidence, externally rooted producer trust, exact-payload lowering/backend convergence, and release authority remain open. |
+| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, complete-output reproducibility verifier, and unified no-clobber producer/reviewer evidence exchange are package-pinned; production external approval, live full-distribution evidence, externally rooted producer trust, exact-payload lowering/backend convergence, and release authority remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
@@ -45,10 +45,10 @@ The 90-minute build is no longer an engineering iteration loop:
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
   exact build lock, verifies both zero-import Worker bundles, verifies that the
   checked-in strict matrix matches its deterministic authoring projection, and
-  passes 93 files/777 tests. Its latest Vitest portion took 17.04 seconds.
-- The complete compiler unit suite passes 101 files/1,640 tests in 14.72 seconds.
-- The required native boundary passes 53 files/280 tests with nine explicit skips
-  in 58.54 seconds; optimized, UBSan, and ASan work remains outside the edit loop.
+  passes 93 files/780 tests. Its latest Vitest portion took 14.87 seconds.
+- The complete compiler unit suite passes 101 files/1,640 tests in 14.62 seconds.
+- The required native boundary passes 53 files/283 tests with nine explicit skips
+  in 63.24 seconds; optimized, UBSan, and ASan work remains outside the edit loop.
 - Cache-free LLVM/Clang builds exist only to mint clean-build and
   reproducibility evidence. Their two jobs run concurrently and never replace
   the focused or fast local paths.
@@ -106,19 +106,19 @@ lowering, backend execution, and release readiness remain false. This verifier
 has adversarial fixture coverage, but no live complete 25-output distribution
 has yet produced that authority.
 
-The external distribution-approval verifier reauthenticates the package-pinned
-17-output header distribution and binds its exact build, output, reproducibility,
-and `license-inventory.json` identities to a policy-rooted P-256 DSSE/in-toto
-decision. Signing material grants no authority. Only synthetic policy/key/
-statement tests exist, so production distribution approval remains false;
-full-output reproducibility, producer trust, execution, lowering, backend, and
-release authority remain independent.
+The external distribution-approval path reauthenticates the package-pinned
+17-output header distribution and binds its build, output, reproducibility, and
+`license-inventory.json` identities to a policy-rooted P-256 DSSE/in-toto
+decision. Its no-clobber request/response exchange accepts no private key and
+serializes only a non-reusable verification observation. Only synthetic
+policy/key/statement tests exist, so production approval remains false and all
+full-output, trust, execution, backend, and release authorities stay separate.
 
-The no-clobber host exchange derives format-only DSSE/in-toto material from
-exact immutable inputs and accepts no private key. Verification requires the
-exact request and returned canonical envelope, runs both opaque trust
-transitions in one process, and persists only a non-reusable observation. Only
-external production evidence can authorize the build.
+The unified host exchange derives producer and reviewer format-only material
+from exact immutable inputs. Each verification requires its exact request and
+returned canonical envelope, runs the corresponding opaque trust transition in
+one process, and persists no reusable authority. Only externally controlled
+production evidence can authorize the build or header distribution.
 
 ### Shared dtype and layout execution
 
