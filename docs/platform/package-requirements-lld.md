@@ -26,7 +26,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
 | 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. |
-| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, complete-output reproducibility verifier, and unified no-clobber producer/reviewer evidence exchange are package-pinned; production external approval, live full-distribution evidence, externally rooted producer trust, exact-payload lowering/backend convergence, and release authority remain open. |
+| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, and unified no-clobber producer/reviewer evidence exchange are package-pinned; production external approval, externally rooted producer trust, exact-payload lowering/backend convergence, and release authority remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
@@ -45,10 +45,10 @@ The 90-minute build is no longer an engineering iteration loop:
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
   exact build lock, verifies both zero-import Worker bundles, verifies that the
   checked-in strict matrix matches its deterministic authoring projection, and
-  passes 93 files/780 tests. Its latest Vitest portion took 14.87 seconds.
-- The complete compiler unit suite passes 101 files/1,640 tests in 14.62 seconds.
-- The required native boundary passes 53 files/283 tests with nine explicit skips
-  in 63.24 seconds; optimized, UBSan, and ASan work remains outside the edit loop.
+  passes 96 files/789 tests. Its latest Vitest portion took 14.14 seconds.
+- The complete compiler unit suite passes 103 files/1,646 tests in 11.52 seconds.
+- The required native boundary passes 54 files/286 tests with nine explicit skips
+  in 52.38 seconds; optimized, UBSan, and ASan work remains outside the edit loop.
 - Cache-free LLVM/Clang builds exist only to mint clean-build and
   reproducibility evidence. Their two jobs run concurrently and never replace
   the focused or fast local paths.
@@ -96,15 +96,35 @@ authority, backend execution, and release readiness as false.
 
 The build lock declares 24 deterministic subjects including diagnostic
 normalization plus one detached DSSE envelope across exactly 25 paths. The
-package-owned full-distribution verifier now rehashes two distinct private
-trees against that exact plan, requires every deterministic subject to be
-byte-identical, strict-decodes both detached envelopes, and requires their
-build subjects and build-lock references to match. Its opaque result grants
-only complete-output reproducibility authority; signature verification,
-license review, distribution approval, producer trust, Worker execution,
-lowering, backend execution, and release readiness remain false. This verifier
-has adversarial fixture coverage, but no live complete 25-output distribution
-has yet produced that authority.
+deterministic materializer accepts only the exact private 17-output header
+root, package-pinned Wasm, current build lock and Worker, and an admitted
+producer policy; it writes the exact 24-subject tree without accepting signing
+material. The finalizer adds only the detached envelope after independently
+reauthenticating the materialized tree and profile and after an in-process
+producer-authority transition binds the same build subject. Both stages use
+exclusive no-follow creation, stable immutable inputs, independent rereads,
+exact tree closure, bounded files, synchronization, and owned-transaction
+cleanup.
+
+Two distinct live roots materialized and finalized at exact source revision
+`0840801a138df057da236e84099cc12182b40e2c`. Each contains 25 outputs and
+103,637,461 bytes; all 24 deterministic subjects are byte-identical and both
+detached envelopes bind build subject
+`bg.cpp.browser-build-subject.sha256.f54e7af965f09b75b49e1db00a5a94d5ba6efc3771c0deff483b0c4417bc010c`.
+The complete-output reproducibility identity is
+`bg.cpp.browser-full-distribution-reproducibility.sha256.b9b6bab28354bc3ddb7466886f958413d253aab65c00bcd61ef13eeaa074c2bf`.
+The 8,951-byte package observation has SHA-256
+`4637cf9624ad00dd833b72b832f2c9e25ee0a8ffcdf62d8b95b732791d36a65a`;
+its verifier independently rebinds the current build plan, header
+distribution, extractor, Worker, build lock, and three canonical policy
+resources before issuing opaque package reproducibility authority.
+
+The live finalization used an explicitly local engineering policy and key.
+Therefore complete-output reproducibility is true, while detached-signature
+verification, externally rooted producer trust, license review, distribution
+approval, Worker execution, lowering, backend execution, and release
+readiness remain false. Reproducible bytes and a valid local signature do not
+substitute for those independent authorities.
 
 The external distribution-approval path reauthenticates the package-pinned
 17-output header distribution and binds its build, output, reproducibility, and
@@ -183,10 +203,10 @@ satisfied:
    externally issued decision over the exact current header-distribution
    subject. Package-generated hashes, license text, signing material, or
    signatures cannot self-approve redistribution.
-4. Two live complete 25-output distribution trees pass the package-owned
-   reproducibility verifier, and final release authority is issued without
-   collapsing build, legal, trust, execution, or backend evidence into one
-   claim.
+4. Final release authority consumes the current package-pinned complete-output
+   reproducibility authority together with the independent production build,
+   legal, trust, execution, and backend authorities without collapsing them
+   into one claim.
 
 Gate 7 remains separate future work. Its absence does not weaken the completed
 closed profiles, but no host-graph, dynamic-control, collective, transport, or
