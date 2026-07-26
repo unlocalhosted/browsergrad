@@ -30,6 +30,20 @@ import {
   CPP_CUTE_BROWSER_BUILD_PROVENANCE_DECODE_LIMITS,
 } from "../../dist/cpp_cute_browser_build_provenance_syntax.js";
 import {
+  CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_BYTE_LIMIT,
+  createCppCuteBrowserDistributionApprovalSigningRequest,
+  verifyCppCuteBrowserDistributionApproval,
+} from "../../dist/cpp_cute_browser_distribution_approval.js";
+import {
+  CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_POLICY_BYTE_LIMIT,
+  admitCppCuteBrowserDistributionApprovalPolicy,
+  copyAdmittedCppCuteBrowserDistributionApprovalPolicyBytes,
+  unwrapAdmittedCppCuteBrowserDistributionApprovalPolicy,
+} from "../../dist/cpp_cute_browser_distribution_approval_policy.js";
+import {
+  cppCuteBrowserHeaderDistributionReproducibilityResourceBytes,
+} from "../../dist/cpp_cute_browser_header_distribution_reproducibility.js";
+import {
   verifyCppCuteBrowserBuildProducer,
 } from "../../dist/cpp_cute_browser_producer_trust.js";
 import {
@@ -53,12 +67,20 @@ export const CPP_CUTE_BROWSER_BUILD_PROVENANCE_SIGNING_REQUEST_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-build-provenance-signing-request";
 export const CPP_CUTE_BROWSER_BUILD_PRODUCER_OBSERVATION_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-build-producer-verification-observation";
+export const CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_SIGNING_REQUEST_SCHEMA =
+  "browsergrad.compiler.cpp-cute.browser-distribution-approval-signing-request";
+export const CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_OBSERVATION_SCHEMA =
+  "browsergrad.compiler.cpp-cute.browser-distribution-approval-verification-observation";
 
-const ERROR_PREFIX = "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-PROVENANCE-EXCHANGE";
+const ERROR_PREFIX = "BG-COMPILER-CPP-CUTE-BROWSER-EXTERNAL-EVIDENCE-EXCHANGE";
 const SIGNING_REQUEST_DOMAIN =
   "browsergrad.compiler.cpp-cute.browser-build-provenance-signing-request.v1";
 const PRODUCER_OBSERVATION_DOMAIN =
   "browsergrad.compiler.cpp-cute.browser-build-producer-verification-observation.v1";
+const DISTRIBUTION_APPROVAL_SIGNING_REQUEST_DOMAIN =
+  "browsergrad.compiler.cpp-cute.browser-distribution-approval-signing-request.v1";
+const DISTRIBUTION_APPROVAL_OBSERVATION_DOMAIN =
+  "browsergrad.compiler.cpp-cute.browser-distribution-approval-verification-observation.v1";
 const PROFILE_BYTE_LIMIT = 256 * 1024;
 const TRUST_STORE_BYTE_LIMIT = 256 * 1024;
 const MAX_ARGUMENT_COUNT = 16;
@@ -68,6 +90,8 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const KEY_ID = /^sha256:[0-9a-f]{64}$/u;
 const REQUEST_ID =
   /^bg\.cpp\.browser-build-provenance-signing-request\.sha256\.[0-9a-f]{64}$/u;
+const DISTRIBUTION_REQUEST_ID =
+  /^bg\.cpp\.browser-distribution-approval-signing-request\.sha256\.[0-9a-f]{64}$/u;
 const PROFILE_DECODE_LIMITS = Object.freeze({
   maxDocumentBytes: PROFILE_BYTE_LIMIT,
   maxDepth: 32,
@@ -90,8 +114,19 @@ const TRUST_STORE_DECODE_LIMITS = Object.freeze({
   maxIntegerBits: 32,
   maxArithmeticOperations: 4_096,
 });
+const DISTRIBUTION_APPROVAL_DECODE_LIMITS = Object.freeze({
+  maxDocumentBytes: CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_BYTE_LIMIT,
+  maxDepth: 24,
+  maxNodes: 4_096,
+  maxStringBytes: 192 * 1024,
+  maxArrayLength: 256,
+  maxObjectProperties: 128,
+  maxRank: 1,
+  maxIntegerBits: 64,
+  maxArithmeticOperations: 8_192,
+});
 const ARGUMENTS = Object.freeze({
-  "signing-request": Object.freeze([
+  "producer-signing-request": Object.freeze([
     "asset-manifest",
     "build-input-lock",
     "builder-id",
@@ -103,7 +138,7 @@ const ARGUMENTS = Object.freeze({
     "trust-store",
     "worker-module",
   ]),
-  "verify-envelope": Object.freeze([
+  "verify-producer-envelope": Object.freeze([
     "asset-manifest",
     "build-input-lock",
     "envelope",
@@ -115,15 +150,31 @@ const ARGUMENTS = Object.freeze({
     "trust-store",
     "worker-module",
   ]),
+  "distribution-approval-signing-request": Object.freeze([
+    "approval-policy",
+    "key-id",
+    "operation",
+    "output",
+    "reviewer-id",
+    "trust-store",
+  ]),
+  "verify-distribution-approval-envelope": Object.freeze([
+    "approval-policy",
+    "envelope",
+    "operation",
+    "output",
+    "signing-request",
+    "trust-store",
+  ]),
 });
 const ABORT_SIGNAL_ABORTED_GETTER = typeof AbortSignal === "undefined"
   ? undefined
   : Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")?.get;
 
-export class CppCuteBrowserBuildProvenanceExchangeError extends Error {
+export class CppCuteBrowserExternalEvidenceExchangeError extends Error {
   constructor(code, path, message, options) {
     super(`${code}: ${message}`, options);
-    this.name = "CppCuteBrowserBuildProvenanceExchangeError";
+    this.name = "CppCuteBrowserExternalEvidenceExchangeError";
     this.code = code;
     this.path = path;
   }
@@ -135,7 +186,7 @@ export class CppCuteBrowserBuildProvenanceExchangeError extends Error {
  * Private keys are never accepted. Serialized verification observations are
  * never reusable producer authority.
  */
-export async function runCppCuteBrowserBuildProvenanceExchange(
+export async function runCppCuteBrowserExternalEvidenceExchange(
   argv,
   options = {},
 ) {
@@ -144,54 +195,74 @@ export async function runCppCuteBrowserBuildProvenanceExchange(
   throwIfAborted(signal);
   const paths = exchangePaths(args);
   assertDistinctPaths(paths);
-  const packageWorker = await verifyCppCuteBrowserWorkerBundle();
-  const packageWorkerBytes =
-    copyVerifiedCppCuteBrowserWorkerBundleBytes(packageWorker);
-  const inputSpecifications = commonInputSpecifications(
-    args,
-    packageWorkerBytes.byteLength,
-  );
-  if (args.operation === "verify-envelope") {
-    inputSpecifications.push(
-      fileSpecification(
-        "envelope",
-        args["envelope"],
-        CPP_CUTE_BROWSER_BUILD_PROVENANCE_BYTE_LIMIT,
-      ),
-      fileSpecification(
-        "signingRequest",
-        args["signing-request"],
-        MAX_OUTPUT_BYTE_LENGTH,
-      ),
+  const producerOperation = args.operation === "producer-signing-request" ||
+    args.operation === "verify-producer-envelope";
+  const packageWorker = producerOperation
+    ? await verifyCppCuteBrowserWorkerBundle()
+    : undefined;
+  const packageWorkerBytes = packageWorker === undefined
+    ? undefined
+    : copyVerifiedCppCuteBrowserWorkerBundleBytes(packageWorker);
+  if (producerOperation &&
+      (packageWorker === undefined || packageWorkerBytes === undefined)) {
+    invalid(
+      "$.packageWorker",
+      "producer exchange requires the exact verified package Worker",
     );
   }
+  const inputSpecifications = producerOperation
+    ? producerInputSpecifications(
+      args,
+      packageWorkerBytes.byteLength,
+    )
+    : distributionApprovalInputSpecifications(args);
   const files = await readInputFiles(inputSpecifications, signal);
   assertDistinctInputFiles(files);
   throwIfAborted(signal);
-  const authorities = await prepareAuthorities(
-    files,
-    packageWorker,
-    packageWorkerBytes,
-    signal,
-  );
-  const inputIdentities = commonInputIdentities(files);
 
   let record;
-  if (args.operation === "signing-request") {
-    record = await createSigningRequestRecord({
-      authorities,
-      builderId: args["builder-id"],
-      inputIdentities,
-      keyId: args["key-id"],
-      signal,
-    });
-  } else {
-    record = await createProducerObservationRecord({
-      authorities,
+  if (producerOperation) {
+    const authorities = await prepareProducerAuthorities(
       files,
-      inputIdentities,
+      packageWorker,
+      packageWorkerBytes,
       signal,
-    });
+    );
+    const inputIdentities = producerInputIdentities(files);
+    record = args.operation === "producer-signing-request"
+      ? await createProducerSigningRequestRecord({
+        authorities,
+        builderId: args["builder-id"],
+        inputIdentities,
+        keyId: args["key-id"],
+        signal,
+      })
+      : await createProducerObservationRecord({
+        authorities,
+        files,
+        inputIdentities,
+        signal,
+      });
+  } else {
+    const authorities = await prepareDistributionApprovalAuthorities(
+      files,
+      signal,
+    );
+    const inputIdentities = distributionApprovalInputIdentities(files);
+    record = args.operation === "distribution-approval-signing-request"
+      ? await createDistributionApprovalSigningRequestRecord({
+        authorities,
+        inputIdentities,
+        keyId: args["key-id"],
+        reviewerId: args["reviewer-id"],
+        signal,
+      })
+      : await createDistributionApprovalObservationRecord({
+        authorities,
+        files,
+        inputIdentities,
+        signal,
+      });
   }
   throwIfAborted(signal);
   const bytes = canonicalJsonBytes(record);
@@ -208,7 +279,7 @@ export async function runCppCuteBrowserBuildProvenanceExchange(
   });
 }
 
-async function createSigningRequestRecord(input) {
+async function createProducerSigningRequestRecord(input) {
   const request = await createCppCuteBrowserBuildProvenanceSigningRequest(
     {
       assetManifest: input.authorities.assetManifest,
@@ -265,7 +336,7 @@ async function createProducerObservationRecord(input) {
     "$.inputs.signingRequest",
   );
   const requested = signingRequestCoordinates(signingRequestValue);
-  const expectedRequest = await createSigningRequestRecord({
+  const expectedRequest = await createProducerSigningRequestRecord({
     authorities: input.authorities,
     builderId: requested.builderId,
     inputIdentities: input.inputIdentities,
@@ -349,7 +420,196 @@ async function createProducerObservationRecord(input) {
   });
 }
 
-async function prepareAuthorities(files, workerBundle, packageWorkerBytes, signal) {
+async function createDistributionApprovalSigningRequestRecord(input) {
+  const reviewerId = nonemptyString(
+    input.reviewerId,
+    "$.arguments.reviewer-id",
+  );
+  const keyId = pattern(input.keyId, KEY_ID, "$.arguments.key-id");
+  const policyRecord = unwrapAdmittedCppCuteBrowserDistributionApprovalPolicy(
+    input.authorities.approvalPolicy,
+  ).policy;
+  if (!policyRecord.keyIds.includes(keyId)) {
+    mismatch(
+      "$.arguments.key-id",
+      "key is not admitted by the exact distribution approval policy",
+    );
+  }
+  if (!input.authorities.trustStore.keyIds.includes(keyId)) {
+    mismatch(
+      "$.arguments.key-id",
+      "key is absent from the exact admitted trust store",
+    );
+  }
+  const request = await createCppCuteBrowserDistributionApprovalSigningRequest(
+    input.authorities.approvalPolicy,
+    reviewerId,
+    input.signal === undefined ? {} : { signal: input.signal },
+  );
+  const body = {
+    schema: CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_SIGNING_REQUEST_SCHEMA,
+    version: 1,
+    authority:
+      "format-only-external-distribution-approval-signing-request",
+    inputs: input.inputIdentities,
+    policyId: input.authorities.approvalPolicy.policyId,
+    policySha256: input.authorities.approvalPolicy.policySha256,
+    reviewerId,
+    keyId,
+    statement: request.statement,
+    payloadType: request.payloadType,
+    payload: request.payload,
+    signingBytesBase64: encodeBase64(request.signingBytes),
+    claims: {
+      signatureVerified: false,
+      externalReviewVerified: false,
+      licenseReviewComplete: false,
+      distributionAuthorized: false,
+      fullDistributedOutputSetReproducible: false,
+      producerTrusted: false,
+      workerExecutionObserved: false,
+      loweringAuthorityMinted: false,
+      backendExecutionObserved: false,
+      releaseReady: false,
+    },
+  };
+  const requestId =
+    `bg.cpp.browser-distribution-approval-signing-request.sha256.${
+      hashProjection(DISTRIBUTION_APPROVAL_SIGNING_REQUEST_DOMAIN, body)
+    }`;
+  return deepFreezeJson({
+    ...body,
+    requestId,
+  });
+}
+
+async function createDistributionApprovalObservationRecord(input) {
+  const signingRequestFile = requiredFile(input.files, "signingRequest");
+  const envelopeFile = requiredFile(input.files, "envelope");
+  const signingRequestValue = decodeCanonicalJson(
+    signingRequestFile.bytes,
+    DISTRIBUTION_APPROVAL_DECODE_LIMITS,
+    "$.inputs.signingRequest",
+  );
+  const requested = distributionSigningRequestCoordinates(signingRequestValue);
+  const expectedRequest =
+    await createDistributionApprovalSigningRequestRecord({
+      authorities: input.authorities,
+      inputIdentities: input.inputIdentities,
+      keyId: requested.keyId,
+      reviewerId: requested.reviewerId,
+      signal: input.signal,
+    });
+  if (!sameBytes(
+    signingRequestFile.bytes,
+    canonicalJsonBytes(expectedRequest),
+  )) {
+    mismatch(
+      "$.inputs.signingRequest",
+      "signing request differs from the exact current package review subject and policy",
+    );
+  }
+  const envelope = decodeCanonicalJson(
+    envelopeFile.bytes,
+    DISTRIBUTION_APPROVAL_DECODE_LIMITS,
+    "$.inputs.envelope",
+  );
+  const envelopeCoordinates = dsseCoordinates(envelope);
+  if (envelopeCoordinates.payloadType !== expectedRequest.payloadType ||
+      envelopeCoordinates.payload !== expectedRequest.payload ||
+      envelopeCoordinates.keyId !== expectedRequest.keyId) {
+    mismatch(
+      "$.inputs.envelope",
+      "external envelope differs from the exact issued distribution approval request",
+    );
+  }
+  const approval = await verifyCppCuteBrowserDistributionApproval(
+    envelope,
+    input.authorities.approvalPolicy,
+    input.authorities.trustStore,
+    input.signal === undefined ? {} : { signal: input.signal },
+  );
+  const inputs = deepFreezeJson({
+    ...input.inputIdentities,
+    signingRequest: fileIdentity(signingRequestFile),
+    envelope: fileIdentity(envelopeFile),
+  });
+  const body = {
+    schema: CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_OBSERVATION_SCHEMA,
+    version: 1,
+    authority: "host-verification-observation-only",
+    signingRequestId: expectedRequest.requestId,
+    inputs,
+    approval: approvalProjection(approval),
+    observed: {
+      signatureVerified: true,
+      independentApprovalPolicyMatched: true,
+      exactHeaderDistributionBound: true,
+      exactReviewInputBound: true,
+      licenseReviewCompleteInThisProcess: true,
+      distributionAuthorizedInThisProcess: true,
+    },
+    claims: {
+      reusableDistributionApprovalAuthority: false,
+      distributionApprovalAuthoritySerialized: false,
+      fullDistributedOutputSetReproducible: false,
+      producerTrusted: false,
+      workerExecutionObserved: false,
+      loweringAuthorityMinted: false,
+      backendExecutionObserved: false,
+      releaseReady: false,
+    },
+  };
+  const observationId =
+    `bg.cpp.browser-distribution-approval-observation.sha256.${
+      hashProjection(DISTRIBUTION_APPROVAL_OBSERVATION_DOMAIN, body)
+    }`;
+  return deepFreezeJson({
+    ...body,
+    observationId,
+  });
+}
+
+async function prepareDistributionApprovalAuthorities(files, signal) {
+  const policyFile = requiredFile(files, "approvalPolicy");
+  const approvalPolicy = await admitCppCuteBrowserDistributionApprovalPolicy(
+    policyFile.bytes,
+    signal === undefined ? {} : { signal },
+  );
+  if (!sameBytes(
+    policyFile.bytes,
+    copyAdmittedCppCuteBrowserDistributionApprovalPolicyBytes(approvalPolicy),
+  )) {
+    mismatch(
+      "$.inputs.approvalPolicy",
+      "distribution approval policy canonical identity changed",
+    );
+  }
+  unwrapAdmittedCppCuteBrowserDistributionApprovalPolicy(approvalPolicy);
+
+  const trustStoreFile = requiredFile(files, "trustStore");
+  const trustStoreValue = decodeCanonicalJson(
+    trustStoreFile.bytes,
+    TRUST_STORE_DECODE_LIMITS,
+    "$.inputs.trustStore",
+  );
+  const trustStore = await prepareCppCuteAttestationTrustStore(
+    trustStoreValue,
+    signal === undefined
+      ? { limits: TRUST_STORE_DECODE_LIMITS }
+      : { limits: TRUST_STORE_DECODE_LIMITS, signal },
+  );
+  if (trustStore.trustStoreHash !== approvalPolicy.trustStoreSha256) {
+    mismatch(
+      "$.inputs.trustStore",
+      "trust store differs from the exact distribution approval policy root",
+    );
+  }
+  throwIfAborted(signal);
+  return Object.freeze({ approvalPolicy, trustStore });
+}
+
+async function prepareProducerAuthorities(files, workerBundle, packageWorkerBytes, signal) {
   const profileFile = requiredFile(files, "profile");
   const profileValue = decodeCanonicalJson(
     profileFile.bytes,
@@ -457,8 +717,53 @@ function producerProjection(producer) {
   });
 }
 
-function commonInputSpecifications(args, workerByteLength) {
-  return [
+function approvalProjection(approval) {
+  return deepFreezeJson({
+    approvalEvidenceId: approval.approvalEvidenceId,
+    statementSha256: approval.statementSha256,
+    signatureEvidenceSha256: approval.signatureEvidenceSha256,
+    policyId: approval.policyId,
+    policySha256: approval.policySha256,
+    policyVersion: approval.policyVersion,
+    reviewSubjectId: approval.reviewSubjectId,
+    reviewSubjectSha256: approval.reviewSubjectSha256,
+    reviewerId: approval.reviewerId,
+    keyId: approval.keyId,
+    trustStoreSha256: approval.trustStoreSha256,
+    currentBuildInputLockId: approval.currentBuildInputLockId,
+    currentBuildInputLockResourceSha256:
+      approval.currentBuildInputLockResourceSha256,
+    headerInputProjectionId: approval.headerInputProjectionId,
+    headerDistributionResourceSha256:
+      approval.headerDistributionResourceSha256,
+    headerDistributionReproducibilityId:
+      approval.headerDistributionReproducibilityId,
+    headerDistributionOutputVerificationId:
+      approval.headerDistributionOutputVerificationId,
+    reviewInputOutputPath: approval.reviewInputOutputPath,
+    reviewInputSha256: approval.reviewInputSha256,
+    reviewInputByteLength: approval.reviewInputByteLength,
+    reviewedScopes: approval.reviewedScopes,
+    resolvedBlockerIds: approval.resolvedBlockerIds,
+    signatureVerified: approval.signatureVerified,
+    independentApprovalPolicyMatched:
+      approval.independentApprovalPolicyMatched,
+    exactHeaderDistributionBound: approval.exactHeaderDistributionBound,
+    exactReviewInputBound: approval.exactReviewInputBound,
+    externalDistributedFileLicenseMapReviewed:
+      approval.externalDistributedFileLicenseMapReviewed,
+    exactPackageNoticeSetReviewed: approval.exactPackageNoticeSetReviewed,
+    exactCudaRedistributionIndexReviewed:
+      approval.exactCudaRedistributionIndexReviewed,
+    exactUpstreamLicenseEvidenceReviewed:
+      approval.exactUpstreamLicenseEvidenceReviewed,
+    licenseReviewComplete: approval.licenseReviewComplete,
+    distributionAuthorized: approval.distributionAuthorized,
+  });
+}
+
+function producerInputSpecifications(args, workerByteLength) {
+  const specifications = [
     fileSpecification("profile", args.profile, PROFILE_BYTE_LIMIT),
     fileSpecification(
       "assetManifest",
@@ -478,9 +783,24 @@ function commonInputSpecifications(args, workerByteLength) {
     ),
     fileSpecification("trustStore", args["trust-store"], TRUST_STORE_BYTE_LIMIT),
   ];
+  if (args.operation === "verify-producer-envelope") {
+    specifications.push(
+      fileSpecification(
+        "envelope",
+        args.envelope,
+        CPP_CUTE_BROWSER_BUILD_PROVENANCE_BYTE_LIMIT,
+      ),
+      fileSpecification(
+        "signingRequest",
+        args["signing-request"],
+        MAX_OUTPUT_BYTE_LENGTH,
+      ),
+    );
+  }
+  return specifications;
 }
 
-function commonInputIdentities(files) {
+function producerInputIdentities(files) {
   return deepFreezeJson({
     profile: fileIdentity(requiredFile(files, "profile")),
     assetManifest: fileIdentity(requiredFile(files, "assetManifest")),
@@ -488,6 +808,45 @@ function commonInputIdentities(files) {
     workerModule: fileIdentity(requiredFile(files, "workerModule")),
     producerPolicy: fileIdentity(requiredFile(files, "producerPolicy")),
     trustStore: fileIdentity(requiredFile(files, "trustStore")),
+  });
+}
+
+function distributionApprovalInputSpecifications(args) {
+  const specifications = [
+    fileSpecification(
+      "approvalPolicy",
+      args["approval-policy"],
+      CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_POLICY_BYTE_LIMIT,
+    ),
+    fileSpecification("trustStore", args["trust-store"], TRUST_STORE_BYTE_LIMIT),
+  ];
+  if (args.operation === "verify-distribution-approval-envelope") {
+    specifications.push(
+      fileSpecification(
+        "envelope",
+        args.envelope,
+        CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_BYTE_LIMIT,
+      ),
+      fileSpecification(
+        "signingRequest",
+        args["signing-request"],
+        MAX_OUTPUT_BYTE_LENGTH,
+      ),
+    );
+  }
+  return specifications;
+}
+
+function distributionApprovalInputIdentities(files) {
+  const headerDistributionBytes =
+    cppCuteBrowserHeaderDistributionReproducibilityResourceBytes();
+  return deepFreezeJson({
+    approvalPolicy: fileIdentity(requiredFile(files, "approvalPolicy")),
+    trustStore: fileIdentity(requiredFile(files, "trustStore")),
+    packageHeaderDistribution: {
+      sha256: sha256(headerDistributionBytes),
+      byteLength: String(headerDistributionBytes.byteLength),
+    },
   });
 }
 
@@ -501,6 +860,7 @@ function fileSpecification(name, path, maxByteLength) {
 
 function argumentName(name) {
   return {
+    approvalPolicy: "approval-policy",
     assetManifest: "asset-manifest",
     buildInputLock: "build-input-lock",
     envelope: "envelope",
@@ -593,7 +953,7 @@ async function readImmutableFile(specification, signal) {
       identity: after,
     });
   } catch (cause) {
-    if (cause instanceof CppCuteBrowserBuildProvenanceExchangeError) throw cause;
+    if (cause instanceof CppCuteBrowserExternalEvidenceExchangeError) throw cause;
     io(
       `$.arguments.${argumentName(specification.name)}`,
       "failed to read exact immutable exchange input",
@@ -685,7 +1045,7 @@ async function persistCanonicalOutput(pathValue, bytes, signal) {
       byteLength: bytes.byteLength,
     });
   } catch (cause) {
-    if (cause instanceof CppCuteBrowserBuildProvenanceExchangeError) throw cause;
+    if (cause instanceof CppCuteBrowserExternalEvidenceExchangeError) throw cause;
     if (isNodeError(cause, "EEXIST") || isNodeError(cause, "ELOOP")) {
       conflict(
         "$.arguments.output",
@@ -812,6 +1172,33 @@ function signingRequestCoordinates(value) {
   });
 }
 
+function distributionSigningRequestCoordinates(value) {
+  const object = jsonObject(value, "$.inputs.signingRequest");
+  if (object.schema !==
+        CPP_CUTE_BROWSER_DISTRIBUTION_APPROVAL_SIGNING_REQUEST_SCHEMA ||
+      object.version !== 1 ||
+      object.authority !==
+        "format-only-external-distribution-approval-signing-request" ||
+      typeof object.requestId !== "string" ||
+      !DISTRIBUTION_REQUEST_ID.test(object.requestId)) {
+    invalid(
+      "$.inputs.signingRequest",
+      "input is not one BrowserGrad distribution approval signing request",
+    );
+  }
+  return Object.freeze({
+    reviewerId: nonemptyString(
+      object.reviewerId,
+      "$.inputs.signingRequest.reviewerId",
+    ),
+    keyId: pattern(
+      object.keyId,
+      KEY_ID,
+      "$.inputs.signingRequest.keyId",
+    ),
+  });
+}
+
 function dsseCoordinates(value) {
   const object = jsonObject(value, "$.inputs.envelope");
   const signatures = object.signatures;
@@ -867,10 +1254,10 @@ function parseArguments(argv) {
     values[key] = value;
   }
   const operation = values.operation;
-  if (operation !== "signing-request" && operation !== "verify-envelope") {
+  if (typeof operation !== "string" || !Object.hasOwn(ARGUMENTS, operation)) {
     invalid(
       "$.arguments.operation",
-      "operation must be signing-request or verify-envelope",
+      "operation must be producer-signing-request, verify-producer-envelope, distribution-approval-signing-request, or verify-distribution-approval-envelope",
     );
   }
   const expected = ARGUMENTS[operation];
@@ -929,7 +1316,7 @@ function snapshotArguments(argv) {
       },
     ));
   } catch (cause) {
-    if (cause instanceof CppCuteBrowserBuildProvenanceExchangeError) throw cause;
+    if (cause instanceof CppCuteBrowserExternalEvidenceExchangeError) throw cause;
     invalid("$.argv", "argument array could not be inspected", { cause });
   }
 }
@@ -954,27 +1341,35 @@ function normalizeOptions(options) {
     }
     return signal.value;
   } catch (cause) {
-    if (cause instanceof CppCuteBrowserBuildProvenanceExchangeError) throw cause;
+    if (cause instanceof CppCuteBrowserExternalEvidenceExchangeError) throw cause;
     invalid("$.options", "options could not be inspected", { cause });
   }
 }
 
 function exchangePaths(args) {
-  const paths = [
-    ["profile", args.profile],
-    ["asset-manifest", args["asset-manifest"]],
-    ["build-input-lock", args["build-input-lock"]],
-    ["worker-module", args["worker-module"]],
-    ["producer-policy", args["producer-policy"]],
-    ["trust-store", args["trust-store"]],
-    ["output", args.output],
-  ];
-  if (args.operation === "verify-envelope") {
+  const producerOperation = args.operation === "producer-signing-request" ||
+    args.operation === "verify-producer-envelope";
+  const paths = producerOperation
+    ? [
+      ["profile", args.profile],
+      ["asset-manifest", args["asset-manifest"]],
+      ["build-input-lock", args["build-input-lock"]],
+      ["worker-module", args["worker-module"]],
+      ["producer-policy", args["producer-policy"]],
+      ["trust-store", args["trust-store"]],
+    ]
+    : [
+      ["approval-policy", args["approval-policy"]],
+      ["trust-store", args["trust-store"]],
+    ];
+  if (args.operation === "verify-producer-envelope" ||
+      args.operation === "verify-distribution-approval-envelope") {
     paths.push(
       ["envelope", args.envelope],
       ["signing-request", args["signing-request"]],
     );
   }
+  paths.push(["output", args.output]);
   return paths.map(([name, path]) =>
     Object.freeze({ name, path: absolutePath(path, `$.arguments.${name}`) }));
 }
@@ -1107,10 +1502,10 @@ function throwIfAborted(signal) {
   if (signal === undefined) return;
   if (ABORT_SIGNAL_ABORTED_GETTER === undefined ||
       Reflect.apply(ABORT_SIGNAL_ABORTED_GETTER, signal, []) === true) {
-    throw new CppCuteBrowserBuildProvenanceExchangeError(
+    throw new CppCuteBrowserExternalEvidenceExchangeError(
       `${ERROR_PREFIX}-CANCELLED`,
       "$.options.signal",
-      "browser build provenance exchange was cancelled",
+      "browser external evidence exchange was cancelled",
     );
   }
 }
@@ -1121,7 +1516,7 @@ function isNodeError(value, code) {
 }
 
 function invalid(path, message, options) {
-  throw new CppCuteBrowserBuildProvenanceExchangeError(
+  throw new CppCuteBrowserExternalEvidenceExchangeError(
     `${ERROR_PREFIX}-INVALID`,
     path,
     message,
@@ -1130,7 +1525,7 @@ function invalid(path, message, options) {
 }
 
 function mismatch(path, message, options) {
-  throw new CppCuteBrowserBuildProvenanceExchangeError(
+  throw new CppCuteBrowserExternalEvidenceExchangeError(
     `${ERROR_PREFIX}-MISMATCH`,
     path,
     message,
@@ -1139,7 +1534,7 @@ function mismatch(path, message, options) {
 }
 
 function resource(path, message, options) {
-  throw new CppCuteBrowserBuildProvenanceExchangeError(
+  throw new CppCuteBrowserExternalEvidenceExchangeError(
     `${ERROR_PREFIX}-RESOURCE-LIMIT`,
     path,
     message,
@@ -1148,7 +1543,7 @@ function resource(path, message, options) {
 }
 
 function conflict(path, message, options) {
-  throw new CppCuteBrowserBuildProvenanceExchangeError(
+  throw new CppCuteBrowserExternalEvidenceExchangeError(
     `${ERROR_PREFIX}-CONFLICT`,
     path,
     message,
@@ -1157,7 +1552,7 @@ function conflict(path, message, options) {
 }
 
 function io(path, message, options) {
-  throw new CppCuteBrowserBuildProvenanceExchangeError(
+  throw new CppCuteBrowserExternalEvidenceExchangeError(
     `${ERROR_PREFIX}-IO`,
     path,
     message,
@@ -1167,7 +1562,7 @@ function io(path, message, options) {
 
 if (process.argv[1] !== undefined &&
     pathToFileURL(process.argv[1]).href === import.meta.url) {
-  const result = await runCppCuteBrowserBuildProvenanceExchange(
+  const result = await runCppCuteBrowserExternalEvidenceExchange(
     process.argv.slice(2),
   );
   process.stdout.write(`${JSON.stringify({
