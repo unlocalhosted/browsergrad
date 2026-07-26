@@ -11,7 +11,12 @@ import {
   type PreparedCppCuteBrowserBuildInputLock,
 } from "./cpp_cute_browser_build_lock.js";
 import {
+  CPP_CUTE_BROWSER_BUILD_DSSE_PAYLOAD_TYPE,
+  CPP_CUTE_BROWSER_BUILD_IN_TOTO_STATEMENT_TYPE,
+  CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE,
+  CPP_CUTE_BROWSER_BUILD_TYPE,
   cppCuteBrowserBuildProvenanceDsseSigningBytes,
+  cppCuteBrowserBuildProvenancePayloadBase64,
   decodeUntrustedCppCuteBrowserBuildProvenanceSyntax,
   deriveCppCuteBrowserBuildSubjectIdentity,
   type CppCuteBrowserBuildProvenanceEnvelopeV1,
@@ -28,9 +33,25 @@ import {
   type PreparedCppCuteFrontendProfile,
 } from "./cpp_cute_frontend_profile.js";
 import {
+  unwrapAdmittedCppCuteBrowserProducerTrustPolicy,
+  type AdmittedCppCuteBrowserProducerTrustPolicy,
+} from "./cpp_cute_browser_producer_trust_policy.js";
+import {
   inspectVerifiedCppCuteBrowserWorkerBundle,
   type VerifiedCppCuteBrowserWorkerBundle,
 } from "./cpp_cute_browser_worker_bundle.js";
+
+const CAPTURED_OBJECT = Object;
+const CAPTURED_REFLECT = Reflect;
+const NATIVE_OBJECT_GET_OWN_PROPERTY_DESCRIPTORS =
+  Object.getOwnPropertyDescriptors;
+const NATIVE_OBJECT_GET_PROTOTYPE_OF = Object.getPrototypeOf;
+const NATIVE_OBJECT_FREEZE = Object.freeze;
+const NATIVE_REFLECT_APPLY = Reflect.apply;
+const NATIVE_REFLECT_OWN_KEYS = Reflect.ownKeys;
+const ABORT_SIGNAL_ABORTED_GETTER = typeof AbortSignal === "undefined"
+  ? undefined
+  : Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")?.get;
 
 const VERIFIED_BUILD_SIGNATURE_BINDINGS = new WeakMap<object, VerifiedCppCuteBrowserBuildSignatureBindingRecord>();
 
@@ -90,6 +111,47 @@ export interface VerifyCppCuteBrowserBuildProvenanceRequest {
   readonly signal?: AbortSignal;
 }
 
+export interface CreateCppCuteBrowserBuildProvenanceSigningRequestInput {
+  readonly assetManifest: PreparedCppCuteBrowserAssetManifest;
+  readonly buildInputLock: PreparedCppCuteBrowserBuildInputLock;
+  readonly workerBundle: VerifiedCppCuteBrowserWorkerBundle;
+  readonly trustPolicy: AdmittedCppCuteBrowserProducerTrustPolicy;
+  readonly trustStore: PreparedCppCuteAttestationTrustStore;
+  readonly builderId: string;
+  readonly keyId: string;
+}
+
+export interface CreateCppCuteBrowserBuildProvenanceSigningRequestOptions {
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * Exact format-only material for an external builder signature. This does not
+ * verify a signature or mint producer, asset, execution, distribution, or
+ * release authority.
+ */
+export interface CppCuteBrowserBuildProvenanceSigningRequest {
+  readonly formatOnly: true;
+  readonly policyId: string;
+  readonly policySha256: string;
+  readonly builderId: string;
+  readonly keyId: string;
+  readonly statement: CppCuteBrowserBuildProvenanceStatementV1;
+  readonly payloadType: typeof CPP_CUTE_BROWSER_BUILD_DSSE_PAYLOAD_TYPE;
+  readonly payload: string;
+  readonly signingBytes: Uint8Array;
+  readonly signatureVerified: false;
+  readonly producerTrusted: false;
+  readonly exactAssetBytesVerified: false;
+  readonly fullDistributedOutputSetReproducible: false;
+  readonly licenseReviewComplete: false;
+  readonly distributionAuthorized: false;
+  readonly workerExecutionObserved: false;
+  readonly loweringAuthorityMinted: false;
+  readonly backendExecutionObserved: false;
+  readonly releaseReady: false;
+}
+
 export type CppCuteBrowserBuildProvenanceErrorCode =
   | "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-PROVENANCE-BINDING"
   | "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-PROVENANCE-CANCELLED"
@@ -107,6 +169,230 @@ export class CppCuteBrowserBuildProvenanceError extends Error {
     super(`${code}: ${message}`, options);
     this.name = "CppCuteBrowserBuildProvenanceError";
   }
+}
+
+export async function createCppCuteBrowserBuildProvenanceSigningRequest(
+  input: CreateCppCuteBrowserBuildProvenanceSigningRequestInput,
+  options: CreateCppCuteBrowserBuildProvenanceSigningRequestOptions = {},
+): Promise<CppCuteBrowserBuildProvenanceSigningRequest> {
+  const request = normalizeSigningRequestInput(input);
+  const signal = normalizeSigningRequestOptions(options);
+  throwIfAborted(signal);
+
+  let manifestRecord: ReturnType<
+    typeof unwrapPreparedCppCuteBrowserAssetManifest
+  >;
+  let policyRecord: ReturnType<
+    typeof unwrapAdmittedCppCuteBrowserProducerTrustPolicy
+  >;
+  let worker: ReturnType<typeof inspectVerifiedCppCuteBrowserWorkerBundle>;
+  try {
+    manifestRecord = unwrapPreparedCppCuteBrowserAssetManifest(
+      request.assetManifest,
+    );
+  } catch (cause) {
+    unverifiedAt(
+      "$.input.assetManifest",
+      "asset manifest is not an opaque prepared authority",
+      cause,
+    );
+  }
+  try {
+    unwrapPreparedCppCuteBrowserBuildInputLock(request.buildInputLock);
+  } catch (cause) {
+    unverifiedAt(
+      "$.input.buildInputLock",
+      "build-input lock is not an opaque prepared authority",
+      cause,
+    );
+  }
+  try {
+    worker = inspectVerifiedCppCuteBrowserWorkerBundle(request.workerBundle);
+  } catch (cause) {
+    unverifiedAt(
+      "$.input.workerBundle",
+      "Worker bundle is not an opaque verified package authority",
+      cause,
+    );
+  }
+  try {
+    policyRecord = unwrapAdmittedCppCuteBrowserProducerTrustPolicy(
+      request.trustPolicy,
+    );
+  } catch (cause) {
+    unverifiedAt(
+      "$.input.trustPolicy",
+      "producer policy is not an opaque host admission authority",
+      cause,
+    );
+  }
+
+  const profileRecord = unwrapPreparedCppCuteBrowserFrontendProfile(
+    manifestRecord.profile,
+  );
+  const profile = profileRecord.profile;
+  const manifest = manifestRecord.manifest;
+  const manifestPolicy = manifest.body.buildProvenancePolicy;
+  const policy = policyRecord.policy;
+  if (request.trustPolicy.policyId !== policy.policyId ||
+      request.trustPolicy.policySha256.length !== 64 ||
+      request.trustPolicy.policyVersion !== "1.0" ||
+      request.trustPolicy.predicateType !== policy.predicateType ||
+      request.trustPolicy.trustStoreSha256 !== policy.trustStoreSha256 ||
+      !sameStrings(request.trustPolicy.builderIds, policy.builderIds) ||
+      !sameStrings(request.trustPolicy.keyIds, policy.keyIds) ||
+      request.trustPolicy.hostOnly !== true ||
+      request.trustPolicy.workerTransferable !== false ||
+      request.trustPolicy.producerTrusted !== false ||
+      request.trustPolicy.releaseReady !== false) {
+    binding(
+      "$.input.trustPolicy",
+      "producer policy projection differs from its retained canonical authority",
+    );
+  }
+  if (!policy.builderIds.includes(request.builderId)) {
+    policyMismatch(
+      "$.input.builderId",
+      "builder is not admitted by the exact producer trust policy",
+    );
+  }
+  if (!policy.keyIds.includes(request.keyId)) {
+    policyMismatch(
+      "$.input.keyId",
+      "key is not admitted by the exact producer trust policy",
+    );
+  }
+  if (request.trustStore.trustStoreHash !== policy.trustStoreSha256) {
+    policyMismatch(
+      "$.input.trustStore",
+      "prepared trust store differs from the exact producer trust policy",
+    );
+  }
+  if (!request.trustStore.keyIds.includes(request.keyId)) {
+    policyMismatch(
+      "$.input.keyId",
+      "key is not present in the prepared policy-pinned trust store",
+    );
+  }
+  if (policy.predicateType !==
+        CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE ||
+      policy.predicateType !== manifestPolicy.predicateType) {
+    policyMismatch(
+      "$.input.trustPolicy.predicateType",
+      "producer policy does not admit the manifest build predicate",
+    );
+  }
+  if (policy.trustStoreSha256 !== manifestPolicy.trustStoreSha256) {
+    policyMismatch(
+      "$.input.trustPolicy.trustStoreSha256",
+      "producer policy does not admit the manifest trust store",
+    );
+  }
+  if (!manifestPolicy.builderIds.includes(request.builderId)) {
+    policyMismatch(
+      "$.input.builderId",
+      "builder is not admitted by the exact asset-manifest policy",
+    );
+  }
+  if (profile.deployment.buildProvenanceLockSha256 !==
+        request.buildInputLock.resourceSha256) {
+    binding(
+      "$.input.buildInputLock",
+      "profile build-input lock differs from the signing request",
+    );
+  }
+  if (profile.deployment.worker.moduleSha256 !== worker.sha256 ||
+      profile.deployment.worker.moduleByteLength !== worker.byteLength) {
+    binding(
+      "$.input.workerBundle",
+      "profile Worker module differs from the signing request",
+    );
+  }
+
+  const buildSubject = await deriveCppCuteBrowserBuildSubjectIdentity({
+    assetManifest: request.assetManifest,
+    buildInputLock: request.buildInputLock,
+    workerBundle: request.workerBundle,
+  });
+  throwIfAborted(signal);
+  if (manifest.body.buildSubjectIds.length !== 1 ||
+      manifest.body.buildSubjectIds[0] !== buildSubject.buildSubjectId) {
+    binding(
+      "$.input.assetManifest.body.buildSubjectIds",
+      "asset manifest does not bind exactly the derived build subject",
+    );
+  }
+
+  const statement = NATIVE_OBJECT_FREEZE({
+    _type: CPP_CUTE_BROWSER_BUILD_IN_TOTO_STATEMENT_TYPE,
+    subject: NATIVE_OBJECT_FREEZE([NATIVE_OBJECT_FREEZE({
+      name: buildSubject.buildSubjectId,
+      digest: NATIVE_OBJECT_FREEZE({
+        sha256: buildSubject.buildSubjectSha256,
+      }),
+    })]),
+    predicateType: CPP_CUTE_BROWSER_BUILD_PROVENANCE_PREDICATE_TYPE,
+    predicate: NATIVE_OBJECT_FREEZE({
+      builderId: request.builderId,
+      buildType: CPP_CUTE_BROWSER_BUILD_TYPE,
+      buildSubject: NATIVE_OBJECT_FREEZE({
+        buildSubjectId: buildSubject.buildSubjectId,
+        buildSubjectSha256: buildSubject.buildSubjectSha256,
+      }),
+      profile: NATIVE_OBJECT_FREEZE({
+        profileId: profile.profileId,
+        profileHash: profileRecord.profileHash,
+        compilationContractHash: profileRecord.compilationContractHash,
+      }),
+      assetManifest: NATIVE_OBJECT_FREEZE({
+        manifestId: request.assetManifest.manifestId,
+        manifestSha256: request.assetManifest.manifestSha256,
+        manifestByteLength: request.assetManifest.manifestByteLength,
+        assetSetSha256: request.assetManifest.assetSetSha256,
+      }),
+      buildInputLock: NATIVE_OBJECT_FREEZE({
+        lockId: request.buildInputLock.lockId,
+        resourceSha256: request.buildInputLock.resourceSha256,
+        recipeSha256: request.buildInputLock.recipeSha256,
+      }),
+      workerBundle: NATIVE_OBJECT_FREEZE({
+        bundleId: worker.bundleId,
+        sha256: worker.sha256,
+        byteLength: worker.byteLength,
+        factorySha256: worker.factorySha256,
+        factoryByteLength: worker.factoryByteLength,
+      }),
+      authorityLimits: NATIVE_OBJECT_FREEZE({
+        fullDistributedOutputSetReproducible: false,
+        licenseReviewComplete: false,
+        distributionAuthorized: false,
+        releaseReady: false,
+      }),
+    }),
+  }) as CppCuteBrowserBuildProvenanceStatementV1;
+  const signingBytes = cppCuteBrowserBuildProvenanceDsseSigningBytes(statement);
+  throwIfAborted(signal);
+  return NATIVE_OBJECT_FREEZE({
+    formatOnly: true,
+    policyId: request.trustPolicy.policyId,
+    policySha256: request.trustPolicy.policySha256,
+    builderId: request.builderId,
+    keyId: request.keyId,
+    statement,
+    payloadType: CPP_CUTE_BROWSER_BUILD_DSSE_PAYLOAD_TYPE,
+    payload: cppCuteBrowserBuildProvenancePayloadBase64(statement),
+    signingBytes,
+    signatureVerified: false,
+    producerTrusted: false,
+    exactAssetBytesVerified: false,
+    fullDistributedOutputSetReproducible: false,
+    licenseReviewComplete: false,
+    distributionAuthorized: false,
+    workerExecutionObserved: false,
+    loweringAuthorityMinted: false,
+    backendExecutionObserved: false,
+    releaseReady: false,
+  });
 }
 
 export async function verifyCppCuteBrowserBuildSignatureBinding(
@@ -277,8 +563,152 @@ function equal(actual: string | number, expected: string | number, path: string)
   if (actual !== expected) binding(path, "provenance field differs from the exact opaque input authority");
 }
 
+function normalizeSigningRequestInput(
+  input: CreateCppCuteBrowserBuildProvenanceSigningRequestInput,
+): CreateCppCuteBrowserBuildProvenanceSigningRequestInput {
+  const descriptors = inspectPlainRecord(
+    input,
+    [
+      "assetManifest",
+      "buildInputLock",
+      "workerBundle",
+      "trustPolicy",
+      "trustStore",
+      "builderId",
+      "keyId",
+    ],
+    "$.input",
+  );
+  const builderId = dataProperty(descriptors, "builderId", "$.input");
+  const keyId = dataProperty(descriptors, "keyId", "$.input");
+  if (typeof builderId !== "string" || builderId.length === 0) {
+    binding("$.input.builderId", "builderId must be one nonempty string");
+  }
+  if (typeof keyId !== "string" || keyId.length === 0) {
+    binding("$.input.keyId", "keyId must be one nonempty string");
+  }
+  return {
+    assetManifest: dataProperty(
+      descriptors,
+      "assetManifest",
+      "$.input",
+    ) as PreparedCppCuteBrowserAssetManifest,
+    buildInputLock: dataProperty(
+      descriptors,
+      "buildInputLock",
+      "$.input",
+    ) as PreparedCppCuteBrowserBuildInputLock,
+    workerBundle: dataProperty(
+      descriptors,
+      "workerBundle",
+      "$.input",
+    ) as VerifiedCppCuteBrowserWorkerBundle,
+    trustPolicy: dataProperty(
+      descriptors,
+      "trustPolicy",
+      "$.input",
+    ) as AdmittedCppCuteBrowserProducerTrustPolicy,
+    trustStore: dataProperty(
+      descriptors,
+      "trustStore",
+      "$.input",
+    ) as PreparedCppCuteAttestationTrustStore,
+    builderId,
+    keyId,
+  };
+}
+
+function normalizeSigningRequestOptions(
+  options: CreateCppCuteBrowserBuildProvenanceSigningRequestOptions,
+): AbortSignal | undefined {
+  const descriptors = inspectPlainRecord(
+    options,
+    ["signal"],
+    "$.options",
+    false,
+  );
+  if (descriptors.signal === undefined) return undefined;
+  const signal = dataProperty(descriptors, "signal", "$.options");
+  if (ABORT_SIGNAL_ABORTED_GETTER === undefined ||
+      typeof signal !== "object" || signal === null) {
+    binding("$.options.signal", "signal must be one native AbortSignal");
+  }
+  try {
+    NATIVE_REFLECT_APPLY(ABORT_SIGNAL_ABORTED_GETTER, signal, []);
+  } catch {
+    binding("$.options.signal", "signal must be one native AbortSignal");
+  }
+  return signal as AbortSignal;
+}
+
+function inspectPlainRecord(
+  value: unknown,
+  allowedKeys: readonly string[],
+  path: string,
+  requireAll = true,
+): PropertyDescriptorMap {
+  let prototype: object | null;
+  let descriptors: PropertyDescriptorMap;
+  let keys: readonly PropertyKey[];
+  try {
+    prototype = NATIVE_REFLECT_APPLY(
+      NATIVE_OBJECT_GET_PROTOTYPE_OF,
+      CAPTURED_OBJECT,
+      [value],
+    ) as object | null;
+    descriptors = NATIVE_REFLECT_APPLY(
+      NATIVE_OBJECT_GET_OWN_PROPERTY_DESCRIPTORS,
+      CAPTURED_OBJECT,
+      [value],
+    ) as PropertyDescriptorMap;
+    keys = NATIVE_REFLECT_APPLY(
+      NATIVE_REFLECT_OWN_KEYS,
+      CAPTURED_REFLECT,
+      [descriptors],
+    ) as readonly PropertyKey[];
+  } catch (cause) {
+    unverifiedAt(
+      path,
+      "record could not be inspected without invoking accessors",
+      cause,
+    );
+  }
+  if (prototype !== CAPTURED_OBJECT.prototype) {
+    binding(path, "record must have the plain Object prototype");
+  }
+  if ((requireAll && keys.length !== allowedKeys.length) ||
+      keys.some((key) =>
+        typeof key !== "string" || !allowedKeys.includes(key))) {
+    binding(path, "record fields differ from the exact closed interface");
+  }
+  return descriptors;
+}
+
+function dataProperty(
+  descriptors: PropertyDescriptorMap,
+  key: string,
+  path: string,
+): unknown {
+  const descriptor = descriptors[key];
+  if (descriptor === undefined || !("value" in descriptor) ||
+      descriptor.enumerable !== true) {
+    binding(`${path}.${key}`, "field must be an enumerable plain data property");
+  }
+  return descriptor.value;
+}
+
+function sameStrings(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return left.length === right.length &&
+    left.every((value, index) => value === right[index]);
+}
+
 function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted === true) {
+  if (signal !== undefined &&
+      (ABORT_SIGNAL_ABORTED_GETTER === undefined ||
+       NATIVE_REFLECT_APPLY(ABORT_SIGNAL_ABORTED_GETTER, signal, []) === true)) {
     throw new CppCuteBrowserBuildProvenanceError(
       "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-PROVENANCE-CANCELLED",
       "$.signal",
@@ -292,6 +722,23 @@ function binding(path: string, message: string): never {
     "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-PROVENANCE-BINDING",
     path,
     message,
+  );
+}
+
+function policyMismatch(path: string, message: string): never {
+  throw new CppCuteBrowserBuildProvenanceError(
+    "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-PROVENANCE-POLICY",
+    path,
+    message,
+  );
+}
+
+function unverifiedAt(path: string, message: string, cause?: unknown): never {
+  throw new CppCuteBrowserBuildProvenanceError(
+    "BG-COMPILER-CPP-CUTE-BROWSER-BUILD-PROVENANCE-UNVERIFIED",
+    path,
+    message,
+    cause === undefined ? undefined : { cause },
   );
 }
 
