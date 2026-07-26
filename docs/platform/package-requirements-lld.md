@@ -26,7 +26,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
 | 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. |
-| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, complete-output reproducibility verifier, exact policy-scoped producer signing request, and policy-rooted external distribution-approval verifier are package-pinned; production external approval, live full-distribution evidence, externally rooted producer trust, exact-payload lowering/backend convergence, and release authority remain open. |
+| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, complete-output reproducibility verifier, no-clobber external producer exchange, and policy-rooted distribution-approval verifier are package-pinned; production external approval, live full-distribution evidence, externally rooted producer trust, exact-payload lowering/backend convergence, and release authority remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
@@ -45,12 +45,10 @@ The 90-minute build is no longer an engineering iteration loop:
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
   exact build lock, verifies both zero-import Worker bundles, verifies that the
   checked-in strict matrix matches its deterministic authoring projection, and
-  passes 92 files/771 tests. Its latest Vitest portion took 17.34 seconds.
-- The complete compiler unit suite passes 101 files/1,640 tests in 14.45
-  seconds.
-- The required native boundary passes 50 files/267 tests with nine explicit
-  platform skips in 67.62 seconds. It intentionally includes optimized, UBSan,
-  and platform-gated ASan work and is not the per-edit loop.
+  passes 93 files/777 tests. Its latest Vitest portion took 17.04 seconds.
+- The complete compiler unit suite passes 101 files/1,640 tests in 14.72 seconds.
+- The required native boundary passes 53 files/280 tests with nine explicit skips
+  in 58.54 seconds; optimized, UBSan, and ASan work remains outside the edit loop.
 - Cache-free LLVM/Clang builds exist only to mint clean-build and
   reproducibility evidence. Their two jobs run concurrently and never replace
   the focused or fast local paths.
@@ -116,9 +114,11 @@ statement tests exist, so production distribution approval remains false;
 full-output reproducibility, producer trust, execution, lowering, backend, and
 release authority remain independent.
 
-The producer path derives format-only DSSE/in-toto signing material from the
-exact manifest, build lock, Worker, policy, trust store, builder, and key. It
-grants no trust; only external production evidence can authorize the build.
+The no-clobber host exchange derives format-only DSSE/in-toto material from
+exact immutable inputs and accepts no private key. Verification requires the
+exact request and returned canonical envelope, runs both opaque trust
+transitions in one process, and persists only a non-reusable observation. Only
+external production evidence can authorize the build.
 
 ### Shared dtype and layout execution
 
