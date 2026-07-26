@@ -43,13 +43,13 @@ import {
 
 export const
   CPP_CUTE_BROWSER_FULL_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_SHA256 =
-    "4637cf9624ad00dd833b72b832f2c9e25ee0a8ffcdf62d8b95b732791d36a65a";
+    "285a73cc67ec4196104389f127f6728e531aa41c44fba8a79d61e89533f2b76e";
 export const
   CPP_CUTE_BROWSER_FULL_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_BYTE_LENGTH =
     8_951;
 export const
   CPP_CUTE_BROWSER_FULL_DISTRIBUTION_REPRODUCIBILITY_OBSERVATION_SOURCE_REVISION =
-    "0840801a138df057da236e84099cc12182b40e2c";
+    "8d7f27eb9a249d8277def3b401377c42e961b6c7";
 
 const REPRODUCIBILITY_HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.browser-full-distribution-reproducibility.v1";
@@ -101,8 +101,8 @@ export interface VerifiedCppCuteBrowserFullDistributionReproducibility {
   readonly outputCount: 25;
   readonly deterministicSubjectCount: 24;
   readonly detachedEvidenceCount: 1;
-  readonly firstByteLength: "103637461";
-  readonly secondByteLength: "103637461";
+  readonly firstByteLength: "103637695";
+  readonly secondByteLength: "103637695";
   readonly twoDistinctPrivateOutputRootsVerified: true;
   readonly exactBuildLockOutputPlanMatched: true;
   readonly exactOutputsRehashedInBothRoots: true;

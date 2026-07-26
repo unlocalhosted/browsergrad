@@ -2,10 +2,12 @@
 
 ## Verdict
 
-As of 2026-07-24, the BrowserGrad compiler harness is strong on correctness,
+As of 2026-07-26, the BrowserGrad compiler harness is strong on correctness,
 security boundaries, and iteration speed. It separately proves parser,
 native-Clang, raw-Wasm ABI, two-clean-build, browser Worker, semantic lowering,
-CPU, and real-WebGPU tiers; a lower tier cannot silently satisfy a higher one.
+complete-distribution reproducibility, CPU, and real-WebGPU tiers; a lower tier
+cannot silently satisfy a higher one. The exact eight-case browser payload now
+converges through shared authorization, CPU, and required actual WebGPU.
 The ordinary compiler loop is seconds-scale and no longer invokes clean LLVM/
 Clang production.
 
@@ -17,8 +19,8 @@ focused test routing constrain that debt, but do not make it disappear.
 
 Overall rating: A for fail-closed evidence integrity, A- for feedback topology,
 B for maintainability, and incomplete for production authority. Externally
-rooted producer signing, file-level redistribution approval, full release
-output reproducibility, and final release authorization remain false.
+rooted producer signing, file-level redistribution approval, production
+backend authority, and final release authorization remain false.
 
 ## 2026-07-19 follow-up
 
@@ -319,13 +321,13 @@ build to discover.
 
 | Area | Rating | Evidence | Required improvement |
 | --- | --- | --- | --- |
-| Locked input integrity | Strong for the promoted extractor; release incomplete | Exact LLVM archive, builder image/config, recipe, ABI, extractor source, runtime closure, factory, Wasm, and canonical reproducibility record are content-bound. Run `30069614333` reproduced the current extractor across two clean roots. | Extend reproducibility to the complete distributed output set and retain independent external approval. |
+| Locked input integrity | Strong for the promoted extractor; release incomplete | Exact LLVM archive, builder image/config, recipe, ABI, extractor source, runtime closure, factory, Wasm, and canonical reproducibility record are content-bound. Run `30069614333` reproduced the current extractor across two clean roots, and two exact 25-file distribution roots now reproduce the complete output set. | Retain independent external producer and redistribution approval. |
 | Build isolation | Strong and exercised | Both current clean builds ran networkless with a read-only root and declared inputs, private work mounts, zero capabilities, and no-new-privileges; source and build paths were distinct. | Keep diagnostic caches outside clean/reproducibility authority and preserve the sealed closure as the recipe evolves. |
-| Native and browser semantic coverage | Good for the declared word32 slice | Exact Clang 22 native behavioral/UBSan/ASan lanes coexist with eight real compiler-Worker C++/CuTe cases and 13 bit-exact CPU/WebGPU word32 cases. | Bind exact promoted candidates through the externally rooted producer transition and shared CPU/WebGPU seam; add new dtype/layout profiles only with matching proof. |
-| Evidence quality | Strong for narrow authorities; release incomplete | Bounded build records, exact ABI reviews, two-build reproducibility, separate Worker identities, strict source observations, artifacts, semantic candidates, and real-device evidence remain distinct. Trust, legal approval, lowering, backend authorization for the exact source payload, complete-output reproducibility, and release remain false. | Complete only the missing independent authorities; do not collapse build, verifier, compiler-Worker, legal, producer-trust, backend, or release evidence. |
-| Feedback speed | Strong engineering loop; intentionally expensive proof lane | The fast gate passes 89 files/754 tests with a 13.74-second Vitest portion; the complete compiler unit suite passes 99 files/1,627 tests in 14.42 seconds. Two cache-free clean builds take 40.5 and 45.9 minutes concurrently, while the strict eight-case browser matrix takes about four minutes. | Keep ordinary edits on focused/fast paths; run clean builds and the complete matrix only when output identities or producer semantics change. |
+| Native and browser semantic coverage | Good for the declared word32 slice | Exact Clang 22 native behavioral/UBSan/ASan lanes coexist with eight exact-distribution compiler-Worker C++/CuTe cases that now authorize and converge bit-exactly through shared CPU and required actual WebGPU. | Re-admit the exact build under external producer trust; add new dtype/layout profiles only with matching proof. |
+| Evidence quality | Strong for narrow authorities; release incomplete | Bounded build records, exact ABI reviews, two-build and full-distribution reproducibility, separate Worker identities, strict source observations, artifacts, semantic candidates, shared lowering, and real-device evidence remain distinct. External trust, legal approval, production backend authority, and release remain false. | Complete only the missing independent authorities; do not collapse build, verifier, compiler-Worker, legal, producer-trust, backend, or release evidence. |
+| Feedback speed | Strong engineering loop; intentionally expensive proof lane | The fast gate passes 98 files/795 tests in 20.14 seconds; the complete compiler unit suite passes 104 files/1,649 tests in 28.17 seconds. Two cache-free clean builds remain a concurrent release-evidence lane, while strict and exact eight-case browser matrices take about four minutes each. | Keep ordinary edits on focused/fast paths; run clean builds and complete matrices only when output identities or producer semantics change. |
 | Maintainability | Fair with controlled high-risk debt | Architecture checks report zero dependency cycles, legacy-backend leaks, semantic-IR leaks, or C++/CuTe frontend legacy leaks. Exact ratchets contain the 7,972-line WGSL lowerer, 7,178-line semantic IR, 6,999-line reference, 2,235-line build executor, 2,162-line native session, and 1,829-line artifact writer. | Extract existing semantic/effect and harness seams without creating parallel paths, and lower each ratchet as modules split. |
-| Delivery truthfulness | Strong | Package admission authenticates exact reproducibility, header, compiler-Worker, verifier-Worker, source, artifact, and candidate identities while explicitly retaining trust, legal, lowering, backend, and release flags as false. | Preserve the separated authority model through external signing, legal approval, exact-payload execution, and final release. |
+| Delivery truthfulness | Strong | Package admission authenticates exact reproducibility, header, compiler-Worker, verifier-Worker, source, artifact, candidate, shared lowering, CPU, and actual-WebGPU identities while retaining external trust, legal, production-backend, and release flags as false. | Preserve the separated authority model through external signing, legal approval, production backend authority, and final release. |
 
 ## Findings closed during this audit
 
@@ -440,17 +442,15 @@ v2 build, independent raw-Wasm review, and two matching clean v2 builds.
 2. Admit the browser-build signer through an independent package-owned trust
    root and verify one external exact-build statement; synthetic package keys
    remain insufficient.
-3. Execute one valid browser-local C++ request through the verifier Worker,
-   compiler Worker, verified Artifact V3, shared semantic lowering, and real
-   WebGPU.
-4. Complete the full release-output reproducibility set without widening the
-   already separated build, ABI, legal, producer-trust, or release authorities.
-5. Add bounded descriptor-relative reclamation for owned failure residue,
+3. Compose the externally trusted exact build, approved distribution,
+   package-pinned convergence result, production backend authority, and final
+   release authority without collapsing their distinct evidence.
+4. Add bounded descriptor-relative reclamation for owned failure residue,
    close or explicitly bound the final validated-inode unlink interval, and
    reduce repeated corpus-byte passes with corpus-scale evidence.
-6. Shard the serial browser/WebGPU case phase while preserving aggregate case
+5. Shard the serial browser/WebGPU case phase while preserving aggregate case
    coverage, skip policy, timeouts, and performance thresholds.
-7. Decompose the corpus provisioning module, build executor, compile session,
+6. Decompose the corpus provisioning module, build executor, compile session,
    artifact writer, and the four largest compiler-core modules along existing
    authority and semantic seams.
 

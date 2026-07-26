@@ -63,8 +63,8 @@ export interface CppCuteBrowserFullDistributionReproducibilityResourceV1
     readonly outputCount: 25;
     readonly deterministicSubjectCount: 24;
     readonly detachedEvidenceCount: 1;
-    readonly firstByteLength: "103637461";
-    readonly secondByteLength: "103637461";
+    readonly firstByteLength: "103637695";
+    readonly secondByteLength: "103637695";
   };
   readonly claims: JsonObject & {
     readonly twoDistinctPrivateOutputRootsVerified: true;
@@ -91,43 +91,43 @@ const VALUE: CppCuteBrowserFullDistributionReproducibilityResourceV1 = {
   authority:
     "two-root-exact-full-distribution-reproducibility-observation-only",
   verifierSourceRevision:
-    "0840801a138df057da236e84099cc12182b40e2c",
+    "8d7f27eb9a249d8277def3b401377c42e961b6c7",
   materializerSourceRevision:
-    "0840801a138df057da236e84099cc12182b40e2c",
+    "8d7f27eb9a249d8277def3b401377c42e961b6c7",
   producerPolicyScope: "local-engineering-reproducibility-only",
   buildInputLockId:
     "bg.cpp.browser-build-input-lock.sha256.fa21cfe45dec6b4869662cd613a7a300848657518f375c04f7f2193f3a874ad4",
   buildInputLockResourceSha256:
     "fd0f4f978399c6e52ebdb0489f35ce6b0a88e289dce8cfdfa112e52d6217cf3c",
   reproducibilityId:
-    "bg.cpp.browser-full-distribution-reproducibility.sha256.b9b6bab28354bc3ddb7466886f958413d253aab65c00bcd61ef13eeaa074c2bf",
+    "bg.cpp.browser-full-distribution-reproducibility.sha256.64cc7401523b6026aba9430e2f081d708bc62cfcbe6fc343bf58ec0798aeec7b",
   deterministicMetadata: {
     metadataId:
-      "bg.cpp.browser-distribution-metadata.sha256.a276fcac4a1feea108c007e410ad35388f0f9f316c52e95414c0edd05d63b1ab",
+      "bg.cpp.browser-distribution-metadata.sha256.79ebaa98ce989d822aad21c925bd062e1850d7877f72e4c904719fa5a0663cfd",
     profileId: "browsergrad.compiler.cpp-cute.browser-clang@1",
     profileHash:
-      "6675d5ca44dfaeea3876cad3c752cc1cf8219f1062cbc1b0be06dfd8a611a3b1",
+      "4f4b7416ec509ea97b612cc5b6c6c01596624ef63b8badc4f2a21ffd6b2e1003",
     compilationContractHash:
       "bc909fc7331ccac6c781ed6c11363ce58b68b1d5cf1bc04f9f7275bdd68cc965",
     profileSha256:
-      "e9a4d08e0f6c0efe7c34689061f37ed46159c2a130765100546513c5d07a22bf",
-    profileByteLength: "7150",
+      "16d47a72abe1851ce51810898cfd7d4223eae8e114c1f7ea300858486b30c6a8",
+    profileByteLength: "7148",
     assetManifestId:
-      "bg.cpp.browser-assets.sha256.6a55d49312de7171cab1ff20b4cc0a79de6696c6c4b1341f472e22282dacb551",
+      "bg.cpp.browser-assets.sha256.9db5c28897a9d9fd512056a767ade5446e0c188e3dc3f12946929f6d59d01c25",
     assetManifestSha256:
-      "64b9cfdf94c653fc537670921b2ac68f980dc372b9e1d218a002b5de87a72c4a",
+      "40085018f1266909688a6aadead0e1d0dbeea60274bf4113d966cddebcbca10c",
     assetManifestByteLength: "11501",
     assetSetSha256:
-      "1664147cc2587b92e61de2f9c0f4cf4ec77f414c36a65d4c3e305b02884b5d22",
+      "2a3a9256bcc1501ee8fc1bddde10b51a5e7eb59048c5f34e5285cba6383510bd",
     buildSubjectId:
-      "bg.cpp.browser-build-subject.sha256.f54e7af965f09b75b49e1db00a5a94d5ba6efc3771c0deff483b0c4417bc010c",
+      "bg.cpp.browser-build-subject.sha256.ed6344d3d2ffef5745f92e0ee53d4839e6c6ed7e193a56ca700c61853eb2da98",
     buildSubjectSha256:
-      "f54e7af965f09b75b49e1db00a5a94d5ba6efc3771c0deff483b0c4417bc010c",
+      "ed6344d3d2ffef5745f92e0ee53d4839e6c6ed7e193a56ca700c61853eb2da98",
     wasmSha256:
       "19edd5622461b2308e83f10fb90f9f029241a5ba706e4c1741b194cb52a82138",
     wasmByteLength: "31841008",
     workerBundleSha256:
-      "a3b8610fc116c7b4949379dbcdcdd55e06ce5f9f59f11bf692abd689b0f17916",
+      "9c9591e725fca512d10a366bdec38b0067366f3d8ebdef50c29a5ebb0134def5",
     headerDistributionReproducibilityId:
       "bg.cpp.browser-header-distribution-reproducibility.sha256.4d4c054fd4c93dbdbdef9581eeac52b037af3425e6a1c7eff8acc585abce1e55",
     headerDistributionOutputVerificationId:
@@ -139,7 +139,7 @@ const VALUE: CppCuteBrowserFullDistributionReproducibilityResourceV1 = {
       role: "asset-manifest",
       mediaType: "application/json",
       sha256:
-        "64b9cfdf94c653fc537670921b2ac68f980dc372b9e1d218a002b5de87a72c4a",
+        "40085018f1266909688a6aadead0e1d0dbeea60274bf4113d966cddebcbca10c",
       byteLength: "11501",
     },
     {
@@ -173,8 +173,8 @@ const VALUE: CppCuteBrowserFullDistributionReproducibilityResourceV1 = {
       role: "browser-worker-module",
       mediaType: "text/javascript",
       sha256:
-        "a3b8610fc116c7b4949379dbcdcdd55e06ce5f9f59f11bf692abd689b0f17916",
-      byteLength: "584660",
+        "9c9591e725fca512d10a366bdec38b0067366f3d8ebdef50c29a5ebb0134def5",
+      byteLength: "584894",
     },
     {
       outputPath:
@@ -347,22 +347,22 @@ const VALUE: CppCuteBrowserFullDistributionReproducibilityResourceV1 = {
     role: "detached-build-provenance",
     mediaType: "application/vnd.dsse.envelope.v1+json",
     firstSha256:
-      "15c30bc9ebd839b3056b10b8b5ca661bdb73d78edec38caa470000c8a58cec00",
+      "e90daa7c78c4ba6870045ddb40f53a148ef1ec5416b3084ca8056a80a18ad378",
     firstByteLength: "3035",
     secondSha256:
-      "15c30bc9ebd839b3056b10b8b5ca661bdb73d78edec38caa470000c8a58cec00",
+      "e90daa7c78c4ba6870045ddb40f53a148ef1ec5416b3084ca8056a80a18ad378",
     secondByteLength: "3035",
     buildSubjectId:
-      "bg.cpp.browser-build-subject.sha256.f54e7af965f09b75b49e1db00a5a94d5ba6efc3771c0deff483b0c4417bc010c",
+      "bg.cpp.browser-build-subject.sha256.ed6344d3d2ffef5745f92e0ee53d4839e6c6ed7e193a56ca700c61853eb2da98",
     buildSubjectSha256:
-      "f54e7af965f09b75b49e1db00a5a94d5ba6efc3771c0deff483b0c4417bc010c",
+      "ed6344d3d2ffef5745f92e0ee53d4839e6c6ed7e193a56ca700c61853eb2da98",
   },
   totals: {
     outputCount: 25,
     deterministicSubjectCount: 24,
     detachedEvidenceCount: 1,
-    firstByteLength: "103637461",
-    secondByteLength: "103637461",
+    firstByteLength: "103637695",
+    secondByteLength: "103637695",
   },
   claims: {
     twoDistinctPrivateOutputRootsVerified: true,

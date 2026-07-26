@@ -41,23 +41,23 @@ describe("package-pinned full-distribution reproducibility", () => {
       buildInputLockResourceSha256:
         "fd0f4f978399c6e52ebdb0489f35ce6b0a88e289dce8cfdfa112e52d6217cf3c",
       reproducibilityId:
-        "bg.cpp.browser-full-distribution-reproducibility.sha256.b9b6bab28354bc3ddb7466886f958413d253aab65c00bcd61ef13eeaa074c2bf",
+        "bg.cpp.browser-full-distribution-reproducibility.sha256.64cc7401523b6026aba9430e2f081d708bc62cfcbe6fc343bf58ec0798aeec7b",
       deterministicMetadata: {
         profileHash:
-          "6675d5ca44dfaeea3876cad3c752cc1cf8219f1062cbc1b0be06dfd8a611a3b1",
+          "4f4b7416ec509ea97b612cc5b6c6c01596624ef63b8badc4f2a21ffd6b2e1003",
         profileSha256:
-          "e9a4d08e0f6c0efe7c34689061f37ed46159c2a130765100546513c5d07a22bf",
-        profileByteLength: "7150",
+          "16d47a72abe1851ce51810898cfd7d4223eae8e114c1f7ea300858486b30c6a8",
+        profileByteLength: "7148",
         assetManifestId:
-          "bg.cpp.browser-assets.sha256.6a55d49312de7171cab1ff20b4cc0a79de6696c6c4b1341f472e22282dacb551",
+          "bg.cpp.browser-assets.sha256.9db5c28897a9d9fd512056a767ade5446e0c188e3dc3f12946929f6d59d01c25",
         buildSubjectId:
-          "bg.cpp.browser-build-subject.sha256.f54e7af965f09b75b49e1db00a5a94d5ba6efc3771c0deff483b0c4417bc010c",
+          "bg.cpp.browser-build-subject.sha256.ed6344d3d2ffef5745f92e0ee53d4839e6c6ed7e193a56ca700c61853eb2da98",
       },
       outputCount: 25,
       deterministicSubjectCount: 24,
       detachedEvidenceCount: 1,
-      firstByteLength: "103637461",
-      secondByteLength: "103637461",
+      firstByteLength: "103637695",
+      secondByteLength: "103637695",
       twoDistinctPrivateOutputRootsVerified: true,
       exactBuildLockOutputPlanMatched: true,
       exactOutputsRehashedInBothRoots: true,

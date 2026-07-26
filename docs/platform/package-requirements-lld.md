@@ -26,7 +26,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
 | 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. |
-| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, and unified no-clobber producer/reviewer evidence exchange are package-pinned; production external approval, externally rooted producer trust, exact-payload lowering/backend convergence, and release authority remain open. |
+| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, and unified no-clobber producer/reviewer evidence exchange are package-pinned; production external approval, externally rooted producer trust, production backend authority, and release authority remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
@@ -45,10 +45,10 @@ The 90-minute build is no longer an engineering iteration loop:
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
   exact build lock, verifies both zero-import Worker bundles, verifies that the
   checked-in strict matrix matches its deterministic authoring projection, and
-  passes 96 files/789 tests. Its latest Vitest portion took 14.14 seconds.
-- The complete compiler unit suite passes 103 files/1,646 tests in 11.52 seconds.
-- The required native boundary passes 54 files/286 tests with nine explicit skips
-  in 52.38 seconds; optimized, UBSan, and ASan work remains outside the edit loop.
+  passes 98 files/795 tests. Its latest Vitest portion took 20.14 seconds.
+- The complete compiler unit suite passes 104 files/1,649 tests in 28.17 seconds.
+- The required native boundary passes 55 files/289 tests with nine explicit
+  skips in 67.05 seconds; optimized, UBSan, and ASan stay outside the edit loop.
 - Cache-free LLVM/Clang builds exist only to mint clean-build and
   reproducibility evidence. Their two jobs run concurrently and never replace
   the focused or fast local paths.
@@ -74,10 +74,7 @@ build/parity machinery and are not runtime dependencies. The controller:
   producer trust, distribution approval, and release as distinct authorities.
 
 The package binds one exact build lock, factory, reproducible extractor, and
-zero-import verifier/compiler Worker pair. Workflow `30069614333` produced two
-byte-identical 31,841,008-byte extractors. Its concurrent cache-free jobs are
-release evidence only; exact identities, durations, and hashes remain in the
-implementation ledger rather than this normative checkpoint.
+zero-import verifier/compiler Worker pair. Exact evidence stays in the ledger.
 
 The package-pinned strict browser observation now records eight unchanged
 C++17/CuTe compilations: f32 ranks 1 through 4, positive strided-slice,
@@ -87,12 +84,8 @@ the verifier and compiler Workers, emits one accepted Artifact V3, and prepares
 one distinct semantic view-copy candidate. The browser test now constructs its
 profile through the package-owned exact Clang 22.1.8, CUDA 12.6.3, CUTLASS
 3.7.0, libc++ 22.1.8, source-root, header-content, Worker, Wasm, and runtime-ABI
-contract; it no longer imports the synthetic test-profile fixture. The
-canonical 26,213-byte matrix has SHA-256
-`4d8b956050834e550405b15f1c7d52b16927ee3e8d4bc7b7da4035d430edc80a`
-and binds source revision `e9062c20f2a070774743e4d839c275c05df47225`.
-The matrix deliberately retains producer trust, license approval, lowering
-authority, backend execution, and release readiness as false.
+contract; it no longer imports the synthetic test-profile fixture. The matrix
+retains producer, legal, backend, and release authority as false.
 
 The build lock declares 24 deterministic subjects including diagnostic
 normalization plus one detached DSSE envelope across exactly 25 paths. The
@@ -106,18 +99,10 @@ exclusive no-follow creation, stable immutable inputs, independent rereads,
 exact tree closure, bounded files, synchronization, and owned-transaction
 cleanup.
 
-Two distinct live roots materialized and finalized at exact source revision
-`0840801a138df057da236e84099cc12182b40e2c`. Each contains 25 outputs and
-103,637,461 bytes; all 24 deterministic subjects are byte-identical and both
-detached envelopes bind build subject
-`bg.cpp.browser-build-subject.sha256.f54e7af965f09b75b49e1db00a5a94d5ba6efc3771c0deff483b0c4417bc010c`.
-The complete-output reproducibility identity is
-`bg.cpp.browser-full-distribution-reproducibility.sha256.b9b6bab28354bc3ddb7466886f958413d253aab65c00bcd61ef13eeaa074c2bf`.
-The 8,951-byte package observation has SHA-256
-`4637cf9624ad00dd833b72b832f2c9e25ee0a8ffcdf62d8b95b732791d36a65a`;
-its verifier independently rebinds the current build plan, header
-distribution, extractor, Worker, build lock, and three canonical policy
-resources before issuing opaque package reproducibility authority.
+Two distinct live 25-output roots have byte-identical deterministic subjects
+and detached envelopes bound to the same build subject. Package verification
+rebinds the current plan and every current component before issuing opaque
+reproducibility authority; exact identities stay in the ledger.
 
 The live finalization used an explicitly local engineering policy and key.
 Therefore complete-output reproducibility is true, while detached-signature
@@ -126,18 +111,9 @@ approval, Worker execution, lowering, backend execution, and release
 readiness remain false. Reproducible bytes and a valid local signature do not
 substitute for those independent authorities.
 
-The external distribution-approval path reauthenticates the package-pinned
-17-output header distribution and binds its build, output, reproducibility, and
-`license-inventory.json` identities to a policy-rooted P-256 DSSE/in-toto
-decision. Its no-clobber request/response exchange accepts no private key and
-serializes only a non-reusable verification observation. Only synthetic
-policy/key/statement tests exist, so production approval remains false and all
-full-output, trust, execution, backend, and release authorities stay separate.
-
-The unified host exchange derives producer and reviewer format-only material
-from exact immutable inputs. Each verification requires its exact request and
-returned canonical envelope, runs the corresponding opaque trust transition in
-one process, and persists no reusable authority. Only externally controlled
+The no-clobber producer/reviewer exchange derives format-only material from
+exact immutable inputs, accepts no private key, rebinds returned canonical
+envelopes, and persists no reusable authority. Only externally controlled
 production evidence can authorize the build or header distribution.
 
 ### Shared dtype and layout execution
@@ -190,22 +166,20 @@ operation uses an opaque callback.
 ### Remaining production blockers
 
 Gate 3 cannot become verified until all of the following are independently
-satisfied:
+satisfied. Exact-payload shared CPU/required-WebGPU convergence is complete for
+the local-engineering build and is no longer an implementation blocker.
 
-1. The exact candidates from the promoted strict eight-case C++17/CuTe matrix
-   are admitted by the independent producer-trust transition and converge
-   through shared CPU and required real-WebGPU execution without a
-   source-shaped bypass.
-2. A package-controlled production policy admits an externally controlled key
+1. A package-controlled production policy admits an externally controlled key
    and an externally issued exact-build statement for the exact build subject.
-3. A package-controlled production approval policy admits an externally
+2. A package-controlled production approval policy admits an externally
    controlled reviewer key, and the package-owned approval verifier accepts an
    externally issued decision over the exact current header-distribution
    subject. Package-generated hashes, license text, signing material, or
    signatures cannot self-approve redistribution.
-4. Final release authority consumes the current package-pinned complete-output
-   reproducibility authority together with the independent production build,
-   legal, trust, execution, and backend authorities without collapsing them
+3. Production composition re-admits the exact build under that external trust
+   root, consumes the package-pinned exact-payload convergence result, and
+   issues the distinct backend execution and final release authorities together
+   with current reproducibility and legal approval without collapsing them
    into one claim.
 
 Gate 7 remains separate future work. Its absence does not weaken the completed
