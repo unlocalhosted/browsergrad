@@ -1,10 +1,14 @@
+import { canonicalJsonBytes } from
+  "@unlocalhosted/browsergrad-semantic-core/schema";
 import { describe, expect, it } from "vitest";
 import {
   CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MAJOR,
   CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MINOR,
   CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_SCHEMA,
+  CPP_CUTE_FRONTEND_PROFILE_BYTE_LIMIT,
   CppCuteFrontendProfileError,
   cppCuteFrontendCompilationContract,
+  decodeCppCuteFrontendProfile,
   prepareCppCuteFrontendProfile,
   unwrapPreparedCppCuteAotFrontendProfile,
   unwrapPreparedCppCuteBrowserFrontendProfile,
@@ -32,6 +36,35 @@ function expectProfileError(
 }
 
 describe("C++/CuTe frontend profile", () => {
+  it("admits only exact canonical plain unshared profile bytes", async () => {
+    const value = createCppCuteBrowserProfileInput();
+    const bytes = canonicalJsonBytes(value);
+    const prepared = await decodeCppCuteFrontendProfile(bytes);
+    expect(prepared).toEqual(await prepareCppCuteFrontendProfile(value));
+
+    const noncanonical = new TextEncoder().encode(
+      `${new TextDecoder().decode(bytes)}\n`,
+    );
+    await expect(decodeCppCuteFrontendProfile(noncanonical)).rejects
+      .toMatchObject({
+        code: "BG-COMPILER-CPP-CUTE-PROFILE-NONCANONICAL-BYTES",
+        path: "$bytes",
+      });
+
+    const shared = new Uint8Array(new SharedArrayBuffer(bytes.byteLength));
+    shared.set(bytes);
+    await expect(decodeCppCuteFrontendProfile(shared)).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-PROFILE-INVALID",
+      path: "$bytes",
+    });
+    await expect(decodeCppCuteFrontendProfile(
+      new Uint8Array(CPP_CUTE_FRONTEND_PROFILE_BYTE_LIMIT + 1),
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-PROFILE-RESOURCE-LIMIT",
+      path: "$bytes",
+    });
+  });
+
   it("prepares one deterministic opaque profile", async () => {
     const first = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
     const second = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
@@ -159,7 +192,7 @@ describe("C++/CuTe frontend profile", () => {
     const aot = await prepareCppCuteFrontendProfile(createCppCuteProfileInput());
 
     expect(first).toEqual(second);
-    expect(first.profileHash).toBe("2c8135711012ab041cee984f25de5fd8aa72d762e7168084b5c3363ed7619ff8");
+    expect(first.profileHash).toBe("5cdb61aa0c930854a68747e04347057bf4ca45693dc1f441d47d2e8fd0ffc57e");
     expect(first.profileId).toBe("browsergrad.compiler.cpp-cute.browser-clang@1");
     expect(first.deploymentMode).toBe("browser-local");
     expect(first.compilationContractHash).toBe(aot.compilationContractHash);

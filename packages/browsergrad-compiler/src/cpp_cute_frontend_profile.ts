@@ -1,13 +1,22 @@
 import {
+  SCHEMA_DIAGNOSTIC_CODES,
+  SemanticSchemaError,
   assertJsonValue,
+  canonicalJsonBytes,
   canonicalizeJson,
   compareCanonicalStrings,
+  decodeWireJson,
   deepFreezeJson,
   hashCanonicalJson,
   isJsonObject,
+  type DecodeLimits,
   type JsonObject,
   type JsonValue,
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import {
+  copyInspectedUnsharedUint8Array,
+  inspectUnsharedPlainUint8Array,
+} from "./cpp_cute_aot_bytes.js";
 import {
   CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256,
 } from "./cpp_cute_browser_runtime_abi.js";
@@ -42,6 +51,19 @@ export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MAJOR = 1;
 export const CPP_CUTE_FRONTEND_COMPILATION_CONTRACT_MINOR = 2;
 export const CPP_CUTE_FRONTEND_PROVENANCE_PREDICATE_TYPE =
   "https://browsergrad.dev/provenance/cpp-cute-aot/v3";
+export const CPP_CUTE_FRONTEND_PROFILE_BYTE_LIMIT = 256 * 1024;
+export const CPP_CUTE_FRONTEND_PROFILE_DECODE_LIMITS: DecodeLimits =
+  Object.freeze({
+    maxDocumentBytes: CPP_CUTE_FRONTEND_PROFILE_BYTE_LIMIT,
+    maxDepth: 24,
+    maxNodes: 16_384,
+    maxStringBytes: 192 * 1024,
+    maxArrayLength: 4_096,
+    maxObjectProperties: 128,
+    maxRank: 16,
+    maxIntegerBits: 64,
+    maxArithmeticOperations: 32_768,
+  });
 
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 const OCI_SHA256 = /^sha256:[0-9a-f]{64}$/u;
@@ -466,6 +488,7 @@ export interface PrepareCppCuteFrontendProfileOptions {
 export type CppCuteFrontendProfileErrorCode =
   | "BG-COMPILER-CPP-CUTE-PROFILE-CANCELLED"
   | "BG-COMPILER-CPP-CUTE-PROFILE-INVALID"
+  | "BG-COMPILER-CPP-CUTE-PROFILE-NONCANONICAL-BYTES"
   | "BG-COMPILER-CPP-CUTE-PROFILE-UNSUPPORTED-VERSION"
   | "BG-COMPILER-CPP-CUTE-PROFILE-RESOURCE-LIMIT"
   | "BG-COMPILER-CPP-CUTE-PROFILE-UNVERIFIED";
@@ -531,6 +554,56 @@ export async function prepareCppCuteFrontendProfile(
     compilationContract,
     compilationContractHash,
   }));
+  return prepared;
+}
+
+/**
+ * Decodes one exact canonical profile document from plain unshared bytes.
+ * This is the distribution/control-plane admission path; object preparation
+ * remains available to profile authors before canonical serialization.
+ */
+export async function decodeCppCuteFrontendProfile(
+  bytes: Uint8Array,
+  options: PrepareCppCuteFrontendProfileOptions = {},
+): Promise<PreparedCppCuteFrontendProfile> {
+  throwIfAborted(options.signal);
+  let inspected: ReturnType<typeof inspectUnsharedPlainUint8Array>;
+  try {
+    inspected = inspectUnsharedPlainUint8Array(bytes);
+  } catch {
+    invalid("$bytes", "profile must be one plain unshared Uint8Array");
+  }
+  if (inspected.byteLength === 0 ||
+      inspected.byteLength > CPP_CUTE_FRONTEND_PROFILE_BYTE_LIMIT) {
+    resource(
+      "$bytes",
+      `profile bytes must contain 1..${CPP_CUTE_FRONTEND_PROFILE_BYTE_LIMIT} bytes`,
+    );
+  }
+  const snapshot = copyInspectedUnsharedUint8Array(bytes, inspected);
+  throwIfAborted(options.signal);
+  let decoded: JsonValue;
+  try {
+    decoded = decodeWireJson(snapshot, {
+      limits: CPP_CUTE_FRONTEND_PROFILE_DECODE_LIMITS,
+    });
+  } catch (cause) {
+    if (isSchemaResourceLimit(cause)) {
+      resource("$bytes", "profile decoding exceeded fixed resource limits");
+    }
+    invalid("$bytes", "profile bytes are not strict JSON");
+  }
+  const prepared = await prepareCppCuteFrontendProfile(decoded, options);
+  const canonical = canonicalJsonBytes(
+    unwrapPreparedCppCuteFrontendProfile(prepared).profile,
+  );
+  if (!equalBytes(snapshot, canonical)) {
+    fail(
+      "BG-COMPILER-CPP-CUTE-PROFILE-NONCANONICAL-BYTES",
+      "$bytes",
+      "profile bytes must exactly equal canonical JSON bytes",
+    );
+  }
   return prepared;
 }
 
@@ -2018,6 +2091,20 @@ function resource(path: string, message: string): never {
 
 function invalid(path: string, message: string): never {
   fail("BG-COMPILER-CPP-CUTE-PROFILE-INVALID", path, message);
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  let difference = 0;
+  for (let index = 0; index < left.byteLength; index += 1) {
+    difference |= (left[index] ?? 0) ^ (right[index] ?? 0);
+  }
+  return difference === 0;
+}
+
+function isSchemaResourceLimit(value: unknown): value is SemanticSchemaError {
+  return value instanceof SemanticSchemaError &&
+    value.diagnostic.code === SCHEMA_DIAGNOSTIC_CODES.resourceLimit;
 }
 
 function fail(code: CppCuteFrontendProfileErrorCode, path: string, message: string): never {

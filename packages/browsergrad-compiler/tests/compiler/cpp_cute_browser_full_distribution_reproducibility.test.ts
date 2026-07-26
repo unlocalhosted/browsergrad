@@ -42,6 +42,17 @@ describe("package-pinned full-distribution reproducibility", () => {
         "fd0f4f978399c6e52ebdb0489f35ce6b0a88e289dce8cfdfa112e52d6217cf3c",
       reproducibilityId:
         "bg.cpp.browser-full-distribution-reproducibility.sha256.b9b6bab28354bc3ddb7466886f958413d253aab65c00bcd61ef13eeaa074c2bf",
+      deterministicMetadata: {
+        profileHash:
+          "6675d5ca44dfaeea3876cad3c752cc1cf8219f1062cbc1b0be06dfd8a611a3b1",
+        profileSha256:
+          "e9a4d08e0f6c0efe7c34689061f37ed46159c2a130765100546513c5d07a22bf",
+        profileByteLength: "7150",
+        assetManifestId:
+          "bg.cpp.browser-assets.sha256.6a55d49312de7171cab1ff20b4cc0a79de6696c6c4b1341f472e22282dacb551",
+        buildSubjectId:
+          "bg.cpp.browser-build-subject.sha256.f54e7af965f09b75b49e1db00a5a94d5ba6efc3771c0deff483b0c4417bc010c",
+      },
       outputCount: 25,
       deterministicSubjectCount: 24,
       detachedEvidenceCount: 1,

@@ -92,6 +92,8 @@ export interface VerifiedCppCuteBrowserFullDistributionReproducibility {
   readonly buildInputLockId: string;
   readonly buildInputLockResourceSha256: string;
   readonly reproducibilityId: string;
+  readonly deterministicMetadata:
+    typeof CPP_CUTE_BROWSER_FULL_DISTRIBUTION_REPRODUCIBILITY_V1_RESOURCE.deterministicMetadata;
   readonly deterministicOutputs:
     readonly CppCuteBrowserFullDistributionReproducibilityOutputV1[];
   readonly detachedEvidence:
@@ -292,6 +294,7 @@ verifyCppCuteBrowserFullDistributionReproducibilityResource(
     buildInputLockResourceSha256:
       resource.buildInputLockResourceSha256,
     reproducibilityId: resource.reproducibilityId,
+    deterministicMetadata: resource.deterministicMetadata,
     deterministicOutputs: resource.deterministicOutputs,
     detachedEvidence: resource.detachedEvidence,
     outputCount: resource.totals.outputCount,

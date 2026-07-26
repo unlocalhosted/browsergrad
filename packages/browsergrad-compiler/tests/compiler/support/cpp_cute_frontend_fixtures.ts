@@ -283,7 +283,7 @@ export function createCppCuteBrowserProfileInput(
       assetSetSha256: options.assetSetSha256 ?? "8".repeat(64),
       buildProvenanceLockSha256: options.buildProvenanceLockSha256 ?? "7".repeat(64),
       extractor: {
-        id: "browsergrad-tools/cpp-cute-clang-wasm",
+        id: "browsergrad-tools/cpp-cute-frontend",
         version: "0.1.0",
         buildId: "browsergrad-cpp-cute-clang-wasm-0.1.0",
         binarySha256: browserExtractorSha256,

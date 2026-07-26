@@ -88,6 +88,7 @@
     "verify:browser-cpp-cute-real-compile": "node scripts/cpp_cute_browser_build/cpp_cute_browser_real_compile_runner.mjs --require-compiled",
     "observe:browser-cpp-cute-real-compile-matrix": "node scripts/cpp_cute_browser_build/cpp_cute_browser_real_compile_matrix.mjs",
     "verify:browser-cpp-cute-real-compile-matrix": "node scripts/cpp_cute_browser_build/cpp_cute_browser_real_compile_matrix.mjs --require-compiled",
+    "verify:browser-cpp-cute-exact-distribution-convergence": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_exact_distribution_convergence.mjs",
     "author:browser-cpp-cute-strict-compile-observation": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_strict_compile_observation_authoring.mjs",
     "check:browser-cpp-cute-strict-compile-observation": "node scripts/cpp_cute_browser_build/cpp_cute_browser_strict_compile_observation_authoring.mjs --check",
     "test:audit-corpus": "pnpm --dir ../.. --filter @unlocalhosted/browsergrad-kernels run build && pnpm run build && pnpm run test:audit-corpus:run",

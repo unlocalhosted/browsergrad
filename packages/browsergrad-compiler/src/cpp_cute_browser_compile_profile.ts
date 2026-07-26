@@ -75,7 +75,11 @@ export function createCppCuteBrowserCompileProfileInput(
       assetSetSha256: input.assetSetSha256,
       buildProvenanceLockSha256: input.buildProvenanceLockSha256,
       extractor: {
-        id: "browsergrad-tools/cpp-cute-clang-wasm",
+        // Artifact V3 identifies the logical extractor that emits its
+        // transport envelope. The Wasm-specific binary/build identities stay
+        // separate below; using the binary label here makes the exact browser
+        // artifact impossible to authorize.
+        id: "browsergrad-tools/cpp-cute-frontend",
         version: "0.1.0",
         buildId: "browsergrad-cpp-cute-clang-wasm-0.1.0",
         binarySha256: input.extractorWasmSha256,

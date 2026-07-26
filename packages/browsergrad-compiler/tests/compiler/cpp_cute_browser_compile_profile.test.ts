@@ -89,6 +89,7 @@ describe("package-owned browser C++/CuTe compile profile", () => {
       assetSetSha256: "1".repeat(64),
       buildProvenanceLockSha256: "2".repeat(64),
       extractor: {
+        id: "browsergrad-tools/cpp-cute-frontend",
         binarySha256: "3".repeat(64),
         semanticAdapterManifestSha256:
           CPP_CUTE_SEMANTIC_ADAPTER_MANIFEST_V1_RESOURCE_SHA256,
