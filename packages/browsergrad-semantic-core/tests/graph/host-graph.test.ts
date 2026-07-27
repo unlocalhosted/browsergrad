@@ -125,6 +125,62 @@ function program(artifacts: VerifiedViewCopyArtifacts): HostGraphProgram {
   };
 }
 
+function copyProgram(): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 1 },
+    failureModel: HOST_GRAPH_FAILURE_MODEL,
+    rankCount: wire("2"),
+    resources: [
+      {
+        resourceId: "input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u8",
+        byteLength: wire("7"),
+        alignmentBytes: 1,
+      },
+      {
+        resourceId: "temporary",
+        role: "temporary",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u8",
+        byteLength: wire("7"),
+        alignmentBytes: 1,
+      },
+      {
+        resourceId: "output",
+        role: "output",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u8",
+        byteLength: wire("7"),
+        alignmentBytes: 1,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "copy-input",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "input",
+        destinationResourceId: "temporary",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "copy-output",
+        kind: "copy",
+        dependsOn: ["copy-input"],
+        sourceResourceId: "temporary",
+        destinationResourceId: "output",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+    ],
+  };
+}
+
 async function diagnostic(
   run: () => Promise<unknown> | unknown,
 ): Promise<SemanticSchemaError> {
@@ -158,6 +214,134 @@ function artifactsFor(artifacts: VerifiedViewCopyArtifacts) {
 }
 
 describe("host graph artifact", () => {
+  it("normalizes version-1.1 whole-allocation per-rank copies", async () => {
+    const constructed = await createVerifiedHostGraphArtifact(
+      copyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    );
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+
+    expect(payload.program.version).toEqual({ major: 1, minor: 1 });
+    expect(payload.program.nodes).toEqual([
+      {
+        nodeId: "copy-input",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "input",
+        destinationResourceId: "temporary",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "copy-output",
+        kind: "copy",
+        dependsOn: ["copy-input"],
+        sourceResourceId: "temporary",
+        destinationResourceId: "output",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+    ]);
+    expect(prepared).toMatchObject({
+      rankCount: 2n,
+      nodeCount: 2,
+      dispatchCount: 0,
+      collectiveCount: 0,
+      copyCount: 2,
+      topologicalNodeIds: ["copy-input", "copy-output"],
+    });
+  });
+
+  it("rejects copy version, mode, resource, dtype, and hazard drift", async () => {
+    const future = clone(copyProgram());
+    future.version.minor = 2 as typeof future.version.minor;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      future,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const version = clone(copyProgram());
+    version.version.minor = 0;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      version,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const mismatch = {
+      schema: HOST_GRAPH_ARTIFACT_SCHEMA,
+      version: { major: 1, minor: 1 },
+      producer: { id: "test", version: "1" },
+      artifactId: "minor-mismatch",
+      requiredExtensions: [],
+      payload: { program: { ...copyProgram(), version: { major: 1, minor: 0 } } },
+    };
+    expect((await diagnostic(() => verifyHostGraphArtifact(
+      mismatch,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidArtifact);
+
+    const mode = clone(copyProgram());
+    const modeNode = mode.nodes[0]!;
+    if (modeNode.kind !== "copy") throw new Error("missing copy node");
+    modeNode.mode = "partial" as typeof modeNode.mode;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      mode,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const missing = clone(copyProgram());
+    const missingNode = missing.nodes[0]!;
+    if (missingNode.kind !== "copy") throw new Error("missing copy node");
+    missingNode.sourceResourceId = "missing";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      missing,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.danglingReference);
+
+    const dtype = clone(copyProgram());
+    dtype.resources.find((item) => item.resourceId === "temporary")!.dtype =
+      "i8";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      dtype,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+
+    const size = clone(copyProgram());
+    size.resources.find((item) => item.resourceId === "temporary")!
+      .byteLength = wire("8");
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      size,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+
+    const self = clone(copyProgram());
+    const selfNode = self.nodes[0]!;
+    if (selfNode.kind !== "copy") throw new Error("missing copy node");
+    selfNode.destinationResourceId = "input";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      self,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidAccess);
+
+    const inputWrite = clone(copyProgram());
+    const inputWriter = inputWrite.nodes[1]!;
+    if (inputWriter.kind !== "copy") throw new Error("missing copy node");
+    inputWriter.destinationResourceId = "input";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      inputWrite,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidAccess);
+
+    const readBeforeWrite = clone(copyProgram());
+    const first = readBeforeWrite.nodes[0]!;
+    if (first.kind !== "copy") throw new Error("missing copy node");
+    first.sourceResourceId = "temporary";
+    first.destinationResourceId = "output";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      readBeforeWrite,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.readBeforeWrite);
+  });
+
   it("normalizes a multi-dispatch DAG with explicit collective meaning", async () => {
     const artifacts = await semantic();
     const constructed = await createVerifiedHostGraphArtifact(
@@ -197,6 +381,7 @@ describe("host graph artifact", () => {
       edgeCount: 2,
       dispatchCount: 2,
       collectiveCount: 1,
+      copyCount: 0,
       topologicalNodeIds: ["transform", "synchronize", "store"],
       outputResourceIds: ["output"],
     });

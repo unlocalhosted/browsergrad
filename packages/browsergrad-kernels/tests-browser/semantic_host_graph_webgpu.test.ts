@@ -51,6 +51,7 @@ const CASE_IDS = Object.freeze([
   "f32-rank-order-sum",
   "f32-signed-zero-min",
   "i32-wrapping-sum",
+  "u8-whole-allocation-copy",
   "u32-exact-max",
 ]);
 const PRODUCER_VERSIONS = Object.freeze({
@@ -70,7 +71,7 @@ const wire = (value: number): WireU64 => parseWireU64(String(value));
 
 interface PreparedCase {
   readonly caseId: string;
-  readonly artifacts: VerifiedViewCopyArtifacts;
+  readonly artifacts?: VerifiedViewCopyArtifacts;
   readonly graph: VerifiedHostGraphArtifact;
   readonly prepared: PreparedSemanticHostGraphWebGpu;
   readonly inputs: readonly SemanticHostGraphWebGpuInputBinding[];
@@ -84,6 +85,7 @@ interface CaseObservation extends JsonObject {
   readonly backendSpecializationHash: string;
   readonly expandedStepCount: number;
   readonly dispatchStepCount: number;
+  readonly copyStepCount: number;
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -138,6 +140,7 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
           i32Bytes([1, -3]),
         ],
       ),
+      prepareRawCopyCase(),
       prepareCase(
         "u32-exact-max",
         "u32",
@@ -214,7 +217,9 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       stage = `execute:${preparedCase.caseId}`;
       const cpu = await prepareHostGraphCpu(
         preparedCase.graph,
-        artifactOptions(preparedCase.artifacts),
+        preparedCase.artifacts === undefined
+          ? { kernelArtifacts: [], layoutArtifacts: [] }
+          : artifactOptions(preparedCase.artifacts),
       );
       const mutableInputs = preparedCase.inputs.map((binding) => ({
         ...binding,
@@ -233,7 +238,8 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       ]);
       assertOutputEquality(actual.outputs, expected.outputs);
       expect(actual.trace.submitted).toBe(true);
-      expect(actual.trace.executedNodeIds).toEqual(["copy", "reduce"]);
+      expect(actual.trace.executedNodeIds)
+        .toEqual(expected.executedNodeIds);
       completedCases.push(Object.freeze({
         caseId: preparedCase.caseId,
         artifactHash: preparedCase.artifactHash,
@@ -242,6 +248,7 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
           actual.trace.backendSpecializationHash,
         expandedStepCount: actual.trace.expandedStepCount,
         dispatchStepCount: actual.trace.dispatchStepCount,
+        copyStepCount: actual.trace.copyStepCount,
         collectiveReductionStepCount:
           actual.trace.collectiveReductionStepCount,
         collectiveReplicationStepCount:
@@ -391,6 +398,36 @@ async function prepareCase(
   });
 }
 
+async function prepareRawCopyCase(): Promise<PreparedCase> {
+  const caseId = "u8-whole-allocation-copy";
+  const values = [
+    new Uint8Array([0, 1, 2, 3, 4, 5, 6, 255]),
+    new Uint8Array([255, 6, 5, 4, 3, 2, 1, 0]),
+  ];
+  const graph = (await createVerifiedHostGraphArtifact(
+    rawCopyProgram(),
+    { kernelArtifacts: [], layoutArtifacts: [] },
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+    kernelArtifacts: [],
+    layoutArtifacts: [],
+  });
+  const inputs = Object.freeze(values.map((bytes, rank) =>
+    input(rank, bytes)));
+  return Object.freeze({
+    caseId,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: values.map((bytes) => Array.from(bytes)),
+    }),
+  });
+}
+
 function collectiveProgram(
   artifacts: VerifiedViewCopyArtifacts,
   dtype: "f32" | "i32" | "u32",
@@ -424,6 +461,43 @@ function collectiveProgram(
         result: "replicated-to-all-participants",
       },
     ],
+  };
+}
+
+function rawCopyProgram(): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 1 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire(2),
+    resources: [
+      {
+        resourceId: "input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u8",
+        byteLength: wire(8),
+        alignmentBytes: 1,
+      },
+      {
+        resourceId: "output",
+        role: "output",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u8",
+        byteLength: wire(8),
+        alignmentBytes: 1,
+      },
+    ],
+    nodes: [{
+      nodeId: "raw-copy",
+      kind: "copy",
+      dependsOn: [],
+      sourceResourceId: "input",
+      destinationResourceId: "output",
+      mode: "whole-allocation-bytes-per-rank",
+    }],
   };
 }
 

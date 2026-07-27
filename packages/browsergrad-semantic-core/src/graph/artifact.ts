@@ -46,6 +46,7 @@ import {
   type HostGraphCollectiveDType,
   type HostGraphCollectiveNumericalPolicy,
   type HostGraphCollectiveReduction,
+  type HostGraphCopyNode,
   type HostGraphDispatchNode,
   type HostGraphDispatchResourceBinding,
   type HostGraphNode,
@@ -56,7 +57,7 @@ import {
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 0;
+export const HOST_GRAPH_ARTIFACT_MINOR = 1;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
@@ -115,6 +116,7 @@ export interface PreparedHostGraphProgram {
   readonly edgeCount: number;
   readonly dispatchCount: number;
   readonly collectiveCount: number;
+  readonly copyCount: number;
   readonly topologicalNodeIds: readonly string[];
   readonly outputResourceIds: readonly string[];
 }
@@ -124,6 +126,7 @@ interface HostGraphAnalysis {
   readonly edgeCount: number;
   readonly dispatchCount: number;
   readonly collectiveCount: number;
+  readonly copyCount: number;
   readonly topologicalNodeIds: readonly string[];
   readonly outputResourceIds: readonly string[];
 }
@@ -183,7 +186,7 @@ export async function verifyHostGraphArtifact(
     layoutArtifacts,
     limits,
   );
-  const program = parseProgram(envelope.payload);
+  const program = parseProgram(envelope.payload, envelope.version.minor);
   const analysis = analyzeProgram(program, semanticCatalog, limits);
   const normalizedEnvelope: WireEnvelope<JsonValue> = {
     ...envelope,
@@ -255,6 +258,7 @@ export async function prepareHostGraphProgram(
     edgeCount: analysis.edgeCount,
     dispatchCount: analysis.dispatchCount,
     collectiveCount: analysis.collectiveCount,
+    copyCount: analysis.copyCount,
     topologicalNodeIds: Object.freeze([...analysis.topologicalNodeIds]),
     outputResourceIds: Object.freeze([...analysis.outputResourceIds]),
   });
@@ -275,7 +279,10 @@ export function requirePreparedHostGraphProgram(
   }
 }
 
-function parseProgram(value: JsonValue): HostGraphProgram {
+function parseProgram(
+  value: JsonValue,
+  envelopeMinor: number,
+): HostGraphProgram {
   const payload = closedObject(value, ["program"], "$.payload");
   const object = closedObject(
     field(payload, "program", "$.payload"),
@@ -301,11 +308,21 @@ function parseProgram(value: JsonValue): HostGraphProgram {
     ["major", "minor"],
     "$.payload.program.version",
   );
-  if (version.major !== 1 || version.minor !== 0) {
+  if (
+    version.major !== 1 ||
+    (version.minor !== 0 && version.minor !== 1)
+  ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports version 1.0 only",
+      "host graph program reader supports versions 1.0 and 1.1 only",
+    );
+  }
+  if (version.minor !== envelopeMinor) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidArtifact,
+      "$.payload.program.version",
+      "host graph program minor version must match its artifact envelope",
     );
   }
   if (object.failureModel !== HOST_GRAPH_FAILURE_MODEL) {
@@ -329,10 +346,13 @@ function parseProgram(value: JsonValue): HostGraphProgram {
     field(object, "resources", "$.payload.program"),
     wireIntegerToBigInt(rankCount),
   );
-  const nodes = parseNodes(field(object, "nodes", "$.payload.program"));
+  const nodes = parseNodes(
+    field(object, "nodes", "$.payload.program"),
+    version.minor,
+  );
   return {
     kind: "host-graph",
-    version: { major: 1, minor: 0 },
+    version: { major: 1, minor: version.minor },
     failureModel: HOST_GRAPH_FAILURE_MODEL,
     rankCount,
     resources,
@@ -446,7 +466,10 @@ function parseResources(
   return resources;
 }
 
-function parseNodes(value: JsonValue): readonly HostGraphNode[] {
+function parseNodes(
+  value: JsonValue,
+  programMinor: 0 | 1,
+): readonly HostGraphNode[] {
   const values = arrayValue(value, "$.payload.program.nodes");
   if (values.length === 0 || values.length > HOST_GRAPH_MAX_NODES) {
     resource(
@@ -455,7 +478,11 @@ function parseNodes(value: JsonValue): readonly HostGraphNode[] {
     );
   }
   const nodes = values.map((item, index) =>
-    parseNode(item, `$.payload.program.nodes[${index}]`))
+    parseNode(
+      item,
+      `$.payload.program.nodes[${index}]`,
+      programMinor,
+    ))
     .sort((left, right) =>
       compareCanonicalStrings(left.nodeId, right.nodeId));
   unique(
@@ -466,16 +493,69 @@ function parseNodes(value: JsonValue): readonly HostGraphNode[] {
   return nodes;
 }
 
-function parseNode(value: JsonValue, path: string): HostGraphNode {
+function parseNode(
+  value: JsonValue,
+  path: string,
+  programMinor: 0 | 1,
+): HostGraphNode {
   const object = objectValue(value, path);
   const kind = stringValue(field(object, "kind", path), `${path}.kind`);
   if (kind === "dispatch") return parseDispatchNode(object, path);
   if (kind === "all-reduce") return parseAllReduceNode(object, path);
+  if (kind === "copy") {
+    if (programMinor < 1) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.kind`,
+        "copy nodes require host graph program version 1.1",
+      );
+    }
+    return parseCopyNode(object, path);
+  }
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "initial host graph profile supports dispatch and all-reduce nodes",
+    "host graph profile supports dispatch, all-reduce, and version-1.1 copy nodes",
   );
+}
+
+function parseCopyNode(
+  value: JsonObject,
+  path: string,
+): HostGraphCopyNode {
+  const object = closedObject(
+    value,
+    [
+      "nodeId",
+      "kind",
+      "dependsOn",
+      "sourceResourceId",
+      "destinationResourceId",
+      "mode",
+    ],
+    path,
+  );
+  if (object.mode !== "whole-allocation-bytes-per-rank") {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "copy mode must be whole-allocation-bytes-per-rank",
+    );
+  }
+  return {
+    nodeId: identifier(field(object, "nodeId", path), `${path}.nodeId`),
+    kind: "copy",
+    dependsOn: dependencies(field(object, "dependsOn", path), path),
+    sourceResourceId: identifier(
+      field(object, "sourceResourceId", path),
+      `${path}.sourceResourceId`,
+    ),
+    destinationResourceId: identifier(
+      field(object, "destinationResourceId", path),
+      `${path}.destinationResourceId`,
+    ),
+    mode: "whole-allocation-bytes-per-rank",
+  };
 }
 
 function parseDispatchNode(
@@ -716,6 +796,7 @@ function analyzeProgram(
   let edgeCount = 0;
   let dispatchCount = 0;
   let collectiveCount = 0;
+  let copyCount = 0;
   const dispatchEffects = new Map<
     string,
     readonly HostGraphResourceEffect[]
@@ -727,6 +808,12 @@ function analyzeProgram(
         node,
         resources,
         rankCount,
+        `$.payload.program.nodes[${index}]`,
+      );
+    } else if (node.kind === "copy") {
+      verifyCopyBinding(
+        node,
+        resources,
         `$.payload.program.nodes[${index}]`,
       );
     }
@@ -866,8 +953,10 @@ function analyzeProgram(
           access: "write" as const,
         }),
       ]));
-    } else {
+    } else if (node.kind === "all-reduce") {
       collectiveCount += 1;
+    } else {
+      copyCount += 1;
     }
   }
   const topologicalNodeIds = topologicalOrder(program.nodes, nodes);
@@ -885,6 +974,7 @@ function analyzeProgram(
     edgeCount,
     dispatchCount,
     collectiveCount,
+    copyCount,
     topologicalNodeIds: Object.freeze(topologicalNodeIds),
     outputResourceIds: Object.freeze(
       program.resources
@@ -892,6 +982,41 @@ function analyzeProgram(
         .map((resource) => resource.resourceId),
     ),
   });
+}
+
+function verifyCopyBinding(
+  node: HostGraphCopyNode,
+  resources: ReadonlyMap<string, HostGraphResource>,
+  path: string,
+): void {
+  if (node.sourceResourceId === node.destinationResourceId) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidAccess,
+      `${path}.destinationResourceId`,
+      "copy source and destination resources must be distinct",
+    );
+  }
+  const source = resources.get(node.sourceResourceId);
+  const destination = resources.get(node.destinationResourceId);
+  if (source === undefined || destination === undefined) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.danglingReference,
+      source === undefined
+        ? `${path}.sourceResourceId`
+        : `${path}.destinationResourceId`,
+      "copy references a missing graph resource",
+    );
+  }
+  if (
+    source.dtype !== destination.dtype ||
+    source.byteLength !== destination.byteLength
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      path,
+      "copy requires identical source and destination dtype and allocation byte length",
+    );
+  }
 }
 
 function verifyCollectiveBinding(
@@ -1113,7 +1238,11 @@ function verifyEffects(
       nodeEffects(node, dispatchEffects).entries()) {
       const effectPath = node.kind === "dispatch"
         ? `${path}.bindings[${effectIndex}]`
-        : `${path}.resourceId`;
+        : node.kind === "all-reduce"
+          ? `${path}.resourceId`
+          : effectIndex === 0
+            ? `${path}.sourceResourceId`
+            : `${path}.destinationResourceId`;
       const resource = resources.get(effect.resourceId);
       if (resource === undefined) {
         invalid(
@@ -1188,7 +1317,13 @@ function nodeEffects(
     }
     return effects;
   }
-  return [{ resourceId: node.resourceId, access: "read-write" }];
+  if (node.kind === "all-reduce") {
+    return [{ resourceId: node.resourceId, access: "read-write" }];
+  }
+  return [
+    { resourceId: node.sourceResourceId, access: "read" },
+    { resourceId: node.destinationResourceId, access: "write" },
+  ];
 }
 
 function reads(access: HostGraphResourceAccess): boolean {

@@ -15,6 +15,7 @@ import {
   type DecodeLimits,
 } from "../schema/limits.js";
 import {
+  HOST_GRAPH_ARTIFACT_MINOR,
   HOST_GRAPH_ARTIFACT_SCHEMA,
   verifyHostGraphArtifact,
   type VerifiedHostGraphArtifact,
@@ -61,9 +62,10 @@ export async function createVerifiedHostGraphArtifact(
     canonicalizeJson(request, { limits: normalized.limits }),
     { limits: normalized.limits },
   );
+  const programMinor = hostGraphProgramMinor(program);
   const artifact = await verifyHostGraphArtifact({
     schema: HOST_GRAPH_ARTIFACT_SCHEMA,
-    version: { major: 1, minor: 0 },
+    version: { major: 1, minor: programMinor },
     producer: normalized.producer,
     artifactId: normalized.artifactId,
     requiredExtensions: [],
@@ -79,6 +81,17 @@ export async function createVerifiedHostGraphArtifact(
       limits: normalized.limits,
     }),
   });
+}
+
+function hostGraphProgramMinor(value: JsonValue): number {
+  if (!isJsonObject(value)) return HOST_GRAPH_ARTIFACT_MINOR;
+  const version = value.version;
+  if (version === undefined || !isJsonObject(version)) {
+    return HOST_GRAPH_ARTIFACT_MINOR;
+  }
+  return typeof version.minor === "number"
+    ? version.minor
+    : HOST_GRAPH_ARTIFACT_MINOR;
 }
 
 function normalizeOptions(

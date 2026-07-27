@@ -3,6 +3,7 @@ import {
   hostGraphArtifactPayload,
   prepareHostGraphProgram,
   type HostGraphAllReduceNode,
+  type HostGraphCopyNode,
   type HostGraphDispatchNode,
   type HostGraphResource,
   type VerifiedHostGraphArtifact,
@@ -50,7 +51,7 @@ import {
 
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.0.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.1.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -200,6 +201,7 @@ export interface PreparedSemanticHostGraphWebGpu {
   readonly outputResourceIds: readonly string[];
   readonly expandedStepCount: number;
   readonly dispatchStepCount: number;
+  readonly copyStepCount: number;
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -219,6 +221,7 @@ export interface SemanticHostGraphWebGpuTrace {
   readonly executedNodeIds: readonly string[];
   readonly expandedStepCount: number;
   readonly dispatchStepCount: number;
+  readonly copyStepCount: number;
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -277,6 +280,7 @@ interface PreparedState {
 
 interface MutablePreparationCounts {
   dispatch: number;
+  copy: number;
   reduction: number;
   replication: number;
 }
@@ -356,6 +360,7 @@ export async function prepareSemanticHostGraphWebGpu(
   const steps: WgslKernelSequenceStep[] = [];
   const counts: MutablePreparationCounts = {
     dispatch: 0,
+    copy: 0,
     reduction: 0,
     replication: 0,
   };
@@ -388,7 +393,7 @@ export async function prepareSemanticHostGraphWebGpu(
         storageMetadata,
         moduleHashes,
       );
-    } else {
+    } else if (node.kind === "all-reduce") {
       const usesStatus = await appendCollectiveSteps(
         node,
         resourcesById,
@@ -400,6 +405,17 @@ export async function prepareSemanticHostGraphWebGpu(
         moduleHashes,
       );
       usesNumericalStatus ||= usesStatus;
+    } else {
+      await appendCopySteps(
+        node,
+        resourcesById,
+        normalized,
+        steps,
+        counts,
+        boundStorageNames,
+        storageMetadata,
+        moduleHashes,
+      );
     }
     if (steps.length > normalized.maxExpandedSteps) {
       fail(
@@ -499,6 +515,7 @@ export async function prepareSemanticHostGraphWebGpu(
     ),
     expandedStepCount: steps.length,
     dispatchStepCount: counts.dispatch,
+    copyStepCount: counts.copy,
     collectiveReductionStepCount: counts.reduction,
     collectiveReplicationStepCount: counts.replication,
     wgslModuleHashes: publicModuleHashes,
@@ -842,6 +859,73 @@ async function appendCollectiveSteps(
   return collective.usesNumericalStatus;
 }
 
+async function appendCopySteps(
+  node: HostGraphCopyNode,
+  resourcesById: ReadonlyMap<string, ResourcePlan>,
+  options: NormalizedPreparationOptions,
+  steps: WgslKernelSequenceStep[],
+  counts: MutablePreparationCounts,
+  boundStorageNames: Set<string>,
+  storageMetadata: Record<string, WgslStorageBufferMetadata>,
+  moduleHashes: string[],
+): Promise<void> {
+  const source = resourcesById.get(node.sourceResourceId);
+  const destination = resourcesById.get(node.destinationResourceId);
+  if (source === undefined || destination === undefined) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${node.nodeId}`,
+      "verified copy resource disappeared",
+    );
+  }
+  if (
+    source.byteLength !== destination.byteLength ||
+    source.resource.dtype !== destination.resource.dtype
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${node.nodeId}`,
+      "verified copy resource contract diverged",
+    );
+  }
+  if (source.byteLength === 0) return;
+  if (source.byteLength % 4 !== 0) {
+    fail(
+      "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
+      `$.nodes.${node.nodeId}`,
+      "portable WebGPU copy requires a whole number of 32-bit words",
+    );
+  }
+  const replication = await prepareHostGraphReplicationWgsl(
+    options.workgroupSize,
+  );
+  const elementCount = source.byteLength / 4;
+  for (let rank = 0; rank < source.storageNames.length; rank += 1) {
+    const sourceName = source.storageNames[rank] as string;
+    const destinationName = destination.storageNames[rank] as string;
+    steps.push(Object.freeze({
+      program: replication.program,
+      launch: frozenLaunch(elementCount),
+      storageAliases: Object.freeze({
+        source_words: sourceName,
+        destination_words: destinationName,
+      }),
+    }));
+    addRawResourceMetadata(
+      sourceName,
+      boundStorageNames,
+      storageMetadata,
+    );
+    addRawResourceMetadata(
+      destinationName,
+      boundStorageNames,
+      storageMetadata,
+    );
+    counts.copy += 1;
+  }
+  moduleHashes.push(replication.moduleHash);
+}
+
 function resourceBinding(
   bindings: ReadonlyMap<string, string>,
   resources: ReadonlyMap<string, ResourcePlan>,
@@ -893,6 +977,15 @@ function addResourceMetadata(
     valueType: "u32",
     compatibleValueTypes: Object.freeze([resource.resource.dtype]),
   });
+}
+
+function addRawResourceMetadata(
+  storageName: string,
+  names: Set<string>,
+  metadata: Record<string, WgslStorageBufferMetadata>,
+): void {
+  names.add(storageName);
+  metadata[storageName] ??= Object.freeze({ valueType: "u32" });
 }
 
 function frozenLaunch(
@@ -1456,6 +1549,7 @@ function createTrace(
     executedNodeIds: state.topologicalNodeIds,
     expandedStepCount: prepared.expandedStepCount,
     dispatchStepCount: prepared.dispatchStepCount,
+    copyStepCount: prepared.copyStepCount,
     collectiveReductionStepCount:
       prepared.collectiveReductionStepCount,
     collectiveReplicationStepCount:

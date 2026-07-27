@@ -140,6 +140,43 @@ function collectiveProgram(
   };
 }
 
+function rawCopyProgram(): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 1 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire("2"),
+    resources: [
+      {
+        resourceId: "input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u8",
+        byteLength: wire("7"),
+        alignmentBytes: 1,
+      },
+      {
+        resourceId: "output",
+        role: "output",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u8",
+        byteLength: wire("7"),
+        alignmentBytes: 1,
+      },
+    ],
+    nodes: [{
+      nodeId: "raw-copy",
+      kind: "copy",
+      dependsOn: [],
+      sourceResourceId: "input",
+      destinationResourceId: "output",
+      mode: "whole-allocation-bytes-per-rank",
+    }],
+  };
+}
+
 async function verified(
   program: HostGraphProgram,
   artifacts: VerifiedViewCopyArtifacts,
@@ -207,6 +244,39 @@ function readU32(bytes: Uint8Array): number[] {
 }
 
 describe("host graph CPU reference", () => {
+  it("copies complete odd-sized allocations per rank without semantic artifacts", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      rawCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+    const first = new Uint8Array([0, 1, 2, 3, 4, 5, 255]);
+    const second = new Uint8Array([255, 5, 4, 3, 2, 1, 0]);
+    const expected = [new Uint8Array(first), new Uint8Array(second)];
+    const pending = prepared.execute({
+      inputs: [input(0, first), input(1, second)],
+    });
+    first.fill(9);
+    second.fill(9);
+    const result = await pending;
+
+    expect(prepared.elementOperations).toBe(14n);
+    expect(result.executedNodeIds).toEqual(["raw-copy"]);
+    expect(result.outputs.map(({ bytes }) => bytes)).toEqual(expected);
+
+    await expect(prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+      maxElementOperations: 13,
+    })).rejects.toMatchObject({
+      code: "BG-GRAPH-CPU-RESOURCE-LIMIT",
+      path: "$.maxElementOperations",
+    });
+  });
+
   it("executes an authority-bound multi-dispatch pipeline", async () => {
     const artifacts = await identityArtifacts();
     const graph = await verified(pipelineProgram(artifacts, "f32"), artifacts);

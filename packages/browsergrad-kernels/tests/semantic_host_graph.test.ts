@@ -16,6 +16,7 @@ import {
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import {
   SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE,
+  SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
   SemanticHostGraphWebGpuError,
   prepareSemanticHostGraphWebGpu,
   runSemanticHostGraphWebGpu,
@@ -152,6 +153,43 @@ function collectiveProgram(
   };
 }
 
+function rawCopyProgram(byteLength = "8"): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 1 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire("2"),
+    resources: [
+      {
+        resourceId: "input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u8",
+        byteLength: wire(byteLength),
+        alignmentBytes: 1,
+      },
+      {
+        resourceId: "output",
+        role: "output",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u8",
+        byteLength: wire(byteLength),
+        alignmentBytes: 1,
+      },
+    ],
+    nodes: [{
+      nodeId: "raw-copy",
+      kind: "copy",
+      dependsOn: [],
+      sourceResourceId: "input",
+      destinationResourceId: "output",
+      mode: "whole-allocation-bytes-per-rank",
+    }],
+  };
+}
+
 async function verified(
   program: HostGraphProgram,
   artifacts: VerifiedViewCopyArtifacts,
@@ -174,6 +212,43 @@ function input(
 }
 
 describe("semantic host-graph WebGPU preparation", () => {
+  it("lowers version-1.1 raw copy nodes per rank without kernel artifacts", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      rawCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+
+    expect(prepared).toMatchObject({
+      rankCount: "2",
+      nodeCount: 1,
+      expandedStepCount: 2,
+      dispatchStepCount: 0,
+      copyStepCount: 2,
+      collectiveReductionStepCount: 0,
+      collectiveReplicationStepCount: 0,
+      plannedTransientGpuBytes: "48",
+      plannedTransientHostBytes: "80",
+      plannedTransientWorkingSetBytes: "128",
+    });
+    expect(prepared.wgslModuleHashes).toHaveLength(1);
+
+    const oddGraph = (await createVerifiedHostGraphArtifact(
+      rawCopyProgram("7"),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    await expect(prepareSemanticHostGraphWebGpu(oddGraph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    })).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
+      path: "$.nodes.raw-copy",
+    });
+  });
+
   it("expands a multi-rank pipeline at the canonical graph seam", async () => {
     const artifacts = await identityArtifacts();
     const graph = await verified(pipelineProgram(artifacts), artifacts);
@@ -184,13 +259,14 @@ describe("semantic host-graph WebGPU preparation", () => {
 
     expect(prepared).toMatchObject({
       profile: SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE,
-      backendVersion: "1.0.0",
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
       rankCount: "2",
       nodeCount: 2,
       inputResourceIds: ["input"],
       outputResourceIds: ["output"],
       expandedStepCount: 4,
       dispatchStepCount: 4,
+      copyStepCount: 0,
       collectiveReductionStepCount: 0,
       collectiveReplicationStepCount: 0,
       plannedTransientGpuBytes: "64",

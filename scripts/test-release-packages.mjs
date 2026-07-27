@@ -464,6 +464,67 @@ try {
     [1, 3, 2, 4].every((value, index) => packedDestinationView.getFloat32(index * 4, true) === value),
     "semantic-core packed /kernel view-copy execution produced the wrong transpose",
   );
+  const packedRawCopyGraph = await semanticGraph.createVerifiedHostGraphArtifact({
+    kind: "host-graph",
+    version: { major: 1, minor: 1 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: "1",
+    resources: [
+      {
+        resourceId: "input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u8",
+        byteLength: "8",
+        alignmentBytes: 1,
+      },
+      {
+        resourceId: "output",
+        role: "output",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u8",
+        byteLength: "8",
+        alignmentBytes: 1,
+      },
+    ],
+    nodes: [{
+      nodeId: "raw-copy",
+      kind: "copy",
+      dependsOn: [],
+      sourceResourceId: "input",
+      destinationResourceId: "output",
+      mode: "whole-allocation-bytes-per-rank",
+    }],
+  }, {
+    kernelArtifacts: [],
+    layoutArtifacts: [],
+  });
+  const packedRawCopyCpu = await semanticGraph.prepareHostGraphCpu(
+    packedRawCopyGraph.artifact,
+    { kernelArtifacts: [], layoutArtifacts: [] },
+  );
+  const packedRawCopyBytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 255]);
+  const packedRawCopyResult = await packedRawCopyCpu.execute({
+    inputs: [{
+      rank: "0",
+      resourceId: "input",
+      bytes: packedRawCopyBytes,
+    }],
+  });
+  assert(
+    semanticGraph.hostGraphArtifactPayload(packedRawCopyGraph.artifact)
+      .program.version.minor === 1
+      && (await semanticGraph.prepareHostGraphProgram(
+        packedRawCopyGraph.artifact,
+      )).copyCount === 1
+      && packedRawCopyResult.elementOperations === "8"
+      && packedRawCopyResult.outputs[0].bytes.every(
+        (value, index) => value === packedRawCopyBytes[index],
+      ),
+    "semantic-core packed graph lost version-1.1 per-rank raw-copy meaning",
+  );
 
   const kernelsPkg = readPackage(kernels);
   const workspaceKernelsPkg = readPackage(join(root, "packages/browsergrad-kernels"));
@@ -555,6 +616,20 @@ try {
   assert(packedWgsl.program.wgsl.includes("var<storage, read> source_words: array<u32>"), "packed WGSL lowering lost bit-exact source words");
   assert(packedWgsl.program.wgsl.includes("destination_words[destination_word] = copied_bits"), "packed WGSL lowering lost destination copy");
   assert(!packedWgsl.program.wgsl.includes("select("), "packed WGSL lowering used eager select for guarded copy");
+  const kernelsSemanticHostGraph = await import(
+    pathToFileURL(join(kernels, "dist/semantic_host_graph.js"))
+  );
+  const packedRawCopyWebGpu =
+    await kernelsSemanticHostGraph.prepareSemanticHostGraphWebGpu(
+      packedRawCopyGraph.artifact,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    );
+  assert(
+    packedRawCopyWebGpu.copyStepCount === 1
+      && packedRawCopyWebGpu.dispatchStepCount === 0
+      && packedRawCopyWebGpu.wgslModuleHashes.length === 1,
+    "packed kernels host graph lost version-1.1 raw-copy preparation",
+  );
   const kernelsSemanticGemm = await import(pathToFileURL(join(kernels, "dist/semantic_gemm.js")));
   const packedExactSchedule = await semanticSchedule.createVerifiedLogicalGemmTileSchedule(
     packedExactLogicalGemm.kernel,
@@ -1424,7 +1499,7 @@ function verifyInstalledSemanticViewCopyConsumer(consumer) {
   const source = `
 import { layoutArtifactPayload } from "@unlocalhosted/browsergrad-semantic-core/layout";
 import { createVerifiedDensePermutationViewCopyArtifacts, prepareViewCopyCpu } from "@unlocalhosted/browsergrad-semantic-core/kernel";
-import { HOST_GRAPH_CPU_PROFILE, hostGraphArtifactPayload, prepareHostGraphCpu } from "@unlocalhosted/browsergrad-semantic-core/graph";
+import { HOST_GRAPH_CPU_PROFILE, createVerifiedHostGraphArtifact, hostGraphArtifactPayload, prepareHostGraphCpu } from "@unlocalhosted/browsergrad-semantic-core/graph";
 import { hashSemanticArtifact, parseWireI64, parseWireU64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import densePermutationFixtures from "@unlocalhosted/browsergrad-semantic-core/fixtures/kernel-v1/dense-permutation-view-copy.cases.json" with { type: "json" };
 import { prepareSemanticViewCopyWgsl } from "@unlocalhosted/browsergrad-kernels/semantic_view_copy";
@@ -1527,6 +1602,56 @@ const hostGraphCpuOutputWords = new Uint32Array(
   hostGraphCpuOutput.bytes.byteOffset,
   hostGraphCpuOutput.bytes.byteLength / 4,
 );
+const rawCopyGraph = await createVerifiedHostGraphArtifact({
+  kind: "host-graph",
+  version: { major: 1, minor: 1 },
+  failureModel: "fail-stop-no-partial-output-commit",
+  rankCount: parseWireU64("1"),
+  resources: [
+    {
+      resourceId: "input",
+      role: "input",
+      multiplicity: "per-rank",
+      initialization: "external-input",
+      dtype: "u8",
+      byteLength: parseWireU64("8"),
+      alignmentBytes: 1,
+    },
+    {
+      resourceId: "output",
+      role: "output",
+      multiplicity: "per-rank",
+      initialization: "zero-fill",
+      dtype: "u8",
+      byteLength: parseWireU64("8"),
+      alignmentBytes: 1,
+    },
+  ],
+  nodes: [{
+    nodeId: "raw-copy",
+    kind: "copy",
+    dependsOn: [],
+    sourceResourceId: "input",
+    destinationResourceId: "output",
+    mode: "whole-allocation-bytes-per-rank",
+  }],
+}, { kernelArtifacts: [], layoutArtifacts: [] });
+const rawCopyCpu = await prepareHostGraphCpu(
+  rawCopyGraph.artifact,
+  { kernelArtifacts: [], layoutArtifacts: [] },
+);
+const rawCopyWebGpu = await prepareSemanticHostGraphWebGpu(
+  rawCopyGraph.artifact,
+  { kernelArtifacts: [], layoutArtifacts: [] },
+);
+const rawCopyBytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 255]);
+const rawCopyResult = await rawCopyCpu.execute({
+  inputs: [{
+    rank: parseWireU64("0"),
+    resourceId: "input",
+    bytes: rawCopyBytes,
+  }],
+});
 if (cpu.specializationHash !== wgsl.semantic.specializationHash) throw new Error("fresh consumer CPU/WGSL specialization mismatch");
 if (!wgsl.program.wgsl.includes("destination_words[destination_word] = copied_bits")) throw new Error("fresh consumer lowering missing copy");
 if (compilerBinding.layoutSemanticHash !== await hashSemanticArtifact(layout)) throw new Error("fresh consumer compiler binding lost semantic layout identity");
@@ -1541,6 +1666,7 @@ const hostGraphTemporary = hostGraphPayload.program.resources.find((resource) =>
 if (hostGraph.dispatchCount !== 2 || hostGraphPayload.program.nodes.length !== 2 || hostGraphTemporary?.byteLength !== "16" || hostGraphTemporary.multiplicity !== "per-rank" || hostGraphTemporary.initialization !== "zero-fill") throw new Error("fresh consumer compiler host graph lost multi-dispatch resource meaning");
 if (hostGraphCpu.profile !== HOST_GRAPH_CPU_PROFILE || ![0x3f800000, 0x40000000, 0x40400000, 0x40800000].every((value, index) => hostGraphCpuOutputWords[index] === value)) throw new Error("fresh consumer CPU host graph lost exact multi-dispatch execution");
 if (hostGraphWebGpu.graphSemanticHash !== hostGraph.graphSemanticHash || hostGraphWebGpu.expandedStepCount !== 2 || hostGraphWebGpu.dispatchStepCount !== 2 || hostGraphWebGpu.wgslModuleHashes.length !== 1) throw new Error("fresh consumer WebGPU host graph lost exact multi-dispatch preparation");
+if (hostGraphArtifactPayload(rawCopyGraph.artifact).program.version.minor !== 1 || rawCopyCpu.elementOperations !== 8n || rawCopyWebGpu.copyStepCount !== 1 || rawCopyWebGpu.dispatchStepCount !== 0 || !rawCopyResult.outputs[0]?.bytes.every((value, index) => value === rawCopyBytes[index])) throw new Error("fresh consumer host graph lost version-1.1 raw-copy CPU/WebGPU meaning");
 `;
   writeFileSync(join(consumer, "consumer.mjs"), source);
   writeFileSync(join(consumer, "consumer.ts"), source);

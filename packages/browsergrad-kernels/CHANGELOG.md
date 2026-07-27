@@ -14,6 +14,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   lowerer per rank; f32/i32/u32 all-reduce expands into bounded pairwise
   rank-order reduction followed by raw-word replication, without a second
   source-shaped orchestration path.
+- Host-graph program version 1.1 whole-allocation copy nodes lower to one
+  bit-preserving raw-word copy per rank. Required actual-device evidence adds
+  an exact u8 case while the CPU reference also preserves odd-sized
+  allocations; portable WebGPU explicitly refuses non-word-sized copies.
 - Graph execution snapshots complete direct/unshared inputs, initializes
   private temporary/output storage deterministically, bounds expanded steps
   and aggregate host/GPU storage, verifies device limits, and publishes fresh
@@ -22,7 +26,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   and out-of-memory paths cannot commit partial caller-visible outputs.
 - Required headed-Chromium evidence on Apple Metal 3 bit-matches the semantic
   CPU graph oracle for rank-ordered f32 sum, signed-zero f32 min, wrapping i32
-  sum, and exact u32 max, and separately rejects non-finite f32 collectives.
+  sum, exact u32 max, and exact u8 allocation copy, and separately rejects
+  non-finite f32 collectives.
 - Semantic attention preparation consumes exact verified rank-4 f32 logical
   meaning plus an independently authorized online K/V-tile schedule. Generated
   WGSL cooperatively stages K/V rows, keeps one Q/output row private per lane,

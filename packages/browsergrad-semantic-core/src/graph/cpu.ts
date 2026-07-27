@@ -22,6 +22,7 @@ import {
 } from "./artifact.js";
 import type {
   HostGraphAllReduceNode,
+  HostGraphCopyNode,
   HostGraphDispatchNode,
   HostGraphResource,
 } from "./model.js";
@@ -196,7 +197,16 @@ interface CollectivePlan {
   readonly elementOperations: bigint;
 }
 
-type CpuNodePlan = DispatchPlan | CollectivePlan;
+interface CopyPlan {
+  readonly kind: "copy";
+  readonly nodeId: string;
+  readonly sourceResourceId: string;
+  readonly destinationResourceId: string;
+  readonly byteLength: number;
+  readonly elementOperations: bigint;
+}
+
+type CpuNodePlan = DispatchPlan | CollectivePlan | CopyPlan;
 
 interface NativeUint8Slots {
   readonly buffer: ArrayBufferLike;
@@ -294,7 +304,9 @@ export async function prepareHostGraphCpu(
         normalized,
         startedAt,
       )
-      : prepareCollectivePlan(node, resources);
+      : node.kind === "all-reduce"
+        ? prepareCollectivePlan(node, resources)
+        : prepareCopyPlan(node, resources, rankCount);
     elementOperations += plan.elementOperations;
     if (elementOperations > BigInt(normalized.maxElementOperations)) {
       fail(
@@ -352,8 +364,16 @@ export async function prepareHostGraphCpu(
           normalized.maxExecutionMs,
           captured.signal,
         );
-      } else {
+      } else if (plan.kind === "all-reduce") {
         await executeAllReduce(
+          plan,
+          rankResources,
+          executionStartedAt,
+          normalized.maxExecutionMs,
+          captured.signal,
+        );
+      } else {
+        executeCopy(
           plan,
           rankResources,
           executionStartedAt,
@@ -525,6 +545,34 @@ function prepareCollectivePlan(
   });
 }
 
+function prepareCopyPlan(
+  node: HostGraphCopyNode,
+  resources: ReadonlyMap<string, HostGraphResource>,
+  rankCount: number,
+): CopyPlan {
+  const source = resources.get(node.sourceResourceId);
+  const destination = resources.get(node.destinationResourceId);
+  if (source === undefined || destination === undefined) {
+    fail(
+      "BG-GRAPH-CPU-INTERNAL",
+      `$.nodes.${node.nodeId}`,
+      "verified copy resource disappeared",
+    );
+  }
+  const byteLength = safeNumber(
+    wireIntegerToBigInt(source.byteLength),
+    `$.resources.${source.resourceId}.byteLength`,
+  );
+  return Object.freeze({
+    kind: "copy",
+    nodeId: node.nodeId,
+    sourceResourceId: node.sourceResourceId,
+    destinationResourceId: node.destinationResourceId,
+    byteLength,
+    elementOperations: BigInt(byteLength) * BigInt(rankCount),
+  });
+}
+
 function executeDispatch(
   plan: DispatchPlan,
   rankResources: RankResources,
@@ -552,6 +600,39 @@ function executeDispatch(
         `rank ${rank} view-copy execution failed`,
       );
     }
+  }
+  ensureExecutionActive(startedAt, maxExecutionMs, signal);
+}
+
+function executeCopy(
+  plan: CopyPlan,
+  rankResources: RankResources,
+  startedAt: number,
+  maxExecutionMs: number,
+  signal: AbortSignal | undefined,
+): void {
+  for (const [rank, resources] of rankResources.entries()) {
+    ensureExecutionActive(startedAt, maxExecutionMs, signal);
+    const source = resources.get(plan.sourceResourceId);
+    const destination = resources.get(plan.destinationResourceId);
+    if (source === undefined || destination === undefined) {
+      fail(
+        "BG-GRAPH-CPU-INTERNAL",
+        `$.nodes.${plan.nodeId}`,
+        `rank ${rank} copy resources disappeared`,
+      );
+    }
+    if (
+      source.byteLength !== plan.byteLength ||
+      destination.byteLength !== plan.byteLength
+    ) {
+      fail(
+        "BG-GRAPH-CPU-INTERNAL",
+        `$.nodes.${plan.nodeId}`,
+        `rank ${rank} copy allocation length diverged after verification`,
+      );
+    }
+    REFLECT_APPLY(UINT8_SET, destination, [source]);
   }
   ensureExecutionActive(startedAt, maxExecutionMs, signal);
 }

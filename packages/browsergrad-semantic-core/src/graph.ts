@@ -4,6 +4,7 @@ export {
   type HostGraphCollectiveDType,
   type HostGraphCollectiveNumericalPolicy,
   type HostGraphCollectiveReduction,
+  type HostGraphCopyNode,
   type HostGraphDispatchNode,
   type HostGraphDispatchResourceBinding,
   type HostGraphNode,

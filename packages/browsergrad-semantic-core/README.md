@@ -103,8 +103,10 @@ The accompanying comparator implements the declared `1e-4` absolute-or-
 relative policy and rejects non-finite outputs. This is CPU reference evidence,
 not WebGPU execution or preservation evidence.
 
-`/graph` defines the initial closed `browsergrad.host-graph@1` profile for
-bounded, backend-neutral multi-dispatch DAGs and explicit all-reduce meaning.
+`/graph` defines the closed `browsergrad.host-graph@1` profile for bounded,
+backend-neutral multi-dispatch DAGs and explicit all-reduce meaning. Program
+version 1.1 additively admits whole-allocation byte copies between distinct
+same-dtype, same-size per-rank resources while retaining version-1.0 reads.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -116,13 +118,15 @@ references, read-before-write, input mutation, unordered hazards, incompatible
 dtype or allocation bindings, invalid initialization or collective
 participants/numerical policy, and graphs above the fixed node, edge, rank,
 artifact, or 1 GiB aggregate-resource ceilings; the byte ceiling accounts for
-rank multiplicity. The failure model is fail-stop with no partial output
-commit.
+rank multiplicity. Copy effects enter the same dependency/hazard analysis and
+cannot mutate inputs, self-copy, reinterpret dtype, or partially copy an
+allocation. The failure model is fail-stop with no partial output commit.
 
 The authority-bound `browsergrad.host-graph.cpu-reference@1` executor consumes
 the exact verified graph plus its opaque kernel/layout artifacts. It snapshots
-all rank-local inputs, runs dispatches and f32/i32/u32 all-reduces against
-private storage, and exposes outputs only after the complete graph succeeds.
+all rank-local inputs, runs dispatches, exact byte copies, and f32/i32/u32
+all-reduces against private storage, and exposes outputs only after the
+complete graph succeeds.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -135,7 +139,7 @@ lowers one or more opaque prepared view-copy bindings into a verified linear
 host graph with derived intermediate resources. Kernels separately owns the
 authority-bound `browsergrad.host-graph.webgpu@1` static-DAG adapter and its
 required actual-device evidence. Neither adapter grants transport, topology,
-retries, copy/event semantics, dynamic control, worker-mesh, native-companion,
+retries, readback/event semantics, dynamic control, worker-mesh, native-companion,
 performance, or release authority.
 
 Frontends construct the operation through one `/kernel` sink rather than
