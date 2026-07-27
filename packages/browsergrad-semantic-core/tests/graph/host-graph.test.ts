@@ -49,6 +49,7 @@ function program(artifacts: VerifiedViewCopyArtifacts): HostGraphProgram {
         resourceId: "output",
         role: "output",
         multiplicity: "per-rank",
+        initialization: "zero-fill",
         dtype: "f32",
         byteLength: wire("24"),
         alignmentBytes: 4,
@@ -57,6 +58,7 @@ function program(artifacts: VerifiedViewCopyArtifacts): HostGraphProgram {
         resourceId: "input",
         role: "input",
         multiplicity: "per-rank",
+        initialization: "external-input",
         dtype: "f32",
         byteLength: wire("24"),
         alignmentBytes: 4,
@@ -65,6 +67,7 @@ function program(artifacts: VerifiedViewCopyArtifacts): HostGraphProgram {
         resourceId: "bucket",
         role: "temporary",
         multiplicity: "per-rank",
+        initialization: "zero-fill",
         dtype: "f32",
         byteLength: wire("24"),
         alignmentBytes: 4,
@@ -326,6 +329,7 @@ describe("host graph artifact", () => {
       resourceId: "sink",
       role: "temporary",
       multiplicity: "per-rank",
+      initialization: "zero-fill",
       dtype: "f32",
       byteLength: wire("24"),
       alignmentBytes: 4,
@@ -454,6 +458,7 @@ describe("host graph artifact", () => {
         resourceId: `r${index}`,
         role: index === 0 ? "output" as const : "temporary" as const,
         multiplicity: "per-rank" as const,
+        initialization: "zero-fill" as const,
         dtype: "f32" as const,
         byteLength: wire("24"),
         alignmentBytes: 4,
@@ -477,6 +482,15 @@ describe("host graph artifact", () => {
     sharedResource.resources[0]!.multiplicity = "shared" as "per-rank";
     expect((await diagnostic(() => createVerifiedHostGraphArtifact(
       sharedResource,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const wrongInitialization = clone(program(artifacts));
+    wrongInitialization.resources.find(
+      (resource) => resource.resourceId === "input",
+    )!.initialization = "zero-fill";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      wrongInitialization,
       artifactsFor(artifacts),
     ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
 

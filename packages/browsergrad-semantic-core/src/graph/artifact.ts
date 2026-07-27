@@ -360,6 +360,7 @@ function parseResources(
         "resourceId",
         "role",
         "multiplicity",
+        "initialization",
         "dtype",
         "byteLength",
         "alignmentBytes",
@@ -383,6 +384,17 @@ function parseResources(
         GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
         `${path}.multiplicity`,
         "initial host graph resources require per-rank multiplicity",
+      );
+    }
+    const expectedInitialization: HostGraphResource["initialization"] =
+      role === "input"
+      ? "external-input"
+      : "zero-fill";
+    if (object.initialization !== expectedInitialization) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.initialization`,
+        `${role} resources require ${expectedInitialization} initialization`,
       );
     }
     const dtype = stringValue(field(object, "dtype", path), `${path}.dtype`);
@@ -412,6 +424,7 @@ function parseResources(
       resourceId,
       role: role as HostGraphResourceRole,
       multiplicity: "per-rank" as const,
+      initialization: expectedInitialization,
       dtype: dtype as BuiltinDTypeId,
       byteLength,
       alignmentBytes,

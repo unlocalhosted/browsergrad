@@ -17,6 +17,7 @@ export interface HostGraphResource extends JsonObject {
   readonly resourceId: string;
   readonly role: HostGraphResourceRole;
   readonly multiplicity: "per-rank";
+  readonly initialization: "external-input" | "zero-fill";
   readonly dtype: BuiltinDTypeId;
   readonly byteLength: WireU64;
   readonly alignmentBytes: number;

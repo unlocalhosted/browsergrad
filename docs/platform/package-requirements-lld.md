@@ -2111,13 +2111,14 @@ preservation, and actual execution evidence.
 
 **Current implemented profile:** `browsergrad.host-graph@1` is a bounded
 version-1 DAG with per-rank resource multiplicity, exact
-dtype/bytes/alignment, and input/temporary/output roles. Dispatch nodes bind
-opaque verified layout/kernel artifacts plus exact dimension bindings; the
-verifier derives view-copy read/write effects and allocation requirements,
+dtype/bytes/alignment, input/temporary/output roles, external bytes for inputs,
+and deterministic zero-fill for temporary/output resources. Dispatch nodes
+bind opaque verified layout/kernel artifacts plus exact dimension bindings;
+the verifier derives view-copy read/write effects and allocation requirements,
 rejects cycles, dangling references, input mutation, read-before-write,
-unordered conflicts, and incompatible bindings, and admits only explicit
-f32/i32/u32 all-reduce contracts with deterministic numerical policy and
-participant ranks. The failure model is
+unordered conflicts, invalid initialization, and incompatible bindings, and
+admits only explicit f32/i32/u32 all-reduce contracts with deterministic
+numerical policy and participant ranks. The failure model is
 `fail-stop-no-partial-output-commit`. Compiler owns one bounded linear
 view-copy pipeline constructor over opaque prepared bindings. The
 authority-bound `browsergrad.host-graph.cpu-reference@1` profile snapshots all

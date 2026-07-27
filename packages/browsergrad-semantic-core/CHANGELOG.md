@@ -11,14 +11,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - Explicit `/graph` export with the closed `browsergrad.host-graph@1`
   multi-dispatch DAG profile. Per-rank resources bind exact dtype, resolved
-  allocation bytes, alignment, and lifetime role; dispatch effects and geometry
-  derive from supplied opaque verified kernel/layout artifacts plus exact
-  dimension bindings. Verification bounds nodes, edges, ranks, semantic
-  artifacts, and aggregate bytes; rejects cycles, dangling references, input
-  mutation, read-before-write, unordered hazards, incompatible bindings, and
-  invalid all-reduce rank/numerical contracts; and fixes a fail-stop,
-  no-partial-output-commit failure model without claiming execution, transport,
-  topology, retries, or backend pipelines.
+  allocation bytes, alignment, lifetime role, and deterministic initialization:
+  external bytes for inputs and zero-fill for temporaries/outputs. Dispatch
+  effects and geometry derive from supplied opaque verified kernel/layout
+  artifacts plus exact dimension bindings. Verification bounds nodes, edges,
+  ranks, semantic artifacts, and aggregate bytes; rejects cycles, dangling
+  references, input mutation, read-before-write, unordered hazards,
+  incompatible bindings, and invalid all-reduce rank/numerical contracts; and
+  fixes a fail-stop, no-partial-output-commit failure model without claiming
+  execution, transport, topology, retries, or backend pipelines.
 - Authority-bound `browsergrad.host-graph.cpu-reference@1` preparation and
   execution for the initial dispatch/all-reduce profile. The reference
   snapshots rank-local inputs into private storage, bounds memory, element

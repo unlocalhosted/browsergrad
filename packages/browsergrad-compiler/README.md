@@ -35,10 +35,11 @@ requirements; successful local compilation does not imply any of them.
 Prepared CUDA-lite view-copy bindings can now be composed with
 `createCudaLiteViewCopyHostGraph()`. The compiler derives a bounded linear
 multi-dispatch graph, exact input/temporary/output allocation contracts,
-dimension bindings, semantic view IDs, effects, and dependencies from opaque
-prepared authority. The result is verified `browsergrad.host-graph@1`
-semantics only; it does not grant CPU/WebGPU execution, collective transport,
-pipeline creation, retry, or release authority.
+external-input versus zero-fill initialization, dimension bindings, semantic
+view IDs, effects, and dependencies from opaque prepared authority. The result
+is verified `browsergrad.host-graph@1` semantics only; it does not grant
+CPU/WebGPU execution, collective transport, pipeline creation, retry, or
+release authority.
 
 Install the compiler and kernels together from npm:
 

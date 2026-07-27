@@ -106,12 +106,14 @@ not WebGPU execution or preservation evidence.
 `/graph` defines the initial closed `browsergrad.host-graph@1` profile for
 bounded, backend-neutral multi-dispatch DAGs and explicit all-reduce meaning.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
-length, alignment, and input/temporary/output role. Dispatches reference opaque
-verified kernel and layout artifacts, retain exact dimension bindings, and
-derive their read/write effects and resource geometry from those artifacts;
-callers cannot declare effects independently. Verification rejects cycles,
-dangling references, read-before-write, input mutation, unordered hazards,
-incompatible dtype or allocation bindings, invalid collective
+length, alignment, and input/temporary/output role. Input resources require
+external bytes; temporary and output resources are deterministically
+zero-filled before the first node. Dispatches reference opaque verified kernel
+and layout artifacts, retain exact dimension bindings, and derive their
+read/write effects and resource geometry from those artifacts; callers cannot
+declare effects independently. Verification rejects cycles, dangling
+references, read-before-write, input mutation, unordered hazards, incompatible
+dtype or allocation bindings, invalid initialization or collective
 participants/numerical policy, and graphs above the fixed node, edge, rank,
 artifact, or 1 GiB aggregate-resource ceilings; the byte ceiling accounts for
 rank multiplicity. The failure model is fail-stop with no partial output

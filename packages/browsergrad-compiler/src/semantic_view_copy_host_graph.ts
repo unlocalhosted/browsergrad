@@ -173,6 +173,9 @@ function pipelineResources(
             ? "output" as const
             : "temporary" as const,
         multiplicity: "per-rank" as const,
+        initialization: index === 0
+          ? "external-input" as const
+          : "zero-fill" as const,
         dtype: accessor.dtype,
         byteLength: encodeWireU64(accessor.allocationByteLength),
         alignmentBytes: Math.max(

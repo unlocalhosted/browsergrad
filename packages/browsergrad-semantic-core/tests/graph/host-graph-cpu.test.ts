@@ -47,6 +47,9 @@ function resource(
     resourceId,
     role,
     multiplicity: "per-rank" as const,
+    initialization: role === "input"
+      ? "external-input" as const
+      : "zero-fill" as const,
     dtype,
     byteLength: wire("8"),
     alignmentBytes: 4,
