@@ -117,12 +117,23 @@ artifact, or 1 GiB aggregate-resource ceilings; the byte ceiling accounts for
 rank multiplicity. The failure model is fail-stop with no partial output
 commit.
 
-This first graph profile does not claim execution, transport, topology,
-retries, copies, readback, events, dynamic control, or a backend pipeline.
-Compiler owns the first concrete consumer: it lowers one or more opaque
-prepared view-copy bindings into a verified linear host graph with derived
-intermediate resources. Backend execution and collective adapters require
-separate authority and evidence.
+The authority-bound `browsergrad.host-graph.cpu-reference@1` executor consumes
+the exact verified graph plus its opaque kernel/layout artifacts. It snapshots
+all rank-local inputs, runs dispatches and f32/i32/u32 all-reduces against
+private storage, and exposes outputs only after the complete graph succeeds.
+It enforces aggregate working-memory, element-operation, preparation-time, and
+execution-time ceilings plus native cancellation. F32 collectives reduce
+finite values in ascending participant-rank order, rounding after every sum;
+non-finite operands or results fail before output commit. Integer sums wrap at
+32 bits, while integer min/max is exact.
+
+The semantic graph itself grants no execution authority. This CPU reference
+does not claim WebGPU execution, transport, topology, retries, copies,
+readback, events, dynamic control, or a backend pipeline. Compiler owns the
+first concrete consumer: it lowers one or more opaque prepared view-copy
+bindings into a verified linear host graph with derived intermediate
+resources. Portable GPU execution and transport adapters require separate
+authority and evidence.
 
 Frontends construct the operation through one `/kernel` sink rather than
 assembling allocation, alias, index-map, view, and operation IDs themselves.

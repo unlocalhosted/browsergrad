@@ -241,8 +241,10 @@ try {
     assert(exportName in semanticSchedule, `semantic-core schedule export missing ${exportName}`);
   }
   for (const exportName of [
+    "HOST_GRAPH_CPU_PROFILE",
     "createVerifiedHostGraphArtifact",
     "hostGraphArtifactPayload",
+    "prepareHostGraphCpu",
     "prepareHostGraphProgram",
     "verifyHostGraphArtifact",
   ]) {
@@ -1401,8 +1403,8 @@ function verifyInstalledSemanticViewCopyConsumer(consumer) {
   const source = `
 import { layoutArtifactPayload } from "@unlocalhosted/browsergrad-semantic-core/layout";
 import { createVerifiedDensePermutationViewCopyArtifacts, prepareViewCopyCpu } from "@unlocalhosted/browsergrad-semantic-core/kernel";
-import { hostGraphArtifactPayload } from "@unlocalhosted/browsergrad-semantic-core/graph";
-import { hashSemanticArtifact, parseWireI64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import { HOST_GRAPH_CPU_PROFILE, hostGraphArtifactPayload, prepareHostGraphCpu } from "@unlocalhosted/browsergrad-semantic-core/graph";
+import { hashSemanticArtifact, parseWireI64, parseWireU64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import densePermutationFixtures from "@unlocalhosted/browsergrad-semantic-core/fixtures/kernel-v1/dense-permutation-view-copy.cases.json" with { type: "json" };
 import { prepareSemanticViewCopyWgsl } from "@unlocalhosted/browsergrad-kernels/semantic_view_copy";
 import {
@@ -1472,6 +1474,30 @@ const hostGraph = await createCudaLiteViewCopyHostGraph([
   viewCopyBinding,
 ]);
 const hostGraphPayload = hostGraphArtifactPayload(hostGraph.artifact);
+const hostGraphCpu = await prepareHostGraphCpu(hostGraph.artifact, {
+  kernelArtifacts: [kernel],
+  layoutArtifacts: [layout],
+});
+const hostGraphCpuInputWords = new Uint32Array([
+  0x3f800000,
+  0x40000000,
+  0x40400000,
+  0x40800000,
+]);
+const hostGraphCpuResult = await hostGraphCpu.execute({
+  inputs: [{
+    rank: parseWireU64("0"),
+    resourceId: "input",
+    bytes: new Uint8Array(hostGraphCpuInputWords.buffer),
+  }],
+});
+const hostGraphCpuOutput = hostGraphCpuResult.outputs[0];
+if (hostGraphCpuOutput === undefined) throw new Error("fresh consumer CPU host graph produced no output");
+const hostGraphCpuOutputWords = new Uint32Array(
+  hostGraphCpuOutput.bytes.buffer,
+  hostGraphCpuOutput.bytes.byteOffset,
+  hostGraphCpuOutput.bytes.byteLength / 4,
+);
 if (cpu.specializationHash !== wgsl.semantic.specializationHash) throw new Error("fresh consumer CPU/WGSL specialization mismatch");
 if (!wgsl.program.wgsl.includes("destination_words[destination_word] = copied_bits")) throw new Error("fresh consumer lowering missing copy");
 if (compilerBinding.layoutSemanticHash !== await hashSemanticArtifact(layout)) throw new Error("fresh consumer compiler binding lost semantic layout identity");
@@ -1484,6 +1510,7 @@ if (compiledViewCopy.preparedViewCopyBinding !== viewCopyBinding || !compiledVie
 if (!compiledViewCopy.wgslProgram?.name.includes(viewCopyBinding.layoutSemanticHash) || !compiledViewCopy.wgslProgram.name.includes(viewCopyBinding.kernelSemanticHash) || !compiledViewCopy.wgslProgram.name.includes(viewCopyBinding.specializationHash) || !compiledViewCopy.wgslProgram.name.includes(viewCopyBinding.bindingProjectionHash)) throw new Error("fresh consumer compiler L2 WGSL identity lost semantic binding hashes");
 const hostGraphTemporary = hostGraphPayload.program.resources.find((resource) => resource.resourceId === "temporary/0");
 if (hostGraph.dispatchCount !== 2 || hostGraphPayload.program.nodes.length !== 2 || hostGraphTemporary?.byteLength !== "16" || hostGraphTemporary.multiplicity !== "per-rank") throw new Error("fresh consumer compiler host graph lost multi-dispatch resource meaning");
+if (hostGraphCpu.profile !== HOST_GRAPH_CPU_PROFILE || ![0x3f800000, 0x40000000, 0x40400000, 0x40800000].every((value, index) => hostGraphCpuOutputWords[index] === value)) throw new Error("fresh consumer CPU host graph lost exact multi-dispatch execution");
 `;
   writeFileSync(join(consumer, "consumer.mjs"), source);
   writeFileSync(join(consumer, "consumer.ts"), source);

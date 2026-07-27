@@ -19,6 +19,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   invalid all-reduce rank/numerical contracts; and fixes a fail-stop,
   no-partial-output-commit failure model without claiming execution, transport,
   topology, retries, or backend pipelines.
+- Authority-bound `browsergrad.host-graph.cpu-reference@1` preparation and
+  execution for the initial dispatch/all-reduce profile. The reference
+  snapshots rank-local inputs into private storage, bounds memory, element
+  operations, preparation/execution time, and cancellation, applies explicit
+  finite rank-ordered f32 and wrapping/exact 32-bit integer collective policy,
+  and returns outputs only after the complete graph succeeds.
 - Explicit `/capability` export with immutable versioned semantic capability
   and backend definitions plus program/artifact-scoped lowering decisions.
   Positive decisions require a registered preservation level; conditional

@@ -709,6 +709,16 @@ function analyzeProgram(
   >();
   const dispatchGeometry = new Map<string, ResolvedDispatchGeometry>();
   for (const [index, node] of program.nodes.entries()) {
+    if (node.kind === "all-reduce") {
+      verifyCollectiveBinding(
+        node,
+        resources,
+        rankCount,
+        `$.payload.program.nodes[${index}]`,
+      );
+    }
+  }
+  for (const [index, node] of program.nodes.entries()) {
     const path = `$.payload.program.nodes[${index}]`;
     edgeCount += node.dependsOn.length;
     if (edgeCount > HOST_GRAPH_MAX_EDGES) {
@@ -845,31 +855,6 @@ function analyzeProgram(
       ]));
     } else {
       collectiveCount += 1;
-      const collectiveResource = resources.get(node.resourceId);
-      if (collectiveResource === undefined) {
-        invalid(
-          GRAPH_DIAGNOSTIC_CODES.danglingReference,
-          `${path}.resourceId`,
-          `all-reduce references missing resource ${node.resourceId}`,
-        );
-      }
-      if (collectiveResource.dtype !== node.dtype) {
-        invalid(
-          GRAPH_DIAGNOSTIC_CODES.invalidBinding,
-          `${path}.dtype`,
-          `all-reduce dtype ${node.dtype} does not match resource dtype ${collectiveResource.dtype}`,
-        );
-      }
-      for (const [participantIndex, participant] of
-        node.participants.entries()) {
-        if (wireIntegerToBigInt(participant) >= rankCount) {
-          invalid(
-            GRAPH_DIAGNOSTIC_CODES.invalidCollective,
-            `${path}.participants[${participantIndex}]`,
-            `participant ${participant} is outside rank count ${rankCount}`,
-          );
-        }
-      }
     }
   }
   const topologicalNodeIds = topologicalOrder(program.nodes, nodes);
@@ -894,6 +879,46 @@ function analyzeProgram(
         .map((resource) => resource.resourceId),
     ),
   });
+}
+
+function verifyCollectiveBinding(
+  node: HostGraphAllReduceNode,
+  resources: ReadonlyMap<string, HostGraphResource>,
+  rankCount: bigint,
+  path: string,
+): void {
+  const resource = resources.get(node.resourceId);
+  if (resource === undefined) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.danglingReference,
+      `${path}.resourceId`,
+      `all-reduce references missing resource ${node.resourceId}`,
+    );
+  }
+  if (resource.dtype !== node.dtype) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      `${path}.dtype`,
+      `all-reduce dtype ${node.dtype} does not match resource dtype ${resource.dtype}`,
+    );
+  }
+  if (wireIntegerToBigInt(resource.byteLength) % 4n !== 0n) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidCollective,
+      `${path}.resourceId`,
+      "initial all-reduce resources require a whole number of 32-bit elements",
+    );
+  }
+  for (const [participantIndex, participant] of
+    node.participants.entries()) {
+    if (wireIntegerToBigInt(participant) >= rankCount) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.invalidCollective,
+        `${path}.participants[${participantIndex}]`,
+        `participant ${participant} is outside rank count ${rankCount}`,
+      );
+    }
+  }
 }
 
 function resolveDispatchGeometry(

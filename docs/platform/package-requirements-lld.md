@@ -30,7 +30,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The initial verified multi-dispatch DAG and explicit all-reduce semantic profile is implemented with one compiler-owned view-copy pipeline consumer; execution, dynamic control, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The initial verified multi-dispatch DAG, explicit all-reduce semantics, compiler-owned view-copy pipeline consumer, and fail-stop CPU reference are implemented; portable GPU execution, dynamic control, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every exit criterion for the declared gate profile is
 complete. Verification of a closed initial profile does not imply broader
@@ -188,7 +188,8 @@ exact-payload CPU/required-WebGPU convergence is no longer a blocker.
    No serialized observation may substitute for an opaque authority, and the
    synthetic composition fixture establishes no current production status.
 
-Gate 7 remains incomplete: semantic verification grants no graph execution,
+Gate 7 remains incomplete: semantic verification alone grants no graph
+execution, and the separately named CPU reference grants no portable GPU,
 dynamic-control, transport/topology, worker-mesh, or native-systems claim.
 
 ## Purpose
@@ -2118,10 +2119,15 @@ unordered conflicts, and incompatible bindings, and admits only explicit
 f32/i32/u32 all-reduce contracts with deterministic numerical policy and
 participant ranks. The failure model is
 `fail-stop-no-partial-output-commit`. Compiler owns one bounded linear
-view-copy pipeline constructor over opaque prepared bindings. No backend
-executor, copy/readback/event node, bounded conditional/repetition node,
-pipeline authority, transport/topology adapter, worker mesh, native companion,
-or actual execution evidence exists yet, so Gate 7 remains `in progress`.
+view-copy pipeline constructor over opaque prepared bindings. The
+authority-bound `browsergrad.host-graph.cpu-reference@1` profile snapshots all
+rank-local inputs, executes dispatches and finite rank-ordered f32 or
+wrapping/exact 32-bit integer all-reduces in private memory, enforces fixed
+memory/operation/time/cancellation ceilings, and exposes outputs only after
+the complete graph succeeds. No portable WebGPU executor,
+copy/readback/event node, bounded conditional/repetition node, pipeline
+authority, transport/topology adapter, worker mesh, native companion, or
+performance evidence exists yet, so Gate 7 remains `in progress`.
 
 ## Proof Matrix and Release Gates
 

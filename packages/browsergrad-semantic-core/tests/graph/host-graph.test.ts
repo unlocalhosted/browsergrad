@@ -434,6 +434,15 @@ describe("host graph artifact", () => {
       policy,
       artifactsFor(artifacts),
     ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const partialElement = clone(program(artifacts));
+    partialElement.resources.find(
+      (resource) => resource.resourceId === "bucket",
+    )!.byteLength = wire("23");
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      partialElement,
+      artifactsFor(artifacts),
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidCollective);
   });
 
   it("enforces graph resource ceilings and closed records", async () => {

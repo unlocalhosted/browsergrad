@@ -37,3 +37,19 @@ export {
   type ConstructedHostGraphArtifact,
   type HostGraphConstructionOptions,
 } from "./graph/construction.js";
+export {
+  HOST_GRAPH_CPU_MAX_ELEMENT_OPERATIONS,
+  HOST_GRAPH_CPU_MAX_EXECUTION_MS,
+  HOST_GRAPH_CPU_MAX_PREPARATION_MS,
+  HOST_GRAPH_CPU_MAX_WORKING_BYTES,
+  HOST_GRAPH_CPU_PROFILE,
+  HostGraphCpuError,
+  prepareHostGraphCpu,
+  type HostGraphCpuErrorCode,
+  type HostGraphCpuExecutionRequest,
+  type HostGraphCpuExecutionResult,
+  type HostGraphCpuInputBinding,
+  type HostGraphCpuOutputBinding,
+  type HostGraphCpuPreparationOptions,
+  type PreparedHostGraphCpu,
+} from "./graph/cpu.js";
