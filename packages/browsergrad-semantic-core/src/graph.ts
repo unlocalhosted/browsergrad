@@ -7,6 +7,7 @@ export {
   type HostGraphCopyNode,
   type HostGraphDispatchNode,
   type HostGraphDispatchResourceBinding,
+  type HostGraphMaterializeNode,
   type HostGraphNode,
   type HostGraphProgram,
   type HostGraphResource,

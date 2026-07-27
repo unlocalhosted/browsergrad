@@ -107,6 +107,10 @@ not WebGPU execution or preservation evidence.
 backend-neutral multi-dispatch DAGs and explicit all-reduce meaning. Program
 version 1.1 additively admits whole-allocation byte copies between distinct
 same-dtype, same-size per-rank resources while retaining version-1.0 reads.
+Version 1.2 requires every declared output to have exactly one terminal
+`host-readback-after-graph-success` materialization node. That node is an
+ordered read effect: it must follow the output's final writer, cannot expose an
+input or temporary resource, cannot be duplicated, and cannot have dependents.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -126,7 +130,9 @@ The authority-bound `browsergrad.host-graph.cpu-reference@1` executor consumes
 the exact verified graph plus its opaque kernel/layout artifacts. It snapshots
 all rank-local inputs, runs dispatches, exact byte copies, and f32/i32/u32
 all-reduces against private storage, and exposes outputs only after the
-complete graph succeeds.
+complete graph succeeds. Version-1.2 results are selected only by verified
+materialization nodes; the node adds no element work and preserves the
+fail-stop publication point.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -139,7 +145,7 @@ lowers one or more opaque prepared view-copy bindings into a verified linear
 host graph with derived intermediate resources. Kernels separately owns the
 authority-bound `browsergrad.host-graph.webgpu@1` static-DAG adapter and its
 required actual-device evidence. Neither adapter grants transport, topology,
-retries, readback/event semantics, dynamic control, worker-mesh, native-companion,
+retries, event semantics, dynamic control, worker-mesh, native-companion,
 performance, or release authority.
 
 Frontends construct the operation through one `/kernel` sink rather than

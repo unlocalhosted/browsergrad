@@ -5,6 +5,7 @@ import {
   type HostGraphAllReduceNode,
   type HostGraphCopyNode,
   type HostGraphDispatchNode,
+  type HostGraphMaterializeNode,
   type HostGraphResource,
   type VerifiedHostGraphArtifact,
 } from "@unlocalhosted/browsergrad-semantic-core/graph";
@@ -51,7 +52,7 @@ import {
 
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.1.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.2.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -202,6 +203,7 @@ export interface PreparedSemanticHostGraphWebGpu {
   readonly expandedStepCount: number;
   readonly dispatchStepCount: number;
   readonly copyStepCount: number;
+  readonly materializationCount: number;
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -222,6 +224,7 @@ export interface SemanticHostGraphWebGpuTrace {
   readonly expandedStepCount: number;
   readonly dispatchStepCount: number;
   readonly copyStepCount: number;
+  readonly materializationCount: number;
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -281,6 +284,7 @@ interface PreparedState {
 interface MutablePreparationCounts {
   dispatch: number;
   copy: number;
+  materialization: number;
   reduction: number;
   replication: number;
 }
@@ -361,6 +365,7 @@ export async function prepareSemanticHostGraphWebGpu(
   const counts: MutablePreparationCounts = {
     dispatch: 0,
     copy: 0,
+    materialization: 0,
     reduction: 0,
     replication: 0,
   };
@@ -405,7 +410,7 @@ export async function prepareSemanticHostGraphWebGpu(
         moduleHashes,
       );
       usesNumericalStatus ||= usesStatus;
-    } else {
+    } else if (node.kind === "copy") {
       await appendCopySteps(
         node,
         resourcesById,
@@ -415,6 +420,13 @@ export async function prepareSemanticHostGraphWebGpu(
         boundStorageNames,
         storageMetadata,
         moduleHashes,
+      );
+    } else {
+      appendMaterialization(
+        node,
+        resourcesById,
+        boundStorageNames,
+        counts,
       );
     }
     if (steps.length > normalized.maxExpandedSteps) {
@@ -434,9 +446,18 @@ export async function prepareSemanticHostGraphWebGpu(
   const inputs = Object.freeze(
     resources.filter(({ resource }) => resource.role === "input"),
   );
+  const outputResourceIds = new Set(preparedGraph.outputResourceIds);
   const outputs = Object.freeze(
-    resources.filter(({ resource }) => resource.role === "output"),
+    resources.filter(({ resource }) =>
+      outputResourceIds.has(resource.resourceId)),
   );
+  if (outputs.length !== preparedGraph.outputResourceIds.length) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      "$.artifact",
+      "prepared output resources disappeared",
+    );
+  }
   const readbackStorageNames = Object.freeze([
     ...outputs.flatMap((resource) => resource.storageNames)
       .filter((name) => boundStorageNames.has(name)),
@@ -516,6 +537,7 @@ export async function prepareSemanticHostGraphWebGpu(
     expandedStepCount: steps.length,
     dispatchStepCount: counts.dispatch,
     copyStepCount: counts.copy,
+    materializationCount: counts.materialization,
     collectiveReductionStepCount: counts.reduction,
     collectiveReplicationStepCount: counts.replication,
     wgslModuleHashes: publicModuleHashes,
@@ -924,6 +946,33 @@ async function appendCopySteps(
     counts.copy += 1;
   }
   moduleHashes.push(replication.moduleHash);
+}
+
+function appendMaterialization(
+  node: HostGraphMaterializeNode,
+  resourcesById: ReadonlyMap<string, ResourcePlan>,
+  boundStorageNames: ReadonlySet<string>,
+  counts: MutablePreparationCounts,
+): void {
+  const resource = resourcesById.get(node.resourceId);
+  if (resource === undefined || resource.resource.role !== "output") {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${node.nodeId}.resourceId`,
+      "verified materialization output disappeared",
+    );
+  }
+  if (
+    resource.byteLength > 0 &&
+    resource.storageNames.some((name) => !boundStorageNames.has(name))
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${node.nodeId}.resourceId`,
+      "materialized output has no complete portable WebGPU producer",
+    );
+  }
+  counts.materialization += 1;
 }
 
 function resourceBinding(
@@ -1550,6 +1599,7 @@ function createTrace(
     expandedStepCount: prepared.expandedStepCount,
     dispatchStepCount: prepared.dispatchStepCount,
     copyStepCount: prepared.copyStepCount,
+    materializationCount: prepared.materializationCount,
     collectiveReductionStepCount:
       prepared.collectiveReductionStepCount,
     collectiveReplicationStepCount:

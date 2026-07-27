@@ -59,10 +59,19 @@ export interface HostGraphCopyNode extends JsonObject {
   readonly mode: "whole-allocation-bytes-per-rank";
 }
 
+export interface HostGraphMaterializeNode extends JsonObject {
+  readonly nodeId: string;
+  readonly kind: "materialize";
+  readonly dependsOn: readonly string[];
+  readonly resourceId: string;
+  readonly mode: "host-readback-after-graph-success";
+}
+
 export type HostGraphNode =
   | HostGraphDispatchNode
   | HostGraphAllReduceNode
-  | HostGraphCopyNode;
+  | HostGraphCopyNode
+  | HostGraphMaterializeNode;
 
 /**
  * Backend-neutral host graph meaning. Transport, topology, scheduling,
@@ -72,7 +81,7 @@ export interface HostGraphProgram extends JsonObject {
   readonly kind: "host-graph";
   readonly version: {
     readonly major: 1;
-    readonly minor: 0 | 1;
+    readonly minor: 0 | 1 | 2;
   };
   readonly failureModel: typeof HOST_GRAPH_FAILURE_MODEL;
   readonly rankCount: WireU64;

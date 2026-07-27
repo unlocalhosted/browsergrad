@@ -177,6 +177,24 @@ function rawCopyProgram(): HostGraphProgram {
   };
 }
 
+function materializedRawCopyProgram(): HostGraphProgram {
+  const copy = rawCopyProgram();
+  return {
+    ...copy,
+    version: { major: 1, minor: 2 },
+    nodes: [
+      ...copy.nodes,
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["raw-copy"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 async function verified(
   program: HostGraphProgram,
   artifacts: VerifiedViewCopyArtifacts,
@@ -244,6 +262,32 @@ function readU32(bytes: Uint8Array): number[] {
 }
 
 describe("host graph CPU reference", () => {
+  it("publishes only explicitly materialized version-1.2 outputs", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      materializedRawCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+    const source = new Uint8Array([0, 1, 2, 3, 4, 5, 255]);
+    const result = await prepared.execute({
+      inputs: [input(0, source), input(1, source)],
+    });
+
+    expect(prepared.outputResourceIds).toEqual(["output"]);
+    expect(prepared.elementOperations).toBe(14n);
+    expect(result.executedNodeIds).toEqual([
+      "raw-copy",
+      "materialize-output",
+    ]);
+    expect(result.outputs.map(({ bytes }) => bytes)).toEqual([
+      source,
+      source,
+    ]);
+  });
+
   it("copies complete odd-sized allocations per rank without semantic artifacts", async () => {
     const graph = (await createVerifiedHostGraphArtifact(
       rawCopyProgram(),

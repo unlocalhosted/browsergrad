@@ -466,7 +466,7 @@ try {
   );
   const packedRawCopyGraph = await semanticGraph.createVerifiedHostGraphArtifact({
     kind: "host-graph",
-    version: { major: 1, minor: 1 },
+    version: { major: 1, minor: 2 },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: "1",
     resources: [
@@ -489,14 +489,23 @@ try {
         alignmentBytes: 1,
       },
     ],
-    nodes: [{
-      nodeId: "raw-copy",
-      kind: "copy",
-      dependsOn: [],
-      sourceResourceId: "input",
-      destinationResourceId: "output",
-      mode: "whole-allocation-bytes-per-rank",
-    }],
+    nodes: [
+      {
+        nodeId: "raw-copy",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "input",
+        destinationResourceId: "output",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["raw-copy"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
   }, {
     kernelArtifacts: [],
     layoutArtifacts: [],
@@ -513,17 +522,20 @@ try {
       bytes: packedRawCopyBytes,
     }],
   });
+  const packedRawCopyPrepared = await semanticGraph.prepareHostGraphProgram(
+    packedRawCopyGraph.artifact,
+  );
   assert(
     semanticGraph.hostGraphArtifactPayload(packedRawCopyGraph.artifact)
-      .program.version.minor === 1
-      && (await semanticGraph.prepareHostGraphProgram(
-        packedRawCopyGraph.artifact,
-      )).copyCount === 1
+      .program.version.minor === 2
+      && packedRawCopyPrepared.copyCount === 1
+      && packedRawCopyPrepared.materializationCount === 1
       && packedRawCopyResult.elementOperations === "8"
+      && packedRawCopyResult.executedNodeIds.at(-1) === "materialize-output"
       && packedRawCopyResult.outputs[0].bytes.every(
         (value, index) => value === packedRawCopyBytes[index],
       ),
-    "semantic-core packed graph lost version-1.1 per-rank raw-copy meaning",
+    "semantic-core packed graph lost version-1.2 explicit materialization meaning",
   );
 
   const kernelsPkg = readPackage(kernels);
@@ -627,8 +639,9 @@ try {
   assert(
     packedRawCopyWebGpu.copyStepCount === 1
       && packedRawCopyWebGpu.dispatchStepCount === 0
+      && packedRawCopyWebGpu.materializationCount === 1
       && packedRawCopyWebGpu.wgslModuleHashes.length === 1,
-    "packed kernels host graph lost version-1.1 raw-copy preparation",
+    "packed kernels host graph lost version-1.2 materialization preparation",
   );
   const kernelsSemanticGemm = await import(pathToFileURL(join(kernels, "dist/semantic_gemm.js")));
   const packedExactSchedule = await semanticSchedule.createVerifiedLogicalGemmTileSchedule(
@@ -1604,7 +1617,7 @@ const hostGraphCpuOutputWords = new Uint32Array(
 );
 const rawCopyGraph = await createVerifiedHostGraphArtifact({
   kind: "host-graph",
-  version: { major: 1, minor: 1 },
+  version: { major: 1, minor: 2 },
   failureModel: "fail-stop-no-partial-output-commit",
   rankCount: parseWireU64("1"),
   resources: [
@@ -1627,14 +1640,23 @@ const rawCopyGraph = await createVerifiedHostGraphArtifact({
       alignmentBytes: 1,
     },
   ],
-  nodes: [{
-    nodeId: "raw-copy",
-    kind: "copy",
-    dependsOn: [],
-    sourceResourceId: "input",
-    destinationResourceId: "output",
-    mode: "whole-allocation-bytes-per-rank",
-  }],
+  nodes: [
+    {
+      nodeId: "raw-copy",
+      kind: "copy",
+      dependsOn: [],
+      sourceResourceId: "input",
+      destinationResourceId: "output",
+      mode: "whole-allocation-bytes-per-rank",
+    },
+    {
+      nodeId: "materialize-output",
+      kind: "materialize",
+      dependsOn: ["raw-copy"],
+      resourceId: "output",
+      mode: "host-readback-after-graph-success",
+    },
+  ],
 }, { kernelArtifacts: [], layoutArtifacts: [] });
 const rawCopyCpu = await prepareHostGraphCpu(
   rawCopyGraph.artifact,
@@ -1666,7 +1688,7 @@ const hostGraphTemporary = hostGraphPayload.program.resources.find((resource) =>
 if (hostGraph.dispatchCount !== 2 || hostGraphPayload.program.nodes.length !== 2 || hostGraphTemporary?.byteLength !== "16" || hostGraphTemporary.multiplicity !== "per-rank" || hostGraphTemporary.initialization !== "zero-fill") throw new Error("fresh consumer compiler host graph lost multi-dispatch resource meaning");
 if (hostGraphCpu.profile !== HOST_GRAPH_CPU_PROFILE || ![0x3f800000, 0x40000000, 0x40400000, 0x40800000].every((value, index) => hostGraphCpuOutputWords[index] === value)) throw new Error("fresh consumer CPU host graph lost exact multi-dispatch execution");
 if (hostGraphWebGpu.graphSemanticHash !== hostGraph.graphSemanticHash || hostGraphWebGpu.expandedStepCount !== 2 || hostGraphWebGpu.dispatchStepCount !== 2 || hostGraphWebGpu.wgslModuleHashes.length !== 1) throw new Error("fresh consumer WebGPU host graph lost exact multi-dispatch preparation");
-if (hostGraphArtifactPayload(rawCopyGraph.artifact).program.version.minor !== 1 || rawCopyCpu.elementOperations !== 8n || rawCopyWebGpu.copyStepCount !== 1 || rawCopyWebGpu.dispatchStepCount !== 0 || !rawCopyResult.outputs[0]?.bytes.every((value, index) => value === rawCopyBytes[index])) throw new Error("fresh consumer host graph lost version-1.1 raw-copy CPU/WebGPU meaning");
+if (hostGraphArtifactPayload(rawCopyGraph.artifact).program.version.minor !== 2 || rawCopyCpu.elementOperations !== 8n || rawCopyWebGpu.copyStepCount !== 1 || rawCopyWebGpu.materializationCount !== 1 || rawCopyWebGpu.dispatchStepCount !== 0 || rawCopyResult.executedNodeIds.at(-1) !== "materialize-output" || !rawCopyResult.outputs[0]?.bytes.every((value, index) => value === rawCopyBytes[index])) throw new Error("fresh consumer host graph lost version-1.2 explicit materialization meaning");
 `;
   writeFileSync(join(consumer, "consumer.mjs"), source);
   writeFileSync(join(consumer, "consumer.ts"), source);

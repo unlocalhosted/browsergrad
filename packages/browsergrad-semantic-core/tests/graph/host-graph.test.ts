@@ -181,6 +181,24 @@ function copyProgram(): HostGraphProgram {
   };
 }
 
+function materializedCopyProgram(): HostGraphProgram {
+  const copy = copyProgram();
+  return {
+    ...copy,
+    version: { major: 1, minor: 2 },
+    nodes: [
+      ...copy.nodes,
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["copy-output"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 async function diagnostic(
   run: () => Promise<unknown> | unknown,
 ): Promise<SemanticSchemaError> {
@@ -214,6 +232,130 @@ function artifactsFor(artifacts: VerifiedViewCopyArtifacts) {
 }
 
 describe("host graph artifact", () => {
+  it("normalizes explicit terminal materialization in version 1.2", async () => {
+    const constructed = await createVerifiedHostGraphArtifact(
+      materializedCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    );
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+
+    expect(payload.program.version).toEqual({ major: 1, minor: 2 });
+    expect(payload.program.nodes.at(-1)).toEqual({
+      nodeId: "materialize-output",
+      kind: "materialize",
+      dependsOn: ["copy-output"],
+      resourceId: "output",
+      mode: "host-readback-after-graph-success",
+    });
+    expect(prepared).toMatchObject({
+      rankCount: 2n,
+      nodeCount: 3,
+      dispatchCount: 0,
+      collectiveCount: 0,
+      copyCount: 2,
+      materializationCount: 1,
+      topologicalNodeIds: [
+        "copy-input",
+        "copy-output",
+        "materialize-output",
+      ],
+      outputResourceIds: ["output"],
+    });
+  });
+
+  it("rejects incomplete, duplicated, nonterminal, or forged materialization", async () => {
+    const missing = clone(materializedCopyProgram());
+    missing.nodes = missing.nodes.filter((node) =>
+      node.kind !== "materialize");
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      missing,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidAccess);
+
+    const duplicate = clone(materializedCopyProgram());
+    duplicate.nodes.push({
+      nodeId: "materialize-output-again",
+      kind: "materialize",
+      dependsOn: ["copy-output"],
+      resourceId: "output",
+      mode: "host-readback-after-graph-success",
+    });
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      duplicate,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidAccess);
+
+    const wrongRole = clone(materializedCopyProgram());
+    const wrongRoleNode = wrongRole.nodes.find((node) =>
+      node.kind === "materialize");
+    if (wrongRoleNode?.kind !== "materialize") {
+      throw new Error("missing materialize node");
+    }
+    wrongRoleNode.resourceId = "temporary";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      wrongRole,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidAccess);
+
+    const missingResource = clone(materializedCopyProgram());
+    const missingResourceNode = missingResource.nodes.find((node) =>
+      node.kind === "materialize");
+    if (missingResourceNode?.kind !== "materialize") {
+      throw new Error("missing materialize node");
+    }
+    missingResourceNode.resourceId = "missing";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      missingResource,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.danglingReference);
+
+    const unordered = clone(materializedCopyProgram());
+    const unorderedNode = unordered.nodes.find((node) =>
+      node.kind === "materialize");
+    if (unorderedNode?.kind !== "materialize") {
+      throw new Error("missing materialize node");
+    }
+    unorderedNode.dependsOn = [];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      unordered,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.readBeforeWrite);
+
+    const nonterminal = clone(materializedCopyProgram());
+    nonterminal.nodes.push({
+      nodeId: "copy-after-materialize",
+      kind: "copy",
+      dependsOn: ["materialize-output"],
+      sourceResourceId: "input",
+      destinationResourceId: "temporary",
+      mode: "whole-allocation-bytes-per-rank",
+    });
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      nonterminal,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidAccess);
+
+    const mode = clone(materializedCopyProgram());
+    const modeNode = mode.nodes.find((node) =>
+      node.kind === "materialize");
+    if (modeNode?.kind !== "materialize") {
+      throw new Error("missing materialize node");
+    }
+    modeNode.mode = "eager-readback" as typeof modeNode.mode;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      mode,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const version = clone(materializedCopyProgram());
+    version.version.minor = 1;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      version,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+  });
+
   it("normalizes version-1.1 whole-allocation per-rank copies", async () => {
     const constructed = await createVerifiedHostGraphArtifact(
       copyProgram(),
@@ -247,13 +389,14 @@ describe("host graph artifact", () => {
       dispatchCount: 0,
       collectiveCount: 0,
       copyCount: 2,
+      materializationCount: 0,
       topologicalNodeIds: ["copy-input", "copy-output"],
     });
   });
 
   it("rejects copy version, mode, resource, dtype, and hazard drift", async () => {
     const future = clone(copyProgram());
-    future.version.minor = 2 as typeof future.version.minor;
+    future.version.minor = 3 as typeof future.version.minor;
     expect((await diagnostic(() => createVerifiedHostGraphArtifact(
       future,
       { kernelArtifacts: [], layoutArtifacts: [] },
@@ -382,6 +525,7 @@ describe("host graph artifact", () => {
       dispatchCount: 2,
       collectiveCount: 1,
       copyCount: 0,
+      materializationCount: 0,
       topologicalNodeIds: ["transform", "synchronize", "store"],
       outputResourceIds: ["output"],
     });

@@ -190,6 +190,24 @@ function rawCopyProgram(byteLength = "8"): HostGraphProgram {
   };
 }
 
+function materializedRawCopyProgram(byteLength = "8"): HostGraphProgram {
+  const copy = rawCopyProgram(byteLength);
+  return {
+    ...copy,
+    version: { major: 1, minor: 2 },
+    nodes: [
+      ...copy.nodes,
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["raw-copy"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 async function verified(
   program: HostGraphProgram,
   artifacts: VerifiedViewCopyArtifacts,
@@ -212,6 +230,29 @@ function input(
 }
 
 describe("semantic host-graph WebGPU preparation", () => {
+  it("prepares explicit version-1.2 materialization without an extra GPU step", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      materializedRawCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+
+    expect(prepared).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 2,
+      outputResourceIds: ["output"],
+      expandedStepCount: 2,
+      dispatchStepCount: 0,
+      copyStepCount: 2,
+      materializationCount: 1,
+      collectiveReductionStepCount: 0,
+      collectiveReplicationStepCount: 0,
+    });
+  });
+
   it("lowers version-1.1 raw copy nodes per rank without kernel artifacts", async () => {
     const graph = (await createVerifiedHostGraphArtifact(
       rawCopyProgram(),
@@ -228,6 +269,7 @@ describe("semantic host-graph WebGPU preparation", () => {
       expandedStepCount: 2,
       dispatchStepCount: 0,
       copyStepCount: 2,
+      materializationCount: 0,
       collectiveReductionStepCount: 0,
       collectiveReplicationStepCount: 0,
       plannedTransientGpuBytes: "48",
@@ -267,6 +309,7 @@ describe("semantic host-graph WebGPU preparation", () => {
       expandedStepCount: 4,
       dispatchStepCount: 4,
       copyStepCount: 0,
+      materializationCount: 0,
       collectiveReductionStepCount: 0,
       collectiveReplicationStepCount: 0,
       plannedTransientGpuBytes: "64",

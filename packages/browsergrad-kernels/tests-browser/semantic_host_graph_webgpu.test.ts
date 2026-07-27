@@ -86,6 +86,7 @@ interface CaseObservation extends JsonObject {
   readonly expandedStepCount: number;
   readonly dispatchStepCount: number;
   readonly copyStepCount: number;
+  readonly materializationCount: number;
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -249,6 +250,7 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         expandedStepCount: actual.trace.expandedStepCount,
         dispatchStepCount: actual.trace.dispatchStepCount,
         copyStepCount: actual.trace.copyStepCount,
+        materializationCount: actual.trace.materializationCount,
         collectiveReductionStepCount:
           actual.trace.collectiveReductionStepCount,
         collectiveReplicationStepCount:
@@ -467,7 +469,7 @@ function collectiveProgram(
 function rawCopyProgram(): HostGraphProgram {
   return {
     kind: "host-graph",
-    version: { major: 1, minor: 1 },
+    version: { major: 1, minor: 2 },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire(2),
     resources: [
@@ -490,14 +492,23 @@ function rawCopyProgram(): HostGraphProgram {
         alignmentBytes: 1,
       },
     ],
-    nodes: [{
-      nodeId: "raw-copy",
-      kind: "copy",
-      dependsOn: [],
-      sourceResourceId: "input",
-      destinationResourceId: "output",
-      mode: "whole-allocation-bytes-per-rank",
-    }],
+    nodes: [
+      {
+        nodeId: "raw-copy",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "input",
+        destinationResourceId: "output",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["raw-copy"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
   };
 }
 

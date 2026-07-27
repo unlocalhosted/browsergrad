@@ -31,7 +31,7 @@ PyTorch-shaped surface.
 | `runThreadGrid`, `referenceSaxpy`, `referenceExclusiveScan`, `referenceFindRepeats`, `referenceOrderedCircleRender` | Thread-grid teaching references for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
 | `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` / `simulateCuda1DGrid` | CUDA-shaped compatibility aliases for labs and rubrics that teach CUDA vocabulary | ✅ |
 | `prepareSemanticViewCopyWgsl` / `runSemanticViewCopyWebGpu` | Verified `view-copy@1.0` lowering over canonical layout/index artifacts, with exact 32-bit-word storage and structured guarded padding | ✅ 13-case strict CPU/WebGPU parity on Apple Metal 3 across f32/i32/u32, ranks 1–4, striding, broadcast, offsets, and float padding; release evidence remains commit-scoped |
-| `prepareSemanticHostGraphWebGpu` / `runSemanticHostGraphWebGpu` | Authority-bound `browsergrad.host-graph@1` execution with per-rank private storage, canonical view-copy dispatches, whole-allocation raw copies, and ordered f32/i32/u32 all-reduce | ✅ required real-WebGPU complete-output bit parity with the CPU graph oracle for finite f32 sum/signed-zero min, wrapping i32 sum, exact u32 max, and exact u8 allocation copy; dynamic control, transport, and native companions remain separate |
+| `prepareSemanticHostGraphWebGpu` / `runSemanticHostGraphWebGpu` | Authority-bound `browsergrad.host-graph@1` execution with per-rank private storage, canonical view-copy dispatches, whole-allocation raw copies, terminal materialization, and ordered f32/i32/u32 all-reduce | ✅ required real-WebGPU complete-output bit parity with the CPU graph oracle for finite f32 sum/signed-zero min, wrapping i32 sum, exact u32 max, and explicitly materialized u8 allocation copy; dynamic control, transport, and native companions remain separate |
 | `prepareSemanticGemmWgsl` / `runSemanticGemmWebGpu` | Verified logical GEMM plus independent schedule lowering with cooperative workgroup staging, uniform barriers, and masked boundary tiles | ✅ bit-exact only for semantic-core certified exact f32 inputs; required irregular two-schedule WebGPU evidence |
 | `prepareSemanticAttentionWgsl` / `runSemanticAttentionWebGpu` | Verified attention plus independent online K/V-tile schedule lowering/execution with cooperative staging, uniform barriers, and causal/tail masks before state updates | ✅ required causal/non-causal two-schedule CPU/WebGPU comparison plus separate observational host-API performance record on Apple Metal 3 |
 | `rowWiseOnlineAttentionDirect` | Fused row-wise online-softmax attention baseline with strict real-WebGPU parity vs composed reference; not block-tiled FlashAttention. | ✅ |
@@ -179,10 +179,12 @@ The host-graph adapter consumes only exact verifier-issued graph authority plus
 the exact opaque kernel/layout artifacts referenced by that graph. Preparation
 expands verified topological nodes into one canonical view-copy dispatch per
 rank, one raw-word copy per rank for version-1.1 whole-allocation copy nodes,
-and pairwise rank-ordered reduction/replication steps. Raw copy preserves all
-dtype bits and requires allocation byte length divisible by four in the
-portable WebGPU profile. It bounds expanded steps, generated WGSL, preparation
-time, and the complete private host/GPU working set before device access.
+and pairwise rank-ordered reduction/replication steps. Version-1.2 terminal
+materialization nodes select output readbacks after whole-graph success without
+adding a GPU dispatch. Raw copy preserves all dtype bits and requires
+allocation byte length divisible by four in the portable WebGPU profile. It
+bounds expanded steps, generated WGSL, preparation time, and the complete
+private host/GPU working set before device access.
 
 Execution snapshots every rank-local input before its first await, creates only
 private zero-initialized temporary/output storage, checks device allocation,
@@ -202,7 +204,7 @@ pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:semantic-host-grap
 ```
 
 This profile is a static DAG executor. It does not claim bounded dynamic
-control, copy/event semantic nodes, transport/topology, a worker mesh, native
+control, event semantic nodes, transport/topology, a worker mesh, native
 collectives, or performance.
 
 ## Quick start

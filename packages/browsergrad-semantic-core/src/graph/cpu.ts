@@ -24,6 +24,7 @@ import type {
   HostGraphAllReduceNode,
   HostGraphCopyNode,
   HostGraphDispatchNode,
+  HostGraphMaterializeNode,
   HostGraphResource,
 } from "./model.js";
 
@@ -206,7 +207,18 @@ interface CopyPlan {
   readonly elementOperations: bigint;
 }
 
-type CpuNodePlan = DispatchPlan | CollectivePlan | CopyPlan;
+interface MaterializePlan {
+  readonly kind: "materialize";
+  readonly nodeId: string;
+  readonly resourceId: string;
+  readonly elementOperations: 0n;
+}
+
+type CpuNodePlan =
+  | DispatchPlan
+  | CollectivePlan
+  | CopyPlan
+  | MaterializePlan;
 
 interface NativeUint8Slots {
   readonly buffer: ArrayBufferLike;
@@ -306,7 +318,9 @@ export async function prepareHostGraphCpu(
       )
       : node.kind === "all-reduce"
         ? prepareCollectivePlan(node, resources)
-        : prepareCopyPlan(node, resources, rankCount);
+        : node.kind === "copy"
+          ? prepareCopyPlan(node, resources, rankCount)
+          : prepareMaterializePlan(node, resources);
     elementOperations += plan.elementOperations;
     if (elementOperations > BigInt(normalized.maxElementOperations)) {
       fail(
@@ -325,8 +339,17 @@ export async function prepareHostGraphCpu(
       .filter((resource) => resource.role === "input"),
   );
   const outputResources = Object.freeze(
-    payload.program.resources
-      .filter((resource) => resource.role === "output"),
+    preparedGraph.outputResourceIds.map((resourceId) => {
+      const resource = resources.get(resourceId);
+      if (resource === undefined || resource.role !== "output") {
+        fail(
+          "BG-GRAPH-CPU-INTERNAL",
+          "$.artifact",
+          `prepared output resource ${resourceId} disappeared`,
+        );
+      }
+      return resource;
+    }),
   );
   const frozenPlans = Object.freeze(plans);
   const executedNodeIds = Object.freeze(frozenPlans.map((plan) => plan.nodeId));
@@ -372,10 +395,16 @@ export async function prepareHostGraphCpu(
           normalized.maxExecutionMs,
           captured.signal,
         );
-      } else {
+      } else if (plan.kind === "copy") {
         executeCopy(
           plan,
           rankResources,
+          executionStartedAt,
+          normalized.maxExecutionMs,
+          captured.signal,
+        );
+      } else {
+        ensureExecutionActive(
           executionStartedAt,
           normalized.maxExecutionMs,
           captured.signal,
@@ -570,6 +599,26 @@ function prepareCopyPlan(
     destinationResourceId: node.destinationResourceId,
     byteLength,
     elementOperations: BigInt(byteLength) * BigInt(rankCount),
+  });
+}
+
+function prepareMaterializePlan(
+  node: HostGraphMaterializeNode,
+  resources: ReadonlyMap<string, HostGraphResource>,
+): MaterializePlan {
+  const resource = resources.get(node.resourceId);
+  if (resource === undefined || resource.role !== "output") {
+    fail(
+      "BG-GRAPH-CPU-INTERNAL",
+      `$.nodes.${node.nodeId}.resourceId`,
+      "verified materialization output disappeared",
+    );
+  }
+  return Object.freeze({
+    kind: "materialize",
+    nodeId: node.nodeId,
+    resourceId: node.resourceId,
+    elementOperations: 0n,
   });
 }
 

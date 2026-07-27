@@ -49,6 +49,7 @@ import {
   type HostGraphCopyNode,
   type HostGraphDispatchNode,
   type HostGraphDispatchResourceBinding,
+  type HostGraphMaterializeNode,
   type HostGraphNode,
   type HostGraphProgram,
   type HostGraphResource,
@@ -57,7 +58,7 @@ import {
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 1;
+export const HOST_GRAPH_ARTIFACT_MINOR = 2;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
@@ -117,6 +118,7 @@ export interface PreparedHostGraphProgram {
   readonly dispatchCount: number;
   readonly collectiveCount: number;
   readonly copyCount: number;
+  readonly materializationCount: number;
   readonly topologicalNodeIds: readonly string[];
   readonly outputResourceIds: readonly string[];
 }
@@ -127,6 +129,7 @@ interface HostGraphAnalysis {
   readonly dispatchCount: number;
   readonly collectiveCount: number;
   readonly copyCount: number;
+  readonly materializationCount: number;
   readonly topologicalNodeIds: readonly string[];
   readonly outputResourceIds: readonly string[];
 }
@@ -259,6 +262,7 @@ export async function prepareHostGraphProgram(
     dispatchCount: analysis.dispatchCount,
     collectiveCount: analysis.collectiveCount,
     copyCount: analysis.copyCount,
+    materializationCount: analysis.materializationCount,
     topologicalNodeIds: Object.freeze([...analysis.topologicalNodeIds]),
     outputResourceIds: Object.freeze([...analysis.outputResourceIds]),
   });
@@ -310,12 +314,12 @@ function parseProgram(
   );
   if (
     version.major !== 1 ||
-    (version.minor !== 0 && version.minor !== 1)
+    (version.minor !== 0 && version.minor !== 1 && version.minor !== 2)
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 and 1.1 only",
+      "host graph program reader supports versions 1.0, 1.1, and 1.2 only",
     );
   }
   if (version.minor !== envelopeMinor) {
@@ -468,7 +472,7 @@ function parseResources(
 
 function parseNodes(
   value: JsonValue,
-  programMinor: 0 | 1,
+  programMinor: 0 | 1 | 2,
 ): readonly HostGraphNode[] {
   const values = arrayValue(value, "$.payload.program.nodes");
   if (values.length === 0 || values.length > HOST_GRAPH_MAX_NODES) {
@@ -496,7 +500,7 @@ function parseNodes(
 function parseNode(
   value: JsonValue,
   path: string,
-  programMinor: 0 | 1,
+  programMinor: 0 | 1 | 2,
 ): HostGraphNode {
   const object = objectValue(value, path);
   const kind = stringValue(field(object, "kind", path), `${path}.kind`);
@@ -512,11 +516,49 @@ function parseNode(
     }
     return parseCopyNode(object, path);
   }
+  if (kind === "materialize") {
+    if (programMinor < 2) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.kind`,
+        "materialize nodes require host graph program version 1.2",
+      );
+    }
+    return parseMaterializeNode(object, path);
+  }
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, and version-1.1 copy nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, and version-1.2 materialize nodes",
   );
+}
+
+function parseMaterializeNode(
+  value: JsonObject,
+  path: string,
+): HostGraphMaterializeNode {
+  const object = closedObject(
+    value,
+    ["nodeId", "kind", "dependsOn", "resourceId", "mode"],
+    path,
+  );
+  if (object.mode !== "host-readback-after-graph-success") {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "materialize mode must be host-readback-after-graph-success",
+    );
+  }
+  return {
+    nodeId: identifier(field(object, "nodeId", path), `${path}.nodeId`),
+    kind: "materialize",
+    dependsOn: dependencies(field(object, "dependsOn", path), path),
+    resourceId: identifier(
+      field(object, "resourceId", path),
+      `${path}.resourceId`,
+    ),
+    mode: "host-readback-after-graph-success",
+  };
 }
 
 function parseCopyNode(
@@ -797,6 +839,7 @@ function analyzeProgram(
   let dispatchCount = 0;
   let collectiveCount = 0;
   let copyCount = 0;
+  let materializationCount = 0;
   const dispatchEffects = new Map<
     string,
     readonly HostGraphResourceEffect[]
@@ -812,6 +855,12 @@ function analyzeProgram(
       );
     } else if (node.kind === "copy") {
       verifyCopyBinding(
+        node,
+        resources,
+        `$.payload.program.nodes[${index}]`,
+      );
+    } else if (node.kind === "materialize") {
+      verifyMaterializeBinding(
         node,
         resources,
         `$.payload.program.nodes[${index}]`,
@@ -955,12 +1004,15 @@ function analyzeProgram(
       ]));
     } else if (node.kind === "all-reduce") {
       collectiveCount += 1;
-    } else {
+    } else if (node.kind === "copy") {
       copyCount += 1;
+    } else {
+      materializationCount += 1;
     }
   }
   const topologicalNodeIds = topologicalOrder(program.nodes, nodes);
   const ancestors = dependencyAncestors(topologicalNodeIds, nodes);
+  verifyMaterializationContract(program);
   verifyEffects(
     program.nodes,
     topologicalNodeIds,
@@ -975,13 +1027,86 @@ function analyzeProgram(
     dispatchCount,
     collectiveCount,
     copyCount,
+    materializationCount,
     topologicalNodeIds: Object.freeze(topologicalNodeIds),
     outputResourceIds: Object.freeze(
-      program.resources
-        .filter((resource) => resource.role === "output")
-        .map((resource) => resource.resourceId),
+      program.version.minor < 2
+        ? program.resources
+          .filter((resource) => resource.role === "output")
+          .map((resource) => resource.resourceId)
+        : program.nodes
+          .filter((node): node is HostGraphMaterializeNode =>
+            node.kind === "materialize")
+          .map((node) => node.resourceId)
+          .sort(compareCanonicalStrings),
     ),
   });
+}
+
+function verifyMaterializeBinding(
+  node: HostGraphMaterializeNode,
+  resources: ReadonlyMap<string, HostGraphResource>,
+  path: string,
+): void {
+  const resource = resources.get(node.resourceId);
+  if (resource === undefined) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.danglingReference,
+      `${path}.resourceId`,
+      `materialize references missing resource ${node.resourceId}`,
+    );
+  }
+  if (resource.role !== "output") {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidAccess,
+      `${path}.resourceId`,
+      "materialize may expose only a declared output resource",
+    );
+  }
+}
+
+function verifyMaterializationContract(
+  program: HostGraphProgram,
+): void {
+  if (program.version.minor < 2) return;
+  const materializations = program.nodes.filter(
+    (node): node is HostGraphMaterializeNode =>
+      node.kind === "materialize",
+  );
+  const byResource = new Map<string, HostGraphMaterializeNode>();
+  for (const node of materializations) {
+    if (byResource.has(node.resourceId)) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.invalidAccess,
+        "$.payload.program.nodes",
+        `output resource ${node.resourceId} is materialized more than once`,
+      );
+    }
+    byResource.set(node.resourceId, node);
+  }
+  for (const resource of program.resources) {
+    if (resource.role === "output" && !byResource.has(resource.resourceId)) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.invalidAccess,
+        "$.payload.program.nodes",
+        `output resource ${resource.resourceId} requires exactly one materialize node in host graph version 1.2`,
+      );
+    }
+  }
+  const materializationIds = new Set(
+    materializations.map((node) => node.nodeId),
+  );
+  for (const [index, node] of program.nodes.entries()) {
+    const dependency = node.dependsOn.find((nodeId) =>
+      materializationIds.has(nodeId));
+    if (dependency !== undefined) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.invalidAccess,
+        `$.payload.program.nodes[${index}].dependsOn`,
+        `materialize node ${dependency} is terminal and cannot have dependents`,
+      );
+    }
+  }
 }
 
 function verifyCopyBinding(
@@ -1240,9 +1365,11 @@ function verifyEffects(
         ? `${path}.bindings[${effectIndex}]`
         : node.kind === "all-reduce"
           ? `${path}.resourceId`
-          : effectIndex === 0
-            ? `${path}.sourceResourceId`
-            : `${path}.destinationResourceId`;
+          : node.kind === "copy"
+            ? effectIndex === 0
+              ? `${path}.sourceResourceId`
+              : `${path}.destinationResourceId`
+            : `${path}.resourceId`;
       const resource = resources.get(effect.resourceId);
       if (resource === undefined) {
         invalid(
@@ -1320,10 +1447,13 @@ function nodeEffects(
   if (node.kind === "all-reduce") {
     return [{ resourceId: node.resourceId, access: "read-write" }];
   }
-  return [
-    { resourceId: node.sourceResourceId, access: "read" },
-    { resourceId: node.destinationResourceId, access: "write" },
-  ];
+  if (node.kind === "copy") {
+    return [
+      { resourceId: node.sourceResourceId, access: "read" },
+      { resourceId: node.destinationResourceId, access: "write" },
+    ];
+  }
+  return [{ resourceId: node.resourceId, access: "read" }];
 }
 
 function reads(access: HostGraphResourceAccess): boolean {

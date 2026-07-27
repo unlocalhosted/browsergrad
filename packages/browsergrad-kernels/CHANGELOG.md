@@ -18,6 +18,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   bit-preserving raw-word copy per rank. Required actual-device evidence adds
   an exact u8 case while the CPU reference also preserves odd-sized
   allocations; portable WebGPU explicitly refuses non-word-sized copies.
+- Host-graph program version 1.2 requires one terminal
+  `host-readback-after-graph-success` materialization node per output.
+  Materialization selects fail-stop readback without adding a GPU dispatch;
+  required actual-device u8 evidence now crosses that explicit node.
 - Graph execution snapshots complete direct/unshared inputs, initializes
   private temporary/output storage deterministically, bounds expanded steps
   and aggregate host/GPU storage, verifies device limits, and publishes fresh

@@ -30,7 +30,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified static DAG, compiler pipeline consumer, whole-allocation copy nodes, fail-stop CPU oracle, and authority-bound portable WebGPU executor have exact f32/i32/u32 plus raw-u8 actual-device parity; dynamic control, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified static DAG, compiler pipeline consumer, whole-allocation copy nodes, explicit fail-stop materialization, CPU oracle, and authority-bound portable WebGPU executor have exact f32/i32/u32 plus raw-u8 actual-device parity; dynamic control, events, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every exit criterion for the declared gate profile is
 complete. Verification of a closed initial profile does not imply broader
@@ -2123,12 +2123,18 @@ numerical policy and participant ranks. The failure model is
 view-copy pipeline constructor over opaque prepared bindings. Program version
 1.1 additively admits exact whole-allocation per-rank copies between distinct
 same-dtype, same-size resources; copy effects use the same read-before-write,
-input-immutability, dependency, and unordered-hazard checks. The
+input-immutability, dependency, and unordered-hazard checks. Program version
+1.2 requires exactly one terminal
+`host-readback-after-graph-success` materialization node for every declared
+output. Materialization is an ordered read after the final writer, cannot
+expose an input or temporary resource, cannot be duplicated, and cannot have
+dependents. Versions 1.0 and 1.1 retain their exact implicit-output behavior.
+The
 authority-bound `browsergrad.host-graph.cpu-reference@1` profile snapshots all
 rank-local inputs, executes dispatches, arbitrary-byte copies, and finite
 rank-ordered f32 or wrapping/exact 32-bit integer all-reduces in private
 memory, enforces fixed memory/operation/time/cancellation ceilings, and
-exposes outputs only after the complete graph succeeds.
+exposes only verified materialized outputs after the complete graph succeeds.
 
 Kernels owns the separate
 `browsergrad.host-graph.webgpu@1` portable adapter. It accepts only exact
@@ -2137,7 +2143,8 @@ the canonical view-copy lowerer; expands each admitted whole-allocation copy
 to one raw-word copy per rank; implements arbitrary-rank collectives as ordered
 pairwise reductions followed by raw-word replication; and retains one private
 GPU buffer per bound rank/resource. The portable copy profile requires whole
-32-bit words but preserves dtype bits, including the required u8 case. F32
+32-bit words but preserves dtype bits, including the required u8 case.
+Materialization selects terminal readback without adding a GPU dispatch. F32
 collectives use a separately
 read back atomic numerical-status word and preserve CPU signed-zero min/max;
 i32 sum wraps explicitly and u32/integer min/max remains exact. Complete input
@@ -2150,9 +2157,9 @@ reference for rank-ordered f32 sum, signed-zero f32 min, wrapping i32 sum,
 exact u32 max, and whole-allocation u8 copy, and separately proves non-finite
 f32 and lost-device refusal.
 
-No readback/event/materialization semantic node, bounded conditional/repetition node,
-pipeline authority, transport/topology adapter, worker mesh, native companion,
-or performance evidence exists yet, so Gate 7 remains `in progress`.
+No event semantic node, bounded conditional/repetition node, pipeline
+authority, transport/topology adapter, worker mesh, native companion, or
+performance evidence exists yet, so Gate 7 remains `in progress`.
 
 ## Proof Matrix and Release Gates
 
