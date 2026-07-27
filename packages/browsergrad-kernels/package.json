@@ -59,6 +59,10 @@
       "types": "./dist/semantic_view_copy.d.ts",
       "import": "./dist/semantic_view_copy.js"
     },
+    "./semantic_host_graph": {
+      "types": "./dist/semantic_host_graph.d.ts",
+      "import": "./dist/semantic_host_graph.js"
+    },
     "./semantic_gemm": {
       "types": "./dist/semantic_gemm.d.ts",
       "import": "./dist/semantic_gemm.js"
@@ -85,6 +89,8 @@
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:browser:view-copy": "vitest run --config vitest.browser.config.ts tests-browser/semantic_view_copy_webgpu.test.ts",
     "test:browser:view-copy:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_view_copy_webgpu.test.ts",
+    "test:browser:semantic-host-graph": "vitest run --config vitest.browser.config.ts tests-browser/semantic_host_graph_webgpu.test.ts",
+    "test:browser:semantic-host-graph:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_host_graph_webgpu.test.ts",
     "test:browser:semantic-gemm": "vitest run --config vitest.browser.config.ts tests-browser/semantic_gemm_webgpu.test.ts",
     "test:browser:semantic-gemm:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_gemm_webgpu.test.ts",
     "test:browser:semantic-attention": "vitest run --config vitest.browser.config.ts tests-browser/semantic_attention_webgpu.test.ts",

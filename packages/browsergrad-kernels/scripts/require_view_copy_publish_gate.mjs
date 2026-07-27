@@ -4,6 +4,7 @@ import { SEMANTIC_PERMUTE_EVIDENCE_SOURCE_PATHS } from "../../../scripts/semanti
 
 export function validateViewCopyPublishGate({
   evidenceCommit,
+  semanticHostGraphEvidenceCommit,
   semanticGemmEvidenceCommit,
   semanticAttentionEvidenceCommit,
   semanticAttentionPerformanceEvidenceCommit,
@@ -20,6 +21,17 @@ export function validateViewCopyPublishGate({
   if (!/^[0-9a-f]{40}$/u.test(evidenceCommit) || evidenceCommit !== head) {
     throw new Error(
       `kernels publish blocked: evidence commit ${evidenceCommit || "<missing>"} does not match HEAD ${head}`,
+    );
+  }
+  if (!semanticHostGraphEvidenceCommit) {
+    throw new Error(
+      "kernels publish blocked: run test:browser:semantic-host-graph:required for this commit and set BG_REQUIRED_SEMANTIC_HOST_GRAPH_WEBGPU_EVIDENCE_COMMIT to its full commit SHA",
+    );
+  }
+  if (!/^[0-9a-f]{40}$/u.test(semanticHostGraphEvidenceCommit)
+    || semanticHostGraphEvidenceCommit !== head) {
+    throw new Error(
+      `kernels publish blocked: semantic host-graph evidence commit ${semanticHostGraphEvidenceCommit || "<missing>"} does not match HEAD ${head}`,
     );
   }
   if (!semanticGemmEvidenceCommit) {
@@ -84,6 +96,9 @@ function main() {
   }).trim();
   validateViewCopyPublishGate({
     evidenceCommit: process.env.BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT?.trim(),
+    semanticHostGraphEvidenceCommit:
+      process.env.BG_REQUIRED_SEMANTIC_HOST_GRAPH_WEBGPU_EVIDENCE_COMMIT
+        ?.trim(),
     semanticGemmEvidenceCommit: process.env.BG_REQUIRED_SEMANTIC_GEMM_WEBGPU_EVIDENCE_COMMIT?.trim(),
     semanticAttentionEvidenceCommit: process.env.BG_REQUIRED_SEMANTIC_ATTENTION_WEBGPU_EVIDENCE_COMMIT?.trim(),
     semanticAttentionPerformanceEvidenceCommit: process.env.BG_REQUIRED_SEMANTIC_ATTENTION_WEBGPU_PERFORMANCE_EVIDENCE_COMMIT?.trim(),

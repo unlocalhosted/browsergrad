@@ -129,13 +129,14 @@ finite values in ascending participant-rank order, rounding after every sum;
 non-finite operands or results fail before output commit. Integer sums wrap at
 32 bits, while integer min/max is exact.
 
-The semantic graph itself grants no execution authority. This CPU reference
-does not claim WebGPU execution, transport, topology, retries, copies,
-readback, events, dynamic control, or a backend pipeline. Compiler owns the
-first concrete consumer: it lowers one or more opaque prepared view-copy
-bindings into a verified linear host graph with derived intermediate
-resources. Portable GPU execution and transport adapters require separate
-authority and evidence.
+The semantic graph itself grants no execution authority, and its CPU reference
+does not imply device execution. Compiler owns the first concrete producer: it
+lowers one or more opaque prepared view-copy bindings into a verified linear
+host graph with derived intermediate resources. Kernels separately owns the
+authority-bound `browsergrad.host-graph.webgpu@1` static-DAG adapter and its
+required actual-device evidence. Neither adapter grants transport, topology,
+retries, copy/event semantics, dynamic control, worker-mesh, native-companion,
+performance, or release authority.
 
 Frontends construct the operation through one `/kernel` sink rather than
 assembling allocation, alias, index-map, view, and operation IDs themselves.

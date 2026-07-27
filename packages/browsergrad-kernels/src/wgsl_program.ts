@@ -164,13 +164,13 @@ export class WgslPipelineCreationError extends KernelError {
   }
 }
 
-interface CachedWgslPipeline {
-  readonly pipeline: GPUComputePipeline;
+interface PendingWgslPipeline {
   readonly bindGroupLayout: GPUBindGroupLayout;
+  readonly pipeline: Promise<GPUComputePipeline>;
 }
 
 interface WgslPipelineCache {
-  readonly entries: Map<string, Promise<CachedWgslPipeline>>;
+  readonly entries: Map<string, PendingWgslPipeline>;
   hits: number;
   misses: number;
 }
@@ -493,7 +493,11 @@ export async function prepareWgslKernelProgramSequence(
         textureViewsByName.set(binding.name, view);
     }
 
-    const executableSteps: PreparedExecutableStep[] = [];
+    const pendingExecutableSteps: Array<{
+      readonly pending: PendingWgslPipeline;
+      readonly bindGroup: GPUBindGroup;
+      readonly program: WgslKernelProgram;
+    }> = [];
     for (let stepIndex = 0; stepIndex < programs.length; stepIndex++) {
       const program = programs[stepIndex]!;
       const { layoutEntries, bindGroupEntries } = bindGroupInputsForProgram(
@@ -502,13 +506,20 @@ export async function prepareWgslKernelProgramSequence(
         uniformBuffersForStep(uniformBuffersByStep, stepIndex),
         textureViewsByName,
       );
-      const { pipeline, bindGroupLayout } = await getOrCreatePipeline(gpu, program, layoutEntries);
+      const pending = getOrCreatePipeline(gpu, program, layoutEntries);
       const bindGroup = gpu.createBindGroup({
-        layout: bindGroupLayout,
+        layout: pending.bindGroupLayout,
         entries: [...bindGroupEntries],
       });
-      executableSteps.push({ pipeline, bindGroup, program });
+      pendingExecutableSteps.push({ pending, bindGroup, program });
     }
+    const executableSteps = await Promise.all(
+      pendingExecutableSteps.map(async ({ pending, bindGroup, program }) => ({
+        pipeline: await pending.pipeline,
+        bindGroup,
+        program,
+      })),
+    );
 
     return new PreparedWgslKernelSequenceImpl(
       impl,
@@ -873,11 +884,11 @@ function bindGroupInputsForProgram(
   return { layoutEntries, bindGroupEntries };
 }
 
-async function getOrCreatePipeline(
+function getOrCreatePipeline(
   gpu: GPUDevice,
   program: WgslKernelProgram,
   layoutEntries: readonly GPUBindGroupLayoutEntry[],
-): Promise<CachedWgslPipeline> {
+): PendingWgslPipeline {
   const cacheKey = [
     program.name,
     hashString(program.wgsl),
@@ -895,12 +906,24 @@ async function getOrCreatePipeline(
     const firstKey = cache.entries.keys().next().value;
     if (firstKey !== undefined) cache.entries.delete(firstKey);
   }
-  const promise = createPipeline(gpu, program, layoutEntries).catch((error: unknown) => {
-    if (cache.entries.get(cacheKey) === promise) cache.entries.delete(cacheKey);
-    throw error;
+  const bindGroupLayout = gpu.createBindGroupLayout({
+    entries: [...layoutEntries],
   });
-  cache.entries.set(cacheKey, promise);
-  return promise;
+  const pending: PendingWgslPipeline = {
+    bindGroupLayout,
+    pipeline: createPipeline(
+      gpu,
+      program,
+      bindGroupLayout,
+    ).catch((error: unknown) => {
+      if (cache.entries.get(cacheKey) === pending) {
+        cache.entries.delete(cacheKey);
+      }
+      throw error;
+    }),
+  };
+  cache.entries.set(cacheKey, pending);
+  return pending;
 }
 
 function getOrCreateWgslPipelineCache(gpu: GPUDevice): WgslPipelineCache {
@@ -915,9 +938,8 @@ function getOrCreateWgslPipelineCache(gpu: GPUDevice): WgslPipelineCache {
 async function createPipeline(
   gpu: GPUDevice,
   program: WgslKernelProgram,
-  layoutEntries: readonly GPUBindGroupLayoutEntry[],
-): Promise<CachedWgslPipeline> {
-  const bindGroupLayout = gpu.createBindGroupLayout({ entries: [...layoutEntries] });
+  bindGroupLayout: GPUBindGroupLayout,
+): Promise<GPUComputePipeline> {
   const shaderModule = gpu.createShaderModule({ code: program.wgsl });
   const pipelineOutcome = gpu.createComputePipelineAsync({
     layout: gpu.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
@@ -951,7 +973,7 @@ async function createPipeline(
         : String(pipelineResult.error);
     throw new WgslPipelineCreationError(`WGSL pipeline creation failed for ${program.name}: ${detail}`);
   }
-  return { pipeline: pipelineResult.pipeline, bindGroupLayout };
+  return pipelineResult.pipeline;
 }
 
 function featureStrings(input: GPUAdapter | GPUDevice | KernelDevice | undefined): string[] | undefined {

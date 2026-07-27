@@ -30,7 +30,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The initial verified multi-dispatch DAG, explicit all-reduce semantics, compiler-owned view-copy pipeline consumer, and fail-stop CPU reference are implemented; portable GPU execution, dynamic control, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified static DAG, compiler pipeline consumer, fail-stop CPU oracle, and authority-bound portable WebGPU executor have exact f32/i32/u32 actual-device parity; dynamic control, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every exit criterion for the declared gate profile is
 complete. Verification of a closed initial profile does not imply broader
@@ -188,9 +188,9 @@ exact-payload CPU/required-WebGPU convergence is no longer a blocker.
    No serialized observation may substitute for an opaque authority, and the
    synthetic composition fixture establishes no current production status.
 
-Gate 7 remains incomplete: semantic verification alone grants no graph
-execution, and the separately named CPU reference grants no portable GPU,
-dynamic-control, transport/topology, worker-mesh, or native-systems claim.
+Gate 7 remains incomplete: its separately authorized CPU and portable-WebGPU
+executors cover the closed static DAG only; dynamic control,
+transport/topology, worker meshes, and native systems remain unimplemented.
 
 ## Purpose
 
@@ -2125,10 +2125,27 @@ authority-bound `browsergrad.host-graph.cpu-reference@1` profile snapshots all
 rank-local inputs, executes dispatches and finite rank-ordered f32 or
 wrapping/exact 32-bit integer all-reduces in private memory, enforces fixed
 memory/operation/time/cancellation ceilings, and exposes outputs only after
-the complete graph succeeds. No portable WebGPU executor,
-copy/readback/event node, bounded conditional/repetition node, pipeline
-authority, transport/topology adapter, worker mesh, native companion, or
-performance evidence exists yet, so Gate 7 remains `in progress`.
+the complete graph succeeds.
+
+Kernels owns the separate
+`browsergrad.host-graph.webgpu@1` portable adapter. It accepts only exact
+prepared graph/kernel/layout authority; expands each dispatch per rank through
+the canonical view-copy lowerer; implements arbitrary-rank collectives as
+ordered pairwise reductions followed by raw-word replication; and retains one
+private GPU buffer per bound rank/resource. F32 collectives use a separately
+read back atomic numerical-status word and preserve CPU signed-zero min/max;
+i32 sum wraps explicitly and u32/integer min/max remains exact. Complete input
+snapshots, deterministic zero-fill, expanded-step and aggregate transient
+budgets, device-limit admission, scoped shader/pipeline/validation/OOM
+diagnostics, device-loss invalidation, cancellation/timeout stale-result
+suppression, and output publication after complete readback preserve the graph
+failure model. Required headed Chromium on Apple Metal 3 bit-matches the CPU
+reference for rank-ordered f32 sum, signed-zero f32 min, wrapping i32 sum, and
+exact u32 max, and separately proves non-finite f32 and lost-device refusal.
+
+No copy/readback/event semantic node, bounded conditional/repetition node,
+pipeline authority, transport/topology adapter, worker mesh, native companion,
+or performance evidence exists yet, so Gate 7 remains `in progress`.
 
 ## Proof Matrix and Release Gates
 

@@ -1,5 +1,6 @@
 export interface ViewCopyPublishGateInput {
   readonly evidenceCommit: string | undefined;
+  readonly semanticHostGraphEvidenceCommit: string | undefined;
   readonly semanticGemmEvidenceCommit: string | undefined;
   readonly semanticAttentionEvidenceCommit: string | undefined;
   readonly semanticAttentionPerformanceEvidenceCommit: string | undefined;

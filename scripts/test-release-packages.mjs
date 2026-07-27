@@ -476,12 +476,14 @@ try {
     semanticCoreRange === workspaceSemanticCoreVersion,
     `kernels package semantic-core dependency should be ${workspaceSemanticCoreVersion}, got ${semanticCoreRange}`,
   );
-  for (const subpath of ["./wgsl_program", "./float16", "./cuda_concepts", "./cuda_program", "./rubric", "./semantic_view_copy", "./semantic_gemm", "./semantic_attention"]) {
+  for (const subpath of ["./wgsl_program", "./float16", "./cuda_concepts", "./cuda_program", "./rubric", "./semantic_view_copy", "./semantic_host_graph", "./semantic_gemm", "./semantic_attention"]) {
     assert(kernelsPkg.exports?.[subpath], `kernels package missing export ${subpath}`);
   }
   for (const file of [
     "dist/semantic_view_copy.js",
     "dist/semantic_view_copy.d.ts",
+    "dist/semantic_host_graph.js",
+    "dist/semantic_host_graph.d.ts",
     "dist/semantic_gemm.js",
     "dist/semantic_gemm.d.ts",
     "dist/semantic_attention.js",
@@ -519,6 +521,8 @@ try {
     "createBrowsergradKernelRubric",
     "prepareSemanticViewCopyWgsl",
     "runSemanticViewCopyWebGpu",
+    "prepareSemanticHostGraphWebGpu",
+    "runSemanticHostGraphWebGpu",
     "prepareSemanticGemmWgsl",
     "runSemanticGemmWebGpu",
     "prepareSemanticAttentionWgsl",
@@ -534,6 +538,7 @@ try {
     ["cuda_program", "defineCuda1DProgram"],
     ["rubric", "createKernelRubric"],
     ["semantic_view_copy", "prepareSemanticViewCopyWgsl"],
+    ["semantic_host_graph", "prepareSemanticHostGraphWebGpu"],
     ["semantic_gemm", "prepareSemanticGemmWgsl"],
     ["semantic_attention", "prepareSemanticAttentionWgsl"],
   ]) {
@@ -1003,6 +1008,7 @@ try {
     "JIT retained evidence must carry a validated domain-separated whole-record digest",
   );
   for (const [workflowName, workflow] of [["release", releaseWorkflow], ["publish", publishWorkflow]]) {
+    assertSemanticHostGraphEvidenceWorkflowOrder(workflowName, workflow);
     assertSemanticGemmEvidenceWorkflowOrder(workflowName, workflow);
     assertSemanticAttentionEvidenceWorkflowOrder(workflowName, workflow);
     assertSemanticAttentionPerformanceEvidenceWorkflowOrder(workflowName, workflow);
@@ -1023,6 +1029,21 @@ try {
       && performanceCiJob.includes("semantic-attention-performance-webgpu-evidence-${{ github.sha }}")
       && !/^    needs:/mu.test(performanceCiJob),
     "CI semantic attention performance evidence must be required, retained, and independently parallel",
+  );
+  const hostGraphCiStart = ciWorkflow.indexOf("\n  semantic-host-graph-webgpu:\n");
+  const hostGraphCiEnd = ciWorkflow.indexOf("\n  semantic-gemm-webgpu:\n", hostGraphCiStart);
+  assert(
+    hostGraphCiStart >= 0
+      && hostGraphCiEnd > hostGraphCiStart
+      && ciWorkflow.includes("--exclude tests-browser/semantic_host_graph_webgpu.test.ts"),
+    "CI must isolate semantic host-graph evidence from the broad browser lane",
+  );
+  const hostGraphCiJob = ciWorkflow.slice(hostGraphCiStart, hostGraphCiEnd);
+  assert(
+    hostGraphCiJob.includes("test:browser:semantic-host-graph:required")
+      && hostGraphCiJob.includes("semantic-host-graph-webgpu-evidence-${{ github.sha }}")
+      && !/^    needs:/mu.test(hostGraphCiJob),
+    "CI semantic host-graph evidence must be required, retained, and independently parallel",
   );
   const compilerRoot = await import(pathToFileURL(join(compiler, "dist/index.js")));
   const packedCompilerEntries = listRelativeEntries(compiler);
@@ -1407,6 +1428,7 @@ import { HOST_GRAPH_CPU_PROFILE, hostGraphArtifactPayload, prepareHostGraphCpu }
 import { hashSemanticArtifact, parseWireI64, parseWireU64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import densePermutationFixtures from "@unlocalhosted/browsergrad-semantic-core/fixtures/kernel-v1/dense-permutation-view-copy.cases.json" with { type: "json" };
 import { prepareSemanticViewCopyWgsl } from "@unlocalhosted/browsergrad-kernels/semantic_view_copy";
+import { prepareSemanticHostGraphWebGpu } from "@unlocalhosted/browsergrad-kernels/semantic_host_graph";
 import {
   compileCudaLiteKernelWithLayoutBindings,
   compileCudaLiteKernelWithViewCopyBinding,
@@ -1478,6 +1500,13 @@ const hostGraphCpu = await prepareHostGraphCpu(hostGraph.artifact, {
   kernelArtifacts: [kernel],
   layoutArtifacts: [layout],
 });
+const hostGraphWebGpu = await prepareSemanticHostGraphWebGpu(
+  hostGraph.artifact,
+  {
+    kernelArtifacts: [kernel],
+    layoutArtifacts: [layout],
+  },
+);
 const hostGraphCpuInputWords = new Uint32Array([
   0x3f800000,
   0x40000000,
@@ -1511,6 +1540,7 @@ if (!compiledViewCopy.wgslProgram?.name.includes(viewCopyBinding.layoutSemanticH
 const hostGraphTemporary = hostGraphPayload.program.resources.find((resource) => resource.resourceId === "temporary/0");
 if (hostGraph.dispatchCount !== 2 || hostGraphPayload.program.nodes.length !== 2 || hostGraphTemporary?.byteLength !== "16" || hostGraphTemporary.multiplicity !== "per-rank" || hostGraphTemporary.initialization !== "zero-fill") throw new Error("fresh consumer compiler host graph lost multi-dispatch resource meaning");
 if (hostGraphCpu.profile !== HOST_GRAPH_CPU_PROFILE || ![0x3f800000, 0x40000000, 0x40400000, 0x40800000].every((value, index) => hostGraphCpuOutputWords[index] === value)) throw new Error("fresh consumer CPU host graph lost exact multi-dispatch execution");
+if (hostGraphWebGpu.graphSemanticHash !== hostGraph.graphSemanticHash || hostGraphWebGpu.expandedStepCount !== 2 || hostGraphWebGpu.dispatchStepCount !== 2 || hostGraphWebGpu.wgslModuleHashes.length !== 1) throw new Error("fresh consumer WebGPU host graph lost exact multi-dispatch preparation");
 `;
   writeFileSync(join(consumer, "consumer.mjs"), source);
   writeFileSync(join(consumer, "consumer.ts"), source);
@@ -1847,6 +1877,21 @@ function assertSemanticGemmEvidenceWorkflowOrder(workflowName, workflow) {
     log: "semantic-gemm-webgpu-evidence.log",
     artifact: "semantic-gemm-webgpu-evidence-${{ github.sha }}",
     evidenceEnvironment: "BG_REQUIRED_SEMANTIC_GEMM_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}",
+  });
+}
+
+function assertSemanticHostGraphEvidenceWorkflowOrder(workflowName, workflow) {
+  assertKernelsSemanticEvidenceWorkflowOrder(workflowName, workflow, {
+    label: "semantic host graph",
+    releaseEvidence: "Required semantic host-graph WebGPU gate (kernels release)",
+    releaseUpload: "Retain semantic host-graph WebGPU evidence (kernels release)",
+    publishEvidence: "Run required semantic host-graph WebGPU gate",
+    publishUpload: "Retain semantic host-graph WebGPU evidence",
+    command: "test:browser:semantic-host-graph:required",
+    log: "semantic-host-graph-webgpu-evidence.log",
+    artifact: "semantic-host-graph-webgpu-evidence-${{ github.sha }}",
+    evidenceEnvironment:
+      "BG_REQUIRED_SEMANTIC_HOST_GRAPH_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}",
   });
 }
 

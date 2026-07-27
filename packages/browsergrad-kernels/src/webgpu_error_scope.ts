@@ -24,6 +24,10 @@ export interface ScopedWebGpuIssueOptions<T> {
   readonly completion?: (value: T) => Promise<unknown>;
 }
 
+export interface ScopedAsyncWebGpuIssueOptions<T> {
+  readonly cleanup?: (value: T) => void;
+}
+
 /**
  * Capture errors from a synchronous WebGPU issue phase. Validation, OOM, and
  * internal scopes are pushed outer-to-inner immediately before `issue`; every
@@ -131,6 +135,120 @@ export async function issueWithWebGpuErrorScopes<T>(
     );
   }
   return value as T;
+}
+
+/**
+ * Capture errors for an operation whose WebGPU issue phase synchronously
+ * returns a promise. Every error scope is popped before awaiting that promise,
+ * so unrelated work cannot enter this operation's scope stack.
+ */
+export async function issueAsyncWithWebGpuErrorScopes<T>(
+  gpu: Pick<GPUDevice, "pushErrorScope" | "popErrorScope" | "lost">,
+  path: string,
+  issue: () => Promise<T>,
+  options: ScopedAsyncWebGpuIssueOptions<T> = {},
+): Promise<T> {
+  const pushed: GPUErrorFilter[] = [];
+  let operation: Promise<T> | undefined;
+  let operationError: unknown;
+  let popAttempts: readonly PopAttempt[] = [];
+  try {
+    for (const scope of ["internal", "out-of-memory", "validation"] as const) {
+      gpu.pushErrorScope(scope);
+      pushed.push(scope);
+    }
+    operation = issue();
+  } catch (error) {
+    operationError = error;
+  } finally {
+    popAttempts = Object.freeze(
+      [...pushed].reverse().map((scope) => ({
+        scope,
+        result: popAttempt(gpu),
+      })),
+    );
+  }
+
+  const operationSettlement = operation === undefined
+    ? Promise.resolve({ kind: "not-issued" as const })
+    : operation.then(
+      (value) => ({ kind: "completed" as const, value }),
+      (error: unknown) => ({ kind: "failed" as const, error }),
+    );
+  const settlement = await Promise.race([
+    gpu.lost.then((info) => ({ kind: "lost" as const, info })),
+    Promise.all([
+      Promise.all(popAttempts.map(({ result }) => result)),
+      operationSettlement,
+    ]).then(([scopes, outcome]) => ({
+      kind: "scopes" as const,
+      scopes,
+      outcome,
+    })),
+  ]);
+  if (settlement.kind === "lost") {
+    if (operation !== undefined && options.cleanup !== undefined) {
+      void operation.then(
+        (value) => cleanup(value, true, options.cleanup),
+        () => undefined,
+      );
+    }
+    throw new ScopedWebGpuIssueError(
+      "device-lost",
+      path,
+      `WebGPU device lost (${settlement.info.reason}): ${settlement.info.message}`,
+    );
+  }
+
+  const completedValue = settlement.outcome.kind === "completed"
+    ? settlement.outcome.value
+    : undefined;
+  for (const [index, attempt] of settlement.scopes.entries()) {
+    if (attempt.failure !== undefined) {
+      cleanup(completedValue, settlement.outcome.kind === "completed", options.cleanup);
+      throw new ScopedWebGpuIssueError(
+        "error-scope",
+        path,
+        `popErrorScope(${popAttempts[index]!.scope}) failed: ${message(attempt.failure)}`,
+        { cause: attempt.failure },
+      );
+    }
+  }
+  for (const [index, attempt] of settlement.scopes.entries()) {
+    if (attempt.value !== null) {
+      cleanup(completedValue, settlement.outcome.kind === "completed", options.cleanup);
+      const scope = popAttempts[index]!.scope;
+      throw new ScopedWebGpuIssueError(
+        scope,
+        path,
+        `${scope} GPU error: ${attempt.value.message}`,
+      );
+    }
+  }
+  if (operationError !== undefined) {
+    throw new ScopedWebGpuIssueError(
+      "operation",
+      path,
+      message(operationError),
+      { cause: operationError },
+    );
+  }
+  if (settlement.outcome.kind === "failed") {
+    throw new ScopedWebGpuIssueError(
+      "operation",
+      path,
+      message(settlement.outcome.error),
+      { cause: settlement.outcome.error },
+    );
+  }
+  if (settlement.outcome.kind !== "completed") {
+    throw new ScopedWebGpuIssueError(
+      "operation",
+      path,
+      "WebGPU operation was not issued",
+    );
+  }
+  return settlement.outcome.value;
 }
 
 interface PopAttempt {

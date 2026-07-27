@@ -2,12 +2,83 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   ScopedWebGpuIssueError,
+  issueAsyncWithWebGpuErrorScopes,
   issueWithWebGpuErrorScopes,
 } from "../src/webgpu_error_scope";
 import { createDevice } from "../src/device";
 import { materializeFloat32 } from "../src/runner";
 
 describe("production WebGPU issue scopes", () => {
+  it("pops async issue scopes before awaiting the operation", async () => {
+    const events: string[] = [];
+    const stack: GPUErrorFilter[] = [];
+    let complete!: (value: { readonly root: number }) => void;
+    const completion = new Promise<{ readonly root: number }>((resolve) => {
+      complete = resolve;
+    });
+    const pending = issueAsyncWithWebGpuErrorScopes(
+      fakeGpu({
+        push(scope) {
+          events.push(`push:${scope}`);
+          stack.push(scope);
+        },
+        pop: async () => {
+          events.push(`pop:${stack.pop()!}`);
+          return null;
+        },
+      }),
+      "$.async",
+      () => completion,
+    );
+    expect(events).toEqual([
+      "push:internal",
+      "push:out-of-memory",
+      "push:validation",
+      "pop:validation",
+      "pop:out-of-memory",
+      "pop:internal",
+    ]);
+    complete({ root: 1 });
+    await expect(pending).resolves.toEqual({ root: 1 });
+  });
+
+  it("classifies async scope failures and cleans the completed value", async () => {
+    const cleanup = vi.fn();
+    await expect(issueAsyncWithWebGpuErrorScopes(
+      scopedErrorGpu("out-of-memory", "allocation failed"),
+      "$.async",
+      async () => ({ root: 1 }),
+      { cleanup },
+    )).rejects.toEqual(expect.objectContaining<Partial<ScopedWebGpuIssueError>>({
+      kind: "out-of-memory",
+      path: "$.async",
+    }));
+    expect(cleanup).toHaveBeenCalledWith({ root: 1 });
+  });
+
+  it("makes device loss authoritative for a pending async issue", async () => {
+    let complete!: (value: { readonly root: number }) => void;
+    const operation = new Promise<{ readonly root: number }>((resolve) => {
+      complete = resolve;
+    });
+    const cleanup = vi.fn();
+    const pending = issueAsyncWithWebGpuErrorScopes(
+      fakeGpu({
+        lost: Promise.resolve({
+          reason: "destroyed",
+          message: "gone",
+        } as GPUDeviceLostInfo),
+      }),
+      "$.async",
+      () => operation,
+      { cleanup },
+    );
+    await expect(pending).rejects.toMatchObject({ kind: "device-lost" });
+    complete({ root: 1 });
+    await Promise.resolve();
+    expect(cleanup).toHaveBeenCalledWith({ root: 1 });
+  });
+
   it("calls every pop LIFO before awaiting delayed scopes and operation completion", async () => {
     const events: string[] = [];
     const scopeStack: GPUErrorFilter[] = [];

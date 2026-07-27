@@ -114,6 +114,22 @@ jobs:
           path: semantic-view-copy-webgpu-evidence.log
           if-no-files-found: error
 
+      - name: Required semantic host-graph WebGPU gate (kernels release)
+        if: steps.parse.outputs.shortname == 'kernels'
+        run: |
+          set -o pipefail
+          pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:semantic-host-graph:required 2>&1 | tee semantic-host-graph-webgpu-evidence.log
+        env:
+          BG_BROWSER_HEADLESS: '1'
+
+      - name: Retain semantic host-graph WebGPU evidence (kernels release)
+        if: always() && steps.parse.outputs.shortname == 'kernels'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semantic-host-graph-webgpu-evidence-${{ github.sha }}
+          path: semantic-host-graph-webgpu-evidence.log
+          if-no-files-found: error
+
       - name: Required semantic GEMM WebGPU gate (kernels release)
         if: steps.parse.outputs.shortname == 'kernels'
         run: |
@@ -230,6 +246,7 @@ jobs:
         run: node scripts/publish-missing-npm.mjs --stage-dir npm-release-artifacts --package "${{ steps.parse.outputs.npmname }}"
         env:
           BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
+          BG_REQUIRED_SEMANTIC_HOST_GRAPH_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_SEMANTIC_GEMM_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_SEMANTIC_ATTENTION_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_SEMANTIC_ATTENTION_WEBGPU_PERFORMANCE_EVIDENCE_COMMIT: ${{ github.sha }}

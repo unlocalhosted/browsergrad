@@ -145,13 +145,20 @@ describe("semantic architecture guardrails", () => {
         "@unlocalhosted/browsergrad-semantic-core/host",
       ),
     ).toEqual([
-      "packages/browsergrad-kernels/src/new.ts imports @unlocalhosted/browsergrad-semantic-core/host; kernels may import semantic-core schema/layout/kernel/schedule protocols only",
+      "packages/browsergrad-kernels/src/new.ts imports @unlocalhosted/browsergrad-semantic-core/host; kernels may import semantic-core schema/layout/kernel/schedule/graph protocols only",
     ]);
     expect(
       checkWorkspaceImportSpecifier(
         "@unlocalhosted/browsergrad-kernels",
         "packages/browsergrad-kernels/src/schedule.ts",
         "@unlocalhosted/browsergrad-semantic-core/schedule",
+      ),
+    ).toEqual([]);
+    expect(
+      checkWorkspaceImportSpecifier(
+        "@unlocalhosted/browsergrad-kernels",
+        "packages/browsergrad-kernels/src/semantic_host_graph.ts",
+        "@unlocalhosted/browsergrad-semantic-core/graph",
       ),
     ).toEqual([]);
   });

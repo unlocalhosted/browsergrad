@@ -188,6 +188,28 @@ export {
 } from "./semantic_view_copy.js";
 
 export {
+  SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+  SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXECUTION_MS,
+  SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS,
+  SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS,
+  SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES,
+  SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE,
+  SemanticHostGraphWebGpuError,
+  prepareSemanticHostGraphWebGpu,
+  runSemanticHostGraphWebGpu,
+  type PreparedSemanticHostGraphWebGpu,
+  type PrepareSemanticHostGraphWebGpuOptions,
+  type SemanticHostGraphWebGpuDeviceFacts,
+  type SemanticHostGraphWebGpuErrorCode,
+  type SemanticHostGraphWebGpuExecutionRequest,
+  type SemanticHostGraphWebGpuExecutionResult,
+  type SemanticHostGraphWebGpuInputBinding,
+  type SemanticHostGraphWebGpuOutputBinding,
+  type SemanticHostGraphWebGpuRunOptions,
+  type SemanticHostGraphWebGpuTrace,
+} from "./semantic_host_graph.js";
+
+export {
   SEMANTIC_GEMM_WEBGPU_BACKEND_VERSION,
   SEMANTIC_GEMM_WEBGPU_PROFILE,
   SemanticGemmWebGpuError,

@@ -9,6 +9,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Authority-bound `browsergrad.host-graph.webgpu@1` preparation and execution.
+  Verified static DAG dispatches expand through the canonical view-copy
+  lowerer per rank; f32/i32/u32 all-reduce expands into bounded pairwise
+  rank-order reduction followed by raw-word replication, without a second
+  source-shaped orchestration path.
+- Graph execution snapshots complete direct/unshared inputs, initializes
+  private temporary/output storage deterministically, bounds expanded steps
+  and aggregate host/GPU storage, verifies device limits, and publishes fresh
+  outputs only after complete submission, numerical-status validation, and
+  readback. Cancellation, timeout, device loss, validation, shader, pipeline,
+  and out-of-memory paths cannot commit partial caller-visible outputs.
+- Required headed-Chromium evidence on Apple Metal 3 bit-matches the semantic
+  CPU graph oracle for rank-ordered f32 sum, signed-zero f32 min, wrapping i32
+  sum, and exact u32 max, and separately rejects non-finite f32 collectives.
 - Semantic attention preparation consumes exact verified rank-4 f32 logical
   meaning plus an independently authorized online K/V-tile schedule. Generated
   WGSL cooperatively stages K/V rows, keeps one Q/output row private per lane,
@@ -54,6 +68,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- Generic WGSL sequence preparation now creates every storage, texture,
+  uniform, shader/pipeline request, and bind group for every step before its
+  first await. Production error scopes therefore own the complete sequence
+  issue phase rather than only the first step.
 - Resident semantic dispatch and materialization now issue all synchronous GPU
   work under production validation, out-of-memory, and internal error scopes;
   all LIFO pops start before the first await and race operation completion with
@@ -63,7 +81,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   receives a private, non-exported synchronous issue capability so future
   consumers cannot bypass diagnostic ownership accidentally.
 - Kernels publication runs build/typecheck/lint/tests before its final clean-
-  commit gate and requires kernels view-copy, kernels semantic-GEMM, and JIT
+  commit gate and requires kernels view-copy, semantic-host-graph,
+  semantic-GEMM, semantic-attention correctness/performance, and JIT
   semantic-permutation evidence markers for the exact source revision.
 
 ## [0.2.0] - 2026-07-15

@@ -8,6 +8,10 @@ import {
   getWgslFloat16ArrayConstructor,
   installWgslFloat16ArrayPolyfill,
 } from "../src/index";
+import { createDevice } from "../src/device";
+import {
+  prepareWgslKernelProgramSequence,
+} from "../src/wgsl_program";
 
 describe("generic WGSL kernel programs", () => {
   it("normalizes binding indices and storage access", () => {
@@ -105,6 +109,114 @@ describe("generic WGSL kernel programs", () => {
     });
 
     expect(program.bindings).toEqual([]);
+  });
+
+  it("issues every sequence pipeline and bind group before its first await", async () => {
+    const events: string[] = [];
+    let currentProgram = "";
+    const target = globalThis as typeof globalThis & {
+      GPUBufferUsage?: typeof GPUBufferUsage;
+      GPUShaderStage?: typeof GPUShaderStage;
+    };
+    const originalUsage = Object.getOwnPropertyDescriptor(
+      target,
+      "GPUBufferUsage",
+    );
+    Object.defineProperty(target, "GPUBufferUsage", {
+      configurable: true,
+      value: Object.freeze({
+        COPY_SRC: 4,
+        COPY_DST: 8,
+        STORAGE: 128,
+      }),
+    });
+    const originalShaderStage = Object.getOwnPropertyDescriptor(
+      target,
+      "GPUShaderStage",
+    );
+    Object.defineProperty(target, "GPUShaderStage", {
+      configurable: true,
+      value: Object.freeze({ COMPUTE: 4 }),
+    });
+    const gpu = {
+      queue: { writeBuffer: () => undefined },
+      createBuffer: () => ({
+        destroy: () => undefined,
+      } as GPUBuffer),
+      createBindGroupLayout: () => ({} as GPUBindGroupLayout),
+      createPipelineLayout: () => ({} as GPUPipelineLayout),
+      createShaderModule: ({ code }: GPUShaderModuleDescriptor) => {
+        currentProgram = code.includes("first_marker") ? "first" : "second";
+        events.push(`shader:${currentProgram}`);
+        return {
+          getCompilationInfo: () => Promise.resolve({ messages: [] }),
+        } as unknown as GPUShaderModule;
+      },
+      createComputePipelineAsync: () => {
+        events.push(`pipeline:${currentProgram}`);
+        return Promise.resolve({} as GPUComputePipeline);
+      },
+      createBindGroup: () => {
+        events.push(`bind-group:${currentProgram}`);
+        return {} as GPUBindGroup;
+      },
+    } as unknown as GPUDevice;
+    const device = await createDevice({ device: gpu });
+    const program = (name: string) => defineWgslKernelProgram({
+      name,
+      wgsl: `// ${name}_marker\n@compute @workgroup_size(1) fn main() {}`,
+      workgroupSize: [1, 1, 1],
+      bindings: [{
+        kind: "storage",
+        name: "words",
+        valueType: "u32",
+      }],
+    });
+    try {
+      const preparation = prepareWgslKernelProgramSequence(
+        device,
+        [
+          {
+            program: program("first"),
+            launch: { dispatchCount: [1, 1, 1] },
+          },
+          {
+            program: program("second"),
+            launch: { dispatchCount: [1, 1, 1] },
+          },
+        ],
+        {
+          buffers: { words: new Uint32Array(1) },
+          readback: [],
+        },
+      );
+
+      expect(events).toEqual([
+        "shader:first",
+        "pipeline:first",
+        "bind-group:first",
+        "shader:second",
+        "pipeline:second",
+        "bind-group:second",
+      ]);
+      const prepared = await preparation;
+      prepared.destroy();
+    } finally {
+      if (originalUsage === undefined) {
+        Reflect.deleteProperty(target, "GPUBufferUsage");
+      } else {
+        Object.defineProperty(target, "GPUBufferUsage", originalUsage);
+      }
+      if (originalShaderStage === undefined) {
+        Reflect.deleteProperty(target, "GPUShaderStage");
+      } else {
+        Object.defineProperty(
+          target,
+          "GPUShaderStage",
+          originalShaderStage,
+        );
+      }
+    }
   });
 
   it("rejects duplicate names and invalid workgroups", () => {

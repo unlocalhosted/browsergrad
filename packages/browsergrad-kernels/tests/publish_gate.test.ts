@@ -9,6 +9,7 @@ describe("kernels publish evidence gate", () => {
     expect(() => validate("0000000000000000000000000000000000000000")).toThrow(/does not match HEAD/u);
     expect(() => validateViewCopyPublishGate({
       evidenceCommit: head,
+      semanticHostGraphEvidenceCommit: head,
       semanticGemmEvidenceCommit: head,
       semanticAttentionEvidenceCommit: head,
       semanticAttentionPerformanceEvidenceCommit: head,
@@ -19,6 +20,7 @@ describe("kernels publish evidence gate", () => {
     })).toThrow(/semantic-permute:required/u);
     expect(() => validateViewCopyPublishGate({
       evidenceCommit: head,
+      semanticHostGraphEvidenceCommit: head,
       semanticGemmEvidenceCommit: undefined,
       semanticAttentionEvidenceCommit: head,
       semanticAttentionPerformanceEvidenceCommit: head,
@@ -29,6 +31,7 @@ describe("kernels publish evidence gate", () => {
     })).toThrow(/semantic-gemm:required/u);
     expect(() => validateViewCopyPublishGate({
       evidenceCommit: head,
+      semanticHostGraphEvidenceCommit: head,
       semanticGemmEvidenceCommit: head,
       semanticAttentionEvidenceCommit: undefined,
       semanticAttentionPerformanceEvidenceCommit: head,
@@ -39,6 +42,7 @@ describe("kernels publish evidence gate", () => {
     })).toThrow(/semantic-attention:required/u);
     expect(() => validateViewCopyPublishGate({
       evidenceCommit: head,
+      semanticHostGraphEvidenceCommit: head,
       semanticGemmEvidenceCommit: head,
       semanticAttentionEvidenceCommit: head,
       semanticAttentionPerformanceEvidenceCommit: undefined,
@@ -47,6 +51,17 @@ describe("kernels publish evidence gate", () => {
       head,
       relevantStatus: "",
     })).toThrow(/semantic-attention:performance:required/u);
+    expect(() => validateViewCopyPublishGate({
+      evidenceCommit: head,
+      semanticHostGraphEvidenceCommit: undefined,
+      semanticGemmEvidenceCommit: head,
+      semanticAttentionEvidenceCommit: head,
+      semanticAttentionPerformanceEvidenceCommit: head,
+      jitEvidenceCommit: head,
+      githubSha: undefined,
+      head,
+      relevantStatus: "",
+    })).toThrow(/semantic-host-graph:required/u);
     expect(() => validate(head, "", undefined, head, "0000000000000000000000000000000000000000"))
       .toThrow(/semantic GEMM evidence commit/u);
     expect(() => validate(
@@ -68,6 +83,16 @@ describe("kernels publish evidence gate", () => {
     )).toThrow(/semantic attention performance evidence commit/u);
     expect(() => validate(head, "", undefined, "0000000000000000000000000000000000000000"))
       .toThrow(/JIT semantic-permute evidence commit/u);
+    expect(() => validate(
+      head,
+      "",
+      undefined,
+      head,
+      head,
+      head,
+      head,
+      "0000000000000000000000000000000000000000",
+    )).toThrow(/semantic host-graph evidence commit/u);
   });
 
   it("accepts only the exact clean evidenced commit", () => {
@@ -85,9 +110,11 @@ function validate(
   semanticGemmEvidenceCommit: string | undefined = evidenceCommit,
   semanticAttentionEvidenceCommit: string | undefined = evidenceCommit,
   semanticAttentionPerformanceEvidenceCommit: string | undefined = evidenceCommit,
+  semanticHostGraphEvidenceCommit: string | undefined = evidenceCommit,
 ) {
   return validateViewCopyPublishGate({
     evidenceCommit,
+    semanticHostGraphEvidenceCommit,
     semanticGemmEvidenceCommit,
     semanticAttentionEvidenceCommit,
     semanticAttentionPerformanceEvidenceCommit,
