@@ -1188,6 +1188,7 @@ try {
   );
   for (const [workflowName, workflow] of [["release", releaseWorkflow], ["publish", publishWorkflow]]) {
     assertSemanticHostGraphEvidenceWorkflowOrder(workflowName, workflow);
+    assertSemanticHostGraphPerformanceEvidenceWorkflowOrder(workflowName, workflow);
     assertSemanticGemmEvidenceWorkflowOrder(workflowName, workflow);
     assertSemanticAttentionEvidenceWorkflowOrder(workflowName, workflow);
     assertSemanticAttentionPerformanceEvidenceWorkflowOrder(workflowName, workflow);
@@ -1210,7 +1211,10 @@ try {
     "CI semantic attention performance evidence must be required, retained, and independently parallel",
   );
   const hostGraphCiStart = ciWorkflow.indexOf("\n  semantic-host-graph-webgpu:\n");
-  const hostGraphCiEnd = ciWorkflow.indexOf("\n  semantic-gemm-webgpu:\n", hostGraphCiStart);
+  const hostGraphPerformanceCiStart = ciWorkflow.indexOf(
+    "\n  semantic-host-graph-performance-webgpu:\n",
+  );
+  const hostGraphCiEnd = hostGraphPerformanceCiStart;
   assert(
     hostGraphCiStart >= 0
       && hostGraphCiEnd > hostGraphCiStart
@@ -1223,6 +1227,32 @@ try {
       && hostGraphCiJob.includes("semantic-host-graph-webgpu-evidence-${{ github.sha }}")
       && !/^    needs:/mu.test(hostGraphCiJob),
     "CI semantic host-graph evidence must be required, retained, and independently parallel",
+  );
+  const hostGraphPerformanceCiEnd = ciWorkflow.indexOf(
+    "\n  semantic-gemm-webgpu:\n",
+    hostGraphPerformanceCiStart,
+  );
+  assert(
+    hostGraphPerformanceCiStart >= 0
+      && hostGraphPerformanceCiEnd > hostGraphPerformanceCiStart
+      && ciWorkflow.includes(
+        "--exclude tests-browser/semantic_host_graph_performance_webgpu.test.ts",
+      ),
+    "CI must isolate semantic host-graph performance from the broad browser lane",
+  );
+  const hostGraphPerformanceCiJob = ciWorkflow.slice(
+    hostGraphPerformanceCiStart,
+    hostGraphPerformanceCiEnd,
+  );
+  assert(
+    hostGraphPerformanceCiJob.includes(
+      "test:browser:semantic-host-graph:performance:required",
+    )
+      && hostGraphPerformanceCiJob.includes(
+        "semantic-host-graph-performance-webgpu-evidence-${{ github.sha }}",
+      )
+      && !/^    needs:/mu.test(hostGraphPerformanceCiJob),
+    "CI semantic host-graph performance evidence must be required, retained, and independently parallel",
   );
   const compilerRoot = await import(pathToFileURL(join(compiler, "dist/index.js")));
   const packedCompilerEntries = listRelativeEntries(compiler);
@@ -2203,6 +2233,21 @@ function assertSemanticHostGraphEvidenceWorkflowOrder(workflowName, workflow) {
     artifact: "semantic-host-graph-webgpu-evidence-${{ github.sha }}",
     evidenceEnvironment:
       "BG_REQUIRED_SEMANTIC_HOST_GRAPH_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}",
+  });
+}
+
+function assertSemanticHostGraphPerformanceEvidenceWorkflowOrder(workflowName, workflow) {
+  assertKernelsSemanticEvidenceWorkflowOrder(workflowName, workflow, {
+    label: "semantic host graph performance",
+    releaseEvidence: "Required semantic host-graph WebGPU performance gate (kernels release)",
+    releaseUpload: "Retain semantic host-graph WebGPU performance evidence (kernels release)",
+    publishEvidence: "Run required semantic host-graph WebGPU performance gate",
+    publishUpload: "Retain semantic host-graph WebGPU performance evidence",
+    command: "test:browser:semantic-host-graph:performance:required",
+    log: "semantic-host-graph-performance-webgpu-evidence.log",
+    artifact: "semantic-host-graph-performance-webgpu-evidence-${{ github.sha }}",
+    evidenceEnvironment:
+      "BG_REQUIRED_SEMANTIC_HOST_GRAPH_WEBGPU_PERFORMANCE_EVIDENCE_COMMIT: ${{ github.sha }}",
   });
 }
 

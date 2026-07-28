@@ -30,7 +30,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count repetition, bounded captured-input u32 conditionals, explicit fail-stop materialization, CPU oracle, and authority-bound portable WebGPU executor have exact f32/i32/u32 plus raw-u8 actual-device parity; runtime/backend-derived control, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count repetition, bounded captured-input u32 conditionals, explicit fail-stop materialization, CPU oracle, and authority-bound portable WebGPU executor have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate fixed-repeat/unrolled performance observation; runtime/backend-derived control, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every exit criterion for the declared gate profile is
 complete. Verification of a closed initial profile does not imply broader
@@ -2197,10 +2197,20 @@ exact u32 max, event-marked/materialized whole-allocation u8 copy, and three
 fixed repetitions of f32 sum plus both captured-input u8-copy branches, and
 separately proves non-finite f32 and lost-device refusal.
 
+A separate required performance record compares the fixed-repeat graph with a
+statically unrolled graph that has bit-exact CPU/WebGPU outputs, equal
+element-operation counts, and the same eight expanded WebGPU steps. The
+two-rank 65,536-element f32 workload uses an untimed correctness preflight,
+eight warmups, and twelve alternating paired end-to-end host-API samples with
+complete readback and queue drain. The current Apple Metal 3 observation has
+1.90 ms fixed-repeat and 2.60 ms unrolled medians. Raw samples and exact
+environment identity are retained; no superiority or regression threshold is
+asserted.
+
 No runtime/backend-derived-control node, pipeline authority,
-transport/topology adapter, worker mesh, native companion, or graph-performance
-evidence exists yet, so Gate 7 remains `in progress`. Current events do not
-claim timestamps, external waits, or cross-queue/cross-worker synchronization.
+transport/topology adapter, worker mesh, or native companion exists yet, so
+Gate 7 remains `in progress`. Current events do not claim timestamps, external
+waits, or cross-queue/cross-worker synchronization.
 
 ## Proof Matrix and Release Gates
 

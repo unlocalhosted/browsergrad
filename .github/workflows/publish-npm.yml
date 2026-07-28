@@ -94,6 +94,21 @@ jobs:
           path: semantic-host-graph-webgpu-evidence.log
           if-no-files-found: error
 
+      - name: Run required semantic host-graph WebGPU performance gate
+        run: |
+          set -o pipefail
+          pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:semantic-host-graph:performance:required 2>&1 | tee semantic-host-graph-performance-webgpu-evidence.log
+        env:
+          BG_BROWSER_HEADLESS: '1'
+
+      - name: Retain semantic host-graph WebGPU performance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semantic-host-graph-performance-webgpu-evidence-${{ github.sha }}
+          path: semantic-host-graph-performance-webgpu-evidence.log
+          if-no-files-found: error
+
       - name: Run required semantic GEMM WebGPU gate
         run: |
           set -o pipefail
@@ -201,6 +216,7 @@ jobs:
         env:
           BG_REQUIRED_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_SEMANTIC_HOST_GRAPH_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
+          BG_REQUIRED_SEMANTIC_HOST_GRAPH_WEBGPU_PERFORMANCE_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_SEMANTIC_GEMM_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_SEMANTIC_ATTENTION_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}
           BG_REQUIRED_SEMANTIC_ATTENTION_WEBGPU_PERFORMANCE_EVIDENCE_COMMIT: ${{ github.sha }}

@@ -49,6 +49,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   sum, exact u32 max, exact u8 allocation copy, and three fixed repetitions of
   f32 all-reduce plus both captured-input conditional branches, and separately
   rejects non-finite f32 collectives.
+- A separate required host-graph performance lane compares version-1.4
+  fixed-count repetition with a bit-exact, equal-work version-1.2 unrolled
+  graph over two ranks and 65,536 f32 elements. It uses an untimed CPU and
+  WebGPU correctness preflight, eight warmups, twelve alternating paired
+  complete-host-API samples, full readback, and queue drains. Raw samples and
+  the named browser/device configuration are retained; the record makes no
+  superiority or regression claim.
 - Semantic attention preparation consumes exact verified rank-4 f32 logical
   meaning plus an independently authorized online K/V-tile schedule. Generated
   WGSL cooperatively stages K/V rows, keeps one Q/output row private per lane,

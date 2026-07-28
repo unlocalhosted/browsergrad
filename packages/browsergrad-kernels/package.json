@@ -91,6 +91,8 @@
     "test:browser:view-copy:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_view_copy_webgpu.test.ts",
     "test:browser:semantic-host-graph": "vitest run --config vitest.browser.config.ts tests-browser/semantic_host_graph_webgpu.test.ts",
     "test:browser:semantic-host-graph:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_host_graph_webgpu.test.ts",
+    "test:browser:semantic-host-graph:performance": "vitest run --config vitest.browser.config.ts tests-browser/semantic_host_graph_performance_webgpu.test.ts",
+    "test:browser:semantic-host-graph:performance:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_host_graph_performance_webgpu.test.ts",
     "test:browser:semantic-gemm": "vitest run --config vitest.browser.config.ts tests-browser/semantic_gemm_webgpu.test.ts",
     "test:browser:semantic-gemm:required": "vitest run --mode webgpu-required --config vitest.browser.config.ts tests-browser/semantic_gemm_webgpu.test.ts",
     "test:browser:semantic-attention": "vitest run --config vitest.browser.config.ts tests-browser/semantic_attention_webgpu.test.ts",
