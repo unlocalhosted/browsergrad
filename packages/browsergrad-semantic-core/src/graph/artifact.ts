@@ -49,6 +49,8 @@ import {
   type HostGraphConditionalBodyNode,
   type HostGraphConditionalNode,
   type HostGraphCopyNode,
+  type HostGraphDynamicDispatchControl,
+  type HostGraphDynamicDispatchNode,
   type HostGraphDispatchNode,
   type HostGraphDispatchResourceBinding,
   type HostGraphEventNode,
@@ -68,7 +70,7 @@ import {
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 8;
+export const HOST_GRAPH_ARTIFACT_MINOR = 9;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
@@ -132,6 +134,7 @@ export interface PreparedHostGraphProgram {
   readonly nodeCount: number;
   readonly edgeCount: number;
   readonly dispatchCount: number;
+  readonly dynamicDispatchCount: number;
   readonly collectiveCount: number;
   readonly copyCount: number;
   readonly materializationCount: number;
@@ -152,6 +155,7 @@ interface HostGraphAnalysis {
   readonly rankCount: bigint;
   readonly edgeCount: number;
   readonly dispatchCount: number;
+  readonly dynamicDispatchCount: number;
   readonly collectiveCount: number;
   readonly copyCount: number;
   readonly materializationCount: number;
@@ -192,10 +196,20 @@ interface DispatchOperationBinding {
 }
 
 interface ResolvedDispatchGeometry {
+  readonly elementCount: bigint;
   readonly sourceByteLength: WireU64;
   readonly destinationByteLength: WireU64;
   readonly sourceAlignmentBytes: number;
   readonly destinationAlignmentBytes: number;
+}
+
+interface ParsedDispatchFields {
+  readonly nodeId: string;
+  readonly dependsOn: readonly string[];
+  readonly semanticArtifactHash: string;
+  readonly entrypointId: string;
+  readonly dimensionBindings: Readonly<Record<string, WireI64>>;
+  readonly bindings: readonly HostGraphDispatchResourceBinding[];
 }
 
 type SemanticArtifactCatalog = ReadonlyMap<
@@ -297,6 +311,7 @@ export async function prepareHostGraphProgram(
     nodeCount: payload.program.nodes.length,
     edgeCount: analysis.edgeCount,
     dispatchCount: analysis.dispatchCount,
+    dynamicDispatchCount: analysis.dynamicDispatchCount,
     collectiveCount: analysis.collectiveCount,
     copyCount: analysis.copyCount,
     materializationCount: analysis.materializationCount,
@@ -368,12 +383,13 @@ function parseProgram(
       version.minor !== 5 &&
       version.minor !== 6 &&
       version.minor !== 7 &&
-      version.minor !== 8)
+      version.minor !== 8 &&
+      version.minor !== 9)
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 through 1.8 only",
+      "host graph program reader supports versions 1.0 through 1.9 only",
     );
   }
   if (version.minor !== envelopeMinor) {
@@ -582,6 +598,23 @@ function parseNode(
   const object = objectValue(value, path);
   const kind = stringValue(field(object, "kind", path), `${path}.kind`);
   if (kind === "dispatch") return parseDispatchNode(object, path);
+  if (kind === "dynamic-dispatch") {
+    if (controlBody !== undefined) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.kind`,
+        `${controlBody} bodies cannot contain dynamic dispatch`,
+      );
+    }
+    if (programMinor < 9) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.kind`,
+        "dynamic dispatch nodes require host graph program version 1.9",
+      );
+    }
+    return parseDynamicDispatchNode(object, path);
+  }
   if (kind === "all-reduce") return parseAllReduceNode(object, path);
   if (kind === "copy") {
     if (programMinor < 1) {
@@ -664,7 +697,7 @@ function parseNode(
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, and version-1.8 runtime repeat nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, and version-1.9 dynamic dispatch nodes",
   );
 }
 
@@ -1129,6 +1162,86 @@ function parseDispatchNode(
     ],
     path,
   );
+  return {
+    ...parseDispatchFields(object, path),
+    kind: "dispatch",
+  };
+}
+
+function parseDynamicDispatchNode(
+  value: JsonObject,
+  path: string,
+): HostGraphDynamicDispatchNode {
+  const object = closedObject(
+    value,
+    [
+      "nodeId",
+      "kind",
+      "dependsOn",
+      "semanticArtifactHash",
+      "entrypointId",
+      "dimensionBindings",
+      "bindings",
+      "launchControl",
+      "maxElementCount",
+      "mode",
+    ],
+    path,
+  );
+  if (object.mode !== "runtime-u32-prefix-elements") {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "dynamic dispatch mode must be runtime-u32-prefix-elements",
+    );
+  }
+  const maxElementCount = positiveWire(
+    field(object, "maxElementCount", path),
+    `${path}.maxElementCount`,
+  );
+  if (wireIntegerToBigInt(maxElementCount) > 0xffff_ffffn) {
+    resource(
+      `${path}.maxElementCount`,
+      "dynamic dispatch maximum exceeds the u32 control domain",
+    );
+  }
+  return {
+    ...parseDispatchFields(object, path),
+    kind: "dynamic-dispatch",
+    launchControl: parseDynamicDispatchControl(
+      field(object, "launchControl", path),
+      `${path}.launchControl`,
+    ),
+    maxElementCount,
+    mode: "runtime-u32-prefix-elements",
+  };
+}
+
+function parseDynamicDispatchControl(
+  value: JsonValue,
+  path: string,
+): HostGraphDynamicDispatchControl {
+  const object = closedObject(value, ["controlId", "mode"], path);
+  if (object.mode !== "u32-prefix-element-count") {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "dynamic dispatch control mode must be u32-prefix-element-count",
+    );
+  }
+  return {
+    controlId: identifier(
+      field(object, "controlId", path),
+      `${path}.controlId`,
+    ),
+    mode: "u32-prefix-element-count",
+  };
+}
+
+function parseDispatchFields(
+  object: JsonObject,
+  path: string,
+): ParsedDispatchFields {
   const bindings = arrayValue(
     field(object, "bindings", path),
     `${path}.bindings`,
@@ -1154,7 +1267,6 @@ function parseDispatchNode(
   );
   return {
     nodeId: identifier(field(object, "nodeId", path), `${path}.nodeId`),
-    kind: "dispatch",
     dependsOn: dependencies(field(object, "dependsOn", path), path),
     semanticArtifactHash: hashValue(
       field(object, "semanticArtifactHash", path),
@@ -1349,6 +1461,7 @@ function analyzeProgram(
   const nodes = new Map(program.nodes.map((node) => [node.nodeId, node]));
   let edgeCount = 0;
   let dispatchCount = 0;
+  let dynamicDispatchCount = 0;
   let collectiveCount = 0;
   let copyCount = 0;
   let materializationCount = 0;
@@ -1361,7 +1474,7 @@ function analyzeProgram(
   const runtimeControlIds = new Set<string>();
   let expandedNodeCount = 0;
   const dispatchEffects = new Map<
-    HostGraphDispatchNode,
+    HostGraphDispatchNode | HostGraphDynamicDispatchNode,
     readonly HostGraphResourceEffect[]
   >();
   const repeatEffects = new Map<
@@ -1434,6 +1547,7 @@ function analyzeProgram(
     }
     if (
       node.kind === "dispatch" ||
+      node.kind === "dynamic-dispatch" ||
       node.kind === "all-reduce" ||
       node.kind === "copy"
     ) {
@@ -1446,7 +1560,22 @@ function analyzeProgram(
         dispatchGeometry,
         path,
       );
-      if (node.kind === "dispatch") dispatchEffects.set(node, effects);
+      if (
+        node.kind === "dispatch" ||
+        node.kind === "dynamic-dispatch"
+      ) {
+        dispatchEffects.set(node, effects);
+      }
+      if (node.kind === "dynamic-dispatch") {
+        dynamicDispatchCount += 1;
+        runtimeControlIds.add(node.launchControl.controlId);
+        if (runtimeControlIds.size > HOST_GRAPH_MAX_RUNTIME_CONTROLS) {
+          resource(
+            `${path}.launchControl.controlId`,
+            `runtime control count exceeds ${HOST_GRAPH_MAX_RUNTIME_CONTROLS}`,
+          );
+        }
+      }
       ({ dispatchCount, collectiveCount, copyCount } =
         addExecutableCounts(
           node,
@@ -1638,6 +1767,7 @@ function analyzeProgram(
     rankCount,
     edgeCount,
     dispatchCount,
+    dynamicDispatchCount,
     collectiveCount,
     copyCount,
     materializationCount,
@@ -1671,7 +1801,7 @@ function analyzeProgram(
 }
 
 function verifyExecutableNodeBinding(
-  node: HostGraphExecutableNode,
+  node: HostGraphExecutableNode | HostGraphDynamicDispatchNode,
   resources: ReadonlyMap<string, HostGraphResource>,
   rankCount: bigint,
   semanticCatalog: SemanticArtifactCatalog,
@@ -1757,6 +1887,16 @@ function verifyExecutableNodeBinding(
     geometry = resolveDispatchGeometry(operation, node, limits, path);
     dispatchGeometry.set(geometryKey, geometry);
   }
+  if (
+    node.kind === "dynamic-dispatch" &&
+    wireIntegerToBigInt(node.maxElementCount) > geometry.elementCount
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      `${path}.maxElementCount`,
+      `dynamic dispatch maximum exceeds semantic element count ${geometry.elementCount}`,
+    );
+  }
   const sourceResource = resources.get(sourceResourceId);
   const destinationResource = resources.get(destinationResourceId);
   if (sourceResource === undefined || destinationResource === undefined) {
@@ -1813,7 +1953,7 @@ function verifyExecutableNodeBinding(
 }
 
 function addExecutableCounts(
-  node: HostGraphExecutableNode,
+  node: HostGraphExecutableNode | HostGraphDynamicDispatchNode,
   multiplier: number,
   dispatchCount: number,
   collectiveCount: number,
@@ -1825,7 +1965,10 @@ function addExecutableCounts(
 }> {
   return {
     dispatchCount:
-      dispatchCount + (node.kind === "dispatch" ? multiplier : 0),
+      dispatchCount +
+      (node.kind === "dispatch" || node.kind === "dynamic-dispatch"
+        ? multiplier
+        : 0),
     collectiveCount:
       collectiveCount + (node.kind === "all-reduce" ? multiplier : 0),
     copyCount: copyCount + (node.kind === "copy" ? multiplier : 0),
@@ -2138,7 +2281,7 @@ function verifyCollectiveBinding(
 
 function resolveDispatchGeometry(
   operation: DispatchOperationBinding,
-  node: HostGraphDispatchNode,
+  node: HostGraphDispatchNode | HostGraphDynamicDispatchNode,
   limits: DecodeLimits,
   path: string,
 ): ResolvedDispatchGeometry {
@@ -2179,6 +2322,10 @@ function resolveDispatchGeometry(
       );
     }
     return Object.freeze({
+      elementCount: destination.logicalShape.reduce(
+        (total, extent) => total * extent,
+        1n,
+      ),
       sourceByteLength: encodeWireU64(source.allocationByteLength),
       destinationByteLength: encodeWireU64(
         destination.allocationByteLength,
@@ -2292,7 +2439,7 @@ function verifyEffects(
   resources: ReadonlyMap<string, HostGraphResource>,
   ancestors: ReadonlyMap<string, ReadonlySet<string>>,
   dispatchEffects: ReadonlyMap<
-    HostGraphDispatchNode,
+    HostGraphDispatchNode | HostGraphDynamicDispatchNode,
     readonly HostGraphResourceEffect[]
   >,
   repeatEffects: ReadonlyMap<
@@ -2326,7 +2473,8 @@ function verifyEffects(
         repeatEffects,
         conditionalEffects,
       ).entries()) {
-      const effectPath = node.kind === "dispatch"
+      const effectPath =
+        node.kind === "dispatch" || node.kind === "dynamic-dispatch"
         ? `${path}.bindings[${effectIndex}]`
         : node.kind === "all-reduce"
           ? `${path}.resourceId`
@@ -2405,7 +2553,7 @@ function verifyEffects(
 function nodeEffects(
   node: HostGraphNode,
   dispatchEffects: ReadonlyMap<
-    HostGraphDispatchNode,
+    HostGraphDispatchNode | HostGraphDynamicDispatchNode,
     readonly HostGraphResourceEffect[]
   >,
   repeatEffects: ReadonlyMap<
@@ -2417,7 +2565,7 @@ function nodeEffects(
     readonly HostGraphResourceEffect[]
   >,
 ): readonly HostGraphResourceEffect[] {
-  if (node.kind === "dispatch") {
+  if (node.kind === "dispatch" || node.kind === "dynamic-dispatch") {
     const effects = dispatchEffects.get(node);
     if (effects === undefined) {
       invalid(

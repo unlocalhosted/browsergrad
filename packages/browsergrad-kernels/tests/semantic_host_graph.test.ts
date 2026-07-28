@@ -117,6 +117,38 @@ function pipelineProgram(
   };
 }
 
+function dynamicPipelineProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  const base = pipelineProgram(artifacts);
+  return {
+    ...base,
+    version: { major: 1, minor: 9 },
+    nodes: [
+      ...base.nodes.map((node) =>
+        node.kind === "dispatch" && node.nodeId === "first"
+          ? {
+              ...node,
+              kind: "dynamic-dispatch" as const,
+              launchControl: {
+                controlId: "prefix-elements",
+                mode: "u32-prefix-element-count" as const,
+              },
+              maxElementCount: wire("2"),
+              mode: "runtime-u32-prefix-elements" as const,
+            }
+          : node),
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["second"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function collectiveProgram(
   artifacts: VerifiedViewCopyArtifacts,
   dtype: "f32" | "i32" | "u32",
@@ -711,6 +743,35 @@ describe("semantic host-graph WebGPU preparation", () => {
     expect(Object.isFrozen(prepared.wgslModuleHashes)).toBe(true);
   });
 
+  it("prewarms a bounded version-1.9 dynamic dispatch maximum", async () => {
+    const artifacts = await identityArtifacts();
+    const graph = await verified(
+      dynamicPipelineProgram(artifacts),
+      artifacts,
+    );
+    await expect(prepareSemanticHostGraphWebGpu(
+      graph,
+      artifactOptions(artifacts),
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
+      path: "$.nodes.first.mode",
+    });
+    const prepared = await prepareSemanticHostGraphWebGpu(
+      graph,
+      { ...artifactOptions(artifacts), workgroupSize: 1 },
+    );
+
+    expect(prepared).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 3,
+      expandedStepCount: 4,
+      dispatchStepCount: 4,
+      materializationCount: 1,
+      dynamicDispatchCount: 1,
+      runtimeControlIds: ["prefix-elements"],
+    });
+  });
+
   it("lowers all-reduce to bounded pairwise reduction and replication", async () => {
     for (const [dtype, reduction] of [
       ["f32", "sum"],
@@ -840,6 +901,48 @@ describe("semantic host-graph WebGPU execution admission", () => {
       code: "BG-WEBGPU-GRAPH-INVALID-BINDING",
       path: "$.request.controls[0].value",
     });
+    expect(inputReads).toBe(0);
+  });
+
+  it("rejects dynamic dispatch values outside the artifact bound before device access", async () => {
+    const artifacts = await identityArtifacts();
+    const graph = await verified(
+      dynamicPipelineProgram(artifacts),
+      artifacts,
+    );
+    const prepared = await prepareSemanticHostGraphWebGpu(
+      graph,
+      { ...artifactOptions(artifacts), workgroupSize: 1 },
+    );
+    let inputReads = 0;
+    const unreadInput = {
+      rank: wire("0"),
+      resourceId: "input",
+    } as SemanticHostGraphWebGpuInputBinding;
+    Object.defineProperty(unreadInput, "bytes", {
+      enumerable: true,
+      get() {
+        inputReads += 1;
+        return new Uint8Array(8);
+      },
+    });
+
+    for (const value of ["0", "3"]) {
+      await expect(runSemanticHostGraphWebGpu(
+        NO_DEVICE,
+        prepared,
+        {
+          inputs: [unreadInput, input(1, new Uint8Array(8))],
+          controls: [{
+            controlId: "prefix-elements",
+            value: wire(value),
+          }],
+        },
+      )).rejects.toMatchObject({
+        code: "BG-WEBGPU-GRAPH-INVALID-BINDING",
+        path: "$.request.controls[0].value",
+      });
+    }
     expect(inputReads).toBe(0);
   });
 

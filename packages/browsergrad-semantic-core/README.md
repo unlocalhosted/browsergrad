@@ -154,6 +154,13 @@ are copied. Verification charges the maximum expanded work and conservatively
 treats runtime-repeat writes as non-guaranteed because zero iterations perform
 no write. This is bounded host-known work selection, not a GPU/backend-derived
 loop or dynamic launch.
+Version 1.9 adds top-level `dynamic-dispatch` with
+`runtime-u32-prefix-elements` mode. The node binds one required request-time
+`u32-prefix-element-count` control and a positive artifact maximum no larger
+than the verified view-copy semantic domain. Values from one through the
+maximum execute exactly that logical linear prefix; zero and larger values
+fail before input copying. Dynamic dispatch cannot appear in repeat or
+conditional bodies, and its maximum work enters preparation budgets.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -199,6 +206,10 @@ Version-1.8 repeats admit the exact control set before copying inputs, reserve
 memory and element-operation capacity for the artifact maximum, execute only
 the captured count with per-iteration cancellation/time checks, report the
 actual completed count, and return the actual element-operation total.
+Version-1.9 dynamic dispatch admits its positive prefix count with the same
+exact control snapshot, reserves the artifact maximum, executes only that
+logical prefix, and reports both the completed element count and actual
+element-operation total after whole-graph success.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -210,12 +221,13 @@ does not imply device execution. Compiler owns the first concrete producer: it
 lowers one or more opaque prepared view-copy bindings into a verified linear
 host graph with derived intermediate resources. Kernels separately owns the
 authority-bound `browsergrad.host-graph.webgpu@1`
-DAG/fixed/runtime-repeat/bounded-input/runtime-control/resource-conditional adapter and
+DAG/fixed/runtime-repeat/dynamic-dispatch/bounded-input/runtime-control/resource-conditional adapter and
 its required actual-device evidence. The version-1.7 backend profile uses one
 explicit bounded host readback/resubmission point for its GPU-produced
 predicate. Neither adapter grants transport, topology, retries, event
-timestamps or external waits, GPU/backend-derived loop control, dynamic
-launch, worker-mesh, native-companion, performance, or release authority.
+timestamps or external waits, GPU/backend-derived loop or launch control,
+broader dynamic schedules, worker-mesh, native-companion,
+performance, or release authority.
 
 Frontends construct the operation through one `/kernel` sink rather than
 assembling allocation, alias, index-map, view, and operation IDs themselves.

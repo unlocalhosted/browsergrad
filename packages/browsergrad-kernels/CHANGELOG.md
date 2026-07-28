@@ -9,6 +9,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Host-graph program version 1.9 adds bounded top-level
+  `dynamic-dispatch` with a positive request-time u32 logical-prefix element
+  count. The portable WebGPU initial profile uses exactly one invocation per
+  workgroup so the admitted count is also the exact x-workgroup launch count;
+  it prewarms the artifact maximum once, reuses the same device-bound
+  pipeline, changes only launch geometry, and records the actual count in
+  specialization and terminal evidence. CPU and real WebGPU match for one-
+  and two-element launches.
 - Host-graph program version 1.8 adds bounded
   `runtime-u32-count-sequential` repetition. Preparation prewarms the
   artifact-maximum schedule; execution admits the exact request-time u32 count

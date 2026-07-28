@@ -39,6 +39,10 @@ export interface PreparedViewCopyCpu {
   readonly logicalShape: readonly bigint[];
   readonly elementCount: bigint;
   readonly execute: (buffers: ViewCopyCpuBuffers) => ViewCopyCpuTrace;
+  readonly executePrefix: (
+    buffers: ViewCopyCpuBuffers,
+    elementCount: bigint,
+  ) => ViewCopyCpuTrace;
 }
 
 export async function prepareViewCopyCpu(
@@ -57,9 +61,26 @@ export async function prepareViewCopyCpu(
     ? floatBitsToLittleEndianBytes(prepared.operation.source.invalidSource.value.bits)
     : undefined;
 
-  const execute = (buffers: ViewCopyCpuBuffers): ViewCopyCpuTrace => {
+  const executePrefix = (
+    buffers: ViewCopyCpuBuffers,
+    elementCount: bigint,
+  ): ViewCopyCpuTrace => {
     validateBuffers(buffers, prepared.source, prepared.destination);
-    for (let linearIndex = 0; linearIndex < sourceByteOffsets.length; linearIndex += 1) {
+    if (
+      typeof elementCount !== "bigint" ||
+      elementCount < 0n ||
+      elementCount > prepared.elementCount
+    ) {
+      invalid(
+        KERNEL_DIAGNOSTIC_CODES.invalidBinding,
+        "$.elementCount",
+        `CPU view-copy prefix must be between 0 and ${prepared.elementCount}`,
+      );
+    }
+    const prefixLength = Number(elementCount);
+    let readElements = 0n;
+    let filledElements = 0n;
+    for (let linearIndex = 0; linearIndex < prefixLength; linearIndex += 1) {
       const sourceStart = sourceByteOffsets[linearIndex] as number;
       const destinationStart = safeBufferIndex(
         prepared.destination.viewByteOffset + (BigInt(linearIndex) * BigInt(prepared.destination.dtypeBytes)),
@@ -67,10 +88,12 @@ export async function prepareViewCopyCpu(
       );
       if (sourceStart < 0) {
         if (fillBytes === undefined) throw new Error("internal: prepared fill entry lost its exact bits");
+        filledElements += 1n;
         for (let byteIndex = 0; byteIndex < prepared.destination.dtypeBytes; byteIndex += 1) {
           buffers.destination[destinationStart + byteIndex] = fillBytes[byteIndex] as number;
         }
       } else {
+        readElements += 1n;
         for (let byteIndex = 0; byteIndex < prepared.source.dtypeBytes; byteIndex += 1) {
           buffers.destination[destinationStart + byteIndex] = buffers.source[sourceStart + byteIndex] as number;
         }
@@ -82,13 +105,15 @@ export async function prepareViewCopyCpu(
       destinationAllocationId: prepared.destination.allocationId,
       specializationHash: prepared.specializationHash,
       logicalShape: Object.freeze(prepared.logicalShape.map((extent) => encodeWireU64(extent))),
-      elementCount: encodeWireU64(prepared.elementCount),
-      readElements: encodeWireU64(prepared.readElements),
-      filledElements: encodeWireU64(prepared.filledElements),
-      bytesRead: encodeWireU64(prepared.readElements * BigInt(prepared.source.dtypeBytes)),
-      bytesWritten: encodeWireU64(prepared.elementCount * BigInt(prepared.destination.dtypeBytes)),
+      elementCount: encodeWireU64(elementCount),
+      readElements: encodeWireU64(readElements),
+      filledElements: encodeWireU64(filledElements),
+      bytesRead: encodeWireU64(readElements * BigInt(prepared.source.dtypeBytes)),
+      bytesWritten: encodeWireU64(elementCount * BigInt(prepared.destination.dtypeBytes)),
     });
   };
+  const execute = (buffers: ViewCopyCpuBuffers): ViewCopyCpuTrace =>
+    executePrefix(buffers, prepared.elementCount);
 
   return Object.freeze({
     operationId: prepared.operation.operationId,
@@ -98,6 +123,7 @@ export async function prepareViewCopyCpu(
     logicalShape: prepared.logicalShape,
     elementCount: prepared.elementCount,
     execute,
+    executePrefix,
   });
 }
 

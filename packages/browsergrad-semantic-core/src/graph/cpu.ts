@@ -25,6 +25,8 @@ import type {
   HostGraphConditionalCompletion,
   HostGraphConditionalNode,
   HostGraphCopyNode,
+  HostGraphDynamicDispatchCompletion,
+  HostGraphDynamicDispatchNode,
   HostGraphDispatchNode,
   HostGraphEventNode,
   HostGraphMaterializeNode,
@@ -162,6 +164,8 @@ export interface HostGraphCpuExecutionResult {
   readonly executedNodeIds: readonly string[];
   readonly completedEventIds: readonly string[];
   readonly completedRepeats: readonly HostGraphRepeatCompletion[];
+  readonly completedDynamicDispatches:
+    readonly HostGraphDynamicDispatchCompletion[];
   readonly completedConditionals: readonly HostGraphConditionalCompletion[];
   readonly elementOperations: WireU64;
   readonly outputs: readonly HostGraphCpuOutputBinding[];
@@ -177,6 +181,7 @@ export interface PreparedHostGraphCpu {
   readonly repeatNodeIds: readonly string[];
   readonly repeats: readonly HostGraphRepeatCompletion[];
   readonly runtimeRepeatCount: number;
+  readonly dynamicDispatchCount: number;
   readonly conditionalNodeIds: readonly string[];
   readonly resourceConditionalCount: number;
   readonly runtimeControlIds: readonly string[];
@@ -208,6 +213,18 @@ interface DispatchPlan {
   readonly sourceResourceId: string;
   readonly destinationResourceId: string;
   readonly prepared: PreparedViewCopyCpu;
+  readonly elementOperations: bigint;
+}
+
+interface DynamicDispatchPlan {
+  readonly kind: "dynamic-dispatch";
+  readonly nodeId: string;
+  readonly sourceResourceId: string;
+  readonly destinationResourceId: string;
+  readonly prepared: PreparedViewCopyCpu;
+  readonly controlId: string;
+  readonly maxElementCount: number;
+  readonly rankCount: number;
   readonly elementOperations: bigint;
 }
 
@@ -293,6 +310,7 @@ type ExecutablePlan = DispatchPlan | CollectivePlan | CopyPlan;
 
 type CpuNodePlan =
   | ExecutablePlan
+  | DynamicDispatchPlan
   | MaterializePlan
   | EventPlan
   | RepeatPlan
@@ -409,6 +427,14 @@ export async function prepareHostGraphCpu(
         normalized,
         startedAt,
       )
+      : node.kind === "dynamic-dispatch"
+        ? await prepareDynamicDispatchPlan(
+          node,
+          catalog,
+          rankCount,
+          normalized,
+          startedAt,
+        )
       : node.kind === "materialize"
         ? prepareMaterializePlan(node, resources)
         : node.kind === "event"
@@ -476,6 +502,8 @@ export async function prepareHostGraphCpu(
         })]
       : []));
   const runtimeRepeatLimits = runtimeRepeatControlLimits(frozenPlans);
+  const dynamicDispatchLimits =
+    dynamicDispatchControlLimits(frozenPlans);
   const conditionalNodeIds = Object.freeze(frozenPlans.flatMap((plan) =>
     plan.kind === "conditional" ? [plan.nodeId] : []));
 
@@ -489,6 +517,7 @@ export async function prepareHostGraphCpu(
       inputResources,
       preparedGraph.runtimeControlIds,
       runtimeRepeatLimits,
+      dynamicDispatchLimits,
     );
     ensureExecutionActive(
       executionStartedAt,
@@ -501,6 +530,8 @@ export async function prepareHostGraphCpu(
       captured.inputs,
     );
     const completedRepeats: HostGraphRepeatCompletion[] = [];
+    const completedDynamicDispatches:
+      HostGraphDynamicDispatchCompletion[] = [];
     const completedConditionals: HostGraphConditionalCompletion[] = [];
     let executedElementOperations = 0n;
     for (const plan of frozenPlans) {
@@ -518,6 +549,19 @@ export async function prepareHostGraphCpu(
           normalized.maxExecutionMs,
           captured.signal,
         );
+      } else if (plan.kind === "dynamic-dispatch") {
+        const completion = executeDynamicDispatch(
+          plan,
+          rankResources,
+          captured.controls,
+          executionStartedAt,
+          normalized.maxExecutionMs,
+          captured.signal,
+        );
+        completedDynamicDispatches.push(completion);
+        executedElementOperations +=
+          wireIntegerToBigInt(completion.elementCount) *
+          BigInt(plan.rankCount);
       } else if (plan.kind === "all-reduce") {
         executedElementOperations += plan.elementOperations;
         await executeAllReduce(
@@ -596,6 +640,9 @@ export async function prepareHostGraphCpu(
       executedNodeIds,
       completedEventIds: eventIds,
       completedRepeats: Object.freeze(completedRepeats),
+      completedDynamicDispatches: Object.freeze(
+        completedDynamicDispatches,
+      ),
       completedConditionals: Object.freeze(completedConditionals),
       elementOperations: encodeWireU64(executedElementOperations),
       outputs,
@@ -616,6 +663,7 @@ export async function prepareHostGraphCpu(
     repeatNodeIds,
     repeats: fixedRepeats,
     runtimeRepeatCount: preparedGraph.runtimeRepeatCount,
+    dynamicDispatchCount: preparedGraph.dynamicDispatchCount,
     conditionalNodeIds,
     resourceConditionalCount: preparedGraph.resourceConditionalCount,
     runtimeControlIds: Object.freeze([...preparedGraph.runtimeControlIds]),
@@ -785,7 +833,7 @@ async function prepareExecutableBody(
 }
 
 async function prepareDispatchPlan(
-  node: HostGraphDispatchNode,
+  node: HostGraphDispatchNode | HostGraphDynamicDispatchNode,
   catalog: ReadonlyMap<string, SemanticCatalogEntry>,
   rankCount: number,
   options: NormalizedPreparationOptions,
@@ -855,6 +903,41 @@ async function prepareDispatchPlan(
     destinationResourceId,
     prepared,
     elementOperations: prepared.elementCount * BigInt(rankCount),
+  });
+}
+
+async function prepareDynamicDispatchPlan(
+  node: HostGraphDynamicDispatchNode,
+  catalog: ReadonlyMap<string, SemanticCatalogEntry>,
+  rankCount: number,
+  options: NormalizedPreparationOptions,
+  startedAt: number,
+): Promise<DynamicDispatchPlan> {
+  const base = await prepareDispatchPlan(
+    node,
+    catalog,
+    rankCount,
+    options,
+    startedAt,
+  );
+  const maxElementCount = safeNumber(
+    wireIntegerToBigInt(node.maxElementCount),
+    `$.nodes.${node.nodeId}.maxElementCount`,
+  );
+  if (BigInt(maxElementCount) > base.prepared.elementCount) {
+    fail(
+      "BG-GRAPH-CPU-INTERNAL",
+      `$.nodes.${node.nodeId}.maxElementCount`,
+      "verified dynamic dispatch maximum exceeds its prepared semantic domain",
+    );
+  }
+  return Object.freeze({
+    ...base,
+    kind: "dynamic-dispatch",
+    controlId: node.launchControl.controlId,
+    maxElementCount,
+    rankCount,
+    elementOperations: BigInt(maxElementCount * rankCount),
   });
 }
 
@@ -1152,6 +1235,61 @@ function executeDispatch(
   ensureExecutionActive(startedAt, maxExecutionMs, signal);
 }
 
+function executeDynamicDispatch(
+  plan: DynamicDispatchPlan,
+  rankResources: RankResources,
+  controls: readonly AdmittedControl[],
+  startedAt: number,
+  maxExecutionMs: number,
+  signal: AbortSignal | undefined,
+): HostGraphDynamicDispatchCompletion {
+  const elementCount = controls.find((control) =>
+    control.controlId === plan.controlId)?.value;
+  if (elementCount === undefined) {
+    fail(
+      "BG-GRAPH-CPU-INTERNAL",
+      `$.nodes.${plan.nodeId}.launchControl`,
+      "verified dynamic dispatch control disappeared",
+    );
+  }
+  if (elementCount <= 0 || elementCount > plan.maxElementCount) {
+    fail(
+      "BG-GRAPH-CPU-INTERNAL",
+      `$.nodes.${plan.nodeId}.launchControl`,
+      "admitted dynamic dispatch control is outside its verified bound",
+    );
+  }
+  for (const [rank, resources] of rankResources.entries()) {
+    ensureExecutionActive(startedAt, maxExecutionMs, signal);
+    const source = resources.get(plan.sourceResourceId);
+    const destination = resources.get(plan.destinationResourceId);
+    if (source === undefined || destination === undefined) {
+      fail(
+        "BG-GRAPH-CPU-INTERNAL",
+        `$.nodes.${plan.nodeId}`,
+        `rank ${rank} dynamic dispatch resources disappeared`,
+      );
+    }
+    try {
+      plan.prepared.executePrefix(
+        { source, destination },
+        BigInt(elementCount),
+      );
+    } catch (cause) {
+      translateSemanticFailure(
+        cause,
+        `$.nodes.${plan.nodeId}`,
+        `rank ${rank} dynamic view-copy execution failed`,
+      );
+    }
+  }
+  ensureExecutionActive(startedAt, maxExecutionMs, signal);
+  return Object.freeze({
+    nodeId: plan.nodeId,
+    elementCount: encodeWireU64(BigInt(elementCount)),
+  });
+}
+
 function executeCopy(
   plan: CopyPlan,
   rankResources: RankResources,
@@ -1361,6 +1499,7 @@ function captureExecutionRequest(
   inputResources: readonly HostGraphResource[],
   runtimeControlIds: readonly string[],
   runtimeRepeatLimits: ReadonlyMap<string, number>,
+  dynamicDispatchLimits: ReadonlyMap<string, number>,
 ): {
   readonly inputs: readonly AdmittedInput[];
   readonly controls: readonly AdmittedControl[];
@@ -1379,6 +1518,7 @@ function captureExecutionRequest(
     captured.controls,
     runtimeControlIds,
     runtimeRepeatLimits,
+    dynamicDispatchLimits,
   );
   const inputResourceMap = new Map(
     inputResources.map((resource) => [resource.resourceId, resource]),
@@ -1439,6 +1579,7 @@ function captureRuntimeControls(
   value: unknown,
   runtimeControlIds: readonly string[],
   runtimeRepeatLimits: ReadonlyMap<string, number>,
+  dynamicDispatchLimits: ReadonlyMap<string, number>,
 ): readonly AdmittedControl[] {
   const controlValues = value === undefined
     ? []
@@ -1498,6 +1639,18 @@ function captureRuntimeControls(
         `runtime repeat control ${controlId} exceeds its artifact bound ${repeatLimit}`,
       );
     }
+    const dynamicDispatchLimit = dynamicDispatchLimits.get(controlId);
+    if (
+      dynamicDispatchLimit !== undefined &&
+      (controlValue === 0n ||
+        controlValue > BigInt(dynamicDispatchLimit))
+    ) {
+      fail(
+        "BG-GRAPH-CPU-INVALID-BINDING",
+        `${path}.value`,
+        `dynamic dispatch control ${controlId} must be between 1 and its artifact bound ${dynamicDispatchLimit}`,
+      );
+    }
     controls.push(Object.freeze({
       controlId,
       value: Number(controlValue),
@@ -1525,6 +1678,23 @@ function runtimeRepeatControlLimits(
       existing === undefined
         ? plan.maxIterationCount
         : Math.min(existing, plan.maxIterationCount),
+    );
+  }
+  return limits;
+}
+
+function dynamicDispatchControlLimits(
+  plans: readonly CpuNodePlan[],
+): ReadonlyMap<string, number> {
+  const limits = new Map<string, number>();
+  for (const plan of plans) {
+    if (plan.kind !== "dynamic-dispatch") continue;
+    const existing = limits.get(plan.controlId);
+    limits.set(
+      plan.controlId,
+      existing === undefined
+        ? plan.maxElementCount
+        : Math.min(existing, plan.maxElementCount),
     );
   }
   return limits;

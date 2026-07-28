@@ -6,6 +6,8 @@ import {
   type HostGraphConditionalCompletion,
   type HostGraphConditionalNode,
   type HostGraphCopyNode,
+  type HostGraphDynamicDispatchCompletion,
+  type HostGraphDynamicDispatchNode,
   type HostGraphDispatchNode,
   type HostGraphExecutableNode,
   type HostGraphMaterializeNode,
@@ -71,7 +73,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.9.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.10.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -249,6 +251,7 @@ export interface PreparedSemanticHostGraphWebGpu {
   readonly repeatCount: number;
   readonly repeatIterationCount: number;
   readonly runtimeRepeatCount: number;
+  readonly dynamicDispatchCount: number;
   readonly conditionalCount: number;
   readonly conditionalNodeIds: readonly string[];
   readonly resourceConditionalCount: number;
@@ -292,6 +295,8 @@ export interface SemanticHostGraphWebGpuTrace {
   readonly materializationCount: number;
   readonly completedEventIds: readonly string[];
   readonly completedRepeats: readonly HostGraphRepeatCompletion[];
+  readonly completedDynamicDispatches:
+    readonly HostGraphDynamicDispatchCompletion[];
   readonly completedConditionals: readonly HostGraphConditionalCompletion[];
   readonly midGraphFeedbackCount: number;
   readonly collectiveReductionStepCount: number;
@@ -347,6 +352,8 @@ interface PreparedState {
   readonly resourceConditional?: PreparedConditionalPlan;
   readonly runtimeRepeats: readonly PreparedRuntimeRepeatPlan[];
   readonly runtimeRepeatLimits: ReadonlyMap<string, number>;
+  readonly dynamicDispatches: readonly PreparedDynamicDispatchPlan[];
+  readonly dynamicDispatchLimits: ReadonlyMap<string, number>;
   readonly runtimeControlIds: readonly string[];
   readonly maximumCounts: Readonly<MutablePreparationCounts>;
   readonly storageMetadata:
@@ -397,6 +404,14 @@ interface PreparedRuntimeRepeatPlan {
   readonly bodyNodeIds: readonly string[];
 }
 
+interface PreparedDynamicDispatchPlan {
+  readonly nodeId: string;
+  readonly controlId: string;
+  readonly maxElementCount: number;
+  readonly startStepIndex: number;
+  readonly stepCount: number;
+}
+
 interface PreparedConditionalBranch {
   readonly steps: readonly WgslKernelSequenceStep[];
   readonly counts: Readonly<MutablePreparationCounts>;
@@ -434,6 +449,8 @@ interface SelectedExecution {
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly completedRepeats: readonly HostGraphRepeatCompletion[];
+  readonly completedDynamicDispatches:
+    readonly HostGraphDynamicDispatchCompletion[];
   readonly completedConditionals: readonly HostGraphConditionalCompletion[];
   readonly resourceConditional?: PreparedConditionalPlan;
 }
@@ -553,6 +570,7 @@ export async function prepareSemanticHostGraphWebGpu(
   const moduleHashes: string[] = [];
   const conditionals: PreparedConditionalPlan[] = [];
   const runtimeRepeats: PreparedRuntimeRepeatPlan[] = [];
+  const dynamicDispatches: PreparedDynamicDispatchPlan[] = [];
   let usesNumericalStatus = false;
 
   for (const nodeId of preparedGraph.topologicalNodeIds) {
@@ -584,6 +602,21 @@ export async function prepareSemanticHostGraphWebGpu(
         moduleHashes,
       );
       usesNumericalStatus ||= nodeUsesNumericalStatus;
+    } else if (node.kind === "dynamic-dispatch") {
+      await appendDynamicDispatchSteps(
+        node,
+        rankCount,
+        catalog,
+        resourcesById,
+        normalized,
+        startedAt,
+        steps,
+        counts,
+        boundStorageNames,
+        storageMetadata,
+        moduleHashes,
+        dynamicDispatches,
+      );
     } else if (node.kind === "materialize") {
       appendMaterialization(
         node,
@@ -792,6 +825,7 @@ export async function prepareSemanticHostGraphWebGpu(
     repeatCount: preparedGraph.repeatCount,
     repeatIterationCount: preparedGraph.repeatIterationCount,
     runtimeRepeatCount: preparedGraph.runtimeRepeatCount,
+    dynamicDispatchCount: preparedGraph.dynamicDispatchCount,
     conditionalCount: preparedGraph.conditionalCount,
     conditionalNodeIds,
     resourceConditionalCount: preparedGraph.resourceConditionalCount,
@@ -827,6 +861,9 @@ export async function prepareSemanticHostGraphWebGpu(
       : { resourceConditional }),
     runtimeRepeats: Object.freeze([...runtimeRepeats]),
     runtimeRepeatLimits: runtimeRepeatControlLimits(runtimeRepeats),
+    dynamicDispatches: Object.freeze([...dynamicDispatches]),
+    dynamicDispatchLimits:
+      dynamicDispatchControlLimits(dynamicDispatches),
     runtimeControlIds: Object.freeze([
       ...preparedGraph.runtimeControlIds,
     ]),
@@ -1692,9 +1729,66 @@ function selectConditionalExecution(
     selectedSteps,
     pipelineStepIndices,
   );
+  const selectedIndexByPipelineIndex = new Map(
+    pipelineStepIndices.map((pipelineIndex, selectedIndex) => [
+      pipelineIndex,
+      selectedIndex,
+    ]),
+  );
+  const dynamicCompletions = new Map<
+    string,
+    HostGraphDynamicDispatchCompletion
+  >();
+  for (const dispatch of state.dynamicDispatches) {
+    const elementCount = controlMap.get(dispatch.controlId);
+    if (
+      elementCount === undefined ||
+      elementCount <= 0 ||
+      elementCount > dispatch.maxElementCount
+    ) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        `$.nodes.${dispatch.nodeId}.launchControl`,
+        "admitted dynamic dispatch control is outside its verified bound",
+      );
+    }
+    for (
+      let pipelineIndex = dispatch.startStepIndex;
+      pipelineIndex < dispatch.startStepIndex + dispatch.stepCount;
+      pipelineIndex += 1
+    ) {
+      const selectedIndex = selectedIndexByPipelineIndex.get(
+        pipelineIndex,
+      );
+      const step = selectedIndex === undefined
+        ? undefined
+        : selectedSteps[selectedIndex];
+      if (selectedIndex === undefined || step === undefined) {
+        fail(
+          "BG-WEBGPU-GRAPH-INTERNAL",
+          `$.nodes.${dispatch.nodeId}`,
+          "dynamic dispatch step disappeared during runtime selection",
+        );
+      }
+      selectedSteps[selectedIndex] = Object.freeze({
+        ...step,
+        launch: frozenLaunch(elementCount),
+      });
+    }
+    dynamicCompletions.set(dispatch.nodeId, Object.freeze({
+      nodeId: dispatch.nodeId,
+      elementCount: encodeWireU64(BigInt(elementCount)),
+    }));
+  }
   const completedRepeats = Object.freeze(
     state.topologicalNodeIds.flatMap((nodeId) => {
       const completion = repeatCompletions.get(nodeId);
+      return completion === undefined ? [] : [completion];
+    }),
+  );
+  const completedDynamicDispatches = Object.freeze(
+    state.topologicalNodeIds.flatMap((nodeId) => {
+      const completion = dynamicCompletions.get(nodeId);
       return completion === undefined ? [] : [completion];
     }),
   );
@@ -1706,6 +1800,7 @@ function selectConditionalExecution(
     collectiveReductionStepCount: selectedCounts.reduction,
     collectiveReplicationStepCount: selectedCounts.replication,
     completedRepeats,
+    completedDynamicDispatches,
     completedConditionals: Object.freeze(completedConditionals),
     ...(state.resourceConditional === undefined
       ? {}
@@ -1760,7 +1855,7 @@ function readCapturedInputPredicate(
 }
 
 async function appendDispatchSteps(
-  node: HostGraphDispatchNode,
+  node: HostGraphDispatchNode | HostGraphDynamicDispatchNode,
   rankCount: number,
   catalog: ReadonlyMap<string, SemanticCatalogEntry>,
   resourcesById: ReadonlyMap<string, ResourcePlan>,
@@ -1771,6 +1866,7 @@ async function appendDispatchSteps(
   boundStorageNames: Set<string>,
   storageMetadata: Record<string, WgslStorageBufferMetadata>,
   moduleHashes: string[],
+  launchElementCount?: number,
 ): Promise<void> {
   const semantic = catalog.get(node.semanticArtifactHash);
   if (semantic === undefined) {
@@ -1836,12 +1932,30 @@ async function appendDispatchSteps(
     );
   }
   if (prepared.semantic.elementCount === 0n) return;
+  const selectedElementCount = launchElementCount ??
+    safeNumber(
+      prepared.semantic.elementCount,
+      `$.nodes.${node.nodeId}.launch`,
+    );
+  if (
+    selectedElementCount <= 0 ||
+    BigInt(selectedElementCount) > prepared.semantic.elementCount
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${node.nodeId}.launch`,
+      "verified dispatch launch is outside its prepared semantic domain",
+    );
+  }
+  const launch = launchElementCount === undefined
+    ? prepared.launch
+    : frozenLaunch(selectedElementCount);
   for (let rank = 0; rank < rankCount; rank += 1) {
     const sourceName = source.storageNames[rank] as string;
     const destinationName = destination.storageNames[rank] as string;
     steps.push(Object.freeze({
       program: prepared.program,
-      launch: prepared.launch,
+      launch,
       storageAliases: Object.freeze({
         source_words: sourceName,
         destination_words: destinationName,
@@ -1862,6 +1976,63 @@ async function appendDispatchSteps(
     counts.dispatch += 1;
   }
   moduleHashes.push(prepared.wgslModuleHash);
+}
+
+async function appendDynamicDispatchSteps(
+  node: HostGraphDynamicDispatchNode,
+  rankCount: number,
+  catalog: ReadonlyMap<string, SemanticCatalogEntry>,
+  resourcesById: ReadonlyMap<string, ResourcePlan>,
+  options: NormalizedPreparationOptions,
+  startedAt: number,
+  steps: WgslKernelSequenceStep[],
+  counts: MutablePreparationCounts,
+  boundStorageNames: Set<string>,
+  storageMetadata: Record<string, WgslStorageBufferMetadata>,
+  moduleHashes: string[],
+  dynamicDispatches: PreparedDynamicDispatchPlan[],
+): Promise<void> {
+  if (options.workgroupSize !== 1) {
+    fail(
+      "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
+      `$.nodes.${node.nodeId}.mode`,
+      "initial dynamic dispatch profile requires one invocation per workgroup",
+    );
+  }
+  const maxElementCount = safeNumber(
+    wireIntegerToBigInt(node.maxElementCount),
+    `$.nodes.${node.nodeId}.maxElementCount`,
+  );
+  const startStepIndex = steps.length;
+  await appendDispatchSteps(
+    node,
+    rankCount,
+    catalog,
+    resourcesById,
+    options,
+    startedAt,
+    steps,
+    counts,
+    boundStorageNames,
+    storageMetadata,
+    moduleHashes,
+    maxElementCount,
+  );
+  const stepCount = steps.length - startStepIndex;
+  if (stepCount !== rankCount) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${node.nodeId}`,
+      "dynamic dispatch did not lower to one exact step per rank",
+    );
+  }
+  dynamicDispatches.push(Object.freeze({
+    nodeId: node.nodeId,
+    controlId: node.launchControl.controlId,
+    maxElementCount,
+    startStepIndex,
+    stepCount,
+  }));
 }
 
 async function appendCollectiveSteps(
@@ -2368,6 +2539,8 @@ async function executeGraphWithResourceFeedback(
       collectiveReplicationStepCount:
         selectedExecution.collectiveReplicationStepCount,
       completedRepeats: selectedExecution.completedRepeats,
+      completedDynamicDispatches:
+        selectedExecution.completedDynamicDispatches,
       completedConditionals,
       resourceConditional: conditional,
     });
@@ -2571,6 +2744,7 @@ function captureExecutionRequest(
     object.controls,
     state.runtimeControlIds,
     state.runtimeRepeatLimits,
+    state.dynamicDispatchLimits,
   );
   const expected = state.rankCount * state.inputs.length;
   const values = snapshotDenseArray(
@@ -2637,6 +2811,7 @@ function captureRuntimeControls(
   value: unknown,
   runtimeControlIds: readonly string[],
   runtimeRepeatLimits: ReadonlyMap<string, number>,
+  dynamicDispatchLimits: ReadonlyMap<string, number>,
 ): readonly CapturedControl[] {
   const controlValues = value === undefined
     ? []
@@ -2696,6 +2871,18 @@ function captureRuntimeControls(
         `runtime repeat control ${controlId} exceeds its artifact bound ${repeatLimit}`,
       );
     }
+    const dynamicDispatchLimit = dynamicDispatchLimits.get(controlId);
+    if (
+      dynamicDispatchLimit !== undefined &&
+      (controlValue === 0n ||
+        controlValue > BigInt(dynamicDispatchLimit))
+    ) {
+      fail(
+        "BG-WEBGPU-GRAPH-INVALID-BINDING",
+        `${path}.value`,
+        `dynamic dispatch control ${controlId} must be between 1 and its artifact bound ${dynamicDispatchLimit}`,
+      );
+    }
     controls.push(Object.freeze({
       controlId,
       value: Number(controlValue),
@@ -2722,6 +2909,22 @@ function runtimeRepeatControlLimits(
       existing === undefined
         ? repeat.maxIterationCount
         : Math.min(existing, repeat.maxIterationCount),
+    );
+  }
+  return limits;
+}
+
+function dynamicDispatchControlLimits(
+  dispatches: readonly PreparedDynamicDispatchPlan[],
+): ReadonlyMap<string, number> {
+  const limits = new Map<string, number>();
+  for (const dispatch of dispatches) {
+    const existing = limits.get(dispatch.controlId);
+    limits.set(
+      dispatch.controlId,
+      existing === undefined
+        ? dispatch.maxElementCount
+        : Math.min(existing, dispatch.maxElementCount),
     );
   }
   return limits;
@@ -3061,6 +3264,8 @@ async function hashBackendSpecialization(
     pipelineAuthority: pipelineIdentityHash,
     selectedPipelineStepIndices: selectedExecution.pipelineStepIndices,
     completedRepeats: selectedExecution.completedRepeats,
+    completedDynamicDispatches:
+      selectedExecution.completedDynamicDispatches,
     selectedConditionals: selectedExecution.completedConditionals,
   });
 }
@@ -3089,6 +3294,8 @@ function createTrace(
     materializationCount: prepared.materializationCount,
     completedEventIds: state.eventIds,
     completedRepeats: selectedExecution.completedRepeats,
+    completedDynamicDispatches:
+      selectedExecution.completedDynamicDispatches,
     completedConditionals,
     midGraphFeedbackCount: prepared.midGraphFeedbackCount,
     collectiveReductionStepCount:

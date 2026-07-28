@@ -313,6 +313,38 @@ function runtimeRepeatedCollectiveProgram(): HostGraphProgram {
   };
 }
 
+function dynamicDispatchProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  const base = program(artifacts);
+  return {
+    ...base,
+    version: { major: 1, minor: 9 },
+    nodes: [
+      ...base.nodes.map((node) =>
+        node.kind === "dispatch" && node.nodeId === "transform"
+          ? {
+              ...node,
+              kind: "dynamic-dispatch" as const,
+              launchControl: {
+                controlId: "prefix-elements",
+                mode: "u32-prefix-element-count" as const,
+              },
+              maxElementCount: wire("4"),
+              mode: "runtime-u32-prefix-elements" as const,
+            }
+          : node),
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["store"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function conditionalCopyProgram(): HostGraphProgram {
   return {
     kind: "host-graph",
@@ -1006,6 +1038,101 @@ describe("host graph artifact", () => {
     ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.readBeforeWrite);
   });
 
+  it("normalizes bounded request-time dynamic dispatch in version 1.9", async () => {
+    const artifacts = await semantic();
+    const constructed = await createVerifiedHostGraphArtifact(
+      dynamicDispatchProgram(artifacts),
+      {
+        kernelArtifacts: [artifacts.kernel],
+        layoutArtifacts: [artifacts.layout],
+      },
+    );
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+
+    expect(payload.program.version).toEqual({ major: 1, minor: 9 });
+    expect(payload.program.nodes.find((node) =>
+      node.kind === "dynamic-dispatch")).toMatchObject({
+        nodeId: "transform",
+        kind: "dynamic-dispatch",
+        launchControl: {
+          controlId: "prefix-elements",
+          mode: "u32-prefix-element-count",
+        },
+        maxElementCount: "4",
+        mode: "runtime-u32-prefix-elements",
+      });
+    expect(prepared).toMatchObject({
+      dispatchCount: 2,
+      dynamicDispatchCount: 1,
+      runtimeControlIds: ["prefix-elements"],
+    });
+  });
+
+  it("rejects malformed, excessive, nested, and pre-version dynamic dispatch", async () => {
+    const artifacts = await semantic();
+    const options = {
+      kernelArtifacts: [artifacts.kernel],
+      layoutArtifacts: [artifacts.layout],
+    };
+    const oldVersion = clone(dynamicDispatchProgram(artifacts));
+    oldVersion.version.minor = 8;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      oldVersion,
+      options,
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const zeroMaximum = clone(dynamicDispatchProgram(artifacts));
+    const zeroNode = zeroMaximum.nodes.find((node) =>
+      node.kind === "dynamic-dispatch");
+    if (zeroNode?.kind !== "dynamic-dispatch") {
+      throw new Error("missing dynamic dispatch");
+    }
+    zeroNode.maxElementCount = wire("0");
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      zeroMaximum,
+      options,
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidArtifact);
+
+    const excessive = clone(dynamicDispatchProgram(artifacts));
+    const excessiveNode = excessive.nodes.find((node) =>
+      node.kind === "dynamic-dispatch");
+    if (excessiveNode?.kind !== "dynamic-dispatch") {
+      throw new Error("missing dynamic dispatch");
+    }
+    excessiveNode.maxElementCount = wire("7");
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      excessive,
+      options,
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+
+    const wrongMode = clone(dynamicDispatchProgram(artifacts));
+    const wrongNode = wrongMode.nodes.find((node) =>
+      node.kind === "dynamic-dispatch");
+    if (wrongNode?.kind !== "dynamic-dispatch") {
+      throw new Error("missing dynamic dispatch");
+    }
+    wrongNode.launchControl.mode =
+      "workgroups" as typeof wrongNode.launchControl.mode;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      wrongMode,
+      options,
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const nested = clone(runtimeRepeatedCollectiveProgram());
+    const repeat = nested.nodes.find((node) => node.kind === "repeat");
+    if (repeat?.kind !== "repeat") throw new Error("missing repeat");
+    repeat.body = [clone(
+      dynamicDispatchProgram(artifacts).nodes.find((node) =>
+        node.kind === "dynamic-dispatch")!,
+    ) as unknown as typeof repeat.body[number]];
+    nested.version.minor = 9;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      nested,
+      options,
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+  });
+
   it("rejects forged repeat versions, modes, bounds, and body control", async () => {
     const oldVersion = clone(repeatedCollectiveProgram());
     oldVersion.version.minor = 3;
@@ -1361,7 +1488,7 @@ describe("host graph artifact", () => {
 
   it("rejects copy version, mode, resource, dtype, and hazard drift", async () => {
     const future = clone(copyProgram());
-    future.version.minor = 9 as unknown as typeof future.version.minor;
+    future.version.minor = 10 as unknown as typeof future.version.minor;
     expect((await diagnostic(() => createVerifiedHostGraphArtifact(
       future,
       { kernelArtifacts: [], layoutArtifacts: [] },

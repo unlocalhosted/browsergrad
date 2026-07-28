@@ -38,6 +38,29 @@ export interface HostGraphDispatchNode extends JsonObject {
   readonly bindings: readonly HostGraphDispatchResourceBinding[];
 }
 
+export interface HostGraphDynamicDispatchControl extends JsonObject {
+  readonly controlId: string;
+  readonly mode: "u32-prefix-element-count";
+}
+
+export interface HostGraphDynamicDispatchNode extends JsonObject {
+  readonly nodeId: string;
+  readonly kind: "dynamic-dispatch";
+  readonly dependsOn: readonly string[];
+  readonly semanticArtifactHash: string;
+  readonly entrypointId: string;
+  readonly dimensionBindings: Readonly<Record<string, WireI64>>;
+  readonly bindings: readonly HostGraphDispatchResourceBinding[];
+  readonly launchControl: HostGraphDynamicDispatchControl;
+  readonly maxElementCount: WireU64;
+  readonly mode: "runtime-u32-prefix-elements";
+}
+
+export interface HostGraphDynamicDispatchCompletion extends JsonObject {
+  readonly nodeId: string;
+  readonly elementCount: WireU64;
+}
+
 export interface HostGraphAllReduceNode extends JsonObject {
   readonly nodeId: string;
   readonly kind: "all-reduce";
@@ -174,6 +197,7 @@ export interface HostGraphConditionalCompletion extends JsonObject {
 
 export type HostGraphNode =
   | HostGraphDispatchNode
+  | HostGraphDynamicDispatchNode
   | HostGraphAllReduceNode
   | HostGraphCopyNode
   | HostGraphMaterializeNode
@@ -189,7 +213,7 @@ export interface HostGraphProgram extends JsonObject {
   readonly kind: "host-graph";
   readonly version: {
     readonly major: 1;
-    readonly minor: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+    readonly minor: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
   };
   readonly failureModel: typeof HOST_GRAPH_FAILURE_MODEL;
   readonly rankCount: WireU64;

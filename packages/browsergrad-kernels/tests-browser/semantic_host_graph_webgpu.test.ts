@@ -60,6 +60,8 @@ const CASE_IDS = Object.freeze([
   "f32-fixed-repeat-sum",
   "f32-runtime-repeat-zero",
   "f32-runtime-repeat-two",
+  "f32-dynamic-dispatch-one",
+  "f32-dynamic-dispatch-two",
   "u8-input-conditional-then",
   "u8-input-conditional-else",
   "u8-runtime-conditional-then",
@@ -104,6 +106,7 @@ interface CaseObservation extends JsonObject {
   readonly materializationCount: number;
   readonly completedEventIds: readonly string[];
   readonly completedRepeats: readonly JsonObject[];
+  readonly completedDynamicDispatches: readonly JsonObject[];
   readonly completedConditionals: readonly JsonObject[];
   readonly midGraphFeedbackCount: number;
   readonly collectiveReductionStepCount: number;
@@ -179,6 +182,14 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       ),
       prepareRuntimeRepeatedCollectiveCase(
         "f32-runtime-repeat-two",
+        2,
+      ),
+      prepareDynamicDispatchCase(
+        "f32-dynamic-dispatch-one",
+        1,
+      ),
+      prepareDynamicDispatchCase(
+        "f32-dynamic-dispatch-two",
         2,
       ),
       prepareConditionalRawCopyCase(
@@ -344,6 +355,8 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         .toEqual(expected.completedEventIds);
       expect(actual.trace.completedRepeats)
         .toEqual(expected.completedRepeats);
+      expect(actual.trace.completedDynamicDispatches)
+        .toEqual(expected.completedDynamicDispatches);
       expect(actual.trace.completedConditionals)
         .toEqual(expected.completedConditionals);
       completedCases.push(Object.freeze({
@@ -359,6 +372,8 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         materializationCount: actual.trace.materializationCount,
         completedEventIds: actual.trace.completedEventIds,
         completedRepeats: actual.trace.completedRepeats,
+        completedDynamicDispatches:
+          actual.trace.completedDynamicDispatches,
         completedConditionals: actual.trace.completedConditionals,
         midGraphFeedbackCount: actual.trace.midGraphFeedbackCount,
         collectiveReductionStepCount:
@@ -414,6 +429,16 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       .not.toBe(twoRuntimeRepeat?.backendSpecializationHash);
     expect(zeroRuntimeRepeat?.expandedStepCount).toBe(2);
     expect(twoRuntimeRepeat?.expandedStepCount).toBe(6);
+    const oneDynamicDispatch = completedCases.find(({ caseId }) =>
+      caseId === "f32-dynamic-dispatch-one");
+    const twoDynamicDispatch = completedCases.find(({ caseId }) =>
+      caseId === "f32-dynamic-dispatch-two");
+    expect(oneDynamicDispatch?.pipelineIdentityHash)
+      .toBe(twoDynamicDispatch?.pipelineIdentityHash);
+    expect(oneDynamicDispatch?.backendSpecializationHash)
+      .not.toBe(twoDynamicDispatch?.backendSpecializationHash);
+    expect(oneDynamicDispatch?.expandedStepCount).toBe(2);
+    expect(twoDynamicDispatch?.expandedStepCount).toBe(2);
 
     stage = "non-finite-fail-stop";
     const finiteCase = cases[0] as PreparedCase;
@@ -668,6 +693,49 @@ async function prepareRuntimeRepeatedCollectiveCase(
   });
 }
 
+async function prepareDynamicDispatchCase(
+  caseId:
+    | "f32-dynamic-dispatch-one"
+    | "f32-dynamic-dispatch-two",
+  elementCount: 1 | 2,
+): Promise<PreparedCase> {
+  const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
+    inputShape: [parseWireI64("2")],
+    axes: [0],
+    dtype: "f32",
+  });
+  const values = [f32Bytes([1.25, -2.5]), f32Bytes([3.5, 4.75])];
+  const graph = (await createVerifiedHostGraphArtifact(
+    dynamicDispatchProgram(artifacts),
+    artifactOptions(artifacts),
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(
+    graph,
+    { ...artifactOptions(artifacts), workgroupSize: 1 },
+  );
+  const inputs = Object.freeze(values.map((bytes, rank) =>
+    input(rank, bytes)));
+  const controls = Object.freeze([{
+    controlId: "prefix-elements",
+    value: wire(elementCount),
+  }]);
+  return Object.freeze({
+    caseId,
+    artifacts,
+    graph,
+    prepared,
+    inputs,
+    controls,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: values.map((bytes) => Array.from(bytes)),
+      controls,
+    }),
+  });
+}
+
 async function prepareConditionalRawCopyCase(
   caseId: "u8-input-conditional-then" | "u8-input-conditional-else",
   predicate: 0 | 1,
@@ -819,6 +887,41 @@ function collectiveProgram(
         numericalPolicy,
         participants: [wire(0), wire(1)],
         result: "replicated-to-all-participants",
+      },
+    ],
+  };
+}
+
+function dynamicDispatchProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  const staticDispatch = dispatch(artifacts);
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 9 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire(2),
+    resources: [
+      resource("input", "input", "f32"),
+      resource("output", "output", "f32"),
+    ],
+    nodes: [
+      {
+        ...staticDispatch,
+        kind: "dynamic-dispatch",
+        launchControl: {
+          controlId: "prefix-elements",
+          mode: "u32-prefix-element-count",
+        },
+        maxElementCount: wire(2),
+        mode: "runtime-u32-prefix-elements",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["copy"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
       },
     ],
   };

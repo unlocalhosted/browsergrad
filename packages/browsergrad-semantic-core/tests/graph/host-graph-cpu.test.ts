@@ -104,6 +104,38 @@ function pipelineProgram(
   };
 }
 
+function dynamicPipelineProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  const base = pipelineProgram(artifacts, "f32");
+  return {
+    ...base,
+    version: { major: 1, minor: 9 },
+    nodes: [
+      ...base.nodes.map((node) =>
+        node.kind === "dispatch" && node.nodeId === "first"
+          ? {
+              ...node,
+              kind: "dynamic-dispatch" as const,
+              launchControl: {
+                controlId: "prefix-elements",
+                mode: "u32-prefix-element-count" as const,
+              },
+              maxElementCount: wire("2"),
+              mode: "runtime-u32-prefix-elements" as const,
+            }
+          : node),
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["second"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function collectiveProgram(
   artifacts: VerifiedViewCopyArtifacts,
   dtype: "f32" | "i32" | "u32",
@@ -982,6 +1014,79 @@ describe("host graph CPU reference", () => {
       elementOperations: "4",
     });
     expect(readF32(result.outputs[0]!.bytes)).toEqual([1.25, -2.5]);
+  });
+
+  it("executes and reports an admitted dynamic dispatch prefix", async () => {
+    const artifacts = await identityArtifacts();
+    const graph = await verified(
+      dynamicPipelineProgram(artifacts),
+      artifacts,
+    );
+    const prepared = await prepareHostGraphCpu(
+      graph,
+      artifactOptions(artifacts),
+    );
+    const source = f32Bytes([1.25, -2.5]);
+    const result = await prepared.execute({
+      inputs: [input(0, source)],
+      controls: [{
+        controlId: "prefix-elements",
+        value: wire("1"),
+      }],
+    });
+
+    expect(prepared).toMatchObject({
+      dynamicDispatchCount: 1,
+      runtimeControlIds: ["prefix-elements"],
+      elementOperations: 4n,
+    });
+    expect(result).toMatchObject({
+      executedNodeIds: ["first", "second", "materialize-output"],
+      completedDynamicDispatches: [{
+        nodeId: "first",
+        elementCount: "1",
+      }],
+      elementOperations: "3",
+    });
+    expect(readF32(result.outputs[0]!.bytes)).toEqual([1.25, 0]);
+  });
+
+  it("rejects dynamic dispatch values before reading caller inputs", async () => {
+    const artifacts = await identityArtifacts();
+    const graph = await verified(
+      dynamicPipelineProgram(artifacts),
+      artifacts,
+    );
+    const prepared = await prepareHostGraphCpu(
+      graph,
+      artifactOptions(artifacts),
+    );
+    let inputReads = 0;
+    const unreadInput = {
+      rank: wire("0"),
+      resourceId: "input",
+    } as HostGraphCpuInputBinding;
+    Object.defineProperty(unreadInput, "bytes", {
+      enumerable: true,
+      get() {
+        inputReads += 1;
+        return f32Bytes([1, 2]);
+      },
+    });
+
+    for (const value of ["0", "3"]) {
+      await expect(prepared.execute({
+        inputs: [unreadInput],
+        controls: [{
+          controlId: "prefix-elements",
+          value: wire(value),
+        }],
+      })).rejects.toMatchObject({
+        code: "BG-GRAPH-CPU-INVALID-BINDING",
+        path: "$.request.controls[0].value",
+      });
+    }
+    expect(inputReads).toBe(0);
   });
 
   it("reduces finite f32 in ascending participant-rank order", async () => {
