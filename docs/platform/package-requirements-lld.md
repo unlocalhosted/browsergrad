@@ -30,7 +30,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count repetition, explicit fail-stop materialization, CPU oracle, and authority-bound portable WebGPU executor have exact f32/i32/u32 plus raw-u8 actual-device parity; conditional/runtime-derived control, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count repetition, bounded captured-input u32 conditionals, explicit fail-stop materialization, CPU oracle, and authority-bound portable WebGPU executor have exact f32/i32/u32 plus raw-u8 actual-device parity; runtime/backend-derived control, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every exit criterion for the declared gate profile is
 complete. Verification of a closed initial profile does not imply broader
@@ -188,9 +188,9 @@ exact-payload CPU/required-WebGPU convergence is no longer a blocker.
    observations and synthetic fixtures grant no production authority.
 
 Gate 7 remains incomplete: its separately authorized CPU and portable-WebGPU
-executors cover the closed DAG plus fixed-count sequential repetition only;
-conditional or runtime-derived control, transport/topology, worker meshes, and
-native systems remain unimplemented.
+executors cover the closed DAG, fixed-count sequential repetition, and one
+captured external-input u32 conditional profile. Runtime/backend-derived
+control, transport/topology, worker meshes, and native systems remain unimplemented.
 
 ## Purpose
 
@@ -748,11 +748,12 @@ allocations, binding, copies, dispatches, readback/materialization, events, and
 dependencies.
 
 Version 1 is a validated DAG with an explicit version-1.4 fixed-count
-sequential-repeat node. Cycles are illegal. Dynamic launch, runtime-derived
-repetition, or conditional host control require additional explicit versioned
-node kinds and cancellation points rather than hidden emitter loops. The
-verifier performs resource lifetime and read/write hazard checks before
-execution.
+sequential-repeat node and a version-1.5 captured-input u32 conditional.
+Cycles are illegal. Dynamic launch, runtime-derived repetition, GPU/backend-
+derived predicates, or mid-graph host/device feedback require additional
+explicit versioned node kinds and cancellation points rather than hidden
+emitter loops. The verifier performs resource lifetime and read/write hazard
+checks before execution.
 
 ## Frontend Contracts
 
@@ -2138,15 +2139,27 @@ whole-graph result. Program version 1.4 adds
 `fixed-count-sequential` repetition. Each repeat owns a nonempty bounded linear
 body containing only dispatch, all-reduce, and copy nodes and a positive
 artifact-fixed iteration count. Nested repeats, events, materialization,
-conditionals, and runtime-derived counts are rejected. The verifier requires
+and runtime-derived counts are rejected. The verifier requires
 globally unique top-level/body node IDs, applies the canonical resource effects
 and hazard checks to the aggregate body, and bounds both iterations and the
-expanded node count. The
+expanded node count. Program version 1.5 adds
+`input-u32-branch-sequential` conditionals. Each predicate names one exact
+rank-local, aligned four-byte external-input `u32`; zero selects else and
+nonzero selects then. Both bodies are nonempty bounded linear
+dispatch/all-reduce/copy sequences with equal node-kind structure. Nested
+control, events, materialization, runtime/GPU-derived predicates, and
+mid-graph feedback are rejected. The verifier merges all possible effects,
+requires both branches to write before treating a write as guaranteed, uses
+one global top-level/branch-body node-ID namespace, and preserves exact
+one-branch node counts. The
 authority-bound `browsergrad.host-graph.cpu-reference@1` profile snapshots all
 rank-local inputs, executes dispatches, arbitrary-byte copies, and finite
 rank-ordered f32 or wrapping/exact 32-bit integer all-reduces in private
 memory, enforces fixed memory/operation/time/cancellation ceilings, and
 exposes only verified materialized outputs after the complete graph succeeds.
+It requires equal conditional branch element-operation counts, selects from
+the private predicate snapshot, and reports branch identity only with the
+successful whole-graph result.
 
 Kernels owns the separate
 `browsergrad.host-graph.webgpu@1` portable adapter. It accepts only exact
@@ -2163,8 +2176,14 @@ their frozen steps are reused for bounded static expansion; preparation checks
 cancellation/time throughout expansion and enforces the step ceiling after
 each body node. Successful CPU/WebGPU results report the
 repeat node, exact iteration count, and body-node IDs only after whole-graph
-success. This grants no runtime branch, runtime loop-count, or dynamic-launch
-authority. F32
+success. Version-1.5 conditional branches are both pre-lowered through the
+same canonical paths and must have equal execution shapes. Preparation binds
+the union of branch resources/modules while charging exactly one branch.
+Execution selects only from the captured external-input predicate before
+device work, includes the selected branch in specialization identity, and
+publishes branch completion only after whole-graph success. This grants no
+GPU/backend-derived predicate, mid-graph feedback, runtime loop-count, or
+dynamic-launch authority. F32
 collectives use a separately
 read back atomic numerical-status word and preserve CPU signed-zero min/max;
 i32 sum wraps explicitly and u32/integer min/max remains exact. Complete input
@@ -2175,11 +2194,11 @@ suppression, and output publication after complete readback preserve the graph
 failure model. Required headed Chromium on Apple Metal 3 bit-matches the CPU
 reference for rank-ordered f32 sum, signed-zero f32 min, wrapping i32 sum,
 exact u32 max, event-marked/materialized whole-allocation u8 copy, and three
-fixed repetitions of f32 sum, and
+fixed repetitions of f32 sum plus both captured-input u8-copy branches, and
 separately proves non-finite f32 and lost-device refusal.
 
-No bounded conditional/runtime-derived-control node, pipeline authority,
-transport/topology adapter, worker mesh, native companion, or performance
+No runtime/backend-derived-control node, pipeline authority,
+transport/topology adapter, worker mesh, native companion, or graph-performance
 evidence exists yet, so Gate 7 remains `in progress`. Current events do not
 claim timestamps, external waits, or cross-queue/cross-worker synchronization.
 

@@ -268,6 +268,89 @@ function repeatedCollectiveProgram(): HostGraphProgram {
   };
 }
 
+function conditionalRawCopyProgram(): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 5 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire("1"),
+    resources: [
+      {
+        resourceId: "predicate",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u32",
+        byteLength: wire("4"),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "then-input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u8",
+        byteLength: wire("8"),
+        alignmentBytes: 1,
+      },
+      {
+        resourceId: "else-input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u8",
+        byteLength: wire("8"),
+        alignmentBytes: 1,
+      },
+      {
+        resourceId: "output",
+        role: "output",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u8",
+        byteLength: wire("8"),
+        alignmentBytes: 1,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "choose-output",
+        kind: "conditional",
+        dependsOn: [],
+        predicate: {
+          resourceId: "predicate",
+          rank: wire("0"),
+          mode: "u32-nonzero",
+        },
+        thenBody: [{
+          nodeId: "copy-then",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "then-input",
+          destinationResourceId: "output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        elseBody: [{
+          nodeId: "copy-else",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "else-input",
+          destinationResourceId: "output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        mode: "input-u32-branch-sequential",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["choose-output"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 async function verified(
   program: HostGraphProgram,
   artifacts: VerifiedViewCopyArtifacts,
@@ -335,6 +418,97 @@ function readU32(bytes: Uint8Array): number[] {
 }
 
 describe("host graph CPU reference", () => {
+  it("selects bounded input conditionals from captured u32 input", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      conditionalRawCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+    const thenBytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+    const elseBytes = new Uint8Array([8, 7, 6, 5, 4, 3, 2, 1]);
+    const predicate = u32Bytes([1]);
+    const request = {
+      inputs: [
+        {
+          rank: wire("0"),
+          resourceId: "predicate",
+          bytes: predicate,
+        },
+        {
+          rank: wire("0"),
+          resourceId: "then-input",
+          bytes: thenBytes,
+        },
+        {
+          rank: wire("0"),
+          resourceId: "else-input",
+          bytes: elseBytes,
+        },
+      ],
+    };
+    const pending = prepared.execute(request);
+    predicate.fill(0);
+    thenBytes.fill(0);
+    elseBytes.fill(0);
+    const thenResult = await pending;
+
+    expect(prepared.conditionalNodeIds).toEqual(["choose-output"]);
+    expect(prepared.expandedNodeCount).toBe(2);
+    expect(prepared.elementOperations).toBe(8n);
+    expect(thenResult.executedNodeIds).toEqual([
+      "choose-output",
+      "materialize-output",
+    ]);
+    expect(thenResult.completedConditionals).toEqual([{
+      nodeId: "choose-output",
+      selectedBranch: "then",
+      bodyNodeIds: ["copy-then"],
+    }]);
+    expect(thenResult.outputs[0]?.bytes).toEqual(
+      new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
+    );
+
+    const elseResult = await prepared.execute({
+      inputs: [
+        {
+          rank: wire("0"),
+          resourceId: "predicate",
+          bytes: u32Bytes([0]),
+        },
+        {
+          rank: wire("0"),
+          resourceId: "then-input",
+          bytes: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
+        },
+        {
+          rank: wire("0"),
+          resourceId: "else-input",
+          bytes: new Uint8Array([8, 7, 6, 5, 4, 3, 2, 1]),
+        },
+      ],
+    });
+    expect(elseResult.completedConditionals).toEqual([{
+      nodeId: "choose-output",
+      selectedBranch: "else",
+      bodyNodeIds: ["copy-else"],
+    }]);
+    expect(elseResult.outputs[0]?.bytes).toEqual(
+      new Uint8Array([8, 7, 6, 5, 4, 3, 2, 1]),
+    );
+
+    await expect(prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+      maxElementOperations: 7,
+    })).rejects.toMatchObject({
+      code: "BG-GRAPH-CPU-RESOURCE-LIMIT",
+      path: "$.maxElementOperations",
+    });
+  });
+
   it("executes bounded repetition with cancellation points per iteration", async () => {
     const graph = (await createVerifiedHostGraphArtifact(
       repeatedCollectiveProgram(),

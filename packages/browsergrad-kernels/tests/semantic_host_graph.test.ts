@@ -281,6 +281,69 @@ function repeatedCollectiveProgram(): HostGraphProgram {
   };
 }
 
+function conditionalRawCopyProgram(): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 5 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire("1"),
+    resources: [
+      resource("predicate", "input", "u32", "4"),
+      {
+        ...resource("then-input", "input", "u32"),
+        dtype: "u8",
+        alignmentBytes: 1,
+      },
+      {
+        ...resource("else-input", "input", "u32"),
+        dtype: "u8",
+        alignmentBytes: 1,
+      },
+      {
+        ...resource("output", "output", "u32"),
+        dtype: "u8",
+        alignmentBytes: 1,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "choose-output",
+        kind: "conditional",
+        dependsOn: [],
+        predicate: {
+          resourceId: "predicate",
+          rank: wire("0"),
+          mode: "u32-nonzero",
+        },
+        thenBody: [{
+          nodeId: "copy-then",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "then-input",
+          destinationResourceId: "output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        elseBody: [{
+          nodeId: "copy-else",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "else-input",
+          destinationResourceId: "output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        mode: "input-u32-branch-sequential",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["choose-output"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 async function verified(
   program: HostGraphProgram,
   artifacts: VerifiedViewCopyArtifacts,
@@ -303,6 +366,35 @@ function input(
 }
 
 describe("semantic host-graph WebGPU preparation", () => {
+  it("pre-lowers both bounded conditional branches with exact public counts", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      conditionalRawCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+
+    expect(prepared).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 2,
+      expandedNodeCount: 2,
+      expandedStepCount: 1,
+      dispatchStepCount: 0,
+      copyStepCount: 1,
+      materializationCount: 1,
+      conditionalCount: 1,
+      conditionalNodeIds: ["choose-output"],
+      collectiveReductionStepCount: 0,
+      collectiveReplicationStepCount: 0,
+      plannedTransientGpuBytes: "32",
+      plannedTransientHostBytes: "60",
+      plannedTransientWorkingSetBytes: "92",
+    });
+    expect(prepared.wgslModuleHashes).toHaveLength(1);
+  });
+
   it("statically expands bounded version-1.4 repetition", async () => {
     const graph = (await createVerifiedHostGraphArtifact(
       repeatedCollectiveProgram(),

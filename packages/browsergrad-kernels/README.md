@@ -31,7 +31,7 @@ PyTorch-shaped surface.
 | `runThreadGrid`, `referenceSaxpy`, `referenceExclusiveScan`, `referenceFindRepeats`, `referenceOrderedCircleRender` | Thread-grid teaching references for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
 | `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` / `simulateCuda1DGrid` | CUDA-shaped compatibility aliases for labs and rubrics that teach CUDA vocabulary | ✅ |
 | `prepareSemanticViewCopyWgsl` / `runSemanticViewCopyWebGpu` | Verified `view-copy@1.0` lowering over canonical layout/index artifacts, with exact 32-bit-word storage and structured guarded padding | ✅ 13-case strict CPU/WebGPU parity on Apple Metal 3 across f32/i32/u32, ranks 1–4, striding, broadcast, offsets, and float padding; release evidence remains commit-scoped |
-| `prepareSemanticHostGraphWebGpu` / `runSemanticHostGraphWebGpu` | Authority-bound `browsergrad.host-graph@1` execution with per-rank private storage, canonical view-copy dispatches, whole-allocation raw copies, dependency-ordered completion events, bounded fixed-count repetition, terminal materialization, and ordered f32/i32/u32 all-reduce | ✅ required real-WebGPU complete-output bit parity with the CPU graph oracle for finite f32 sum/signed-zero min, wrapping i32 sum, exact u32 max, event-marked/materialized u8 allocation copy, and repeated f32 sum; conditional/runtime-derived control, transport, and native companions remain separate |
+| `prepareSemanticHostGraphWebGpu` / `runSemanticHostGraphWebGpu` | Authority-bound `browsergrad.host-graph@1` execution with per-rank private storage, canonical view-copy dispatches, whole-allocation raw copies, dependency-ordered completion events, bounded fixed-count repetition, captured-input u32 conditionals, terminal materialization, and ordered f32/i32/u32 all-reduce | ✅ required real-WebGPU complete-output bit parity with the CPU graph oracle for finite f32 sum/signed-zero min, wrapping i32 sum, exact u32 max, event-marked/materialized u8 allocation copy, repeated f32 sum, and both conditional branches; runtime/backend-derived control, transport, and native companions remain separate |
 | `prepareSemanticGemmWgsl` / `runSemanticGemmWebGpu` | Verified logical GEMM plus independent schedule lowering with cooperative workgroup staging, uniform barriers, and masked boundary tiles | ✅ bit-exact only for semantic-core certified exact f32 inputs; required irregular two-schedule WebGPU evidence |
 | `prepareSemanticAttentionWgsl` / `runSemanticAttentionWebGpu` | Verified attention plus independent online K/V-tile schedule lowering/execution with cooperative staging, uniform barriers, and causal/tail masks before state updates | ✅ required causal/non-causal two-schedule CPU/WebGPU comparison plus separate observational host-API performance record on Apple Metal 3 |
 | `rowWiseOnlineAttentionDirect` | Fused row-wise online-softmax attention baseline with strict real-WebGPU parity vs composed reference; not block-tiled FlashAttention. | ✅ |
@@ -195,6 +195,13 @@ cancellation and time throughout expansion and enforces the step ceiling after
 every body node. A successful trace reports the repeat node, exact iteration
 count, and body-node IDs; no completion is published on failure. This is
 bounded static expansion, not runtime branching or a dynamic loop claim.
+Version-1.5 conditionals pre-lower both bounded linear branches through the
+same canonical lowerers. The backend requires equal lowered execution shapes,
+accounts exactly one selected branch while conservatively binding the union of
+branch resources/modules, and selects only from the complete captured
+external-input u32 predicate before device work. Branch identity is included
+in the backend specialization hash and successful trace. This is bounded
+host-known selection, not shader, GPU-derived, or mid-graph control flow.
 
 Execution snapshots every rank-local input before its first await, creates only
 private zero-initialized temporary/output storage, checks device allocation,
@@ -213,10 +220,10 @@ pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:semantic-host-grap
 pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:semantic-host-graph:required
 ```
 
-This profile is a static DAG plus fixed-count sequential-repeat executor. It
-does not claim conditionals, runtime-derived loop counts or launches, event
-timestamps/external waits, transport/topology, a worker mesh, native
-collectives, or performance.
+This profile is a bounded DAG plus fixed-count sequential repetition and one
+captured-input conditional profile. It does not claim GPU/backend-derived
+predicates, runtime-derived loop counts or launches, event timestamps/external
+waits, transport/topology, a worker mesh, native collectives, or performance.
 
 ## Quick start
 

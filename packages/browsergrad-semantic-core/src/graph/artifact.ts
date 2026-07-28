@@ -46,10 +46,13 @@ import {
   type HostGraphCollectiveDType,
   type HostGraphCollectiveNumericalPolicy,
   type HostGraphCollectiveReduction,
+  type HostGraphConditionalBodyNode,
+  type HostGraphConditionalNode,
   type HostGraphCopyNode,
   type HostGraphDispatchNode,
   type HostGraphDispatchResourceBinding,
   type HostGraphEventNode,
+  type HostGraphExecutableNode,
   type HostGraphMaterializeNode,
   type HostGraphNode,
   type HostGraphProgram,
@@ -61,11 +64,12 @@ import {
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 4;
+export const HOST_GRAPH_ARTIFACT_MINOR = 5;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
 export const HOST_GRAPH_MAX_REPEAT_BODY_NODES = 64;
+export const HOST_GRAPH_MAX_CONDITIONAL_BODY_NODES = 64;
 export const HOST_GRAPH_MAX_REPEAT_ITERATIONS = 1_024;
 export const HOST_GRAPH_MAX_EXPANDED_NODES = 16_384;
 export const HOST_GRAPH_MAX_RANKS = 256;
@@ -129,6 +133,7 @@ export interface PreparedHostGraphProgram {
   readonly eventIds: readonly string[];
   readonly repeatCount: number;
   readonly repeatIterationCount: number;
+  readonly conditionalCount: number;
   readonly expandedNodeCount: number;
   readonly topologicalNodeIds: readonly string[];
   readonly outputResourceIds: readonly string[];
@@ -145,6 +150,7 @@ interface HostGraphAnalysis {
   readonly eventIds: readonly string[];
   readonly repeatCount: number;
   readonly repeatIterationCount: number;
+  readonly conditionalCount: number;
   readonly expandedNodeCount: number;
   readonly topologicalNodeIds: readonly string[];
   readonly outputResourceIds: readonly string[];
@@ -153,6 +159,7 @@ interface HostGraphAnalysis {
 interface ResourceUse {
   readonly nodeId: string;
   readonly access: HostGraphResourceAccess;
+  readonly guaranteesWrite: boolean;
   readonly path: string;
 }
 
@@ -162,6 +169,7 @@ interface HostGraphResourceEffect {
   readonly resourceId: string;
   readonly access: HostGraphResourceAccess;
   readonly requiresPriorWriter?: boolean;
+  readonly guaranteesWrite?: boolean;
 }
 
 interface DispatchOperationBinding {
@@ -284,6 +292,7 @@ export async function prepareHostGraphProgram(
     eventIds: Object.freeze([...analysis.eventIds]),
     repeatCount: analysis.repeatCount,
     repeatIterationCount: analysis.repeatIterationCount,
+    conditionalCount: analysis.conditionalCount,
     expandedNodeCount: analysis.expandedNodeCount,
     topologicalNodeIds: Object.freeze([...analysis.topologicalNodeIds]),
     outputResourceIds: Object.freeze([...analysis.outputResourceIds]),
@@ -340,12 +349,13 @@ function parseProgram(
       version.minor !== 1 &&
       version.minor !== 2 &&
       version.minor !== 3 &&
-      version.minor !== 4)
+      version.minor !== 4 &&
+      version.minor !== 5)
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 through 1.4 only",
+      "host graph program reader supports versions 1.0 through 1.5 only",
     );
   }
   if (version.minor !== envelopeMinor) {
@@ -498,7 +508,7 @@ function parseResources(
 
 function parseNodes(
   value: JsonValue,
-  programMinor: 0 | 1 | 2 | 3 | 4,
+  programMinor: 0 | 1 | 2 | 3 | 4 | 5,
 ): readonly HostGraphNode[] {
   const values = arrayValue(value, "$.payload.program.nodes");
   if (values.length === 0 || values.length > HOST_GRAPH_MAX_NODES) {
@@ -525,10 +535,15 @@ function parseNodes(
       node.nodeId,
       ...(node.kind === "repeat"
         ? node.body.map((bodyNode) => bodyNode.nodeId)
+        : node.kind === "conditional"
+          ? [
+              ...node.thenBody.map((bodyNode) => bodyNode.nodeId),
+              ...node.elseBody.map((bodyNode) => bodyNode.nodeId),
+            ]
         : []),
     ]),
     "$.payload.program.nodes",
-    "top-level or repeat-body node",
+    "top-level or control-body node",
   );
   unique(
     nodes
@@ -543,8 +558,8 @@ function parseNodes(
 function parseNode(
   value: JsonValue,
   path: string,
-  programMinor: 0 | 1 | 2 | 3 | 4,
-  repeatBody = false,
+  programMinor: 0 | 1 | 2 | 3 | 4 | 5,
+  controlBody?: string,
 ): HostGraphNode {
   const object = objectValue(value, path);
   const kind = stringValue(field(object, "kind", path), `${path}.kind`);
@@ -561,11 +576,11 @@ function parseNode(
     return parseCopyNode(object, path);
   }
   if (kind === "materialize") {
-    if (repeatBody) {
+    if (controlBody !== undefined) {
       invalid(
         GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
         `${path}.kind`,
-        "fixed-count repeat bodies cannot contain materialization",
+        `${controlBody} bodies cannot contain materialization`,
       );
     }
     if (programMinor < 2) {
@@ -578,11 +593,11 @@ function parseNode(
     return parseMaterializeNode(object, path);
   }
   if (kind === "event") {
-    if (repeatBody) {
+    if (controlBody !== undefined) {
       invalid(
         GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
         `${path}.kind`,
-        "fixed-count repeat bodies cannot contain events",
+        `${controlBody} bodies cannot contain events`,
       );
     }
     if (programMinor < 3) {
@@ -595,11 +610,11 @@ function parseNode(
     return parseEventNode(object, path);
   }
   if (kind === "repeat") {
-    if (repeatBody) {
+    if (controlBody !== undefined) {
       invalid(
         GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
         `${path}.kind`,
-        "fixed-count repeat bodies cannot nest repeat nodes",
+        `${controlBody} bodies cannot contain nested control`,
       );
     }
     if (programMinor < 4) {
@@ -611,10 +626,27 @@ function parseNode(
     }
     return parseRepeatNode(object, path);
   }
+  if (kind === "conditional") {
+    if (controlBody !== undefined) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.kind`,
+        `${controlBody} bodies cannot contain nested control`,
+      );
+    }
+    if (programMinor < 5) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.kind`,
+        "conditional nodes require host graph program version 1.5",
+      );
+    }
+    return parseConditionalNode(object, path);
+  }
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, and version-1.4 repeat nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 repeat, and version-1.5 conditional nodes",
   );
 }
 
@@ -647,41 +679,134 @@ function parseRepeatNode(
       `repeat iteration count exceeds ${HOST_GRAPH_MAX_REPEAT_ITERATIONS}`,
     );
   }
-  const bodyValues = arrayValue(field(object, "body", path), `${path}.body`);
-  if (
-    bodyValues.length === 0 ||
-    bodyValues.length > HOST_GRAPH_MAX_REPEAT_BODY_NODES
-  ) {
-    resource(
-      `${path}.body`,
-      `repeat body node count must be between 1 and ${HOST_GRAPH_MAX_REPEAT_BODY_NODES}`,
+  const body = parseLinearControlBody(
+    field(object, "body", path),
+    `${path}.body`,
+    "fixed-count repeat",
+    HOST_GRAPH_MAX_REPEAT_BODY_NODES,
+  ) as readonly HostGraphRepeatBodyNode[];
+  return {
+    nodeId: identifier(field(object, "nodeId", path), `${path}.nodeId`),
+    kind: "repeat",
+    dependsOn: dependencies(field(object, "dependsOn", path), path),
+    iterationCount,
+    body,
+    mode: "fixed-count-sequential",
+  };
+}
+
+function parseConditionalNode(
+  value: JsonObject,
+  path: string,
+): HostGraphConditionalNode {
+  const object = closedObject(
+    value,
+    [
+      "nodeId",
+      "kind",
+      "dependsOn",
+      "predicate",
+      "thenBody",
+      "elseBody",
+      "mode",
+    ],
+    path,
+  );
+  if (object.mode !== "input-u32-branch-sequential") {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "conditional mode must be input-u32-branch-sequential",
     );
   }
-  const body = bodyValues.map((item, index) => {
-    const node = parseNode(
-      item,
-      `${path}.body[${index}]`,
-      4,
-      true,
+  const thenBody = parseLinearControlBody(
+    field(object, "thenBody", path),
+    `${path}.thenBody`,
+    "input conditional",
+    HOST_GRAPH_MAX_CONDITIONAL_BODY_NODES,
+  ) as readonly HostGraphConditionalBodyNode[];
+  const elseBody = parseLinearControlBody(
+    field(object, "elseBody", path),
+    `${path}.elseBody`,
+    "input conditional",
+    HOST_GRAPH_MAX_CONDITIONAL_BODY_NODES,
+  ) as readonly HostGraphConditionalBodyNode[];
+  if (
+    thenBody.length !== elseBody.length ||
+    thenBody.some((node, index) => node.kind !== elseBody[index]?.kind)
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.elseBody`,
+      "conditional branches require equal-length executable-kind structure",
     );
+  }
+  return {
+    nodeId: identifier(field(object, "nodeId", path), `${path}.nodeId`),
+    kind: "conditional",
+    dependsOn: dependencies(field(object, "dependsOn", path), path),
+    predicate: parseInputPredicate(
+      field(object, "predicate", path),
+      `${path}.predicate`,
+    ),
+    thenBody,
+    elseBody,
+    mode: "input-u32-branch-sequential",
+  };
+}
+
+function parseInputPredicate(
+  value: JsonValue,
+  path: string,
+): HostGraphConditionalNode["predicate"] {
+  const object = closedObject(value, ["resourceId", "rank", "mode"], path);
+  if (object.mode !== "u32-nonzero") {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "input predicate mode must be u32-nonzero",
+    );
+  }
+  return {
+    resourceId: identifier(
+      field(object, "resourceId", path),
+      `${path}.resourceId`,
+    ),
+    rank: parseWireU64(field(object, "rank", path), `${path}.rank`),
+    mode: "u32-nonzero",
+  };
+}
+
+function parseLinearControlBody(
+  value: JsonValue,
+  path: string,
+  label: string,
+  maxNodes: number,
+): readonly HostGraphExecutableNode[] {
+  const values = arrayValue(value, path);
+  if (values.length === 0 || values.length > maxNodes) {
+    resource(
+      path,
+      `${label} body node count must be between 1 and ${maxNodes}`,
+    );
+  }
+  const body = values.map((item, index) => {
+    const node = parseNode(item, `${path}[${index}]`, 5, label);
     if (
       node.kind === "materialize" ||
       node.kind === "event" ||
-      node.kind === "repeat"
+      node.kind === "repeat" ||
+      node.kind === "conditional"
     ) {
       invalid(
         GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
-        `${path}.body[${index}].kind`,
-        "fixed-count repeat bodies support dispatch, all-reduce, and copy only",
+        `${path}[${index}].kind`,
+        `${label} bodies support dispatch, all-reduce, and copy only`,
       );
     }
     return node;
-  }) as HostGraphRepeatBodyNode[];
-  unique(
-    body.map((node) => node.nodeId),
-    `${path}.body`,
-    "repeat body node",
-  );
+  }) as HostGraphExecutableNode[];
+  unique(body.map((node) => node.nodeId), path, `${label} body node`);
   for (const [index, node] of body.entries()) {
     const expected = index === 0 ? [] : [body[index - 1]!.nodeId];
     if (
@@ -691,21 +816,14 @@ function parseRepeatNode(
     ) {
       invalid(
         GRAPH_DIAGNOSTIC_CODES.invalidAccess,
-        `${path}.body[${index}].dependsOn`,
+        `${path}[${index}].dependsOn`,
         index === 0
-          ? "first repeat body node must have no internal dependency"
-          : `repeat body node must depend only on immediately preceding node ${expected[0]}`,
+          ? `first ${label} body node must have no internal dependency`
+          : `${label} body node must depend only on immediately preceding node ${expected[0]}`,
       );
     }
   }
-  return {
-    nodeId: identifier(field(object, "nodeId", path), `${path}.nodeId`),
-    kind: "repeat",
-    dependsOn: dependencies(field(object, "dependsOn", path), path),
-    iterationCount,
-    body: Object.freeze(body),
-    mode: "fixed-count-sequential",
-  };
+  return Object.freeze(body);
 }
 
 function parseEventNode(
@@ -1046,6 +1164,7 @@ function analyzeProgram(
   let eventCount = 0;
   let repeatCount = 0;
   let repeatIterationCount = 0;
+  let conditionalCount = 0;
   let expandedNodeCount = 0;
   const dispatchEffects = new Map<
     HostGraphDispatchNode,
@@ -1055,14 +1174,31 @@ function analyzeProgram(
     HostGraphRepeatNode,
     readonly HostGraphResourceEffect[]
   >();
+  const conditionalEffects = new Map<
+    HostGraphConditionalNode,
+    readonly HostGraphResourceEffect[]
+  >();
   const dispatchGeometry = new Map<string, ResolvedDispatchGeometry>();
   for (const [index, node] of program.nodes.entries()) {
     const path = `$.payload.program.nodes[${index}]`;
-    const candidates = node.kind === "repeat" ? node.body : [node];
-    for (const [bodyIndex, candidate] of candidates.entries()) {
-      const candidatePath = node.kind === "repeat"
-        ? `${path}.body[${bodyIndex}]`
-        : path;
+    const candidates = node.kind === "repeat"
+      ? node.body.map((candidate, bodyIndex) => ({
+          candidate,
+          candidatePath: `${path}.body[${bodyIndex}]`,
+        }))
+      : node.kind === "conditional"
+        ? [
+            ...node.thenBody.map((candidate, bodyIndex) => ({
+              candidate,
+              candidatePath: `${path}.thenBody[${bodyIndex}]`,
+            })),
+            ...node.elseBody.map((candidate, bodyIndex) => ({
+              candidate,
+              candidatePath: `${path}.elseBody[${bodyIndex}]`,
+            })),
+          ]
+        : [{ candidate: node, candidatePath: path }];
+    for (const { candidate, candidatePath } of candidates) {
       if (candidate.kind === "all-reduce") {
         verifyCollectiveBinding(
           candidate,
@@ -1133,7 +1269,7 @@ function analyzeProgram(
     } else if (node.kind === "event") {
       eventCount += 1;
       expandedNodeCount += 1;
-    } else {
+    } else if (node.kind === "repeat") {
       repeatCount += 1;
       const iterationCount = Number(wireIntegerToBigInt(node.iterationCount));
       repeatIterationCount += iterationCount;
@@ -1180,7 +1316,68 @@ function analyzeProgram(
             copyCount,
           ));
       }
-      repeatEffects.set(node, aggregateRepeatEffects(node.body, bodyEffects));
+      repeatEffects.set(node, aggregateLinearEffects(
+        node.body,
+        bodyEffects,
+        "repeat",
+      ));
+    } else {
+      conditionalCount += 1;
+      verifyConditionalPredicate(node, resources, rankCount, path);
+      expandedNodeCount += node.thenBody.length;
+      const branchEffects: Array<readonly HostGraphResourceEffect[]> = [];
+      for (const [branchName, body] of [
+        ["thenBody", node.thenBody],
+        ["elseBody", node.elseBody],
+      ] as const) {
+        const bodyEffects = new Map<
+          HostGraphConditionalBodyNode,
+          readonly HostGraphResourceEffect[]
+        >();
+        for (const [bodyIndex, bodyNode] of body.entries()) {
+          const bodyPath = `${path}.${branchName}[${bodyIndex}]`;
+          edgeCount += bodyNode.dependsOn.length;
+          if (edgeCount > HOST_GRAPH_MAX_EDGES) {
+            resource(
+              `${path}.${branchName}[*].dependsOn`,
+              `dependency edge count exceeds ${HOST_GRAPH_MAX_EDGES}`,
+            );
+          }
+          const effects = verifyExecutableNodeBinding(
+            bodyNode,
+            resources,
+            rankCount,
+            semanticCatalog,
+            limits,
+            dispatchGeometry,
+            bodyPath,
+          );
+          bodyEffects.set(bodyNode, effects);
+          if (bodyNode.kind === "dispatch") {
+            dispatchEffects.set(bodyNode, effects);
+          }
+          if (branchName === "thenBody") {
+            ({ dispatchCount, collectiveCount, copyCount } =
+              addExecutableCounts(
+                bodyNode,
+                1,
+                dispatchCount,
+                collectiveCount,
+                copyCount,
+              ));
+          }
+        }
+        branchEffects.push(aggregateLinearEffects(
+          body,
+          bodyEffects,
+          `conditional ${branchName}`,
+        ));
+      }
+      conditionalEffects.set(node, mergeConditionalEffects(
+        node,
+        branchEffects[0]!,
+        branchEffects[1]!,
+      ));
     }
     if (expandedNodeCount > HOST_GRAPH_MAX_EXPANDED_NODES) {
       resource(
@@ -1200,6 +1397,7 @@ function analyzeProgram(
     ancestors,
     dispatchEffects,
     repeatEffects,
+    conditionalEffects,
   );
   return Object.freeze({
     rankCount,
@@ -1215,6 +1413,7 @@ function analyzeProgram(
     })),
     repeatCount,
     repeatIterationCount,
+    conditionalCount,
     expandedNodeCount,
     topologicalNodeIds: Object.freeze(topologicalNodeIds),
     outputResourceIds: Object.freeze(
@@ -1232,7 +1431,7 @@ function analyzeProgram(
 }
 
 function verifyExecutableNodeBinding(
-  node: HostGraphRepeatBodyNode,
+  node: HostGraphExecutableNode,
   resources: ReadonlyMap<string, HostGraphResource>,
   rankCount: bigint,
   semanticCatalog: SemanticArtifactCatalog,
@@ -1374,7 +1573,7 @@ function verifyExecutableNodeBinding(
 }
 
 function addExecutableCounts(
-  node: HostGraphRepeatBodyNode,
+  node: HostGraphExecutableNode,
   multiplier: number,
   dispatchCount: number,
   collectiveCount: number,
@@ -1393,12 +1592,13 @@ function addExecutableCounts(
   };
 }
 
-function aggregateRepeatEffects(
-  body: readonly HostGraphRepeatBodyNode[],
+function aggregateLinearEffects(
+  body: readonly HostGraphExecutableNode[],
   bodyEffects: ReadonlyMap<
-    HostGraphRepeatBodyNode,
+    HostGraphExecutableNode,
     readonly HostGraphResourceEffect[]
   >,
+  label: string,
 ): readonly HostGraphResourceEffect[] {
   const aggregate = new Map<string, {
     read: boolean;
@@ -1411,7 +1611,7 @@ function aggregateRepeatEffects(
       invalid(
         GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
         "$.payload.program.nodes",
-        `repeat body effects for ${node.nodeId} were not derived`,
+        `${label} body effects for ${node.nodeId} were not derived`,
       );
     }
     for (const effect of effects) {
@@ -1440,7 +1640,96 @@ function aggregateRepeatEffects(
           ? "write" as const
           : "read" as const,
       requiresPriorWriter: state.requiresPriorWriter,
+      guaranteesWrite: state.write,
     })));
+}
+
+function verifyConditionalPredicate(
+  node: HostGraphConditionalNode,
+  resources: ReadonlyMap<string, HostGraphResource>,
+  rankCount: bigint,
+  path: string,
+): void {
+  const predicate = resources.get(node.predicate.resourceId);
+  if (predicate === undefined) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.danglingReference,
+      `${path}.predicate.resourceId`,
+      `conditional predicate references missing resource ${node.predicate.resourceId}`,
+    );
+  }
+  if (
+    predicate.role !== "input" ||
+    predicate.dtype !== "u32" ||
+    predicate.byteLength !== "4" ||
+    predicate.alignmentBytes < 4
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      `${path}.predicate.resourceId`,
+      "conditional predicate requires one 4-byte-aligned external-input u32 resource",
+    );
+  }
+  if (wireIntegerToBigInt(node.predicate.rank) >= rankCount) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      `${path}.predicate.rank`,
+      "conditional predicate rank is outside the graph rank count",
+    );
+  }
+}
+
+function mergeConditionalEffects(
+  node: HostGraphConditionalNode,
+  thenEffects: readonly HostGraphResourceEffect[],
+  elseEffects: readonly HostGraphResourceEffect[],
+): readonly HostGraphResourceEffect[] {
+  const thenByResource = new Map(thenEffects.map((effect) => [
+    effect.resourceId,
+    effect,
+  ]));
+  const elseByResource = new Map(elseEffects.map((effect) => [
+    effect.resourceId,
+    effect,
+  ]));
+  const resourceIds = new Set([
+    node.predicate.resourceId,
+    ...thenByResource.keys(),
+    ...elseByResource.keys(),
+  ]);
+  return Object.freeze([...resourceIds]
+    .sort(compareCanonicalStrings)
+    .map((resourceId) => {
+      const thenEffect = thenByResource.get(resourceId);
+      const elseEffect = elseByResource.get(resourceId);
+      const predicateRead = resourceId === node.predicate.resourceId;
+      const read = predicateRead ||
+        (thenEffect !== undefined && reads(thenEffect.access)) ||
+        (elseEffect !== undefined && reads(elseEffect.access));
+      const write =
+        (thenEffect !== undefined && writes(thenEffect.access)) ||
+        (elseEffect !== undefined && writes(elseEffect.access));
+      const requiresPriorWriter =
+        (thenEffect?.requiresPriorWriter ?? false) ||
+        (elseEffect?.requiresPriorWriter ?? false);
+      const guaranteesWrite =
+        thenEffect !== undefined &&
+        writes(thenEffect.access) &&
+        (thenEffect.guaranteesWrite ?? true) &&
+        elseEffect !== undefined &&
+        writes(elseEffect.access) &&
+        (elseEffect.guaranteesWrite ?? true);
+      return Object.freeze({
+        resourceId,
+        access: read && write
+          ? "read-write" as const
+          : write
+            ? "write" as const
+            : "read" as const,
+        requiresPriorWriter,
+        guaranteesWrite,
+      });
+    }));
 }
 
 function verifyMaterializeBinding(
@@ -1747,6 +2036,10 @@ function verifyEffects(
     HostGraphRepeatNode,
     readonly HostGraphResourceEffect[]
   >,
+  conditionalEffects: ReadonlyMap<
+    HostGraphConditionalNode,
+    readonly HostGraphResourceEffect[]
+  >,
 ): void {
   const uses = new Map<string, ResourceUse[]>();
   const nodeIndexes = new Map(
@@ -1764,7 +2057,12 @@ function verifyEffects(
     }
     const path = `$.payload.program.nodes[${nodeIndex}]`;
     for (const [effectIndex, effect] of
-      nodeEffects(node, dispatchEffects, repeatEffects).entries()) {
+      nodeEffects(
+        node,
+        dispatchEffects,
+        repeatEffects,
+        conditionalEffects,
+      ).entries()) {
       const effectPath = node.kind === "dispatch"
         ? `${path}.bindings[${effectIndex}]`
         : node.kind === "all-reduce"
@@ -1775,7 +2073,9 @@ function verifyEffects(
               : `${path}.destinationResourceId`
             : node.kind === "materialize"
               ? `${path}.resourceId`
-              : `${path}.body`;
+              : node.kind === "repeat"
+                ? `${path}.body`
+                : `${path}.predicate`;
       const resource = resources.get(effect.resourceId);
       if (resource === undefined) {
         invalid(
@@ -1795,7 +2095,7 @@ function verifyEffects(
       if (resource.role !== "input" &&
           (effect.requiresPriorWriter ?? reads(effect.access)) &&
           !prior.some((use) =>
-            writes(use.access) &&
+            use.guaranteesWrite &&
             ancestors.get(node.nodeId)?.has(use.nodeId) === true)) {
         invalid(
           GRAPH_DIAGNOSTIC_CODES.readBeforeWrite,
@@ -1816,14 +2116,20 @@ function verifyEffects(
           );
         }
       }
-      prior.push({ nodeId: node.nodeId, access: effect.access, path: effectPath });
+      prior.push({
+        nodeId: node.nodeId,
+        access: effect.access,
+        guaranteesWrite:
+          effect.guaranteesWrite ?? writes(effect.access),
+        path: effectPath,
+      });
       uses.set(effect.resourceId, prior);
     }
   }
   for (const resource of resources.values()) {
     if (resource.role === "input") continue;
     const resourceUses = uses.get(resource.resourceId) ?? [];
-    if (!resourceUses.some((use) => writes(use.access))) {
+    if (!resourceUses.some((use) => use.guaranteesWrite)) {
       invalid(
         GRAPH_DIAGNOSTIC_CODES.readBeforeWrite,
         "$.payload.program.resources",
@@ -1841,6 +2147,10 @@ function nodeEffects(
   >,
   repeatEffects: ReadonlyMap<
     HostGraphRepeatNode,
+    readonly HostGraphResourceEffect[]
+  >,
+  conditionalEffects: ReadonlyMap<
+    HostGraphConditionalNode,
     readonly HostGraphResourceEffect[]
   >,
 ): readonly HostGraphResourceEffect[] {
@@ -1874,6 +2184,17 @@ function nodeEffects(
         GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
         "$.payload.program.nodes",
         `repeat effects for ${node.nodeId} were not derived`,
+      );
+    }
+    return effects;
+  }
+  if (node.kind === "conditional") {
+    const effects = conditionalEffects.get(node);
+    if (effects === undefined) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
+        "$.payload.program.nodes",
+        `conditional effects for ${node.nodeId} were not derived`,
       );
     }
     return effects;

@@ -75,10 +75,12 @@ export interface HostGraphEventNode extends JsonObject {
   readonly mode: "completion-after-dependencies";
 }
 
-export type HostGraphRepeatBodyNode =
+export type HostGraphExecutableNode =
   | HostGraphDispatchNode
   | HostGraphAllReduceNode
   | HostGraphCopyNode;
+
+export type HostGraphRepeatBodyNode = HostGraphExecutableNode;
 
 export interface HostGraphRepeatNode extends JsonObject {
   readonly nodeId: string;
@@ -95,13 +97,38 @@ export interface HostGraphRepeatCompletion extends JsonObject {
   readonly bodyNodeIds: readonly string[];
 }
 
+export type HostGraphConditionalBodyNode = HostGraphExecutableNode;
+
+export interface HostGraphInputPredicate extends JsonObject {
+  readonly resourceId: string;
+  readonly rank: WireU64;
+  readonly mode: "u32-nonzero";
+}
+
+export interface HostGraphConditionalNode extends JsonObject {
+  readonly nodeId: string;
+  readonly kind: "conditional";
+  readonly dependsOn: readonly string[];
+  readonly predicate: HostGraphInputPredicate;
+  readonly thenBody: readonly HostGraphConditionalBodyNode[];
+  readonly elseBody: readonly HostGraphConditionalBodyNode[];
+  readonly mode: "input-u32-branch-sequential";
+}
+
+export interface HostGraphConditionalCompletion extends JsonObject {
+  readonly nodeId: string;
+  readonly selectedBranch: "then" | "else";
+  readonly bodyNodeIds: readonly string[];
+}
+
 export type HostGraphNode =
   | HostGraphDispatchNode
   | HostGraphAllReduceNode
   | HostGraphCopyNode
   | HostGraphMaterializeNode
   | HostGraphEventNode
-  | HostGraphRepeatNode;
+  | HostGraphRepeatNode
+  | HostGraphConditionalNode;
 
 /**
  * Backend-neutral host graph meaning. Transport, topology, scheduling,
@@ -111,7 +138,7 @@ export interface HostGraphProgram extends JsonObject {
   readonly kind: "host-graph";
   readonly version: {
     readonly major: 1;
-    readonly minor: 0 | 1 | 2 | 3 | 4;
+    readonly minor: 0 | 1 | 2 | 3 | 4 | 5;
   };
   readonly failureModel: typeof HOST_GRAPH_FAILURE_MODEL;
   readonly rankCount: WireU64;

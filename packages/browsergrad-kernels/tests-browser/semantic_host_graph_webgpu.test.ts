@@ -54,6 +54,8 @@ const CASE_IDS = Object.freeze([
   "u8-whole-allocation-copy",
   "u32-exact-max",
   "f32-fixed-repeat-sum",
+  "u8-input-conditional-then",
+  "u8-input-conditional-else",
 ]);
 const PRODUCER_VERSIONS = Object.freeze({
   "@unlocalhosted/browsergrad-kernels": __BG_KERNELS_VERSION__,
@@ -90,6 +92,7 @@ interface CaseObservation extends JsonObject {
   readonly materializationCount: number;
   readonly completedEventIds: readonly string[];
   readonly completedRepeats: readonly JsonObject[];
+  readonly completedConditionals: readonly JsonObject[];
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -155,6 +158,14 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         ],
       ),
       prepareRepeatedCollectiveCase(),
+      prepareConditionalRawCopyCase(
+        "u8-input-conditional-then",
+        1,
+      ),
+      prepareConditionalRawCopyCase(
+        "u8-input-conditional-else",
+        0,
+      ),
     ]);
     artifactHash = await hashNamedComponents({
       suiteId: SUITE_ID,
@@ -249,6 +260,8 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         .toEqual(expected.completedEventIds);
       expect(actual.trace.completedRepeats)
         .toEqual(expected.completedRepeats);
+      expect(actual.trace.completedConditionals)
+        .toEqual(expected.completedConditionals);
       completedCases.push(Object.freeze({
         caseId: preparedCase.caseId,
         artifactHash: preparedCase.artifactHash,
@@ -261,6 +274,7 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         materializationCount: actual.trace.materializationCount,
         completedEventIds: actual.trace.completedEventIds,
         completedRepeats: actual.trace.completedRepeats,
+        completedConditionals: actual.trace.completedConditionals,
         collectiveReductionStepCount:
           actual.trace.collectiveReductionStepCount,
         collectiveReplicationStepCount:
@@ -271,6 +285,12 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         inputSnapshot: "caller-mutated-after-admission-bit-exact",
       }));
     }
+    const thenConditional = completedCases.find(({ caseId }) =>
+      caseId === "u8-input-conditional-then");
+    const elseConditional = completedCases.find(({ caseId }) =>
+      caseId === "u8-input-conditional-else");
+    expect(thenConditional?.backendSpecializationHash)
+      .not.toBe(elseConditional?.backendSpecializationHash);
 
     stage = "non-finite-fail-stop";
     const finiteCase = cases[0] as PreparedCase;
@@ -467,6 +487,43 @@ async function prepareRepeatedCollectiveCase(): Promise<PreparedCase> {
   });
 }
 
+async function prepareConditionalRawCopyCase(
+  caseId: "u8-input-conditional-then" | "u8-input-conditional-else",
+  predicate: 0 | 1,
+): Promise<PreparedCase> {
+  const thenBytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+  const elseBytes = new Uint8Array([8, 7, 6, 5, 4, 3, 2, 1]);
+  const graph = (await createVerifiedHostGraphArtifact(
+    conditionalRawCopyProgram(),
+    { kernelArtifacts: [], layoutArtifacts: [] },
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+    kernelArtifacts: [],
+    layoutArtifacts: [],
+  });
+  const inputs = Object.freeze([
+    namedInput(0, "predicate", u32Bytes([predicate])),
+    namedInput(0, "then-input", thenBytes),
+    namedInput(0, "else-input", elseBytes),
+  ]);
+  return Object.freeze({
+    caseId,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: inputs.map(({ rank, resourceId, bytes }) => ({
+        rank,
+        resourceId,
+        bytes: Array.from(bytes),
+      })),
+    }),
+  });
+}
+
 function collectiveProgram(
   artifacts: VerifiedViewCopyArtifacts,
   dtype: "f32" | "i32" | "u32",
@@ -604,6 +661,80 @@ function repeatedCollectiveProgram(): HostGraphProgram {
   };
 }
 
+function conditionalRawCopyProgram(): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 5 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire(1),
+    resources: [
+      {
+        resourceId: "predicate",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u32",
+        byteLength: wire(4),
+        alignmentBytes: 4,
+      },
+      ...["then-input", "else-input"].map((resourceId) => ({
+        resourceId,
+        role: "input" as const,
+        multiplicity: "per-rank" as const,
+        initialization: "external-input" as const,
+        dtype: "u8" as const,
+        byteLength: wire(8),
+        alignmentBytes: 1,
+      })),
+      {
+        resourceId: "output",
+        role: "output",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u8",
+        byteLength: wire(8),
+        alignmentBytes: 1,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "choose-output",
+        kind: "conditional",
+        dependsOn: [],
+        predicate: {
+          resourceId: "predicate",
+          rank: wire(0),
+          mode: "u32-nonzero",
+        },
+        thenBody: [{
+          nodeId: "copy-then",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "then-input",
+          destinationResourceId: "output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        elseBody: [{
+          nodeId: "copy-else",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "else-input",
+          destinationResourceId: "output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        mode: "input-u32-branch-sequential",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["choose-output"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function resource(
   resourceId: string,
   role: "input" | "output",
@@ -654,7 +785,15 @@ function input(
   rank: number,
   bytes: Uint8Array,
 ): SemanticHostGraphWebGpuInputBinding {
-  return { rank: wire(rank), resourceId: "input", bytes };
+  return namedInput(rank, "input", bytes);
+}
+
+function namedInput(
+  rank: number,
+  resourceId: string,
+  bytes: Uint8Array,
+): SemanticHostGraphWebGpuInputBinding {
+  return { rank: wire(rank), resourceId, bytes };
 }
 
 function f32Bytes(values: readonly number[]): Uint8Array {

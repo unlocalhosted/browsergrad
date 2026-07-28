@@ -32,6 +32,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   lowerers, reuses frozen step templates for the exact verified count, enforces
   preparation and expanded-step limits throughout expansion, and reports
   completion only after whole-graph success.
+- Host-graph program version 1.5 adds bounded
+  `input-u32-branch-sequential` conditionals. The WebGPU backend pre-lowers
+  both branches, requires equal execution shapes, selects from the captured
+  external-input predicate before device work, includes branch identity in
+  specialization evidence, and reports completion only after whole-graph
+  success. It grants no GPU-derived or mid-graph branch authority.
 - Graph execution snapshots complete direct/unshared inputs, initializes
   private temporary/output storage deterministically, bounds expanded steps
   and aggregate host/GPU storage, verifies device limits, and publishes fresh
@@ -41,7 +47,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Required headed-Chromium evidence on Apple Metal 3 bit-matches the semantic
   CPU graph oracle for rank-ordered f32 sum, signed-zero f32 min, wrapping i32
   sum, exact u32 max, exact u8 allocation copy, and three fixed repetitions of
-  f32 all-reduce, and separately rejects non-finite f32 collectives.
+  f32 all-reduce plus both captured-input conditional branches, and separately
+  rejects non-finite f32 collectives.
 - Semantic attention preparation consumes exact verified rank-4 f32 logical
   meaning plus an independently authorized online K/V-tile schedule. Generated
   WGSL cooperatively stages K/V rows, keeps one Q/output row private per lane,

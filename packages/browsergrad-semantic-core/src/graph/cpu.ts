@@ -22,6 +22,8 @@ import {
 } from "./artifact.js";
 import type {
   HostGraphAllReduceNode,
+  HostGraphConditionalCompletion,
+  HostGraphConditionalNode,
   HostGraphCopyNode,
   HostGraphDispatchNode,
   HostGraphEventNode,
@@ -153,6 +155,7 @@ export interface HostGraphCpuExecutionResult {
   readonly executedNodeIds: readonly string[];
   readonly completedEventIds: readonly string[];
   readonly completedRepeats: readonly HostGraphRepeatCompletion[];
+  readonly completedConditionals: readonly HostGraphConditionalCompletion[];
   readonly elementOperations: WireU64;
   readonly outputs: readonly HostGraphCpuOutputBinding[];
 }
@@ -165,6 +168,7 @@ export interface PreparedHostGraphCpu {
   readonly outputResourceIds: readonly string[];
   readonly eventIds: readonly string[];
   readonly repeats: readonly HostGraphRepeatCompletion[];
+  readonly conditionalNodeIds: readonly string[];
   readonly expandedNodeCount: number;
   readonly elementOperations: bigint;
   readonly execute: (
@@ -238,13 +242,24 @@ interface RepeatPlan {
   readonly elementOperations: bigint;
 }
 
+interface ConditionalPlan {
+  readonly kind: "conditional";
+  readonly nodeId: string;
+  readonly predicateResourceId: string;
+  readonly predicateRank: number;
+  readonly thenBody: readonly ExecutablePlan[];
+  readonly elseBody: readonly ExecutablePlan[];
+  readonly elementOperations: bigint;
+}
+
 type ExecutablePlan = DispatchPlan | CollectivePlan | CopyPlan;
 
 type CpuNodePlan =
   | ExecutablePlan
   | MaterializePlan
   | EventPlan
-  | RepeatPlan;
+  | RepeatPlan
+  | ConditionalPlan;
 
 interface NativeUint8Slots {
   readonly buffer: ArrayBufferLike;
@@ -300,7 +315,11 @@ export async function prepareHostGraphCpu(
   );
   const largestCollectiveScratch = payload.program.nodes.reduce(
     (largest, node) => {
-      const candidates = node.kind === "repeat" ? node.body : [node];
+      const candidates = node.kind === "repeat"
+        ? node.body
+        : node.kind === "conditional"
+          ? [...node.thenBody, ...node.elseBody]
+          : [node];
       return candidates.reduce((bodyLargest, candidate) => {
         if (candidate.kind !== "all-reduce") return bodyLargest;
         const resource = resources.get(candidate.resourceId);
@@ -352,14 +371,23 @@ export async function prepareHostGraphCpu(
         ? prepareMaterializePlan(node, resources)
         : node.kind === "event"
           ? prepareEventPlan(node)
-          : await prepareRepeatPlan(
-            node,
-            catalog,
-            resources,
-            rankCount,
-            normalized,
-            startedAt,
-          );
+          : node.kind === "repeat"
+            ? await prepareRepeatPlan(
+              node,
+              catalog,
+              resources,
+              rankCount,
+              normalized,
+              startedAt,
+            )
+            : await prepareConditionalPlan(
+              node,
+              catalog,
+              resources,
+              rankCount,
+              normalized,
+              startedAt,
+            );
     elementOperations += plan.elementOperations;
     if (elementOperations > BigInt(normalized.maxElementOperations)) {
       fail(
@@ -403,6 +431,8 @@ export async function prepareHostGraphCpu(
             bodyPlan.nodeId)),
         })]
       : []));
+  const conditionalNodeIds = Object.freeze(frozenPlans.flatMap((plan) =>
+    plan.kind === "conditional" ? [plan.nodeId] : []));
 
   const execute = async (
     request: HostGraphCpuExecutionRequest,
@@ -423,6 +453,7 @@ export async function prepareHostGraphCpu(
       payload.program.resources,
       captured.inputs,
     );
+    const completedConditionals: HostGraphConditionalCompletion[] = [];
     for (const plan of frozenPlans) {
       ensureExecutionActive(
         executionStartedAt,
@@ -461,6 +492,14 @@ export async function prepareHostGraphCpu(
           normalized.maxExecutionMs,
           captured.signal,
         );
+      } else if (plan.kind === "conditional") {
+        completedConditionals.push(await executeConditional(
+          plan,
+          rankResources,
+          executionStartedAt,
+          normalized.maxExecutionMs,
+          captured.signal,
+        ));
       } else {
         ensureExecutionActive(
           executionStartedAt,
@@ -499,6 +538,7 @@ export async function prepareHostGraphCpu(
       executedNodeIds,
       completedEventIds: eventIds,
       completedRepeats: repeats,
+      completedConditionals: Object.freeze(completedConditionals),
       elementOperations: encodeWireU64(elementOperations),
       outputs,
     });
@@ -516,6 +556,7 @@ export async function prepareHostGraphCpu(
     ),
     eventIds,
     repeats,
+    conditionalNodeIds,
     expandedNodeCount: preparedGraph.expandedNodeCount,
     elementOperations,
     execute,
@@ -551,9 +592,94 @@ async function prepareRepeatPlan(
   options: NormalizedPreparationOptions,
   startedAt: number,
 ): Promise<RepeatPlan> {
+  const body = await prepareExecutableBody(
+    node.body,
+    catalog,
+    resources,
+    rankCount,
+    options,
+    startedAt,
+  );
+  const bodyElementOperations = body.reduce(
+    (total, plan) => total + plan.elementOperations,
+    0n,
+  );
+  const iterationCount = safeNumber(
+    wireIntegerToBigInt(node.iterationCount),
+    `$.nodes.${node.nodeId}.iterationCount`,
+  );
+  return Object.freeze({
+    kind: "repeat",
+    nodeId: node.nodeId,
+    iterationCount,
+    body,
+    elementOperations: bodyElementOperations * BigInt(iterationCount),
+  });
+}
+
+async function prepareConditionalPlan(
+  node: HostGraphConditionalNode,
+  catalog: ReadonlyMap<string, SemanticCatalogEntry>,
+  resources: ReadonlyMap<string, HostGraphResource>,
+  rankCount: number,
+  options: NormalizedPreparationOptions,
+  startedAt: number,
+): Promise<ConditionalPlan> {
+  const thenBody = await prepareExecutableBody(
+    node.thenBody,
+    catalog,
+    resources,
+    rankCount,
+    options,
+    startedAt,
+  );
+  const elseBody = await prepareExecutableBody(
+    node.elseBody,
+    catalog,
+    resources,
+    rankCount,
+    options,
+    startedAt,
+  );
+  const thenOperations = thenBody.reduce(
+    (total, plan) => total + plan.elementOperations,
+    0n,
+  );
+  const elseOperations = elseBody.reduce(
+    (total, plan) => total + plan.elementOperations,
+    0n,
+  );
+  if (thenOperations !== elseOperations) {
+    fail(
+      "BG-GRAPH-CPU-UNSUPPORTED-PROFILE",
+      `$.nodes.${node.nodeId}`,
+      "CPU conditional branches require equal element-operation counts",
+    );
+  }
+  return Object.freeze({
+    kind: "conditional",
+    nodeId: node.nodeId,
+    predicateResourceId: node.predicate.resourceId,
+    predicateRank: safeNumber(
+      wireIntegerToBigInt(node.predicate.rank),
+      `$.nodes.${node.nodeId}.predicate.rank`,
+    ),
+    thenBody,
+    elseBody,
+    elementOperations: thenOperations,
+  });
+}
+
+async function prepareExecutableBody(
+  nodes: readonly HostGraphRepeatBodyNode[],
+  catalog: ReadonlyMap<string, SemanticCatalogEntry>,
+  resources: ReadonlyMap<string, HostGraphResource>,
+  rankCount: number,
+  options: NormalizedPreparationOptions,
+  startedAt: number,
+): Promise<readonly ExecutablePlan[]> {
   const body: ExecutablePlan[] = [];
-  let bodyElementOperations = 0n;
-  for (const bodyNode of node.body) {
+  for (const bodyNode of nodes) {
     ensurePreparationActive(startedAt, options);
     const plan = await prepareExecutablePlan(
       bodyNode,
@@ -564,19 +690,8 @@ async function prepareRepeatPlan(
       startedAt,
     );
     body.push(plan);
-    bodyElementOperations += plan.elementOperations;
   }
-  const iterationCount = safeNumber(
-    wireIntegerToBigInt(node.iterationCount),
-    `$.nodes.${node.nodeId}.iterationCount`,
-  );
-  return Object.freeze({
-    kind: "repeat",
-    nodeId: node.nodeId,
-    iterationCount,
-    body: Object.freeze(body),
-    elementOperations: bodyElementOperations * BigInt(iterationCount),
-  });
+  return Object.freeze(body);
 }
 
 async function prepareDispatchPlan(
@@ -760,36 +875,98 @@ async function executeRepeat(
 ): Promise<void> {
   for (let iteration = 0; iteration < plan.iterationCount; iteration += 1) {
     ensureExecutionActive(startedAt, maxExecutionMs, signal);
-    for (const bodyPlan of plan.body) {
-      ensureExecutionActive(startedAt, maxExecutionMs, signal);
-      if (bodyPlan.kind === "dispatch") {
-        executeDispatch(
-          bodyPlan,
-          rankResources,
-          startedAt,
-          maxExecutionMs,
-          signal,
-        );
-      } else if (bodyPlan.kind === "all-reduce") {
-        await executeAllReduce(
-          bodyPlan,
-          rankResources,
-          startedAt,
-          maxExecutionMs,
-          signal,
-        );
-      } else {
-        executeCopy(
-          bodyPlan,
-          rankResources,
-          startedAt,
-          maxExecutionMs,
-          signal,
-        );
-      }
-    }
+    await executeExecutableBody(
+      plan.body,
+      rankResources,
+      startedAt,
+      maxExecutionMs,
+      signal,
+    );
   }
   ensureExecutionActive(startedAt, maxExecutionMs, signal);
+}
+
+async function executeConditional(
+  plan: ConditionalPlan,
+  rankResources: RankResources,
+  startedAt: number,
+  maxExecutionMs: number,
+  signal: AbortSignal | undefined,
+): Promise<HostGraphConditionalCompletion> {
+  ensureExecutionActive(startedAt, maxExecutionMs, signal);
+  const predicateBytes = rankResources[plan.predicateRank]?.get(
+    plan.predicateResourceId,
+  );
+  if (predicateBytes === undefined || predicateBytes.byteLength !== 4) {
+    fail(
+      "BG-GRAPH-CPU-INTERNAL",
+      `$.nodes.${plan.nodeId}.predicate`,
+      "verified conditional predicate storage disappeared",
+    );
+  }
+  const predicateView = new DATA_VIEW_CONSTRUCTOR(
+    predicateBytes.buffer,
+    predicateBytes.byteOffset,
+    predicateBytes.byteLength,
+  );
+  const selectedBranch = REFLECT_APPLY(
+    DATA_VIEW_GET_UINT32,
+    predicateView,
+    [0, true],
+  ) === 0
+    ? "else" as const
+    : "then" as const;
+  const body = selectedBranch === "then" ? plan.thenBody : plan.elseBody;
+  await executeExecutableBody(
+    body,
+    rankResources,
+    startedAt,
+    maxExecutionMs,
+    signal,
+  );
+  ensureExecutionActive(startedAt, maxExecutionMs, signal);
+  return Object.freeze({
+    nodeId: plan.nodeId,
+    selectedBranch,
+    bodyNodeIds: Object.freeze(body.map((bodyPlan) => bodyPlan.nodeId)),
+  });
+}
+
+async function executeExecutableBody(
+  body: readonly ExecutablePlan[],
+  rankResources: RankResources,
+  startedAt: number,
+  maxExecutionMs: number,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  for (const bodyPlan of body) {
+    ensureExecutionActive(startedAt, maxExecutionMs, signal);
+    if (bodyPlan.kind === "dispatch") {
+      executeDispatch(
+        bodyPlan,
+        rankResources,
+        startedAt,
+        maxExecutionMs,
+        signal,
+      );
+    } else if (bodyPlan.kind === "all-reduce") {
+      await executeAllReduce(
+        bodyPlan,
+        rankResources,
+        startedAt,
+        maxExecutionMs,
+        signal,
+      );
+    } else {
+      executeCopy(
+        bodyPlan,
+        rankResources,
+        startedAt,
+        maxExecutionMs,
+        signal,
+      );
+    }
+  }
 }
 
 function executeDispatch(

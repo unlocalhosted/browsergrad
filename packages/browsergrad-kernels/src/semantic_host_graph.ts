@@ -3,8 +3,11 @@ import {
   hostGraphArtifactPayload,
   prepareHostGraphProgram,
   type HostGraphAllReduceNode,
+  type HostGraphConditionalCompletion,
+  type HostGraphConditionalNode,
   type HostGraphCopyNode,
   type HostGraphDispatchNode,
+  type HostGraphExecutableNode,
   type HostGraphMaterializeNode,
   type HostGraphRepeatBodyNode,
   type HostGraphRepeatCompletion,
@@ -55,7 +58,7 @@ import {
 
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.4.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.5.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -108,6 +111,8 @@ const ABORT_SIGNAL_ABORTED_GETTER =
       "aborted",
     )?.get;
 const UINT8_SET = Uint8Array.prototype.set;
+const DATA_VIEW_CONSTRUCTOR = DataView;
+const DATA_VIEW_GET_UINT32 = DataView.prototype.getUint32;
 const REFLECT_APPLY = Reflect.apply;
 const DATE_NOW = Date.now;
 const PERFORMANCE_NOW = globalThis.performance?.now.bind(
@@ -212,6 +217,8 @@ export interface PreparedSemanticHostGraphWebGpu {
   readonly eventIds: readonly string[];
   readonly repeatCount: number;
   readonly repeatIterationCount: number;
+  readonly conditionalCount: number;
+  readonly conditionalNodeIds: readonly string[];
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -235,6 +242,7 @@ export interface SemanticHostGraphWebGpuTrace {
   readonly materializationCount: number;
   readonly completedEventIds: readonly string[];
   readonly completedRepeats: readonly HostGraphRepeatCompletion[];
+  readonly completedConditionals: readonly HostGraphConditionalCompletion[];
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -281,6 +289,8 @@ interface PreparedState {
   readonly inputs: readonly ResourcePlan[];
   readonly outputs: readonly ResourcePlan[];
   readonly steps: readonly WgslKernelSequenceStep[];
+  readonly deviceAdmissionSteps: readonly WgslKernelSequenceStep[];
+  readonly conditionals: readonly PreparedConditionalPlan[];
   readonly storageMetadata:
     Readonly<Record<string, WgslStorageBufferMetadata>>;
   readonly boundStorageNames: ReadonlySet<string>;
@@ -305,6 +315,27 @@ interface MutablePreparationCounts {
 interface PreparedRepeatBodyTemplate {
   readonly steps: readonly WgslKernelSequenceStep[];
   readonly counts: Readonly<MutablePreparationCounts>;
+}
+
+interface PreparedConditionalBranch {
+  readonly steps: readonly WgslKernelSequenceStep[];
+  readonly counts: Readonly<MutablePreparationCounts>;
+  readonly bodyNodeIds: readonly string[];
+}
+
+interface PreparedConditionalPlan {
+  readonly nodeId: string;
+  readonly predicateResourceId: string;
+  readonly predicateRank: number;
+  readonly startStepIndex: number;
+  readonly stepCount: number;
+  readonly thenBranch: PreparedConditionalBranch;
+  readonly elseBranch: PreparedConditionalBranch;
+}
+
+interface SelectedExecution {
+  readonly steps: readonly WgslKernelSequenceStep[];
+  readonly completedConditionals: readonly HostGraphConditionalCompletion[];
 }
 
 interface CapturedInput {
@@ -384,6 +415,7 @@ export async function prepareSemanticHostGraphWebGpu(
   const boundStorageNames = new Set<string>();
   const storageMetadata: Record<string, WgslStorageBufferMetadata> = {};
   const moduleHashes: string[] = [];
+  const conditionals: PreparedConditionalPlan[] = [];
   let usesNumericalStatus = false;
 
   for (const nodeId of preparedGraph.topologicalNodeIds) {
@@ -424,7 +456,7 @@ export async function prepareSemanticHostGraphWebGpu(
       );
     } else if (node.kind === "event") {
       appendEvent(counts);
-    } else {
+    } else if (node.kind === "repeat") {
       const repeatUsesNumericalStatus = await appendRepeatSteps(
         node,
         rankCount,
@@ -439,6 +471,22 @@ export async function prepareSemanticHostGraphWebGpu(
         moduleHashes,
       );
       usesNumericalStatus ||= repeatUsesNumericalStatus;
+    } else {
+      const conditionalUsesNumericalStatus = await appendConditionalSteps(
+        node,
+        rankCount,
+        catalog,
+        resourcesById,
+        normalized,
+        startedAt,
+        steps,
+        counts,
+        boundStorageNames,
+        storageMetadata,
+        moduleHashes,
+        conditionals,
+      );
+      usesNumericalStatus ||= conditionalUsesNumericalStatus;
     }
     if (steps.length > normalized.maxExpandedSteps) {
       fail(
@@ -533,6 +581,14 @@ export async function prepareSemanticHostGraphWebGpu(
     0n,
   );
   const publicModuleHashes = Object.freeze(unique(moduleHashes));
+  const conditionalNodeIds = Object.freeze(
+    conditionals.map((conditional) => conditional.nodeId),
+  );
+  const deviceAdmissionSteps = Object.freeze([
+    ...steps,
+    ...conditionals.flatMap((conditional) =>
+      conditional.elseBranch.steps),
+  ]);
   const repeats = Object.freeze(preparedGraph.topologicalNodeIds.flatMap(
     (nodeId): readonly HostGraphRepeatCompletion[] => {
       const node = nodes.get(nodeId);
@@ -568,6 +624,8 @@ export async function prepareSemanticHostGraphWebGpu(
     eventIds: Object.freeze([...preparedGraph.eventIds]),
     repeatCount: preparedGraph.repeatCount,
     repeatIterationCount: preparedGraph.repeatIterationCount,
+    conditionalCount: preparedGraph.conditionalCount,
+    conditionalNodeIds,
     collectiveReductionStepCount: counts.reduction,
     collectiveReplicationStepCount: counts.replication,
     wgslModuleHashes: publicModuleHashes,
@@ -588,6 +646,8 @@ export async function prepareSemanticHostGraphWebGpu(
     inputs,
     outputs,
     steps: Object.freeze([...steps]),
+    deviceAdmissionSteps,
+    conditionals: Object.freeze([...conditionals]),
     storageMetadata: Object.freeze({ ...storageMetadata }),
     boundStorageNames,
     readbackStorageNames,
@@ -720,6 +780,169 @@ async function appendRepeatSteps(
   return usesNumericalStatus;
 }
 
+async function appendConditionalSteps(
+  node: HostGraphConditionalNode,
+  rankCount: number,
+  catalog: ReadonlyMap<string, SemanticCatalogEntry>,
+  resourcesById: ReadonlyMap<string, ResourcePlan>,
+  options: NormalizedPreparationOptions,
+  startedAt: number,
+  steps: WgslKernelSequenceStep[],
+  counts: MutablePreparationCounts,
+  boundStorageNames: Set<string>,
+  storageMetadata: Record<string, WgslStorageBufferMetadata>,
+  moduleHashes: string[],
+  conditionals: PreparedConditionalPlan[],
+): Promise<boolean> {
+  const thenPrepared = await prepareConditionalBranch(
+    node.thenBody,
+    rankCount,
+    catalog,
+    resourcesById,
+    options,
+    startedAt,
+    boundStorageNames,
+    storageMetadata,
+    moduleHashes,
+  );
+  const elsePrepared = await prepareConditionalBranch(
+    node.elseBody,
+    rankCount,
+    catalog,
+    resourcesById,
+    options,
+    startedAt,
+    boundStorageNames,
+    storageMetadata,
+    moduleHashes,
+  );
+  requireEqualConditionalBranchShape(
+    node,
+    thenPrepared.branch,
+    elsePrepared.branch,
+  );
+  if (
+    steps.length + thenPrepared.branch.steps.length >
+    options.maxExpandedSteps
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
+      "$.maxExpandedSteps",
+      `graph expands to more than ${options.maxExpandedSteps} WebGPU steps`,
+    );
+  }
+  const startStepIndex = steps.length;
+  steps.push(...thenPrepared.branch.steps);
+  addPreparationCounts(counts, thenPrepared.branch.counts);
+  conditionals.push(Object.freeze({
+    nodeId: node.nodeId,
+    predicateResourceId: node.predicate.resourceId,
+    predicateRank: safeNumber(
+      wireIntegerToBigInt(node.predicate.rank),
+      `$.nodes.${node.nodeId}.predicate.rank`,
+    ),
+    startStepIndex,
+    stepCount: thenPrepared.branch.steps.length,
+    thenBranch: thenPrepared.branch,
+    elseBranch: elsePrepared.branch,
+  }));
+  return thenPrepared.usesNumericalStatus ||
+    elsePrepared.usesNumericalStatus;
+}
+
+async function prepareConditionalBranch(
+  body: readonly HostGraphExecutableNode[],
+  rankCount: number,
+  catalog: ReadonlyMap<string, SemanticCatalogEntry>,
+  resourcesById: ReadonlyMap<string, ResourcePlan>,
+  options: NormalizedPreparationOptions,
+  startedAt: number,
+  boundStorageNames: Set<string>,
+  storageMetadata: Record<string, WgslStorageBufferMetadata>,
+  moduleHashes: string[],
+): Promise<Readonly<{
+  branch: PreparedConditionalBranch;
+  usesNumericalStatus: boolean;
+}>> {
+  const steps: WgslKernelSequenceStep[] = [];
+  const counts = emptyPreparationCounts();
+  let usesNumericalStatus = false;
+  for (const bodyNode of body) {
+    ensurePreparationActive(startedAt, options);
+    const bodyUsesNumericalStatus = await appendExecutableNodeSteps(
+      bodyNode,
+      rankCount,
+      catalog,
+      resourcesById,
+      options,
+      startedAt,
+      steps,
+      counts,
+      boundStorageNames,
+      storageMetadata,
+      moduleHashes,
+    );
+    usesNumericalStatus ||= bodyUsesNumericalStatus;
+  }
+  return Object.freeze({
+    branch: Object.freeze({
+      steps: Object.freeze(steps),
+      counts: Object.freeze(counts),
+      bodyNodeIds: Object.freeze(body.map((bodyNode) => bodyNode.nodeId)),
+    }),
+    usesNumericalStatus,
+  });
+}
+
+function requireEqualConditionalBranchShape(
+  node: HostGraphConditionalNode,
+  thenBranch: PreparedConditionalBranch,
+  elseBranch: PreparedConditionalBranch,
+): void {
+  if (
+    !equalPreparationCounts(thenBranch.counts, elseBranch.counts) ||
+    thenBranch.steps.length !== elseBranch.steps.length ||
+    thenBranch.steps.some((step, index) =>
+      !equalStepExecutionShape(step, elseBranch.steps[index]))
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
+      `$.nodes.${node.nodeId}`,
+      "WebGPU conditional branches require equal lowered step and execution shapes",
+    );
+  }
+}
+
+function equalPreparationCounts(
+  left: Readonly<MutablePreparationCounts>,
+  right: Readonly<MutablePreparationCounts>,
+): boolean {
+  return left.dispatch === right.dispatch &&
+    left.copy === right.copy &&
+    left.materialization === right.materialization &&
+    left.event === right.event &&
+    left.reduction === right.reduction &&
+    left.replication === right.replication;
+}
+
+function equalStepExecutionShape(
+  left: WgslKernelSequenceStep,
+  right: WgslKernelSequenceStep | undefined,
+): boolean {
+  return right !== undefined &&
+    left.launch.dispatchCount.every((value, index) =>
+      value === right.launch.dispatchCount[index]) &&
+    left.program.workgroupSize.every((value, index) =>
+      value === right.program.workgroupSize[index]) &&
+    left.program.bindings.length === right.program.bindings.length &&
+    left.program.bindings.every((binding, index) => {
+      const other = right.program.bindings[index];
+      return other !== undefined &&
+        binding.kind === other.kind &&
+        binding.binding === other.binding;
+    });
+}
+
 function emptyPreparationCounts(): MutablePreparationCounts {
   return {
     dispatch: 0,
@@ -764,6 +987,10 @@ export async function runSemanticHostGraphWebGpu(
   const capturedOptions = captureRunOptions(options);
   throwIfCancelled(capturedOptions.signal);
   const capturedInputs = captureExecutionRequest(request, state);
+  const selectedExecution = selectConditionalExecution(
+    state,
+    capturedInputs,
+  );
   if (!HOST_IS_LITTLE_ENDIAN) {
     fail(
       "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
@@ -789,11 +1016,12 @@ export async function runSemanticHostGraphWebGpu(
   );
   const materialized = materializePrivateBuffers(state, capturedInputs);
 
-  if (state.steps.length === 0) {
+  if (selectedExecution.steps.length === 0) {
     const backendSpecializationHash = await hashBackendSpecialization(
       prepared,
       state,
       deviceFacts,
+      selectedExecution,
     );
     throwIfCancelled(capturedOptions.signal);
     return Object.freeze({
@@ -804,6 +1032,7 @@ export async function runSemanticHostGraphWebGpu(
         backendSpecializationHash,
         deviceFacts,
         false,
+        selectedExecution.completedConditionals,
       ),
     });
   }
@@ -819,6 +1048,7 @@ export async function runSemanticHostGraphWebGpu(
     device,
     gpu,
     state,
+    selectedExecution.steps,
     materialized.buffers,
   ).finally(() => {
     ACTIVE_DEVICES.delete(gpu);
@@ -829,7 +1059,12 @@ export async function runSemanticHostGraphWebGpu(
       capturedOptions.signal,
       timeoutMs,
     ),
-    hashBackendSpecialization(prepared, state, deviceFacts),
+    hashBackendSpecialization(
+      prepared,
+      state,
+      deviceFacts,
+      selectedExecution,
+    ),
   ]);
   if (state.usesNumericalStatus) {
     const status = result.buffers[NUMERICAL_STATUS_STORAGE];
@@ -857,7 +1092,67 @@ export async function runSemanticHostGraphWebGpu(
       backendSpecializationHash,
       deviceFacts,
       true,
+      selectedExecution.completedConditionals,
     ),
+  });
+}
+
+function selectConditionalExecution(
+  state: PreparedState,
+  inputs: readonly CapturedInput[],
+): SelectedExecution {
+  if (state.conditionals.length === 0) {
+    return Object.freeze({
+      steps: state.steps,
+      completedConditionals: Object.freeze([]),
+    });
+  }
+  const inputMap = new Map(inputs.map((input) => [
+    `${input.rank}\0${input.resourceId}`,
+    input.bytes,
+  ]));
+  const steps = [...state.steps];
+  const completedConditionals: HostGraphConditionalCompletion[] = [];
+  for (const conditional of state.conditionals) {
+    const predicate = inputMap.get(
+      `${conditional.predicateRank}\0${conditional.predicateResourceId}`,
+    );
+    if (predicate === undefined || predicate.byteLength !== 4) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        `$.nodes.${conditional.nodeId}.predicate`,
+        "verified conditional predicate input disappeared",
+      );
+    }
+    const view = new DATA_VIEW_CONSTRUCTOR(
+      predicate.buffer,
+      predicate.byteOffset,
+      predicate.byteLength,
+    );
+    const selectedBranch = REFLECT_APPLY(
+      DATA_VIEW_GET_UINT32,
+      view,
+      [0, true],
+    ) === 0
+      ? "else" as const
+      : "then" as const;
+    const branch = selectedBranch === "then"
+      ? conditional.thenBranch
+      : conditional.elseBranch;
+    steps.splice(
+      conditional.startStepIndex,
+      conditional.stepCount,
+      ...branch.steps,
+    );
+    completedConditionals.push(Object.freeze({
+      nodeId: conditional.nodeId,
+      selectedBranch,
+      bodyNodeIds: branch.bodyNodeIds,
+    }));
+  }
+  return Object.freeze({
+    steps: Object.freeze(steps),
+    completedConditionals: Object.freeze(completedConditionals),
   });
 }
 
@@ -1286,6 +1581,7 @@ async function executeGraph(
   device: KernelDevice,
   gpu: GPUDevice,
   state: PreparedState,
+  steps: readonly WgslKernelSequenceStep[],
   buffers: Readonly<Record<string, WgslTypedArray>>,
 ): Promise<WgslKernelRunResult> {
   let sequence: Awaited<
@@ -1297,7 +1593,7 @@ async function executeGraph(
       "$.pipeline",
       () => prepareWgslKernelProgramSequence(
         device,
-        state.steps,
+        steps,
         {
           buffers,
           storageMetadata: state.storageMetadata,
@@ -1723,7 +2019,7 @@ function readAndVerifyDeviceFacts(
       `device cannot bind the required ${requiredBindings} storage buffers`,
     );
   }
-  for (const [index, step] of state.steps.entries()) {
+  for (const [index, step] of state.deviceAdmissionSteps.entries()) {
     const workgroups = divideRoundUp(
       BigInt(step.launch.dispatchCount[0]),
       BigInt(step.program.workgroupSize[0]),
@@ -1745,6 +2041,7 @@ async function hashBackendSpecialization(
   prepared: PreparedSemanticHostGraphWebGpu,
   state: PreparedState,
   device: SemanticHostGraphWebGpuDeviceFacts,
+  selectedExecution: SelectedExecution,
 ): Promise<string> {
   return hashNamedComponents({
     profile: prepared.profile,
@@ -1752,6 +2049,7 @@ async function hashBackendSpecialization(
     graph: prepared.graphSemanticHash,
     steps: prepared.expandedStepCount,
     wgslModules: prepared.wgslModuleHashes,
+    selectedConditionals: selectedExecution.completedConditionals,
     workgroupSize: state.workgroupSize,
     selectedFeatures: [],
     limits: device.limits as unknown as JsonObject,
@@ -1764,6 +2062,7 @@ function createTrace(
   backendSpecializationHash: string,
   device: SemanticHostGraphWebGpuDeviceFacts,
   submitted: boolean,
+  completedConditionals: readonly HostGraphConditionalCompletion[],
 ): SemanticHostGraphWebGpuTrace {
   return Object.freeze({
     profile: prepared.profile,
@@ -1778,6 +2077,7 @@ function createTrace(
     materializationCount: prepared.materializationCount,
     completedEventIds: state.eventIds,
     completedRepeats: state.repeats,
+    completedConditionals,
     collectiveReductionStepCount:
       prepared.collectiveReductionStepCount,
     collectiveReplicationStepCount:

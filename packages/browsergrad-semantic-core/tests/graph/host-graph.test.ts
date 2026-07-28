@@ -292,6 +292,89 @@ function repeatedCollectiveProgram(): HostGraphProgram {
   };
 }
 
+function conditionalCopyProgram(): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 5 },
+    failureModel: HOST_GRAPH_FAILURE_MODEL,
+    rankCount: wire("1"),
+    resources: [
+      {
+        resourceId: "predicate",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u32",
+        byteLength: wire("4"),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "then-input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u8",
+        byteLength: wire("8"),
+        alignmentBytes: 1,
+      },
+      {
+        resourceId: "else-input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u8",
+        byteLength: wire("8"),
+        alignmentBytes: 1,
+      },
+      {
+        resourceId: "output",
+        role: "output",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u8",
+        byteLength: wire("8"),
+        alignmentBytes: 1,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "choose-output",
+        kind: "conditional",
+        dependsOn: [],
+        predicate: {
+          resourceId: "predicate",
+          rank: wire("0"),
+          mode: "u32-nonzero",
+        },
+        thenBody: [{
+          nodeId: "copy-then",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "then-input",
+          destinationResourceId: "output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        elseBody: [{
+          nodeId: "copy-else",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "else-input",
+          destinationResourceId: "output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        mode: "input-u32-branch-sequential",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["choose-output"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 async function diagnostic(
   run: () => Promise<unknown> | unknown,
 ): Promise<SemanticSchemaError> {
@@ -325,6 +408,217 @@ function artifactsFor(artifacts: VerifiedViewCopyArtifacts) {
 }
 
 describe("host graph artifact", () => {
+  it("normalizes bounded input conditionals in version 1.5", async () => {
+    const constructed = await createVerifiedHostGraphArtifact(
+      conditionalCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    );
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+
+    expect(payload.program.version).toEqual({ major: 1, minor: 5 });
+    expect(payload.program.nodes.find((node) => node.kind === "conditional"))
+      .toEqual({
+        nodeId: "choose-output",
+        kind: "conditional",
+        dependsOn: [],
+        predicate: {
+          resourceId: "predicate",
+          rank: "0",
+          mode: "u32-nonzero",
+        },
+        thenBody: [{
+          nodeId: "copy-then",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "then-input",
+          destinationResourceId: "output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        elseBody: [{
+          nodeId: "copy-else",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "else-input",
+          destinationResourceId: "output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        mode: "input-u32-branch-sequential",
+      });
+    expect(prepared).toMatchObject({
+      nodeCount: 2,
+      expandedNodeCount: 2,
+      copyCount: 1,
+      materializationCount: 1,
+      conditionalCount: 1,
+      topologicalNodeIds: ["choose-output", "materialize-output"],
+    });
+  });
+
+  it("rejects forged conditional versions, predicates, shapes, and control", async () => {
+    const oldVersion = clone(conditionalCopyProgram());
+    oldVersion.version.minor = 4;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      oldVersion,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const mode = clone(conditionalCopyProgram());
+    const modeNode = mode.nodes.find((node) => node.kind === "conditional");
+    if (modeNode?.kind !== "conditional") {
+      throw new Error("missing conditional node");
+    }
+    modeNode.mode = "device-branch" as typeof modeNode.mode;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      mode,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const predicateMode = clone(conditionalCopyProgram());
+    const predicateModeNode = predicateMode.nodes.find((node) =>
+      node.kind === "conditional");
+    if (predicateModeNode?.kind !== "conditional") {
+      throw new Error("missing conditional node");
+    }
+    predicateModeNode.predicate.mode =
+      "i32-positive" as typeof predicateModeNode.predicate.mode;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      predicateMode,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    for (const mutate of [
+      (candidate: Mutable<HostGraphProgram>) => {
+        const predicate = candidate.resources.find((item) =>
+          item.resourceId === "predicate");
+        if (predicate === undefined) throw new Error("missing predicate");
+        predicate.dtype = "i32";
+      },
+      (candidate: Mutable<HostGraphProgram>) => {
+        const predicate = candidate.resources.find((item) =>
+          item.resourceId === "predicate");
+        if (predicate === undefined) throw new Error("missing predicate");
+        predicate.byteLength = wire("8");
+      },
+      (candidate: Mutable<HostGraphProgram>) => {
+        const predicate = candidate.resources.find((item) =>
+          item.resourceId === "predicate");
+        if (predicate === undefined) throw new Error("missing predicate");
+        predicate.alignmentBytes = 2;
+      },
+      (candidate: Mutable<HostGraphProgram>) => {
+        const predicate = candidate.resources.find((item) =>
+          item.resourceId === "predicate");
+        if (predicate === undefined) throw new Error("missing predicate");
+        predicate.role = "temporary";
+        predicate.initialization = "zero-fill";
+      },
+    ]) {
+      const candidate = clone(conditionalCopyProgram());
+      mutate(candidate);
+      expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+        candidate,
+        { kernelArtifacts: [], layoutArtifacts: [] },
+      ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+    }
+
+    const missingPredicate = clone(conditionalCopyProgram());
+    const missingPredicateNode = missingPredicate.nodes.find((node) =>
+      node.kind === "conditional");
+    if (missingPredicateNode?.kind !== "conditional") {
+      throw new Error("missing conditional node");
+    }
+    missingPredicateNode.predicate.resourceId = "missing";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      missingPredicate,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.danglingReference);
+
+    const rank = clone(conditionalCopyProgram());
+    const rankNode = rank.nodes.find((node) => node.kind === "conditional");
+    if (rankNode?.kind !== "conditional") {
+      throw new Error("missing conditional node");
+    }
+    rankNode.predicate.rank = wire("1");
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      rank,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+
+    const mismatchedShape = clone(conditionalCopyProgram());
+    const mismatchedShapeNode = mismatchedShape.nodes.find((node) =>
+      node.kind === "conditional");
+    if (mismatchedShapeNode?.kind !== "conditional") {
+      throw new Error("missing conditional node");
+    }
+    mismatchedShapeNode.elseBody.push({
+      nodeId: "copy-else-again",
+      kind: "copy",
+      dependsOn: ["copy-else"],
+      sourceResourceId: "else-input",
+      destinationResourceId: "output",
+      mode: "whole-allocation-bytes-per-rank",
+    });
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      mismatchedShape,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const nestedControl = clone(conditionalCopyProgram());
+    const nestedNode = nestedControl.nodes.find((node) =>
+      node.kind === "conditional");
+    if (nestedNode?.kind !== "conditional") {
+      throw new Error("missing conditional node");
+    }
+    nestedNode.thenBody[0] = {
+      nodeId: "nested-event",
+      kind: "event",
+      dependsOn: [],
+      eventId: "nested",
+      mode: "completion-after-dependencies",
+    } as unknown as typeof nestedNode.thenBody[number];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      nestedControl,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const duplicateNodeId = clone(conditionalCopyProgram());
+    const duplicateNode = duplicateNodeId.nodes.find((node) =>
+      node.kind === "conditional");
+    if (duplicateNode?.kind !== "conditional") {
+      throw new Error("missing conditional node");
+    }
+    duplicateNode.elseBody[0]!.nodeId = "copy-then";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      duplicateNodeId,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.duplicateId);
+  });
+
+  it("requires conditional writes to be guaranteed across both branches", async () => {
+    const optionalWrite = clone(conditionalCopyProgram());
+    optionalWrite.resources.push({
+      resourceId: "temporary",
+      role: "temporary",
+      multiplicity: "per-rank",
+      initialization: "zero-fill",
+      dtype: "u8",
+      byteLength: wire("8"),
+      alignmentBytes: 1,
+    });
+    const conditional = optionalWrite.nodes.find((node) =>
+      node.kind === "conditional");
+    if (conditional?.kind !== "conditional") {
+      throw new Error("missing conditional node");
+    }
+    conditional.elseBody[0]!.destinationResourceId = "temporary";
+
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      optionalWrite,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.readBeforeWrite);
+  });
+
   it("normalizes bounded fixed-count sequential repetition in version 1.4", async () => {
     const constructed = await createVerifiedHostGraphArtifact(
       repeatedCollectiveProgram(),
@@ -724,7 +1018,7 @@ describe("host graph artifact", () => {
 
   it("rejects copy version, mode, resource, dtype, and hazard drift", async () => {
     const future = clone(copyProgram());
-    future.version.minor = 5 as typeof future.version.minor;
+    future.version.minor = 6 as typeof future.version.minor;
     expect((await diagnostic(() => createVerifiedHostGraphArtifact(
       future,
       { kernelArtifacts: [], layoutArtifacts: [] },

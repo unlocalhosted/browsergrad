@@ -118,10 +118,19 @@ whole-graph result.
 Version 1.4 adds fixed-count sequential repetition. A repeat body is a
 nonempty, bounded linear sequence of dispatch, all-reduce, and copy nodes,
 with a positive iteration count fixed in the verified artifact. Nested
-repetition, events, materialization, conditionals, and runtime-derived counts
+repetition, events, materialization, and runtime-derived counts
 are rejected. Verification applies the same resource effects and hazard rules
 to the aggregate body, bounds both iterations and expanded nodes, and requires
 all top-level and body node IDs to be globally unique.
+Version 1.5 adds `input-u32-branch-sequential` conditionals. The predicate is
+exactly one rank-local, four-byte, aligned external-input `u32`; zero selects
+the else body and any nonzero value selects the then body. Both branches are
+nonempty bounded linear dispatch/all-reduce/copy sequences with equal node-kind
+structure. Nested control, events, materialization, backend-derived predicates,
+and runtime-generated work remain rejected. Verification conservatively merges
+all possible reads/writes, treats a write as guaranteed only when both branches
+write the resource, preserves exact one-branch work counts, and keeps
+top-level plus both branch bodies in one global node-ID namespace.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -149,6 +158,11 @@ Version-1.4 repeats execute the exact body sequentially for every fixed
 iteration, check cancellation and time at iteration and body-node boundaries,
 charge expanded element work before admission, and report completion only with
 the successful whole-graph result.
+Version-1.5 conditionals select only from the executor's private snapshot of
+the declared input predicate. The CPU profile requires equal branch
+element-operation counts, admits that exact one-branch cost before execution,
+checks cancellation/time at every selected body node, and reports the selected
+branch and body IDs only with successful whole-graph publication.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -159,11 +173,12 @@ The semantic graph itself grants no execution authority, and its CPU reference
 does not imply device execution. Compiler owns the first concrete producer: it
 lowers one or more opaque prepared view-copy bindings into a verified linear
 host graph with derived intermediate resources. Kernels separately owns the
-authority-bound `browsergrad.host-graph.webgpu@1` DAG/fixed-repeat adapter and its
-required actual-device evidence. Neither adapter grants transport, topology,
-retries, event timestamps or external waits, conditional or runtime-derived
-control, worker-mesh,
-native-companion, performance, or release authority.
+authority-bound `browsergrad.host-graph.webgpu@1`
+DAG/fixed-repeat/bounded-input-conditional adapter and its required
+actual-device evidence. Neither adapter grants transport, topology, retries,
+event timestamps or external waits, backend-derived predicates,
+runtime-derived loop/launch control, worker-mesh, native-companion,
+performance, or release authority.
 
 Frontends construct the operation through one `/kernel` sink rather than
 assembling allocation, alias, index-map, view, and operation IDs themselves.

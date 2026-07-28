@@ -466,7 +466,7 @@ try {
   );
   const packedRawCopyGraph = await semanticGraph.createVerifiedHostGraphArtifact({
     kind: "host-graph",
-    version: { major: 1, minor: 4 },
+    version: { major: 1, minor: 5 },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: "1",
     resources: [
@@ -478,6 +478,24 @@ try {
         dtype: "u8",
         byteLength: "8",
         alignmentBytes: 1,
+      },
+      {
+        resourceId: "else-input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u8",
+        byteLength: "8",
+        alignmentBytes: 1,
+      },
+      {
+        resourceId: "predicate",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u32",
+        byteLength: "4",
+        alignmentBytes: 4,
       },
       {
         resourceId: "output",
@@ -506,9 +524,36 @@ try {
         mode: "fixed-count-sequential",
       },
       {
+        nodeId: "choose-copy",
+        kind: "conditional",
+        dependsOn: ["repeat-copy"],
+        predicate: {
+          resourceId: "predicate",
+          rank: "0",
+          mode: "u32-nonzero",
+        },
+        thenBody: [{
+          nodeId: "copy-then",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "input",
+          destinationResourceId: "output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        elseBody: [{
+          nodeId: "copy-else",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "else-input",
+          destinationResourceId: "output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        mode: "input-u32-branch-sequential",
+      },
+      {
         nodeId: "copy-complete-event",
         kind: "event",
-        dependsOn: ["repeat-copy"],
+        dependsOn: ["choose-copy"],
         eventId: "copy-complete",
         mode: "completion-after-dependencies",
       },
@@ -530,35 +575,51 @@ try {
   );
   const packedRawCopyBytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 255]);
   const packedRawCopyResult = await packedRawCopyCpu.execute({
-    inputs: [{
-      rank: "0",
-      resourceId: "input",
-      bytes: packedRawCopyBytes,
-    }],
+    inputs: [
+      {
+        rank: "0",
+        resourceId: "input",
+        bytes: packedRawCopyBytes,
+      },
+      {
+        rank: "0",
+        resourceId: "else-input",
+        bytes: new Uint8Array(8),
+      },
+      {
+        rank: "0",
+        resourceId: "predicate",
+        bytes: new Uint8Array([1, 0, 0, 0]),
+      },
+    ],
   });
   const packedRawCopyPrepared = await semanticGraph.prepareHostGraphProgram(
     packedRawCopyGraph.artifact,
   );
   assert(
     semanticGraph.hostGraphArtifactPayload(packedRawCopyGraph.artifact)
-      .program.version.minor === 4
-      && packedRawCopyPrepared.copyCount === 2
+      .program.version.minor === 5
+      && packedRawCopyPrepared.copyCount === 3
       && packedRawCopyPrepared.materializationCount === 1
       && packedRawCopyPrepared.eventCount === 1
       && packedRawCopyPrepared.eventIds[0] === "copy-complete"
       && packedRawCopyPrepared.repeatCount === 1
       && packedRawCopyPrepared.repeatIterationCount === 2
-      && packedRawCopyPrepared.expandedNodeCount === 4
-      && packedRawCopyResult.elementOperations === "16"
+      && packedRawCopyPrepared.conditionalCount === 1
+      && packedRawCopyPrepared.expandedNodeCount === 5
+      && packedRawCopyResult.elementOperations === "24"
       && packedRawCopyResult.executedNodeIds.at(-1) === "materialize-output"
       && packedRawCopyResult.completedEventIds[0] === "copy-complete"
       && packedRawCopyResult.completedRepeats[0]?.nodeId === "repeat-copy"
       && packedRawCopyResult.completedRepeats[0]?.iterationCount === "2"
       && packedRawCopyResult.completedRepeats[0]?.bodyNodeIds[0] === "raw-copy"
+      && packedRawCopyResult.completedConditionals[0]?.nodeId === "choose-copy"
+      && packedRawCopyResult.completedConditionals[0]?.selectedBranch === "then"
+      && packedRawCopyResult.completedConditionals[0]?.bodyNodeIds[0] === "copy-then"
       && packedRawCopyResult.outputs[0].bytes.every(
         (value, index) => value === packedRawCopyBytes[index],
       ),
-    "semantic-core packed graph lost version-1.4 repetition meaning",
+    "semantic-core packed graph lost version-1.5 conditional/repetition meaning",
   );
 
   const kernelsPkg = readPackage(kernels);
@@ -660,16 +721,18 @@ try {
       { kernelArtifacts: [], layoutArtifacts: [] },
     );
   assert(
-    packedRawCopyWebGpu.copyStepCount === 2
+    packedRawCopyWebGpu.copyStepCount === 3
       && packedRawCopyWebGpu.dispatchStepCount === 0
       && packedRawCopyWebGpu.materializationCount === 1
       && packedRawCopyWebGpu.eventCount === 1
       && packedRawCopyWebGpu.eventIds[0] === "copy-complete"
       && packedRawCopyWebGpu.repeatCount === 1
       && packedRawCopyWebGpu.repeatIterationCount === 2
-      && packedRawCopyWebGpu.expandedNodeCount === 4
+      && packedRawCopyWebGpu.conditionalCount === 1
+      && packedRawCopyWebGpu.conditionalNodeIds[0] === "choose-copy"
+      && packedRawCopyWebGpu.expandedNodeCount === 5
       && packedRawCopyWebGpu.wgslModuleHashes.length === 1,
-    "packed kernels host graph lost version-1.4 repetition preparation",
+    "packed kernels host graph lost version-1.5 conditional/repetition preparation",
   );
   const kernelsSemanticGemm = await import(pathToFileURL(join(kernels, "dist/semantic_gemm.js")));
   const packedExactSchedule = await semanticSchedule.createVerifiedLogicalGemmTileSchedule(
@@ -1645,7 +1708,7 @@ const hostGraphCpuOutputWords = new Uint32Array(
 );
 const rawCopyGraph = await createVerifiedHostGraphArtifact({
   kind: "host-graph",
-  version: { major: 1, minor: 4 },
+  version: { major: 1, minor: 5 },
   failureModel: "fail-stop-no-partial-output-commit",
   rankCount: parseWireU64("1"),
   resources: [
@@ -1657,6 +1720,24 @@ const rawCopyGraph = await createVerifiedHostGraphArtifact({
       dtype: "u8",
       byteLength: parseWireU64("8"),
       alignmentBytes: 1,
+    },
+    {
+      resourceId: "else-input",
+      role: "input",
+      multiplicity: "per-rank",
+      initialization: "external-input",
+      dtype: "u8",
+      byteLength: parseWireU64("8"),
+      alignmentBytes: 1,
+    },
+    {
+      resourceId: "predicate",
+      role: "input",
+      multiplicity: "per-rank",
+      initialization: "external-input",
+      dtype: "u32",
+      byteLength: parseWireU64("4"),
+      alignmentBytes: 4,
     },
     {
       resourceId: "output",
@@ -1685,9 +1766,36 @@ const rawCopyGraph = await createVerifiedHostGraphArtifact({
       mode: "fixed-count-sequential",
     },
     {
+      nodeId: "choose-copy",
+      kind: "conditional",
+      dependsOn: ["repeat-copy"],
+      predicate: {
+        resourceId: "predicate",
+        rank: parseWireU64("0"),
+        mode: "u32-nonzero",
+      },
+      thenBody: [{
+        nodeId: "copy-then",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "input",
+        destinationResourceId: "output",
+        mode: "whole-allocation-bytes-per-rank",
+      }],
+      elseBody: [{
+        nodeId: "copy-else",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "else-input",
+        destinationResourceId: "output",
+        mode: "whole-allocation-bytes-per-rank",
+      }],
+      mode: "input-u32-branch-sequential",
+    },
+    {
       nodeId: "copy-complete-event",
       kind: "event",
-      dependsOn: ["repeat-copy"],
+      dependsOn: ["choose-copy"],
       eventId: "copy-complete",
       mode: "completion-after-dependencies",
     },
@@ -1709,12 +1817,25 @@ const rawCopyWebGpu = await prepareSemanticHostGraphWebGpu(
   { kernelArtifacts: [], layoutArtifacts: [] },
 );
 const rawCopyBytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 255]);
+const rawCopyElseBytes = new Uint8Array([255, 6, 5, 4, 3, 2, 1, 0]);
 const rawCopyResult = await rawCopyCpu.execute({
-  inputs: [{
-    rank: parseWireU64("0"),
-    resourceId: "input",
-    bytes: rawCopyBytes,
-  }],
+  inputs: [
+    {
+      rank: parseWireU64("0"),
+      resourceId: "input",
+      bytes: rawCopyBytes,
+    },
+    {
+      rank: parseWireU64("0"),
+      resourceId: "else-input",
+      bytes: rawCopyElseBytes,
+    },
+    {
+      rank: parseWireU64("0"),
+      resourceId: "predicate",
+      bytes: new Uint8Array(4),
+    },
+  ],
 });
 if (cpu.specializationHash !== wgsl.semantic.specializationHash) throw new Error("fresh consumer CPU/WGSL specialization mismatch");
 if (!wgsl.program.wgsl.includes("destination_words[destination_word] = copied_bits")) throw new Error("fresh consumer lowering missing copy");
@@ -1730,7 +1851,7 @@ const hostGraphTemporary = hostGraphPayload.program.resources.find((resource) =>
 if (hostGraph.dispatchCount !== 2 || hostGraphPayload.program.nodes.length !== 2 || hostGraphTemporary?.byteLength !== "16" || hostGraphTemporary.multiplicity !== "per-rank" || hostGraphTemporary.initialization !== "zero-fill") throw new Error("fresh consumer compiler host graph lost multi-dispatch resource meaning");
 if (hostGraphCpu.profile !== HOST_GRAPH_CPU_PROFILE || ![0x3f800000, 0x40000000, 0x40400000, 0x40800000].every((value, index) => hostGraphCpuOutputWords[index] === value)) throw new Error("fresh consumer CPU host graph lost exact multi-dispatch execution");
 if (hostGraphWebGpu.graphSemanticHash !== hostGraph.graphSemanticHash || hostGraphWebGpu.expandedStepCount !== 2 || hostGraphWebGpu.dispatchStepCount !== 2 || hostGraphWebGpu.wgslModuleHashes.length !== 1) throw new Error("fresh consumer WebGPU host graph lost exact multi-dispatch preparation");
-if (hostGraphArtifactPayload(rawCopyGraph.artifact).program.version.minor !== 4 || rawCopyCpu.elementOperations !== 16n || rawCopyCpu.eventIds[0] !== "copy-complete" || rawCopyCpu.repeats[0]?.iterationCount !== "2" || rawCopyCpu.expandedNodeCount !== 4 || rawCopyWebGpu.copyStepCount !== 2 || rawCopyWebGpu.materializationCount !== 1 || rawCopyWebGpu.eventCount !== 1 || rawCopyWebGpu.eventIds[0] !== "copy-complete" || rawCopyWebGpu.repeatCount !== 1 || rawCopyWebGpu.repeatIterationCount !== 2 || rawCopyWebGpu.expandedNodeCount !== 4 || rawCopyWebGpu.dispatchStepCount !== 0 || rawCopyResult.executedNodeIds.at(-1) !== "materialize-output" || rawCopyResult.completedEventIds[0] !== "copy-complete" || rawCopyResult.completedRepeats[0]?.nodeId !== "repeat-copy" || rawCopyResult.completedRepeats[0]?.bodyNodeIds[0] !== "raw-copy" || !rawCopyResult.outputs[0]?.bytes.every((value, index) => value === rawCopyBytes[index])) throw new Error("fresh consumer host graph lost version-1.4 repetition meaning");
+if (hostGraphArtifactPayload(rawCopyGraph.artifact).program.version.minor !== 5 || rawCopyCpu.elementOperations !== 24n || rawCopyCpu.eventIds[0] !== "copy-complete" || rawCopyCpu.repeats[0]?.iterationCount !== "2" || rawCopyCpu.conditionalNodeIds[0] !== "choose-copy" || rawCopyCpu.expandedNodeCount !== 5 || rawCopyWebGpu.copyStepCount !== 3 || rawCopyWebGpu.materializationCount !== 1 || rawCopyWebGpu.eventCount !== 1 || rawCopyWebGpu.eventIds[0] !== "copy-complete" || rawCopyWebGpu.repeatCount !== 1 || rawCopyWebGpu.repeatIterationCount !== 2 || rawCopyWebGpu.conditionalCount !== 1 || rawCopyWebGpu.conditionalNodeIds[0] !== "choose-copy" || rawCopyWebGpu.expandedNodeCount !== 5 || rawCopyWebGpu.dispatchStepCount !== 0 || rawCopyResult.executedNodeIds.at(-1) !== "materialize-output" || rawCopyResult.completedEventIds[0] !== "copy-complete" || rawCopyResult.completedRepeats[0]?.nodeId !== "repeat-copy" || rawCopyResult.completedRepeats[0]?.bodyNodeIds[0] !== "raw-copy" || rawCopyResult.completedConditionals[0]?.nodeId !== "choose-copy" || rawCopyResult.completedConditionals[0]?.selectedBranch !== "else" || rawCopyResult.completedConditionals[0]?.bodyNodeIds[0] !== "copy-else" || !rawCopyResult.outputs[0]?.bytes.every((value, index) => value === rawCopyElseBytes[index])) throw new Error("fresh consumer host graph lost version-1.5 conditional/repetition meaning");
 `;
   writeFileSync(join(consumer, "consumer.mjs"), source);
   writeFileSync(join(consumer, "consumer.ts"), source);
