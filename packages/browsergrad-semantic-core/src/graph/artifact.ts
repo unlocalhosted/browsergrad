@@ -53,16 +53,21 @@ import {
   type HostGraphMaterializeNode,
   type HostGraphNode,
   type HostGraphProgram,
+  type HostGraphRepeatBodyNode,
+  type HostGraphRepeatNode,
   type HostGraphResource,
   type HostGraphResourceRole,
 } from "./model.js";
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 3;
+export const HOST_GRAPH_ARTIFACT_MINOR = 4;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
+export const HOST_GRAPH_MAX_REPEAT_BODY_NODES = 64;
+export const HOST_GRAPH_MAX_REPEAT_ITERATIONS = 1_024;
+export const HOST_GRAPH_MAX_EXPANDED_NODES = 16_384;
 export const HOST_GRAPH_MAX_RANKS = 256;
 export const HOST_GRAPH_MAX_SEMANTIC_ARTIFACTS = 256;
 export const HOST_GRAPH_MAX_TOTAL_RESOURCE_BYTES = 1_073_741_824n;
@@ -122,6 +127,9 @@ export interface PreparedHostGraphProgram {
   readonly materializationCount: number;
   readonly eventCount: number;
   readonly eventIds: readonly string[];
+  readonly repeatCount: number;
+  readonly repeatIterationCount: number;
+  readonly expandedNodeCount: number;
   readonly topologicalNodeIds: readonly string[];
   readonly outputResourceIds: readonly string[];
 }
@@ -135,6 +143,9 @@ interface HostGraphAnalysis {
   readonly materializationCount: number;
   readonly eventCount: number;
   readonly eventIds: readonly string[];
+  readonly repeatCount: number;
+  readonly repeatIterationCount: number;
+  readonly expandedNodeCount: number;
   readonly topologicalNodeIds: readonly string[];
   readonly outputResourceIds: readonly string[];
 }
@@ -150,6 +161,7 @@ type HostGraphResourceAccess = "read" | "write" | "read-write";
 interface HostGraphResourceEffect {
   readonly resourceId: string;
   readonly access: HostGraphResourceAccess;
+  readonly requiresPriorWriter?: boolean;
 }
 
 interface DispatchOperationBinding {
@@ -270,6 +282,9 @@ export async function prepareHostGraphProgram(
     materializationCount: analysis.materializationCount,
     eventCount: analysis.eventCount,
     eventIds: Object.freeze([...analysis.eventIds]),
+    repeatCount: analysis.repeatCount,
+    repeatIterationCount: analysis.repeatIterationCount,
+    expandedNodeCount: analysis.expandedNodeCount,
     topologicalNodeIds: Object.freeze([...analysis.topologicalNodeIds]),
     outputResourceIds: Object.freeze([...analysis.outputResourceIds]),
   });
@@ -324,12 +339,13 @@ function parseProgram(
     (version.minor !== 0 &&
       version.minor !== 1 &&
       version.minor !== 2 &&
-      version.minor !== 3)
+      version.minor !== 3 &&
+      version.minor !== 4)
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 through 1.3 only",
+      "host graph program reader supports versions 1.0 through 1.4 only",
     );
   }
   if (version.minor !== envelopeMinor) {
@@ -482,7 +498,7 @@ function parseResources(
 
 function parseNodes(
   value: JsonValue,
-  programMinor: 0 | 1 | 2 | 3,
+  programMinor: 0 | 1 | 2 | 3 | 4,
 ): readonly HostGraphNode[] {
   const values = arrayValue(value, "$.payload.program.nodes");
   if (values.length === 0 || values.length > HOST_GRAPH_MAX_NODES) {
@@ -505,6 +521,16 @@ function parseNodes(
     "node",
   );
   unique(
+    nodes.flatMap((node) => [
+      node.nodeId,
+      ...(node.kind === "repeat"
+        ? node.body.map((bodyNode) => bodyNode.nodeId)
+        : []),
+    ]),
+    "$.payload.program.nodes",
+    "top-level or repeat-body node",
+  );
+  unique(
     nodes
       .filter((node): node is HostGraphEventNode => node.kind === "event")
       .map((node) => node.eventId),
@@ -517,7 +543,8 @@ function parseNodes(
 function parseNode(
   value: JsonValue,
   path: string,
-  programMinor: 0 | 1 | 2 | 3,
+  programMinor: 0 | 1 | 2 | 3 | 4,
+  repeatBody = false,
 ): HostGraphNode {
   const object = objectValue(value, path);
   const kind = stringValue(field(object, "kind", path), `${path}.kind`);
@@ -534,6 +561,13 @@ function parseNode(
     return parseCopyNode(object, path);
   }
   if (kind === "materialize") {
+    if (repeatBody) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.kind`,
+        "fixed-count repeat bodies cannot contain materialization",
+      );
+    }
     if (programMinor < 2) {
       invalid(
         GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
@@ -544,6 +578,13 @@ function parseNode(
     return parseMaterializeNode(object, path);
   }
   if (kind === "event") {
+    if (repeatBody) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.kind`,
+        "fixed-count repeat bodies cannot contain events",
+      );
+    }
     if (programMinor < 3) {
       invalid(
         GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
@@ -553,11 +594,118 @@ function parseNode(
     }
     return parseEventNode(object, path);
   }
+  if (kind === "repeat") {
+    if (repeatBody) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.kind`,
+        "fixed-count repeat bodies cannot nest repeat nodes",
+      );
+    }
+    if (programMinor < 4) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.kind`,
+        "repeat nodes require host graph program version 1.4",
+      );
+    }
+    return parseRepeatNode(object, path);
+  }
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, and version-1.3 event nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, and version-1.4 repeat nodes",
   );
+}
+
+function parseRepeatNode(
+  value: JsonObject,
+  path: string,
+): HostGraphRepeatNode {
+  const object = closedObject(
+    value,
+    ["nodeId", "kind", "dependsOn", "iterationCount", "body", "mode"],
+    path,
+  );
+  if (object.mode !== "fixed-count-sequential") {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "repeat mode must be fixed-count-sequential",
+    );
+  }
+  const iterationCount = positiveWire(
+    field(object, "iterationCount", path),
+    `${path}.iterationCount`,
+  );
+  if (
+    wireIntegerToBigInt(iterationCount) >
+    BigInt(HOST_GRAPH_MAX_REPEAT_ITERATIONS)
+  ) {
+    resource(
+      `${path}.iterationCount`,
+      `repeat iteration count exceeds ${HOST_GRAPH_MAX_REPEAT_ITERATIONS}`,
+    );
+  }
+  const bodyValues = arrayValue(field(object, "body", path), `${path}.body`);
+  if (
+    bodyValues.length === 0 ||
+    bodyValues.length > HOST_GRAPH_MAX_REPEAT_BODY_NODES
+  ) {
+    resource(
+      `${path}.body`,
+      `repeat body node count must be between 1 and ${HOST_GRAPH_MAX_REPEAT_BODY_NODES}`,
+    );
+  }
+  const body = bodyValues.map((item, index) => {
+    const node = parseNode(
+      item,
+      `${path}.body[${index}]`,
+      4,
+      true,
+    );
+    if (
+      node.kind === "materialize" ||
+      node.kind === "event" ||
+      node.kind === "repeat"
+    ) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.body[${index}].kind`,
+        "fixed-count repeat bodies support dispatch, all-reduce, and copy only",
+      );
+    }
+    return node;
+  }) as HostGraphRepeatBodyNode[];
+  unique(
+    body.map((node) => node.nodeId),
+    `${path}.body`,
+    "repeat body node",
+  );
+  for (const [index, node] of body.entries()) {
+    const expected = index === 0 ? [] : [body[index - 1]!.nodeId];
+    if (
+      node.dependsOn.length !== expected.length ||
+      node.dependsOn.some((dependency, dependencyIndex) =>
+        dependency !== expected[dependencyIndex])
+    ) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.invalidAccess,
+        `${path}.body[${index}].dependsOn`,
+        index === 0
+          ? "first repeat body node must have no internal dependency"
+          : `repeat body node must depend only on immediately preceding node ${expected[0]}`,
+      );
+    }
+  }
+  return {
+    nodeId: identifier(field(object, "nodeId", path), `${path}.nodeId`),
+    kind: "repeat",
+    dependsOn: dependencies(field(object, "dependsOn", path), path),
+    iterationCount,
+    body: Object.freeze(body),
+    mode: "fixed-count-sequential",
+  };
 }
 
 function parseEventNode(
@@ -896,31 +1044,37 @@ function analyzeProgram(
   let copyCount = 0;
   let materializationCount = 0;
   let eventCount = 0;
+  let repeatCount = 0;
+  let repeatIterationCount = 0;
+  let expandedNodeCount = 0;
   const dispatchEffects = new Map<
-    string,
+    HostGraphDispatchNode,
+    readonly HostGraphResourceEffect[]
+  >();
+  const repeatEffects = new Map<
+    HostGraphRepeatNode,
     readonly HostGraphResourceEffect[]
   >();
   const dispatchGeometry = new Map<string, ResolvedDispatchGeometry>();
   for (const [index, node] of program.nodes.entries()) {
-    if (node.kind === "all-reduce") {
-      verifyCollectiveBinding(
-        node,
-        resources,
-        rankCount,
-        `$.payload.program.nodes[${index}]`,
-      );
-    } else if (node.kind === "copy") {
-      verifyCopyBinding(
-        node,
-        resources,
-        `$.payload.program.nodes[${index}]`,
-      );
-    } else if (node.kind === "materialize") {
-      verifyMaterializeBinding(
-        node,
-        resources,
-        `$.payload.program.nodes[${index}]`,
-      );
+    const path = `$.payload.program.nodes[${index}]`;
+    const candidates = node.kind === "repeat" ? node.body : [node];
+    for (const [bodyIndex, candidate] of candidates.entries()) {
+      const candidatePath = node.kind === "repeat"
+        ? `${path}.body[${bodyIndex}]`
+        : path;
+      if (candidate.kind === "all-reduce") {
+        verifyCollectiveBinding(
+          candidate,
+          resources,
+          rankCount,
+          candidatePath,
+        );
+      } else if (candidate.kind === "copy") {
+        verifyCopyBinding(candidate, resources, candidatePath);
+      } else if (candidate.kind === "materialize") {
+        verifyMaterializeBinding(candidate, resources, candidatePath);
+      }
     }
   }
   for (const [index, node] of program.nodes.entries()) {
@@ -948,124 +1102,91 @@ function analyzeProgram(
         );
       }
     }
-    if (node.kind === "dispatch") {
-      dispatchCount += 1;
-      const operations = semanticCatalog.get(node.semanticArtifactHash);
-      if (operations === undefined) {
-        invalid(
-          GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
-          `${path}.semanticArtifactHash`,
-          "dispatch references no supplied opaque verified semantic artifact",
-        );
-      }
-      const operation = operations.get(node.entrypointId);
-      if (operation === undefined) {
-        invalid(
-          GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
-          `${path}.entrypointId`,
-          "dispatch entrypoint is absent from its supplied verified semantic artifact",
-        );
-      }
-      const bindings = new Map(
-        node.bindings.map((binding) => [
-          binding.semanticResourceId,
-          binding.graphResourceId,
-        ]),
+    if (
+      node.kind === "dispatch" ||
+      node.kind === "all-reduce" ||
+      node.kind === "copy"
+    ) {
+      const effects = verifyExecutableNodeBinding(
+        node,
+        resources,
+        rankCount,
+        semanticCatalog,
+        limits,
+        dispatchGeometry,
+        path,
       );
-      if (bindings.size !== 2 ||
-          !bindings.has(operation.sourceSemanticResourceId) ||
-          !bindings.has(operation.destinationSemanticResourceId)) {
-        invalid(
-          GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
-          `${path}.bindings`,
-          "initial dispatch profile requires exact source and destination view bindings from the verified view-copy operation",
-        );
-      }
-      const sourceResourceId =
-        bindings.get(operation.sourceSemanticResourceId);
-      const destinationResourceId =
-        bindings.get(operation.destinationSemanticResourceId);
-      if (sourceResourceId === undefined ||
-          destinationResourceId === undefined) {
-        invalid(
-          GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
-          `${path}.bindings`,
-          "view-copy resource binding disappeared during verification",
-        );
-      }
-      if (sourceResourceId === destinationResourceId) {
-        invalid(
-          GRAPH_DIAGNOSTIC_CODES.invalidAccess,
-          `${path}.bindings`,
-          "view-copy source and destination must bind distinct graph resources",
-        );
-      }
-      const geometryKey = `${node.semanticArtifactHash}\0${node.entrypointId}\0${
-        canonicalizeJson(node.dimensionBindings, { limits })
-      }`;
-      let geometry = dispatchGeometry.get(geometryKey);
-      if (geometry === undefined) {
-        geometry = resolveDispatchGeometry(operation, node, limits, path);
-        dispatchGeometry.set(geometryKey, geometry);
-      }
-      const sourceResource = resources.get(sourceResourceId);
-      const destinationResource = resources.get(destinationResourceId);
-      if (sourceResource === undefined || destinationResource === undefined) {
-        invalid(
-          GRAPH_DIAGNOSTIC_CODES.danglingReference,
-          `${path}.bindings`,
-          "view-copy dispatch binds a missing graph resource",
-        );
-      }
-      if (sourceResource.dtype !== operation.dtype ||
-          destinationResource.dtype !== operation.dtype) {
-        invalid(
-          GRAPH_DIAGNOSTIC_CODES.invalidBinding,
-          `${path}.bindings`,
-          `view-copy ${operation.dtype} operation requires matching source and destination resource dtypes`,
-        );
-      }
-      if (sourceResource.byteLength !== geometry.sourceByteLength ||
-          destinationResource.byteLength !==
-            geometry.destinationByteLength) {
-        invalid(
-          GRAPH_DIAGNOSTIC_CODES.invalidBinding,
-          `${path}.bindings`,
-          "view-copy graph resources must preserve the exact verified allocation byte lengths",
-        );
-      }
-      if (sourceResource.alignmentBytes <
-            geometry.sourceAlignmentBytes ||
-          sourceResource.alignmentBytes %
-            geometry.sourceAlignmentBytes !== 0 ||
-          destinationResource.alignmentBytes <
-            geometry.destinationAlignmentBytes ||
-          destinationResource.alignmentBytes %
-            geometry.destinationAlignmentBytes !== 0) {
-        invalid(
-          GRAPH_DIAGNOSTIC_CODES.invalidBinding,
-          `${path}.bindings`,
-          "view-copy graph resources do not satisfy verified allocation alignment",
-        );
-      }
-      dispatchEffects.set(node.nodeId, Object.freeze([
-        Object.freeze({
-          resourceId: sourceResourceId,
-          access: "read" as const,
-        }),
-        Object.freeze({
-          resourceId: destinationResourceId,
-          access: "write" as const,
-        }),
-      ]));
-    } else if (node.kind === "all-reduce") {
-      collectiveCount += 1;
-    } else if (node.kind === "copy") {
-      copyCount += 1;
+      if (node.kind === "dispatch") dispatchEffects.set(node, effects);
+      ({ dispatchCount, collectiveCount, copyCount } =
+        addExecutableCounts(
+          node,
+          1,
+          dispatchCount,
+          collectiveCount,
+          copyCount,
+        ));
+      expandedNodeCount += 1;
     } else if (node.kind === "materialize") {
+      verifyMaterializeBinding(node, resources, path);
       materializationCount += 1;
-    } else {
+      expandedNodeCount += 1;
+    } else if (node.kind === "event") {
       eventCount += 1;
+      expandedNodeCount += 1;
+    } else {
+      repeatCount += 1;
+      const iterationCount = Number(wireIntegerToBigInt(node.iterationCount));
+      repeatIterationCount += iterationCount;
+      const bodyExpandedNodeCount = iterationCount * node.body.length;
+      expandedNodeCount += bodyExpandedNodeCount;
+      if (expandedNodeCount > HOST_GRAPH_MAX_EXPANDED_NODES) {
+        resource(
+          `${path}.iterationCount`,
+          `expanded node count exceeds ${HOST_GRAPH_MAX_EXPANDED_NODES}`,
+        );
+      }
+      const bodyEffects = new Map<
+        HostGraphRepeatBodyNode,
+        readonly HostGraphResourceEffect[]
+      >();
+      for (const [bodyIndex, bodyNode] of node.body.entries()) {
+        const bodyPath = `${path}.body[${bodyIndex}]`;
+        edgeCount += bodyNode.dependsOn.length;
+        if (edgeCount > HOST_GRAPH_MAX_EDGES) {
+          resource(
+            `${path}.body[*].dependsOn`,
+            `dependency edge count exceeds ${HOST_GRAPH_MAX_EDGES}`,
+          );
+        }
+        const effects = verifyExecutableNodeBinding(
+          bodyNode,
+          resources,
+          rankCount,
+          semanticCatalog,
+          limits,
+          dispatchGeometry,
+          bodyPath,
+        );
+        bodyEffects.set(bodyNode, effects);
+        if (bodyNode.kind === "dispatch") {
+          dispatchEffects.set(bodyNode, effects);
+        }
+        ({ dispatchCount, collectiveCount, copyCount } =
+          addExecutableCounts(
+            bodyNode,
+            iterationCount,
+            dispatchCount,
+            collectiveCount,
+            copyCount,
+          ));
+      }
+      repeatEffects.set(node, aggregateRepeatEffects(node.body, bodyEffects));
+    }
+    if (expandedNodeCount > HOST_GRAPH_MAX_EXPANDED_NODES) {
+      resource(
+        "$.payload.program.nodes",
+        `expanded node count exceeds ${HOST_GRAPH_MAX_EXPANDED_NODES}`,
+      );
     }
   }
   const topologicalNodeIds = topologicalOrder(program.nodes, nodes);
@@ -1078,6 +1199,7 @@ function analyzeProgram(
     resources,
     ancestors,
     dispatchEffects,
+    repeatEffects,
   );
   return Object.freeze({
     rankCount,
@@ -1091,6 +1213,9 @@ function analyzeProgram(
       const node = nodes.get(nodeId);
       return node?.kind === "event" ? [node.eventId] : [];
     })),
+    repeatCount,
+    repeatIterationCount,
+    expandedNodeCount,
     topologicalNodeIds: Object.freeze(topologicalNodeIds),
     outputResourceIds: Object.freeze(
       program.version.minor < 2
@@ -1104,6 +1229,218 @@ function analyzeProgram(
           .sort(compareCanonicalStrings),
     ),
   });
+}
+
+function verifyExecutableNodeBinding(
+  node: HostGraphRepeatBodyNode,
+  resources: ReadonlyMap<string, HostGraphResource>,
+  rankCount: bigint,
+  semanticCatalog: SemanticArtifactCatalog,
+  limits: DecodeLimits,
+  dispatchGeometry: Map<string, ResolvedDispatchGeometry>,
+  path: string,
+): readonly HostGraphResourceEffect[] {
+  if (node.kind === "all-reduce") {
+    verifyCollectiveBinding(node, resources, rankCount, path);
+    return Object.freeze([Object.freeze({
+      resourceId: node.resourceId,
+      access: "read-write" as const,
+    })]);
+  }
+  if (node.kind === "copy") {
+    verifyCopyBinding(node, resources, path);
+    return Object.freeze([
+      Object.freeze({
+        resourceId: node.sourceResourceId,
+        access: "read" as const,
+      }),
+      Object.freeze({
+        resourceId: node.destinationResourceId,
+        access: "write" as const,
+      }),
+    ]);
+  }
+  const operations = semanticCatalog.get(node.semanticArtifactHash);
+  if (operations === undefined) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
+      `${path}.semanticArtifactHash`,
+      "dispatch references no supplied opaque verified semantic artifact",
+    );
+  }
+  const operation = operations.get(node.entrypointId);
+  if (operation === undefined) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
+      `${path}.entrypointId`,
+      "dispatch entrypoint is absent from its supplied verified semantic artifact",
+    );
+  }
+  const bindings = new Map(
+    node.bindings.map((binding) => [
+      binding.semanticResourceId,
+      binding.graphResourceId,
+    ]),
+  );
+  if (
+    bindings.size !== 2 ||
+    !bindings.has(operation.sourceSemanticResourceId) ||
+    !bindings.has(operation.destinationSemanticResourceId)
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
+      `${path}.bindings`,
+      "initial dispatch profile requires exact source and destination view bindings from the verified view-copy operation",
+    );
+  }
+  const sourceResourceId = bindings.get(operation.sourceSemanticResourceId);
+  const destinationResourceId =
+    bindings.get(operation.destinationSemanticResourceId);
+  if (sourceResourceId === undefined || destinationResourceId === undefined) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
+      `${path}.bindings`,
+      "view-copy resource binding disappeared during verification",
+    );
+  }
+  if (sourceResourceId === destinationResourceId) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidAccess,
+      `${path}.bindings`,
+      "view-copy source and destination must bind distinct graph resources",
+    );
+  }
+  const geometryKey = `${node.semanticArtifactHash}\0${node.entrypointId}\0${
+    canonicalizeJson(node.dimensionBindings, { limits })
+  }`;
+  let geometry = dispatchGeometry.get(geometryKey);
+  if (geometry === undefined) {
+    geometry = resolveDispatchGeometry(operation, node, limits, path);
+    dispatchGeometry.set(geometryKey, geometry);
+  }
+  const sourceResource = resources.get(sourceResourceId);
+  const destinationResource = resources.get(destinationResourceId);
+  if (sourceResource === undefined || destinationResource === undefined) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.danglingReference,
+      `${path}.bindings`,
+      "view-copy dispatch binds a missing graph resource",
+    );
+  }
+  if (
+    sourceResource.dtype !== operation.dtype ||
+    destinationResource.dtype !== operation.dtype
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      `${path}.bindings`,
+      `view-copy ${operation.dtype} operation requires matching source and destination resource dtypes`,
+    );
+  }
+  if (
+    sourceResource.byteLength !== geometry.sourceByteLength ||
+    destinationResource.byteLength !== geometry.destinationByteLength
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      `${path}.bindings`,
+      "view-copy graph resources must preserve the exact verified allocation byte lengths",
+    );
+  }
+  if (
+    sourceResource.alignmentBytes < geometry.sourceAlignmentBytes ||
+    sourceResource.alignmentBytes % geometry.sourceAlignmentBytes !== 0 ||
+    destinationResource.alignmentBytes <
+      geometry.destinationAlignmentBytes ||
+    destinationResource.alignmentBytes %
+      geometry.destinationAlignmentBytes !== 0
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      `${path}.bindings`,
+      "view-copy graph resources do not satisfy verified allocation alignment",
+    );
+  }
+  return Object.freeze([
+    Object.freeze({
+      resourceId: sourceResourceId,
+      access: "read" as const,
+    }),
+    Object.freeze({
+      resourceId: destinationResourceId,
+      access: "write" as const,
+    }),
+  ]);
+}
+
+function addExecutableCounts(
+  node: HostGraphRepeatBodyNode,
+  multiplier: number,
+  dispatchCount: number,
+  collectiveCount: number,
+  copyCount: number,
+): Readonly<{
+  dispatchCount: number;
+  collectiveCount: number;
+  copyCount: number;
+}> {
+  return {
+    dispatchCount:
+      dispatchCount + (node.kind === "dispatch" ? multiplier : 0),
+    collectiveCount:
+      collectiveCount + (node.kind === "all-reduce" ? multiplier : 0),
+    copyCount: copyCount + (node.kind === "copy" ? multiplier : 0),
+  };
+}
+
+function aggregateRepeatEffects(
+  body: readonly HostGraphRepeatBodyNode[],
+  bodyEffects: ReadonlyMap<
+    HostGraphRepeatBodyNode,
+    readonly HostGraphResourceEffect[]
+  >,
+): readonly HostGraphResourceEffect[] {
+  const aggregate = new Map<string, {
+    read: boolean;
+    write: boolean;
+    requiresPriorWriter: boolean;
+  }>();
+  for (const node of body) {
+    const effects = bodyEffects.get(node);
+    if (effects === undefined) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
+        "$.payload.program.nodes",
+        `repeat body effects for ${node.nodeId} were not derived`,
+      );
+    }
+    for (const effect of effects) {
+      const state = aggregate.get(effect.resourceId) ?? {
+        read: false,
+        write: false,
+        requiresPriorWriter: false,
+      };
+      const readsBeforeBodyWriter =
+        reads(effect.access) &&
+        !state.write &&
+        effect.requiresPriorWriter !== false;
+      state.read ||= reads(effect.access);
+      state.write ||= writes(effect.access);
+      state.requiresPriorWriter ||= readsBeforeBodyWriter;
+      aggregate.set(effect.resourceId, state);
+    }
+  }
+  return Object.freeze([...aggregate.entries()]
+    .sort(([left], [right]) => compareCanonicalStrings(left, right))
+    .map(([resourceId, state]) => Object.freeze({
+      resourceId,
+      access: state.read && state.write
+        ? "read-write" as const
+        : state.write
+          ? "write" as const
+          : "read" as const,
+      requiresPriorWriter: state.requiresPriorWriter,
+    })));
 }
 
 function verifyMaterializeBinding(
@@ -1152,7 +1489,7 @@ function verifyMaterializationContract(
       invalid(
         GRAPH_DIAGNOSTIC_CODES.invalidAccess,
         "$.payload.program.nodes",
-        `output resource ${resource.resourceId} requires exactly one materialize node in host graph version 1.2`,
+        `output resource ${resource.resourceId} requires exactly one materialize node in host graph version 1.2 or newer`,
       );
     }
   }
@@ -1403,7 +1740,11 @@ function verifyEffects(
   resources: ReadonlyMap<string, HostGraphResource>,
   ancestors: ReadonlyMap<string, ReadonlySet<string>>,
   dispatchEffects: ReadonlyMap<
-    string,
+    HostGraphDispatchNode,
+    readonly HostGraphResourceEffect[]
+  >,
+  repeatEffects: ReadonlyMap<
+    HostGraphRepeatNode,
     readonly HostGraphResourceEffect[]
   >,
 ): void {
@@ -1423,7 +1764,7 @@ function verifyEffects(
     }
     const path = `$.payload.program.nodes[${nodeIndex}]`;
     for (const [effectIndex, effect] of
-      nodeEffects(node, dispatchEffects).entries()) {
+      nodeEffects(node, dispatchEffects, repeatEffects).entries()) {
       const effectPath = node.kind === "dispatch"
         ? `${path}.bindings[${effectIndex}]`
         : node.kind === "all-reduce"
@@ -1432,7 +1773,9 @@ function verifyEffects(
             ? effectIndex === 0
               ? `${path}.sourceResourceId`
               : `${path}.destinationResourceId`
-            : `${path}.resourceId`;
+            : node.kind === "materialize"
+              ? `${path}.resourceId`
+              : `${path}.body`;
       const resource = resources.get(effect.resourceId);
       if (resource === undefined) {
         invalid(
@@ -1449,7 +1792,8 @@ function verifyEffects(
         );
       }
       const prior = uses.get(effect.resourceId) ?? [];
-      if (resource.role !== "input" && reads(effect.access) &&
+      if (resource.role !== "input" &&
+          (effect.requiresPriorWriter ?? reads(effect.access)) &&
           !prior.some((use) =>
             writes(use.access) &&
             ancestors.get(node.nodeId)?.has(use.nodeId) === true)) {
@@ -1492,12 +1836,16 @@ function verifyEffects(
 function nodeEffects(
   node: HostGraphNode,
   dispatchEffects: ReadonlyMap<
-    string,
+    HostGraphDispatchNode,
+    readonly HostGraphResourceEffect[]
+  >,
+  repeatEffects: ReadonlyMap<
+    HostGraphRepeatNode,
     readonly HostGraphResourceEffect[]
   >,
 ): readonly HostGraphResourceEffect[] {
   if (node.kind === "dispatch") {
-    const effects = dispatchEffects.get(node.nodeId);
+    const effects = dispatchEffects.get(node);
     if (effects === undefined) {
       invalid(
         GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
@@ -1518,6 +1866,17 @@ function nodeEffects(
   }
   if (node.kind === "materialize") {
     return [{ resourceId: node.resourceId, access: "read" }];
+  }
+  if (node.kind === "repeat") {
+    const effects = repeatEffects.get(node);
+    if (effects === undefined) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.semanticArtifactMismatch,
+        "$.payload.program.nodes",
+        `repeat effects for ${node.nodeId} were not derived`,
+      );
+    }
+    return effects;
   }
   return [];
 }

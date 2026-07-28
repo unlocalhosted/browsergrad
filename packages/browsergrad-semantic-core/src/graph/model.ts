@@ -75,12 +75,33 @@ export interface HostGraphEventNode extends JsonObject {
   readonly mode: "completion-after-dependencies";
 }
 
+export type HostGraphRepeatBodyNode =
+  | HostGraphDispatchNode
+  | HostGraphAllReduceNode
+  | HostGraphCopyNode;
+
+export interface HostGraphRepeatNode extends JsonObject {
+  readonly nodeId: string;
+  readonly kind: "repeat";
+  readonly dependsOn: readonly string[];
+  readonly iterationCount: WireU64;
+  readonly body: readonly HostGraphRepeatBodyNode[];
+  readonly mode: "fixed-count-sequential";
+}
+
+export interface HostGraphRepeatCompletion extends JsonObject {
+  readonly nodeId: string;
+  readonly iterationCount: WireU64;
+  readonly bodyNodeIds: readonly string[];
+}
+
 export type HostGraphNode =
   | HostGraphDispatchNode
   | HostGraphAllReduceNode
   | HostGraphCopyNode
   | HostGraphMaterializeNode
-  | HostGraphEventNode;
+  | HostGraphEventNode
+  | HostGraphRepeatNode;
 
 /**
  * Backend-neutral host graph meaning. Transport, topology, scheduling,
@@ -90,7 +111,7 @@ export interface HostGraphProgram extends JsonObject {
   readonly kind: "host-graph";
   readonly version: {
     readonly major: 1;
-    readonly minor: 0 | 1 | 2 | 3;
+    readonly minor: 0 | 1 | 2 | 3 | 4;
   };
   readonly failureModel: typeof HOST_GRAPH_FAILURE_MODEL;
   readonly rankCount: WireU64;

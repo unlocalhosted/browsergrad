@@ -233,6 +233,54 @@ function eventfulRawCopyProgram(byteLength = "8"): HostGraphProgram {
   };
 }
 
+function repeatedCollectiveProgram(): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 4 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire("2"),
+    resources: [
+      resource("input", "input", "f32"),
+      resource("output", "output", "f32"),
+    ],
+    nodes: [
+      {
+        nodeId: "initialize",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "input",
+        destinationResourceId: "output",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "repeat-reduction",
+        kind: "repeat",
+        dependsOn: ["initialize"],
+        iterationCount: wire("3"),
+        body: [{
+          nodeId: "reduce-body",
+          kind: "all-reduce",
+          dependsOn: [],
+          resourceId: "output",
+          reduction: "sum",
+          dtype: "f32",
+          numericalPolicy: "rank-order-f32",
+          participants: [wire("0"), wire("1")],
+          result: "replicated-to-all-participants",
+        }],
+        mode: "fixed-count-sequential",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["repeat-reduction"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 async function verified(
   program: HostGraphProgram,
   artifacts: VerifiedViewCopyArtifacts,
@@ -255,6 +303,42 @@ function input(
 }
 
 describe("semantic host-graph WebGPU preparation", () => {
+  it("statically expands bounded version-1.4 repetition", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      repeatedCollectiveProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+
+    expect(prepared).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 3,
+      expandedNodeCount: 5,
+      expandedStepCount: 8,
+      dispatchStepCount: 0,
+      copyStepCount: 2,
+      materializationCount: 1,
+      eventCount: 0,
+      eventIds: [],
+      repeatCount: 1,
+      repeatIterationCount: 3,
+      collectiveReductionStepCount: 3,
+      collectiveReplicationStepCount: 3,
+    });
+    expect(prepared.wgslModuleHashes).toHaveLength(2);
+    await expect(prepareSemanticHostGraphWebGpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+      maxExpandedSteps: 7,
+    })).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
+      path: "$.maxExpandedSteps",
+    });
+  });
+
   it("retains version-1.3 completion events without an extra GPU step", async () => {
     const graph = (await createVerifiedHostGraphArtifact(
       eventfulRawCopyProgram(),

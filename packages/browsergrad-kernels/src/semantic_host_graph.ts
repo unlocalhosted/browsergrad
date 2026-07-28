@@ -6,6 +6,9 @@ import {
   type HostGraphCopyNode,
   type HostGraphDispatchNode,
   type HostGraphMaterializeNode,
+  type HostGraphRepeatBodyNode,
+  type HostGraphRepeatCompletion,
+  type HostGraphRepeatNode,
   type HostGraphResource,
   type VerifiedHostGraphArtifact,
 } from "@unlocalhosted/browsergrad-semantic-core/graph";
@@ -52,7 +55,7 @@ import {
 
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.3.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.4.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -198,6 +201,7 @@ export interface PreparedSemanticHostGraphWebGpu {
   readonly graphSemanticHash: string;
   readonly rankCount: WireU64;
   readonly nodeCount: number;
+  readonly expandedNodeCount: number;
   readonly inputResourceIds: readonly string[];
   readonly outputResourceIds: readonly string[];
   readonly expandedStepCount: number;
@@ -206,6 +210,8 @@ export interface PreparedSemanticHostGraphWebGpu {
   readonly materializationCount: number;
   readonly eventCount: number;
   readonly eventIds: readonly string[];
+  readonly repeatCount: number;
+  readonly repeatIterationCount: number;
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -228,6 +234,7 @@ export interface SemanticHostGraphWebGpuTrace {
   readonly copyStepCount: number;
   readonly materializationCount: number;
   readonly completedEventIds: readonly string[];
+  readonly completedRepeats: readonly HostGraphRepeatCompletion[];
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -281,6 +288,7 @@ interface PreparedState {
   readonly usesNumericalStatus: boolean;
   readonly topologicalNodeIds: readonly string[];
   readonly eventIds: readonly string[];
+  readonly repeats: readonly HostGraphRepeatCompletion[];
   readonly maximumBoundAllocationBytes: bigint;
   readonly workgroupSize: number;
 }
@@ -292,6 +300,11 @@ interface MutablePreparationCounts {
   event: number;
   reduction: number;
   replication: number;
+}
+
+interface PreparedRepeatBodyTemplate {
+  readonly steps: readonly WgslKernelSequenceStep[];
+  readonly counts: Readonly<MutablePreparationCounts>;
 }
 
 interface CapturedInput {
@@ -367,14 +380,7 @@ export async function prepareSemanticHostGraphWebGpu(
     payload.program.nodes.map((node) => [node.nodeId, node]),
   );
   const steps: WgslKernelSequenceStep[] = [];
-  const counts: MutablePreparationCounts = {
-    dispatch: 0,
-    copy: 0,
-    materialization: 0,
-    event: 0,
-    reduction: 0,
-    replication: 0,
-  };
+  const counts = emptyPreparationCounts();
   const boundStorageNames = new Set<string>();
   const storageMetadata: Record<string, WgslStorageBufferMetadata> = {};
   const moduleHashes: string[] = [];
@@ -390,8 +396,12 @@ export async function prepareSemanticHostGraphWebGpu(
         `prepared topological node ${nodeId} disappeared`,
       );
     }
-    if (node.kind === "dispatch") {
-      await appendDispatchSteps(
+    if (
+      node.kind === "dispatch" ||
+      node.kind === "all-reduce" ||
+      node.kind === "copy"
+    ) {
+      const nodeUsesNumericalStatus = await appendExecutableNodeSteps(
         node,
         rankCount,
         catalog,
@@ -404,29 +414,7 @@ export async function prepareSemanticHostGraphWebGpu(
         storageMetadata,
         moduleHashes,
       );
-    } else if (node.kind === "all-reduce") {
-      const usesStatus = await appendCollectiveSteps(
-        node,
-        resourcesById,
-        normalized,
-        steps,
-        counts,
-        boundStorageNames,
-        storageMetadata,
-        moduleHashes,
-      );
-      usesNumericalStatus ||= usesStatus;
-    } else if (node.kind === "copy") {
-      await appendCopySteps(
-        node,
-        resourcesById,
-        normalized,
-        steps,
-        counts,
-        boundStorageNames,
-        storageMetadata,
-        moduleHashes,
-      );
+      usesNumericalStatus ||= nodeUsesNumericalStatus;
     } else if (node.kind === "materialize") {
       appendMaterialization(
         node,
@@ -434,8 +422,23 @@ export async function prepareSemanticHostGraphWebGpu(
         boundStorageNames,
         counts,
       );
-    } else {
+    } else if (node.kind === "event") {
       appendEvent(counts);
+    } else {
+      const repeatUsesNumericalStatus = await appendRepeatSteps(
+        node,
+        rankCount,
+        catalog,
+        resourcesById,
+        normalized,
+        startedAt,
+        steps,
+        counts,
+        boundStorageNames,
+        storageMetadata,
+        moduleHashes,
+      );
+      usesNumericalStatus ||= repeatUsesNumericalStatus;
     }
     if (steps.length > normalized.maxExpandedSteps) {
       fail(
@@ -530,12 +533,27 @@ export async function prepareSemanticHostGraphWebGpu(
     0n,
   );
   const publicModuleHashes = Object.freeze(unique(moduleHashes));
+  const repeats = Object.freeze(preparedGraph.topologicalNodeIds.flatMap(
+    (nodeId): readonly HostGraphRepeatCompletion[] => {
+      const node = nodes.get(nodeId);
+      return node?.kind === "repeat"
+        ? [Object.freeze({
+            nodeId: node.nodeId,
+            iterationCount: node.iterationCount,
+            bodyNodeIds: Object.freeze(
+              node.body.map((bodyNode) => bodyNode.nodeId),
+            ),
+          })]
+        : [];
+    },
+  ));
   const prepared = Object.freeze({
     profile: SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE,
     backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
     graphSemanticHash: preparedGraph.graphSemanticHash,
     rankCount: encodeWireU64(preparedGraph.rankCount),
     nodeCount: preparedGraph.nodeCount,
+    expandedNodeCount: preparedGraph.expandedNodeCount,
     inputResourceIds: Object.freeze(
       inputs.map(({ resource }) => resource.resourceId),
     ),
@@ -548,6 +566,8 @@ export async function prepareSemanticHostGraphWebGpu(
     materializationCount: counts.materialization,
     eventCount: counts.event,
     eventIds: Object.freeze([...preparedGraph.eventIds]),
+    repeatCount: preparedGraph.repeatCount,
+    repeatIterationCount: preparedGraph.repeatIterationCount,
     collectiveReductionStepCount: counts.reduction,
     collectiveReplicationStepCount: counts.replication,
     wgslModuleHashes: publicModuleHashes,
@@ -576,10 +596,151 @@ export async function prepareSemanticHostGraphWebGpu(
       ...preparedGraph.topologicalNodeIds,
     ]),
     eventIds: Object.freeze([...preparedGraph.eventIds]),
+    repeats,
     maximumBoundAllocationBytes,
     workgroupSize: normalized.workgroupSize,
   }));
   return prepared;
+}
+
+async function appendExecutableNodeSteps(
+  node: HostGraphRepeatBodyNode,
+  rankCount: number,
+  catalog: ReadonlyMap<string, SemanticCatalogEntry>,
+  resourcesById: ReadonlyMap<string, ResourcePlan>,
+  options: NormalizedPreparationOptions,
+  startedAt: number,
+  steps: WgslKernelSequenceStep[],
+  counts: MutablePreparationCounts,
+  boundStorageNames: Set<string>,
+  storageMetadata: Record<string, WgslStorageBufferMetadata>,
+  moduleHashes: string[],
+): Promise<boolean> {
+  if (node.kind === "dispatch") {
+    await appendDispatchSteps(
+      node,
+      rankCount,
+      catalog,
+      resourcesById,
+      options,
+      startedAt,
+      steps,
+      counts,
+      boundStorageNames,
+      storageMetadata,
+      moduleHashes,
+    );
+    return false;
+  }
+  if (node.kind === "all-reduce") {
+    return appendCollectiveSteps(
+      node,
+      resourcesById,
+      options,
+      steps,
+      counts,
+      boundStorageNames,
+      storageMetadata,
+      moduleHashes,
+    );
+  }
+  await appendCopySteps(
+    node,
+    resourcesById,
+    options,
+    steps,
+    counts,
+    boundStorageNames,
+    storageMetadata,
+    moduleHashes,
+  );
+  return false;
+}
+
+async function appendRepeatSteps(
+  node: HostGraphRepeatNode,
+  rankCount: number,
+  catalog: ReadonlyMap<string, SemanticCatalogEntry>,
+  resourcesById: ReadonlyMap<string, ResourcePlan>,
+  options: NormalizedPreparationOptions,
+  startedAt: number,
+  steps: WgslKernelSequenceStep[],
+  counts: MutablePreparationCounts,
+  boundStorageNames: Set<string>,
+  storageMetadata: Record<string, WgslStorageBufferMetadata>,
+  moduleHashes: string[],
+): Promise<boolean> {
+  const iterationCount = safeNumber(
+    wireIntegerToBigInt(node.iterationCount),
+    `$.nodes.${node.nodeId}.iterationCount`,
+  );
+  const templates: PreparedRepeatBodyTemplate[] = [];
+  let usesNumericalStatus = false;
+  for (const bodyNode of node.body) {
+    ensurePreparationActive(startedAt, options);
+    const templateSteps: WgslKernelSequenceStep[] = [];
+    const templateCounts = emptyPreparationCounts();
+    const bodyUsesNumericalStatus = await appendExecutableNodeSteps(
+      bodyNode,
+      rankCount,
+      catalog,
+      resourcesById,
+      options,
+      startedAt,
+      templateSteps,
+      templateCounts,
+      boundStorageNames,
+      storageMetadata,
+      moduleHashes,
+    );
+    usesNumericalStatus ||= bodyUsesNumericalStatus;
+    templates.push(Object.freeze({
+      steps: Object.freeze(templateSteps),
+      counts: Object.freeze(templateCounts),
+    }));
+  }
+  for (let iteration = 0; iteration < iterationCount; iteration += 1) {
+    ensurePreparationActive(startedAt, options);
+    for (const template of templates) {
+      ensurePreparationActive(startedAt, options);
+      if (
+        steps.length + template.steps.length >
+        options.maxExpandedSteps
+      ) {
+        fail(
+          "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
+          "$.maxExpandedSteps",
+          `graph expands to more than ${options.maxExpandedSteps} WebGPU steps`,
+        );
+      }
+      steps.push(...template.steps);
+      addPreparationCounts(counts, template.counts);
+    }
+  }
+  return usesNumericalStatus;
+}
+
+function emptyPreparationCounts(): MutablePreparationCounts {
+  return {
+    dispatch: 0,
+    copy: 0,
+    materialization: 0,
+    event: 0,
+    reduction: 0,
+    replication: 0,
+  };
+}
+
+function addPreparationCounts(
+  destination: MutablePreparationCounts,
+  source: Readonly<MutablePreparationCounts>,
+): void {
+  destination.dispatch += source.dispatch;
+  destination.copy += source.copy;
+  destination.materialization += source.materialization;
+  destination.event += source.event;
+  destination.reduction += source.reduction;
+  destination.replication += source.replication;
 }
 
 /**
@@ -1616,6 +1777,7 @@ function createTrace(
     copyStepCount: prepared.copyStepCount,
     materializationCount: prepared.materializationCount,
     completedEventIds: state.eventIds,
+    completedRepeats: state.repeats,
     collectiveReductionStepCount:
       prepared.collectiveReductionStepCount,
     collectiveReplicationStepCount:

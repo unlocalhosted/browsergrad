@@ -30,7 +30,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified static DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, explicit fail-stop materialization, CPU oracle, and authority-bound portable WebGPU executor have exact f32/i32/u32 plus raw-u8 actual-device parity; dynamic control, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count repetition, explicit fail-stop materialization, CPU oracle, and authority-bound portable WebGPU executor have exact f32/i32/u32 plus raw-u8 actual-device parity; conditional/runtime-derived control, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every exit criterion for the declared gate profile is
 complete. Verification of a closed initial profile does not imply broader
@@ -40,25 +40,23 @@ dtype, layout, numerical, or backend coverage.
 
 The 90-minute build is no longer an engineering iteration loop:
 
-- `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed` is the
-  default compiler edit loop and routes changed files to owning tests.
+- `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed` is the default
+  compiler edit loop and routes changed files to owning tests.
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
-  exact build lock, both zero-import Worker bundles, and the strict matrix
-  authoring projection; it passes 100 files/802 tests in 16.52 seconds.
+  exact build lock, both zero-import Worker bundles, and the strict matrix authoring
+  projection; it passes 100 files/802 tests in 16.52 seconds.
 - The complete compiler unit suite passes 106 files/1,658 tests in 12.03 seconds.
-- The required native boundary is a single isolated prerequisite: 12 files/30
-  tests pass with nine explicit platform skips in 71.82 seconds. Every
-  behavioral native compile/run child uses the same no-shell, bounded-output,
-  process-group termination boundary as the production build executor.
-- The remaining 43 Clang-Wasm surface files/261 tests run in the parallel
-  compiler lane in 16.13 seconds. The complete compiler verifier, including
-  builds, native tests, four parallel lanes, architecture checks, and 1,658
-  compiler tests, passes in 114.23 seconds.
-- Cache-free LLVM/Clang builds exist only to mint clean-build and
-  reproducibility evidence. Their two jobs run concurrently and never replace
-  the focused or fast local paths.
-- A `dist`-rebuilding lane and its consumer use separate worktrees/output roots
-  when parallelized; read-only test lanes remain independently parallelizable.
+- The required native boundary is one isolated prerequisite: 13 files/34 tests
+  pass with nine platform skips in 78.87 seconds. Every behavioral native child
+  uses the production no-shell, bounded-output, process-group termination boundary.
+- The remaining 42 Clang-Wasm surface files/257 tests run in the parallel
+  compiler lane in 16.13 seconds. The complete verifier, including builds,
+  native tests, four parallel lanes, architecture checks, and 1,658 tests, passes
+  in 129.30 seconds under concurrent host load.
+- Cache-free LLVM/Clang builds only mint clean-build/reproducibility evidence.
+  Their two jobs run concurrently and never replace focused or fast local paths.
+- A `dist`-rebuilding lane and consumer use separate worktrees/output roots when
+  parallelized; read-only lanes remain independently parallelizable.
 
 An unavailable browser, native sanitizer, external approval, signer, or release
 authority is an explicit non-passing result. No parser, fixture, CPU reference,
@@ -70,11 +68,9 @@ The portable product runs a pinned CUDA-capable Clang/LibTooling extractor as
 Wasm inside a dedicated browser Worker. Docker and native Clang remain optional
 build/parity machinery and are not runtime dependencies. The controller:
 
-- verifies exact package-owned verifier and compiler Worker bytes before
-  constructing Blob Workers;
+- verifies exact package-owned verifier/compiler bytes before constructing Blob Workers;
 - mounts only canonical, package-matched VFS packs;
-- binds the exact profile, request, asset, ABI, invocation, result, and
-  semantic-candidate identities;
+- binds exact profile, request, asset, ABI, invocation, result, and candidate identities;
 - enforces bounded input, frontend work, memory, output, time, cancellation,
   diagnostics, and cleanup; and
 - keeps build, ABI, Worker execution, semantic lowering, backend execution,
@@ -184,19 +180,17 @@ exact-payload CPU/required-WebGPU convergence is no longer a blocker.
 
 1. A package-controlled production policy admits an externally controlled key
    and an externally issued exact-build statement for the exact build subject.
-2. A package-controlled production approval policy admits an externally
-   controlled reviewer key, and the package-owned approval verifier accepts an
-   externally issued decision over the exact current header-distribution
-   subject. Package-generated hashes, license text, signing material, or
-   signatures cannot self-approve redistribution.
-3. Run the implemented unified host operation against those exact external
-   responses so backend and final-release authority are minted in one process.
-   No serialized observation may substitute for an opaque authority, and the
-   synthetic composition fixture establishes no current production status.
+2. A production approval policy admits an externally controlled reviewer key,
+   and the package verifier accepts an external decision over the exact current
+   header distribution. Package-generated material cannot self-approve it.
+3. Run the unified host operation against those exact external responses so
+   backend/final-release authority is minted in one process. Serialized
+   observations and synthetic fixtures grant no production authority.
 
 Gate 7 remains incomplete: its separately authorized CPU and portable-WebGPU
-executors cover the closed static DAG only; dynamic control,
-transport/topology, worker meshes, and native systems remain unimplemented.
+executors cover the closed DAG plus fixed-count sequential repetition only;
+conditional or runtime-derived control, transport/topology, worker meshes, and
+native systems remain unimplemented.
 
 ## Purpose
 
@@ -753,10 +747,12 @@ The host graph represents observable work that cannot live inside one dispatch:
 allocations, binding, copies, dispatches, readback/materialization, events, and
 dependencies.
 
-Version 1 is a validated DAG. Cycles are illegal. Bounded repetition, dynamic
-launch, or conditional host control require explicit versioned node kinds and
-cancellation points rather than hidden emitter loops. The verifier performs
-resource lifetime and read/write hazard checks before execution.
+Version 1 is a validated DAG with an explicit version-1.4 fixed-count
+sequential-repeat node. Cycles are illegal. Dynamic launch, runtime-derived
+repetition, or conditional host control require additional explicit versioned
+node kinds and cancellation points rather than hidden emitter loops. The
+verifier performs resource lifetime and read/write hazard checks before
+execution.
 
 ## Frontend Contracts
 
@@ -2138,7 +2134,14 @@ dependents. Versions 1.0 and 1.1 retain their exact implicit-output behavior.
 Program version 1.3 adds unique `completion-after-dependencies` events. An
 event has no resource effect, timestamp, queue identity, or external wait
 authority; it is a named dependency milestone reported only with a successful
-whole-graph result. The
+whole-graph result. Program version 1.4 adds
+`fixed-count-sequential` repetition. Each repeat owns a nonempty bounded linear
+body containing only dispatch, all-reduce, and copy nodes and a positive
+artifact-fixed iteration count. Nested repeats, events, materialization,
+conditionals, and runtime-derived counts are rejected. The verifier requires
+globally unique top-level/body node IDs, applies the canonical resource effects
+and hazard checks to the aggregate body, and bounds both iterations and the
+expanded node count. The
 authority-bound `browsergrad.host-graph.cpu-reference@1` profile snapshots all
 rank-local inputs, executes dispatches, arbitrary-byte copies, and finite
 rank-ordered f32 or wrapping/exact 32-bit integer all-reduces in private
@@ -2154,7 +2157,14 @@ pairwise reductions followed by raw-word replication; and retains one private
 GPU buffer per bound rank/resource. The portable copy profile requires whole
 32-bit words but preserves dtype bits, including the required u8 case.
 Materialization selects terminal readback without adding a GPU dispatch.
-Completion events preserve topological ordering and add no GPU command. F32
+Completion events preserve topological ordering and add no GPU command. Fixed
+repeat bodies are lowered once through those same canonical lowerers, then
+their frozen steps are reused for bounded static expansion; preparation checks
+cancellation/time throughout expansion and enforces the step ceiling after
+each body node. Successful CPU/WebGPU results report the
+repeat node, exact iteration count, and body-node IDs only after whole-graph
+success. This grants no runtime branch, runtime loop-count, or dynamic-launch
+authority. F32
 collectives use a separately
 read back atomic numerical-status word and preserve CPU signed-zero min/max;
 i32 sum wraps explicitly and u32/integer min/max remains exact. Complete input
@@ -2164,10 +2174,11 @@ diagnostics, device-loss invalidation, cancellation/timeout stale-result
 suppression, and output publication after complete readback preserve the graph
 failure model. Required headed Chromium on Apple Metal 3 bit-matches the CPU
 reference for rank-ordered f32 sum, signed-zero f32 min, wrapping i32 sum,
-exact u32 max, and event-marked/materialized whole-allocation u8 copy, and
+exact u32 max, event-marked/materialized whole-allocation u8 copy, and three
+fixed repetitions of f32 sum, and
 separately proves non-finite f32 and lost-device refusal.
 
-No bounded conditional/repetition node, pipeline authority,
+No bounded conditional/runtime-derived-control node, pipeline authority,
 transport/topology adapter, worker mesh, native companion, or performance
 evidence exists yet, so Gate 7 remains `in progress`. Current events do not
 claim timestamps, external waits, or cross-queue/cross-worker synchronization.

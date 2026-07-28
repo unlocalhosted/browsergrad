@@ -26,6 +26,9 @@ import type {
   HostGraphDispatchNode,
   HostGraphEventNode,
   HostGraphMaterializeNode,
+  HostGraphRepeatBodyNode,
+  HostGraphRepeatCompletion,
+  HostGraphRepeatNode,
   HostGraphResource,
 } from "./model.js";
 
@@ -149,6 +152,7 @@ export interface HostGraphCpuExecutionResult {
   readonly failureModel: "fail-stop-no-partial-output-commit";
   readonly executedNodeIds: readonly string[];
   readonly completedEventIds: readonly string[];
+  readonly completedRepeats: readonly HostGraphRepeatCompletion[];
   readonly elementOperations: WireU64;
   readonly outputs: readonly HostGraphCpuOutputBinding[];
 }
@@ -160,6 +164,8 @@ export interface PreparedHostGraphCpu {
   readonly inputResourceIds: readonly string[];
   readonly outputResourceIds: readonly string[];
   readonly eventIds: readonly string[];
+  readonly repeats: readonly HostGraphRepeatCompletion[];
+  readonly expandedNodeCount: number;
   readonly elementOperations: bigint;
   readonly execute: (
     request: HostGraphCpuExecutionRequest,
@@ -224,12 +230,21 @@ interface EventPlan {
   readonly elementOperations: 0n;
 }
 
+interface RepeatPlan {
+  readonly kind: "repeat";
+  readonly nodeId: string;
+  readonly iterationCount: number;
+  readonly body: readonly ExecutablePlan[];
+  readonly elementOperations: bigint;
+}
+
+type ExecutablePlan = DispatchPlan | CollectivePlan | CopyPlan;
+
 type CpuNodePlan =
-  | DispatchPlan
-  | CollectivePlan
-  | CopyPlan
+  | ExecutablePlan
   | MaterializePlan
-  | EventPlan;
+  | EventPlan
+  | RepeatPlan;
 
 interface NativeUint8Slots {
   readonly buffer: ArrayBufferLike;
@@ -285,11 +300,14 @@ export async function prepareHostGraphCpu(
   );
   const largestCollectiveScratch = payload.program.nodes.reduce(
     (largest, node) => {
-      if (node.kind !== "all-reduce") return largest;
-      const resource = resources.get(node.resourceId);
-      if (resource === undefined) return largest;
-      const byteLength = wireIntegerToBigInt(resource.byteLength);
-      return byteLength > largest ? byteLength : largest;
+      const candidates = node.kind === "repeat" ? node.body : [node];
+      return candidates.reduce((bodyLargest, candidate) => {
+        if (candidate.kind !== "all-reduce") return bodyLargest;
+        const resource = resources.get(candidate.resourceId);
+        if (resource === undefined) return bodyLargest;
+        const byteLength = wireIntegerToBigInt(resource.byteLength);
+        return byteLength > bodyLargest ? byteLength : bodyLargest;
+      }, largest);
     },
     0n,
   );
@@ -319,21 +337,29 @@ export async function prepareHostGraphCpu(
         `prepared topological node ${nodeId} disappeared`,
       );
     }
-    const plan = node.kind === "dispatch"
-      ? await prepareDispatchPlan(
+    const plan = node.kind === "dispatch" ||
+      node.kind === "all-reduce" ||
+      node.kind === "copy"
+      ? await prepareExecutablePlan(
         node,
         catalog,
+        resources,
         rankCount,
         normalized,
         startedAt,
       )
-      : node.kind === "all-reduce"
-        ? prepareCollectivePlan(node, resources)
-        : node.kind === "copy"
-          ? prepareCopyPlan(node, resources, rankCount)
-          : node.kind === "materialize"
-            ? prepareMaterializePlan(node, resources)
-            : prepareEventPlan(node);
+      : node.kind === "materialize"
+        ? prepareMaterializePlan(node, resources)
+        : node.kind === "event"
+          ? prepareEventPlan(node)
+          : await prepareRepeatPlan(
+            node,
+            catalog,
+            resources,
+            rankCount,
+            normalized,
+            startedAt,
+          );
     elementOperations += plan.elementOperations;
     if (elementOperations > BigInt(normalized.maxElementOperations)) {
       fail(
@@ -368,6 +394,15 @@ export async function prepareHostGraphCpu(
   const executedNodeIds = Object.freeze(frozenPlans.map((plan) => plan.nodeId));
   const eventIds = Object.freeze(frozenPlans.flatMap((plan) =>
     plan.kind === "event" ? [plan.eventId] : []));
+  const repeats = Object.freeze(frozenPlans.flatMap((plan) =>
+    plan.kind === "repeat"
+      ? [Object.freeze({
+          nodeId: plan.nodeId,
+          iterationCount: encodeWireU64(BigInt(plan.iterationCount)),
+          bodyNodeIds: Object.freeze(plan.body.map((bodyPlan) =>
+            bodyPlan.nodeId)),
+        })]
+      : []));
 
   const execute = async (
     request: HostGraphCpuExecutionRequest,
@@ -418,6 +453,14 @@ export async function prepareHostGraphCpu(
           normalized.maxExecutionMs,
           captured.signal,
         );
+      } else if (plan.kind === "repeat") {
+        await executeRepeat(
+          plan,
+          rankResources,
+          executionStartedAt,
+          normalized.maxExecutionMs,
+          captured.signal,
+        );
       } else {
         ensureExecutionActive(
           executionStartedAt,
@@ -455,6 +498,7 @@ export async function prepareHostGraphCpu(
       failureModel: "fail-stop-no-partial-output-commit",
       executedNodeIds,
       completedEventIds: eventIds,
+      completedRepeats: repeats,
       elementOperations: encodeWireU64(elementOperations),
       outputs,
     });
@@ -471,8 +515,67 @@ export async function prepareHostGraphCpu(
       outputResources.map((resource) => resource.resourceId),
     ),
     eventIds,
+    repeats,
+    expandedNodeCount: preparedGraph.expandedNodeCount,
     elementOperations,
     execute,
+  });
+}
+
+async function prepareExecutablePlan(
+  node: HostGraphRepeatBodyNode,
+  catalog: ReadonlyMap<string, SemanticCatalogEntry>,
+  resources: ReadonlyMap<string, HostGraphResource>,
+  rankCount: number,
+  options: NormalizedPreparationOptions,
+  startedAt: number,
+): Promise<ExecutablePlan> {
+  return node.kind === "dispatch"
+    ? prepareDispatchPlan(
+      node,
+      catalog,
+      rankCount,
+      options,
+      startedAt,
+    )
+    : node.kind === "all-reduce"
+      ? prepareCollectivePlan(node, resources)
+      : prepareCopyPlan(node, resources, rankCount);
+}
+
+async function prepareRepeatPlan(
+  node: HostGraphRepeatNode,
+  catalog: ReadonlyMap<string, SemanticCatalogEntry>,
+  resources: ReadonlyMap<string, HostGraphResource>,
+  rankCount: number,
+  options: NormalizedPreparationOptions,
+  startedAt: number,
+): Promise<RepeatPlan> {
+  const body: ExecutablePlan[] = [];
+  let bodyElementOperations = 0n;
+  for (const bodyNode of node.body) {
+    ensurePreparationActive(startedAt, options);
+    const plan = await prepareExecutablePlan(
+      bodyNode,
+      catalog,
+      resources,
+      rankCount,
+      options,
+      startedAt,
+    );
+    body.push(plan);
+    bodyElementOperations += plan.elementOperations;
+  }
+  const iterationCount = safeNumber(
+    wireIntegerToBigInt(node.iterationCount),
+    `$.nodes.${node.nodeId}.iterationCount`,
+  );
+  return Object.freeze({
+    kind: "repeat",
+    nodeId: node.nodeId,
+    iterationCount,
+    body: Object.freeze(body),
+    elementOperations: bodyElementOperations * BigInt(iterationCount),
   });
 }
 
@@ -646,6 +749,47 @@ function prepareEventPlan(node: HostGraphEventNode): EventPlan {
     eventId: node.eventId,
     elementOperations: 0n,
   });
+}
+
+async function executeRepeat(
+  plan: RepeatPlan,
+  rankResources: RankResources,
+  startedAt: number,
+  maxExecutionMs: number,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  for (let iteration = 0; iteration < plan.iterationCount; iteration += 1) {
+    ensureExecutionActive(startedAt, maxExecutionMs, signal);
+    for (const bodyPlan of plan.body) {
+      ensureExecutionActive(startedAt, maxExecutionMs, signal);
+      if (bodyPlan.kind === "dispatch") {
+        executeDispatch(
+          bodyPlan,
+          rankResources,
+          startedAt,
+          maxExecutionMs,
+          signal,
+        );
+      } else if (bodyPlan.kind === "all-reduce") {
+        await executeAllReduce(
+          bodyPlan,
+          rankResources,
+          startedAt,
+          maxExecutionMs,
+          signal,
+        );
+      } else {
+        executeCopy(
+          bodyPlan,
+          rankResources,
+          startedAt,
+          maxExecutionMs,
+          signal,
+        );
+      }
+    }
+  }
+  ensureExecutionActive(startedAt, maxExecutionMs, signal);
 }
 
 function executeDispatch(

@@ -26,6 +26,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   events. Successful CPU/WebGPU traces report completed event IDs without
   adding element work, GPU commands, timestamps, queue fences, or external
   wait authority.
+- Host-graph program version 1.4 adds bounded fixed-count sequential
+  repetition over linear dispatch, all-reduce, and copy bodies. The WebGPU
+  backend lowers each body definition once through the existing canonical
+  lowerers, reuses frozen step templates for the exact verified count, enforces
+  preparation and expanded-step limits throughout expansion, and reports
+  completion only after whole-graph success.
 - Graph execution snapshots complete direct/unshared inputs, initializes
   private temporary/output storage deterministically, bounds expanded steps
   and aggregate host/GPU storage, verifies device limits, and publishes fresh
@@ -34,8 +40,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   and out-of-memory paths cannot commit partial caller-visible outputs.
 - Required headed-Chromium evidence on Apple Metal 3 bit-matches the semantic
   CPU graph oracle for rank-ordered f32 sum, signed-zero f32 min, wrapping i32
-  sum, exact u32 max, and exact u8 allocation copy, and separately rejects
-  non-finite f32 collectives.
+  sum, exact u32 max, exact u8 allocation copy, and three fixed repetitions of
+  f32 all-reduce, and separately rejects non-finite f32 collectives.
 - Semantic attention preparation consumes exact verified rank-4 f32 logical
   meaning plus an independently authorized online K/V-tile schedule. Generated
   WGSL cooperatively stages K/V rows, keeps one Q/output row private per lane,

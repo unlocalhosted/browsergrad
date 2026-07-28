@@ -53,6 +53,7 @@ const CASE_IDS = Object.freeze([
   "i32-wrapping-sum",
   "u8-whole-allocation-copy",
   "u32-exact-max",
+  "f32-fixed-repeat-sum",
 ]);
 const PRODUCER_VERSIONS = Object.freeze({
   "@unlocalhosted/browsergrad-kernels": __BG_KERNELS_VERSION__,
@@ -88,6 +89,7 @@ interface CaseObservation extends JsonObject {
   readonly copyStepCount: number;
   readonly materializationCount: number;
   readonly completedEventIds: readonly string[];
+  readonly completedRepeats: readonly JsonObject[];
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -152,6 +154,7 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
           u32Bytes([2, 5]),
         ],
       ),
+      prepareRepeatedCollectiveCase(),
     ]);
     artifactHash = await hashNamedComponents({
       suiteId: SUITE_ID,
@@ -244,6 +247,8 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         .toEqual(expected.executedNodeIds);
       expect(actual.trace.completedEventIds)
         .toEqual(expected.completedEventIds);
+      expect(actual.trace.completedRepeats)
+        .toEqual(expected.completedRepeats);
       completedCases.push(Object.freeze({
         caseId: preparedCase.caseId,
         artifactHash: preparedCase.artifactHash,
@@ -255,6 +260,7 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         copyStepCount: actual.trace.copyStepCount,
         materializationCount: actual.trace.materializationCount,
         completedEventIds: actual.trace.completedEventIds,
+        completedRepeats: actual.trace.completedRepeats,
         collectiveReductionStepCount:
           actual.trace.collectiveReductionStepCount,
         collectiveReplicationStepCount:
@@ -434,6 +440,33 @@ async function prepareRawCopyCase(): Promise<PreparedCase> {
   });
 }
 
+async function prepareRepeatedCollectiveCase(): Promise<PreparedCase> {
+  const caseId = "f32-fixed-repeat-sum";
+  const values = [f32Bytes([1, 2]), f32Bytes([3, 4])];
+  const graph = (await createVerifiedHostGraphArtifact(
+    repeatedCollectiveProgram(),
+    { kernelArtifacts: [], layoutArtifacts: [] },
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+    kernelArtifacts: [],
+    layoutArtifacts: [],
+  });
+  const inputs = Object.freeze(values.map((bytes, rank) =>
+    input(rank, bytes)));
+  return Object.freeze({
+    caseId,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: values.map((bytes) => Array.from(bytes)),
+    }),
+  });
+}
+
 function collectiveProgram(
   artifacts: VerifiedViewCopyArtifacts,
   dtype: "f32" | "i32" | "u32",
@@ -516,6 +549,54 @@ function rawCopyProgram(): HostGraphProgram {
         nodeId: "materialize-output",
         kind: "materialize",
         dependsOn: ["copy-complete-event"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
+function repeatedCollectiveProgram(): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 4 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire(2),
+    resources: [
+      resource("input", "input", "f32"),
+      resource("output", "output", "f32"),
+    ],
+    nodes: [
+      {
+        nodeId: "initialize",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "input",
+        destinationResourceId: "output",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "repeat-reduction",
+        kind: "repeat",
+        dependsOn: ["initialize"],
+        iterationCount: wire(3),
+        body: [{
+          nodeId: "reduce-body",
+          kind: "all-reduce",
+          dependsOn: [],
+          resourceId: "output",
+          reduction: "sum",
+          dtype: "f32",
+          numericalPolicy: "rank-order-f32",
+          participants: [wire(0), wire(1)],
+          result: "replicated-to-all-participants",
+        }],
+        mode: "fixed-count-sequential",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["repeat-reduction"],
         resourceId: "output",
         mode: "host-readback-after-graph-success",
       },

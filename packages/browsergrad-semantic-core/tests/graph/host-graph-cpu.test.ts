@@ -220,6 +220,54 @@ function eventfulRawCopyProgram(): HostGraphProgram {
   };
 }
 
+function repeatedCollectiveProgram(): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 4 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire("2"),
+    resources: [
+      resource("input", "input", "f32"),
+      resource("output", "output", "f32"),
+    ],
+    nodes: [
+      {
+        nodeId: "initialize",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "input",
+        destinationResourceId: "output",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "repeat-reduction",
+        kind: "repeat",
+        dependsOn: ["initialize"],
+        iterationCount: wire("3"),
+        body: [{
+          nodeId: "reduce-step",
+          kind: "all-reduce",
+          dependsOn: [],
+          resourceId: "output",
+          reduction: "sum",
+          dtype: "f32",
+          numericalPolicy: "rank-order-f32",
+          participants: [wire("0"), wire("1")],
+          result: "replicated-to-all-participants",
+        }],
+        mode: "fixed-count-sequential",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["repeat-reduction"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 async function verified(
   program: HostGraphProgram,
   artifacts: VerifiedViewCopyArtifacts,
@@ -287,6 +335,50 @@ function readU32(bytes: Uint8Array): number[] {
 }
 
 describe("host graph CPU reference", () => {
+  it("executes bounded repetition with cancellation points per iteration", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      repeatedCollectiveProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+    const result = await prepared.execute({
+      inputs: [
+        input(0, f32Bytes([1, 2])),
+        input(1, f32Bytes([3, 4])),
+      ],
+    });
+
+    expect(prepared.expandedNodeCount).toBe(5);
+    expect(prepared.elementOperations).toBe(28n);
+    expect(prepared.repeats).toEqual([{
+      nodeId: "repeat-reduction",
+      iterationCount: "3",
+      bodyNodeIds: ["reduce-step"],
+    }]);
+    expect(result.executedNodeIds).toEqual([
+      "initialize",
+      "repeat-reduction",
+      "materialize-output",
+    ]);
+    expect(result.completedRepeats).toEqual(prepared.repeats);
+    expect(result.outputs.map(({ bytes }) => readF32(bytes))).toEqual([
+      [16, 24],
+      [16, 24],
+    ]);
+
+    await expect(prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+      maxElementOperations: 27,
+    })).rejects.toMatchObject({
+      code: "BG-GRAPH-CPU-RESOURCE-LIMIT",
+      path: "$.maxElementOperations",
+    });
+  });
+
   it("reports completion events only with a successful whole-graph result", async () => {
     const graph = (await createVerifiedHostGraphArtifact(
       eventfulRawCopyProgram(),

@@ -13,7 +13,9 @@ import {
 import {
   HOST_GRAPH_ARTIFACT_SCHEMA,
   HOST_GRAPH_FAILURE_MODEL,
+  HOST_GRAPH_MAX_EXPANDED_NODES,
   HOST_GRAPH_MAX_RESOURCES,
+  HOST_GRAPH_MAX_REPEAT_ITERATIONS,
   HOST_GRAPH_MAX_TOTAL_RESOURCE_BYTES,
   createVerifiedHostGraphArtifact,
   decodeHostGraphArtifact,
@@ -226,6 +228,70 @@ function eventfulCopyProgram(): HostGraphProgram {
   };
 }
 
+function repeatedCollectiveProgram(): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 4 },
+    failureModel: HOST_GRAPH_FAILURE_MODEL,
+    rankCount: wire("2"),
+    resources: [
+      {
+        resourceId: "input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "f32",
+        byteLength: wire("8"),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "output",
+        role: "output",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "f32",
+        byteLength: wire("8"),
+        alignmentBytes: 4,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "initialize",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "input",
+        destinationResourceId: "output",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "repeat-reduction",
+        kind: "repeat",
+        dependsOn: ["initialize"],
+        iterationCount: wire("3"),
+        body: [{
+          nodeId: "reduce-step",
+          kind: "all-reduce",
+          dependsOn: [],
+          resourceId: "output",
+          reduction: "sum",
+          dtype: "f32",
+          numericalPolicy: "rank-order-f32",
+          participants: [wire("0"), wire("1")],
+          result: "replicated-to-all-participants",
+        }],
+        mode: "fixed-count-sequential",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["repeat-reduction"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 async function diagnostic(
   run: () => Promise<unknown> | unknown,
 ): Promise<SemanticSchemaError> {
@@ -259,6 +325,162 @@ function artifactsFor(artifacts: VerifiedViewCopyArtifacts) {
 }
 
 describe("host graph artifact", () => {
+  it("normalizes bounded fixed-count sequential repetition in version 1.4", async () => {
+    const constructed = await createVerifiedHostGraphArtifact(
+      repeatedCollectiveProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    );
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+
+    expect(payload.program.version).toEqual({ major: 1, minor: 4 });
+    expect(payload.program.nodes.find((node) => node.kind === "repeat"))
+      .toEqual({
+        nodeId: "repeat-reduction",
+        kind: "repeat",
+        dependsOn: ["initialize"],
+        iterationCount: "3",
+        body: [{
+          nodeId: "reduce-step",
+          kind: "all-reduce",
+          dependsOn: [],
+          resourceId: "output",
+          reduction: "sum",
+          dtype: "f32",
+          numericalPolicy: "rank-order-f32",
+          participants: ["0", "1"],
+          result: "replicated-to-all-participants",
+        }],
+        mode: "fixed-count-sequential",
+      });
+    expect(prepared).toMatchObject({
+      nodeCount: 3,
+      expandedNodeCount: 5,
+      copyCount: 1,
+      collectiveCount: 3,
+      materializationCount: 1,
+      repeatCount: 1,
+      repeatIterationCount: 3,
+      topologicalNodeIds: [
+        "initialize",
+        "repeat-reduction",
+        "materialize-output",
+      ],
+    });
+  });
+
+  it("rejects forged repeat versions, modes, bounds, and body control", async () => {
+    const oldVersion = clone(repeatedCollectiveProgram());
+    oldVersion.version.minor = 3;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      oldVersion,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const mode = clone(repeatedCollectiveProgram());
+    const modeNode = mode.nodes.find((node) => node.kind === "repeat");
+    if (modeNode?.kind !== "repeat") throw new Error("missing repeat node");
+    modeNode.mode = "while" as typeof modeNode.mode;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      mode,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const zero = clone(repeatedCollectiveProgram());
+    const zeroNode = zero.nodes.find((node) => node.kind === "repeat");
+    if (zeroNode?.kind !== "repeat") throw new Error("missing repeat node");
+    zeroNode.iterationCount = wire("0");
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      zero,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidArtifact);
+
+    const excessive = clone(repeatedCollectiveProgram());
+    const excessiveNode = excessive.nodes.find((node) =>
+      node.kind === "repeat");
+    if (excessiveNode?.kind !== "repeat") {
+      throw new Error("missing repeat node");
+    }
+    excessiveNode.iterationCount = wire(String(
+      HOST_GRAPH_MAX_REPEAT_ITERATIONS + 1,
+    ));
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      excessive,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.resourceLimit);
+
+    const nonlinear = clone(repeatedCollectiveProgram());
+    const nonlinearNode = nonlinear.nodes.find((node) =>
+      node.kind === "repeat");
+    if (nonlinearNode?.kind !== "repeat") {
+      throw new Error("missing repeat node");
+    }
+    nonlinearNode.body.push({
+      nodeId: "copy-step",
+      kind: "copy",
+      dependsOn: [],
+      sourceResourceId: "input",
+      destinationResourceId: "output",
+      mode: "whole-allocation-bytes-per-rank",
+    });
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      nonlinear,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidAccess);
+
+    const nestedControl = clone(repeatedCollectiveProgram());
+    const nestedNode = nestedControl.nodes.find((node) =>
+      node.kind === "repeat");
+    if (nestedNode?.kind !== "repeat") throw new Error("missing repeat node");
+    nestedNode.body[0] = {
+      nodeId: "nested-event",
+      kind: "event",
+      dependsOn: [],
+      eventId: "nested",
+      mode: "completion-after-dependencies",
+    } as unknown as typeof nestedNode.body[number];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      nestedControl,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const duplicateNodeId = clone(repeatedCollectiveProgram());
+    const duplicateNode = duplicateNodeId.nodes.find((node) =>
+      node.kind === "repeat");
+    if (duplicateNode?.kind !== "repeat") {
+      throw new Error("missing repeat node");
+    }
+    duplicateNode.body[0]!.nodeId = "initialize";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      duplicateNodeId,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.duplicateId);
+
+    const expansion = clone(repeatedCollectiveProgram());
+    const expansionNode = expansion.nodes.find((node) =>
+      node.kind === "repeat");
+    if (expansionNode?.kind !== "repeat") {
+      throw new Error("missing repeat node");
+    }
+    expansionNode.iterationCount = wire(String(
+      HOST_GRAPH_MAX_REPEAT_ITERATIONS,
+    ));
+    expansionNode.body = Array.from({ length: 16 }, (_, index) => ({
+      nodeId: `copy-step-${index}`,
+      kind: "copy" as const,
+      dependsOn: index === 0 ? [] : [`copy-step-${index - 1}`],
+      sourceResourceId: "input",
+      destinationResourceId: "output",
+      mode: "whole-allocation-bytes-per-rank" as const,
+    }));
+    expect(HOST_GRAPH_MAX_REPEAT_ITERATIONS * expansionNode.body.length)
+      .toBe(HOST_GRAPH_MAX_EXPANDED_NODES);
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      expansion,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.resourceLimit);
+  });
+
   it("normalizes dependency-ordered completion events in version 1.3", async () => {
     const constructed = await createVerifiedHostGraphArtifact(
       eventfulCopyProgram(),
@@ -502,7 +724,7 @@ describe("host graph artifact", () => {
 
   it("rejects copy version, mode, resource, dtype, and hazard drift", async () => {
     const future = clone(copyProgram());
-    future.version.minor = 4 as typeof future.version.minor;
+    future.version.minor = 5 as typeof future.version.minor;
     expect((await diagnostic(() => createVerifiedHostGraphArtifact(
       future,
       { kernelArtifacts: [], layoutArtifacts: [] },

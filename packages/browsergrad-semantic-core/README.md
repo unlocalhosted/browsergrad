@@ -115,6 +115,13 @@ Version 1.3 adds unique `completion-after-dependencies` events. Events carry
 no resource effect, timing value, queue identity, or external wait authority;
 they are dependency-ordered completion markers reported only with a successful
 whole-graph result.
+Version 1.4 adds fixed-count sequential repetition. A repeat body is a
+nonempty, bounded linear sequence of dispatch, all-reduce, and copy nodes,
+with a positive iteration count fixed in the verified artifact. Nested
+repetition, events, materialization, conditionals, and runtime-derived counts
+are rejected. Verification applies the same resource effects and hazard rules
+to the aggregate body, bounds both iterations and expanded nodes, and requires
+all top-level and body node IDs to be globally unique.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -138,6 +145,10 @@ complete graph succeeds. Version-1.2 results are selected only by verified
 materialization nodes; the node adds no element work and preserves the
 fail-stop publication point. Version-1.3 events likewise add no element work;
 completed event IDs are returned only after every later node also succeeds.
+Version-1.4 repeats execute the exact body sequentially for every fixed
+iteration, check cancellation and time at iteration and body-node boundaries,
+charge expanded element work before admission, and report completion only with
+the successful whole-graph result.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -148,9 +159,10 @@ The semantic graph itself grants no execution authority, and its CPU reference
 does not imply device execution. Compiler owns the first concrete producer: it
 lowers one or more opaque prepared view-copy bindings into a verified linear
 host graph with derived intermediate resources. Kernels separately owns the
-authority-bound `browsergrad.host-graph.webgpu@1` static-DAG adapter and its
+authority-bound `browsergrad.host-graph.webgpu@1` DAG/fixed-repeat adapter and its
 required actual-device evidence. Neither adapter grants transport, topology,
-retries, event timestamps or external waits, dynamic control, worker-mesh,
+retries, event timestamps or external waits, conditional or runtime-derived
+control, worker-mesh,
 native-companion, performance, or release authority.
 
 Frontends construct the operation through one `/kernel` sink rather than
