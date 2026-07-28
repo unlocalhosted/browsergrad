@@ -1,10 +1,11 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
+
+import { runNativeTestProcess } from "./cpp_cute_browser_native_test_harness.js";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const extractorRoot = join(scriptRoot, "extractor");
@@ -26,19 +27,21 @@ interface NativeClangToolchain {
   readonly llvmLibrary: string;
 }
 
-function discoverNativeClangToolchain(): NativeClangToolchain | undefined {
+async function discoverNativeClangToolchain(): Promise<NativeClangToolchain | undefined> {
   if (llvmConfig === undefined) return undefined;
-  const query = (argument: string): string | undefined => {
-    const result = spawnSync(llvmConfig, [argument], {
+  const query = async (argument: string): Promise<string | undefined> => {
+    const result = await runNativeTestProcess(llvmConfig, [argument], {
       encoding: "utf8",
       timeout: 10_000,
     });
     return result.status === 0 ? result.stdout.trim() : undefined;
   };
-  const bindir = query("--bindir");
-  const includeDirectory = query("--includedir");
-  const libraryDirectory = query("--libdir");
-  const version = query("--version");
+  const [bindir, includeDirectory, libraryDirectory, version] = await Promise.all([
+    query("--bindir"),
+    query("--includedir"),
+    query("--libdir"),
+    query("--version"),
+  ]);
   if (bindir === undefined || includeDirectory === undefined ||
       libraryDirectory === undefined || version !== expectedClangVersion) {
     return undefined;
@@ -58,14 +61,14 @@ function discoverNativeClangToolchain(): NativeClangToolchain | undefined {
   };
 }
 
-const toolchain = discoverNativeClangToolchain();
+const toolchain = await discoverNativeClangToolchain();
 
-function compileAndRun(): void {
+async function compileAndRun(): Promise<void> {
   if (toolchain === undefined) throw new Error("Clang development toolchain unavailable");
   const workingDirectory = mkdtempSync(join(tmpdir(), "browsergrad-clang-pass-"));
   const executable = join(workingDirectory, "clang-pass-native-test");
   try {
-    const compilation = spawnSync(toolchain.compiler, [
+    const compilation = await runNativeTestProcess(toolchain.compiler, [
       "-std=c++20",
       "-O1",
       "-Wall",
@@ -90,7 +93,7 @@ function compileAndRun(): void {
     expect(compilation.error).toBeUndefined();
     expect(compilation.status, compilation.stderr).toBe(0);
 
-    const execution = spawnSync(executable, [], {
+    const execution = await runNativeTestProcess(executable, [], {
       encoding: "utf8",
       timeout: 60_000,
     });

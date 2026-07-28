@@ -1,7 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
@@ -11,6 +10,7 @@ import {
   nativeCompiler as compiler,
   nativeCompilerIsClang,
   nativeCompilerUnavailableUnlessOptional,
+  runNativeTestProcess,
 } from "./cpp_cute_browser_native_test_harness.js";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
@@ -20,7 +20,7 @@ const implementationSource = join(
   "extractor",
   "BrowserGradCppCuteCanonicalJson.cpp",
 );
-function compileAndRun(extraFlags: readonly string[]): void {
+async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
   if (compiler === undefined) throw new Error("native C++ compiler unavailable");
   const workingDirectory = mkdtempSync(join(tmpdir(), "browsergrad-canonical-json-"));
   const executable = join(workingDirectory, "canonical-json-native-test");
@@ -32,7 +32,7 @@ function compileAndRun(extraFlags: readonly string[]): void {
       nested: [{ maximum: Number.MAX_SAFE_INTEGER, minimum: Number.MIN_SAFE_INTEGER }],
       unicode: ["e\u0301", "é", "😀", "\ue000"],
     }));
-    const compilation = spawnSync(compiler, [
+    const compilation = await runNativeTestProcess(compiler, [
       "-std=c++20",
       "-O2",
       "-Wall",
@@ -52,7 +52,7 @@ function compileAndRun(extraFlags: readonly string[]): void {
     expect(compilation.error).toBeUndefined();
     expect(compilation.status, compilation.stderr).toBe(0);
 
-    const execution = spawnSync(executable, [fixturePath], {
+    const execution = await runNativeTestProcess(executable, [fixturePath], {
       encoding: "utf8",
       timeout: 30_000,
       env: {

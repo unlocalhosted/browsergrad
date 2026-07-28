@@ -1,7 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -52,6 +51,7 @@ import {
   nativeCompiler as compiler,
   nativeCompilerIsClang,
   nativeCompilerUnavailableUnlessOptional,
+  runNativeTestProcess,
 } from "./cpp_cute_browser_native_test_harness.js";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
@@ -307,7 +307,7 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
   const workingDirectory = mkdtempSync(join(tmpdir(), "browsergrad-compile-session-"));
   const executable = join(workingDirectory, "compile-session-native-test");
   try {
-    const compilation = spawnSync(compiler, [
+    const compilation = await runNativeTestProcess(compiler, [
       "-std=c++20", "-O1", "-Wall", "-Wextra", "-Wpedantic", "-Werror",
       "-fno-omit-frame-pointer", ...extraFlags,
       nativeSource,
@@ -334,7 +334,7 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
       const fixturePath = join(workingDirectory, `${testCase.name}.frame`);
       const artifactPath = join(workingDirectory, `${testCase.name}.artifact.json`);
       writeFileSync(fixturePath, testCase.bytes);
-      const execution = spawnSync(executable, [
+      const execution = await runNativeTestProcess(executable, [
         fixturePath,
         artifactPath,
         "success",
@@ -366,7 +366,7 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
         expect(binding.inputClosureSha256).toMatch(/^[0-9a-f]{64}$/u);
         for (const producerMode of ["semantic-failure", "surface-divergence"] as const) {
           const rejectedArtifactPath = join(workingDirectory, `${producerMode}.artifact.json`);
-          const rejectedExecution = spawnSync(executable, [
+          const rejectedExecution = await runNativeTestProcess(executable, [
             fixturePath,
             rejectedArtifactPath,
             producerMode,
@@ -405,7 +405,7 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
         }
         for (const producerMode of ["layout-drift", "content-drift", "invalid-utf8"] as const) {
           const hostileArtifactPath = join(workingDirectory, `${producerMode}.artifact.json`);
-          const hostile = spawnSync(executable, [
+          const hostile = await runNativeTestProcess(executable, [
             fixturePath,
             hostileArtifactPath,
             producerMode,
@@ -430,7 +430,7 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
       viewCopyFramePath,
       frame(viewCopyFixture.profile, viewCopyFixture.request, viewCopyFixture.snapshots),
     );
-    const viewCopyExecution = spawnSync(executable, [
+    const viewCopyExecution = await runNativeTestProcess(executable, [
       viewCopyFramePath,
       viewCopyArtifactPath,
       "success",
@@ -483,7 +483,7 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
       workingDirectory,
       "view-copy-semantic-failure.artifact.json",
     );
-    const rejectedViewCopy = spawnSync(executable, [
+    const rejectedViewCopy = await runNativeTestProcess(executable, [
       viewCopyFramePath,
       rejectedViewCopyArtifactPath,
       "view-copy-semantic-failure",
@@ -522,7 +522,7 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
         workingDirectory,
         `${producerMode}.artifact.json`,
       );
-      const hostile = spawnSync(executable, [
+      const hostile = await runNativeTestProcess(executable, [
         viewCopyFramePath,
         hostileArtifactPath,
         producerMode,

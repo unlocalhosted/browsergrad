@@ -28,7 +28,10 @@
     "scripts/cpp_cute_browser_build/cpp_cute_browser_wasm_review.mjs",
     "scripts/cpp_cute_browser_build/cpp_cute_browser_wasm_review.d.mts",
     "scripts/cpp_cute_browser_build/*.test.ts",
-    "scripts/cpp_cute_browser_build/vitest.config.ts"
+    "scripts/cpp_cute_browser_build/vitest.config.ts",
+    "scripts/cpp_cute_browser_build/vitest.fast.config.ts",
+    "scripts/cpp_cute_browser_build/vitest.native.config.ts",
+    "scripts/cpp_cute_browser_build/vitest.surface.config.ts"
   ],
   "exclude": ["dist", "node_modules"]
 }

@@ -1,7 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -16,6 +15,7 @@ import {
   nativeCompiler as compiler,
   nativeCompilerIsClang,
   nativeCompilerUnavailableUnlessOptional,
+  runNativeTestProcess,
 } from "./cpp_cute_browser_native_test_harness.js";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
@@ -29,17 +29,17 @@ async function canonicalArtifactFixtureBytes(): Promise<Uint8Array> {
   return bytes;
 }
 
-function compileAndRun(
+async function compileAndRun(
   extraFlags: readonly string[],
   artifactBytes: Uint8Array,
-): void {
+): Promise<void> {
   if (compiler === undefined) throw new Error("native C++ compiler unavailable");
   const workingDirectory = mkdtempSync(join(tmpdir(), "browsergrad-runtime-"));
   const executable = join(workingDirectory, "runtime-native-test");
   const artifactPath = join(workingDirectory, "canonical-artifact-v3.json");
   try {
     writeFileSync(artifactPath, artifactBytes);
-    const compilation = spawnSync(compiler, [
+    const compilation = await runNativeTestProcess(compiler, [
       "-std=c++20",
       "-O2",
       "-Wall",
@@ -58,7 +58,7 @@ function compileAndRun(
     expect(compilation.error).toBeUndefined();
     expect(compilation.status, compilation.stderr).toBe(0);
 
-    const execution = spawnSync(executable, [artifactPath], {
+    const execution = await runNativeTestProcess(executable, [artifactPath], {
       encoding: "utf8",
       timeout: 30_000,
       env: {

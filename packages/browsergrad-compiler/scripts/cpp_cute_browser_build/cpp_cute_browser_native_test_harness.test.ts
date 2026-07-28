@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   resolveNativeCompiler,
+  runNativeTestProcess,
 } from "./cpp_cute_browser_native_test_harness.js";
 
 describe("native C++ test harness compiler discovery", () => {
@@ -76,5 +77,22 @@ describe("native C++ test harness compiler discovery", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("bounds native process trees through the shared no-shell process boundary", async () => {
+    const startedAt = performance.now();
+    const result = await runNativeTestProcess(process.execPath, [
+      "-e",
+      "require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'inherit'});setInterval(()=>{},1000)",
+    ], { timeout: 25 });
+
+    expect(result).toMatchObject({
+      status: null,
+      signal: null,
+      stdout: "",
+    });
+    expect(result.error).toMatchObject({ reason: "timeout" });
+    expect(result.stderr).toContain("exceeded 25 milliseconds");
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
   });
 });

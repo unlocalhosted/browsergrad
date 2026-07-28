@@ -19,11 +19,13 @@ const EXPECTED_INVOCATIONS = [
   "pnpm --dir ../.. run architecture:check",
   "pnpm --dir ../.. --filter @unlocalhosted/browsergrad-kernels run build",
   "pnpm run build",
+  "pnpm run test:browser-clang-wasm-build-plan:check",
+  "pnpm run test:browser-clang-wasm-build-plan:native",
   "pnpm run typecheck",
   "pnpm run lint",
   "pnpm run architecture:check",
   "pnpm run test:aot-docker-shell:run",
-  "pnpm run test:browser-clang-wasm-build-plan:run",
+  "pnpm run test:browser-clang-wasm-build-plan:surface",
   "pnpm run test",
   "pnpm run test:synthetic-input:run",
   "pnpm run test:source-normalizer",
@@ -37,7 +39,7 @@ const EXPECTED_INVOCATIONS = [
 ];
 
 describe("verify:compiler bounded runner", () => {
-  it("covers every former serial command exactly once in one build chain and four lanes", () => {
+  it("covers every verification command exactly once with native Clang isolated", () => {
     const plan = validateVerifyCompilerPlan(createVerifyCompilerPlan());
     const commands = allCommands(plan);
 
@@ -46,6 +48,8 @@ describe("verify:compiler bounded runner", () => {
       "root-architecture",
       "kernels-build",
       "compiler-build",
+      "clang-wasm-build-plan-check",
+      "clang-wasm-native-tests",
     ]);
     expect(plan.lanes.map((lane) => lane.id)).toEqual([
       "static-analysis",
@@ -58,6 +62,9 @@ describe("verify:compiler bounded runner", () => {
     expect(plan.lanes.find((lane) => lane.id === "docker-shell")?.commands.map(
       (command) => command.id,
     )).toEqual(["docker-shell-tests"]);
+    expect(plan.lanes.find((lane) => lane.id === "compiler-tests")?.commands.map(
+      (command) => command.id,
+    )).toEqual(["clang-wasm-surface-tests", "compiler-tests"]);
   });
 
   it("rejects duplicate command ids, invocations, lanes, and excess concurrency", () => {
@@ -78,6 +85,22 @@ describe("verify:compiler bounded runner", () => {
     const excessConcurrency = mutablePlan();
     excessConcurrency.maximumConcurrentLanes = 5;
     expect(() => validateVerifyCompilerPlan(excessConcurrency)).toThrow(/between one and four/u);
+
+    const nativeLane = mutablePlan();
+    const nativeCommand = nativeLane.prerequisites.pop()!;
+    nativeLane.lanes[0]!.commands.push(nativeCommand);
+    expect(() => validateVerifyCompilerPlan(nativeLane))
+      .toThrow(/native Clang verification must remain an isolated serial prerequisite/u);
+
+    const misplacedSurface = mutablePlan();
+    const compilerLane = misplacedSurface.lanes.find((lane) => lane.id === "compiler-tests")!;
+    const surfaceCommandIndex = compilerLane.commands.findIndex(
+      (command) => command.id === "clang-wasm-surface-tests",
+    );
+    const [surfaceCommand] = compilerLane.commands.splice(surfaceCommandIndex, 1);
+    misplacedSurface.lanes[0]!.commands.push(surfaceCommand!);
+    expect(() => validateVerifyCompilerPlan(misplacedSurface))
+      .toThrow(/non-native Clang-Wasm verification must remain in the compiler-test lane/u);
   });
 
   it("keeps prerequisites serial, starts four lanes together, and serializes each lane", async () => {
@@ -103,6 +126,10 @@ describe("verify:compiler bounded runner", () => {
       .toBeLessThan(intervals.get("kernels-build")!.start);
     expect(intervals.get("kernels-build")!.finish)
       .toBeLessThan(intervals.get("compiler-build")!.start);
+    expect(intervals.get("compiler-build")!.finish)
+      .toBeLessThan(intervals.get("clang-wasm-build-plan-check")!.start);
+    expect(intervals.get("clang-wasm-build-plan-check")!.finish)
+      .toBeLessThan(intervals.get("clang-wasm-native-tests")!.start);
     for (const lane of createVerifyCompilerPlan().lanes) {
       for (let index = 1; index < lane.commands.length; index++) {
         const previous = lane.commands[index - 1]!;
@@ -120,7 +147,13 @@ describe("verify:compiler bounded runner", () => {
     const execution = executeVerifyCompilerPlan(createVerifyCompilerPlan(), {
       executeCommand: async (command, { signal }) => {
         started.push(command.id);
-        if (["root-architecture", "kernels-build", "compiler-build"].includes(command.id)) return;
+        if ([
+          "root-architecture",
+          "kernels-build",
+          "compiler-build",
+          "clang-wasm-build-plan-check",
+          "clang-wasm-native-tests",
+        ].includes(command.id)) return;
         await new Promise<void>((resolve, reject) => {
           let settled = false;
           const onAbort = () => {
@@ -152,13 +185,15 @@ describe("verify:compiler bounded runner", () => {
       "root-architecture",
       "kernels-build",
       "compiler-build",
+      "clang-wasm-build-plan-check",
+      "clang-wasm-native-tests",
       "compiler-typecheck",
       "docker-shell-tests",
-      "clang-wasm-build-plan-tests",
+      "clang-wasm-surface-tests",
       "synthetic-input",
     ]);
     expect(cancelled.sort()).toEqual([
-      "clang-wasm-build-plan-tests",
+      "clang-wasm-surface-tests",
       "compiler-typecheck",
       "synthetic-input",
     ]);
@@ -261,13 +296,19 @@ describe("verify:compiler bounded runner", () => {
       signal: controller.signal,
       executeCommand: async (command, { signal }) => {
         started.push(command.id);
-        if (["root-architecture", "kernels-build", "compiler-build"].includes(command.id)) return;
+        if ([
+          "root-architecture",
+          "kernels-build",
+          "compiler-build",
+          "clang-wasm-build-plan-check",
+          "clang-wasm-native-tests",
+        ].includes(command.id)) return;
         await new Promise<void>((_resolve, reject) => {
           signal.addEventListener("abort", () => {
             observedReasons.push(signal.reason);
             reject(signal.reason);
           }, { once: true });
-          if (started.length === 7) {
+          if (started.length === 9) {
             queueMicrotask(() => controller.abort(new VerifyCompilerSignalError("SIGTERM")));
           }
         });

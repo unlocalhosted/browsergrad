@@ -57,6 +57,16 @@ export function createVerifyCompilerPlan() {
         "build",
       ),
       command("compiler-build", "run", "build"),
+      command(
+        "clang-wasm-build-plan-check",
+        "run",
+        "test:browser-clang-wasm-build-plan:check",
+      ),
+      command(
+        "clang-wasm-native-tests",
+        "run",
+        "test:browser-clang-wasm-build-plan:native",
+      ),
     ]),
     lanes: Object.freeze([
       lane("static-analysis", [
@@ -69,9 +79,9 @@ export function createVerifyCompilerPlan() {
       ]),
       lane("compiler-tests", [
         command(
-          "clang-wasm-build-plan-tests",
+          "clang-wasm-surface-tests",
           "run",
-          "test:browser-clang-wasm-build-plan:run",
+          "test:browser-clang-wasm-build-plan:surface",
         ),
         command("compiler-tests", "run", "test"),
       ]),
@@ -163,6 +173,23 @@ export function validateVerifyCompilerPlan(value) {
     lane.commands.some((command) => command.id === "docker-shell-tests"));
   if (dockerLane === undefined || dockerLane.commands.length !== 1) {
     throw new TypeError("Docker-shell verification must remain isolated in its own lane");
+  }
+  const nativePrerequisite = plan.prerequisites.find(
+    (command) => command.id === "clang-wasm-native-tests",
+  );
+  if (nativePrerequisite === undefined ||
+      plan.lanes.some((lane) =>
+        lane.commands.some((command) => command.id === "clang-wasm-native-tests"))) {
+    throw new TypeError(
+      "native Clang verification must remain an isolated serial prerequisite",
+    );
+  }
+  const surfaceLane = plan.lanes.find((lane) =>
+    lane.commands.some((command) => command.id === "clang-wasm-surface-tests"));
+  if (surfaceLane?.id !== "compiler-tests") {
+    throw new TypeError(
+      "non-native Clang-Wasm verification must remain in the compiler-test lane",
+    );
   }
   return plan;
 }

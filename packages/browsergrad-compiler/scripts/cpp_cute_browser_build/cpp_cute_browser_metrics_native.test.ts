@@ -1,7 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -10,16 +9,17 @@ import {
   nativeCompiler as compiler,
   nativeCompilerIsClang,
   nativeCompilerUnavailableUnlessOptional,
+  runNativeTestProcess,
 } from "./cpp_cute_browser_native_test_harness.js";
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const nativeSource = join(scriptRoot, "cpp_cute_browser_metrics_native_test.cpp");
-function compileAndRun(extraFlags: readonly string[]): void {
+async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
   if (compiler === undefined) throw new Error("native C++ compiler unavailable");
   const workingDirectory = mkdtempSync(join(tmpdir(), "browsergrad-metrics-"));
   const executable = join(workingDirectory, "metrics-native-test");
   try {
-    const compilation = spawnSync(compiler, [
+    const compilation = await runNativeTestProcess(compiler, [
       "-std=c++20",
       "-O2",
       "-Wall",
@@ -38,7 +38,7 @@ function compileAndRun(extraFlags: readonly string[]): void {
     expect(compilation.error).toBeUndefined();
     expect(compilation.status, compilation.stderr).toBe(0);
 
-    const execution = spawnSync(executable, [], {
+    const execution = await runNativeTestProcess(executable, [], {
       encoding: "utf8",
       timeout: 30_000,
       env: {
