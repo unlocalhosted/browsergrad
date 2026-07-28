@@ -105,15 +105,34 @@ export interface HostGraphInputPredicate extends JsonObject {
   readonly mode: "u32-nonzero";
 }
 
-export interface HostGraphConditionalNode extends JsonObject {
+export interface HostGraphRuntimeControlPredicate extends JsonObject {
+  readonly controlId: string;
+  readonly mode: "u32-nonzero";
+}
+
+interface HostGraphConditionalNodeBase extends JsonObject {
   readonly nodeId: string;
   readonly kind: "conditional";
   readonly dependsOn: readonly string[];
-  readonly predicate: HostGraphInputPredicate;
   readonly thenBody: readonly HostGraphConditionalBodyNode[];
   readonly elseBody: readonly HostGraphConditionalBodyNode[];
+}
+
+export interface HostGraphInputConditionalNode
+  extends HostGraphConditionalNodeBase {
+  readonly predicate: HostGraphInputPredicate;
   readonly mode: "input-u32-branch-sequential";
 }
+
+export interface HostGraphRuntimeControlConditionalNode
+  extends HostGraphConditionalNodeBase {
+  readonly predicate: HostGraphRuntimeControlPredicate;
+  readonly mode: "runtime-u32-branch-sequential";
+}
+
+export type HostGraphConditionalNode =
+  | HostGraphInputConditionalNode
+  | HostGraphRuntimeControlConditionalNode;
 
 export interface HostGraphConditionalCompletion extends JsonObject {
   readonly nodeId: string;
@@ -138,7 +157,7 @@ export interface HostGraphProgram extends JsonObject {
   readonly kind: "host-graph";
   readonly version: {
     readonly major: 1;
-    readonly minor: 0 | 1 | 2 | 3 | 4 | 5;
+    readonly minor: 0 | 1 | 2 | 3 | 4 | 5 | 6;
   };
   readonly failureModel: typeof HOST_GRAPH_FAILURE_MODEL;
   readonly rankCount: WireU64;

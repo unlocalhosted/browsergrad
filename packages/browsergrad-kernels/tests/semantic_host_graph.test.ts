@@ -344,6 +344,27 @@ function conditionalRawCopyProgram(): HostGraphProgram {
   };
 }
 
+function runtimeConditionalRawCopyProgram(): HostGraphProgram {
+  const base = conditionalRawCopyProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 6 },
+    resources: base.resources.filter((resource) =>
+      resource.resourceId !== "predicate"),
+    nodes: base.nodes.map((node) =>
+      node.kind === "conditional"
+        ? {
+            ...node,
+            predicate: {
+              controlId: "choose",
+              mode: "u32-nonzero" as const,
+            },
+            mode: "runtime-u32-branch-sequential" as const,
+          }
+        : node),
+  };
+}
+
 async function verified(
   program: HostGraphProgram,
   artifacts: VerifiedViewCopyArtifacts,
@@ -391,6 +412,29 @@ describe("semantic host-graph WebGPU preparation", () => {
       plannedTransientGpuBytes: "32",
       plannedTransientHostBytes: "60",
       plannedTransientWorkingSetBytes: "92",
+    });
+    expect(prepared.wgslModuleHashes).toHaveLength(1);
+  });
+
+  it("pre-lowers version-1.6 runtime control through the same branch path", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      runtimeConditionalRawCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+
+    expect(prepared).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 2,
+      expandedNodeCount: 2,
+      expandedStepCount: 1,
+      copyStepCount: 1,
+      conditionalCount: 1,
+      conditionalNodeIds: ["choose-output"],
+      runtimeControlIds: ["choose"],
     });
     expect(prepared.wgslModuleHashes).toHaveLength(1);
   });
@@ -641,6 +685,57 @@ describe("semantic host-graph WebGPU preparation", () => {
 });
 
 describe("semantic host-graph WebGPU execution admission", () => {
+  it("rejects missing, duplicate, unknown, and out-of-range controls before device access", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      runtimeConditionalRawCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+    const inputs = [
+      {
+        rank: wire("0"),
+        resourceId: "then-input",
+        bytes: new Uint8Array(8),
+      },
+      {
+        rank: wire("0"),
+        resourceId: "else-input",
+        bytes: new Uint8Array(8),
+      },
+    ];
+    await expect(runSemanticHostGraphWebGpu(
+      NO_DEVICE,
+      prepared,
+      { inputs: null as unknown as typeof inputs },
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-INVALID-BINDING",
+      path: "$.request.controls",
+    });
+    for (const controls of [
+      undefined,
+      [
+        { controlId: "choose", value: wire("0") },
+        { controlId: "choose", value: wire("1") },
+      ],
+      [{ controlId: "other", value: wire("0") }],
+      [{ controlId: "choose", value: wire("4294967296") }],
+    ]) {
+      await expect(runSemanticHostGraphWebGpu(
+        NO_DEVICE,
+        prepared,
+        {
+          inputs,
+          ...(controls === undefined ? {} : { controls }),
+        },
+      )).rejects.toMatchObject({
+        code: "BG-WEBGPU-GRAPH-INVALID-BINDING",
+      });
+    }
+  });
+
   it("rejects copied preparation authority before observing a device", async () => {
     const artifacts = await identityArtifacts();
     const graph = await verified(pipelineProgram(artifacts), artifacts);

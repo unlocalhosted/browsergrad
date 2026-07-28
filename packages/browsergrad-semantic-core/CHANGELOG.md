@@ -20,12 +20,21 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   incompatible bindings, and invalid all-reduce rank/numerical contracts; and
   fixes a fail-stop, no-partial-output-commit failure model without claiming
   execution, transport, topology, retries, or backend pipelines.
+- Additive host-graph versions 1.1 through 1.6 add exact whole-allocation
+  copies, terminal fail-stop materialization, dependency-ordered completion
+  events, bounded fixed-count repetition, captured-input u32 conditionals, and
+  runtime-control u32 conditionals while retaining exact older-version
+  decoding. Runtime controls are exact request bindings captured before
+  execution; they grant no GPU-derived predicate, feedback, dynamic launch, or
+  runtime loop-count authority.
 - Authority-bound `browsergrad.host-graph.cpu-reference@1` preparation and
-  execution for the initial dispatch/all-reduce profile. The reference
-  snapshots rank-local inputs into private storage, bounds memory, element
-  operations, preparation/execution time, and cancellation, applies explicit
-  finite rank-ordered f32 and wrapping/exact 32-bit integer collective policy,
-  and returns outputs only after the complete graph succeeds.
+  execution for dispatches, all-reduces, copies, events, materialization,
+  fixed repetition, and bounded input/runtime-control conditionals. The
+  reference snapshots rank-local inputs and exact runtime controls into private
+  state, bounds memory, element operations, preparation/execution time, and
+  cancellation, applies explicit finite rank-ordered f32 and wrapping/exact
+  32-bit integer collective policy, and returns outputs only after the complete
+  graph succeeds.
 - Explicit `/capability` export with immutable versioned semantic capability
   and backend definitions plus program/artifact-scoped lowering decisions.
   Positive decisions require a registered preservation level; conditional

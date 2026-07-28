@@ -47,6 +47,7 @@ const DEFAULT_MAX_PREPARATION_MS = 5_000;
 const DEFAULT_MAX_EXECUTION_MS = 5_000;
 const MAX_VIEW_COPY_ELEMENTS = 1_000_000;
 const MAX_ARTIFACTS = 256;
+const MAX_U32 = 0xffff_ffffn;
 const YIELD_INTERVAL_MS = 16;
 const UINT8_ARRAY_CONSTRUCTOR = Uint8Array;
 const DATA_VIEW_CONSTRUCTOR = DataView;
@@ -137,8 +138,14 @@ export interface HostGraphCpuInputBinding {
   readonly bytes: Uint8Array;
 }
 
+export interface HostGraphCpuControlBinding {
+  readonly controlId: string;
+  readonly value: WireU64;
+}
+
 export interface HostGraphCpuExecutionRequest {
   readonly inputs: readonly HostGraphCpuInputBinding[];
+  readonly controls?: readonly HostGraphCpuControlBinding[];
   readonly signal?: AbortSignal;
 }
 
@@ -169,6 +176,7 @@ export interface PreparedHostGraphCpu {
   readonly eventIds: readonly string[];
   readonly repeats: readonly HostGraphRepeatCompletion[];
   readonly conditionalNodeIds: readonly string[];
+  readonly runtimeControlIds: readonly string[];
   readonly expandedNodeCount: number;
   readonly elementOperations: bigint;
   readonly execute: (
@@ -245,8 +253,16 @@ interface RepeatPlan {
 interface ConditionalPlan {
   readonly kind: "conditional";
   readonly nodeId: string;
-  readonly predicateResourceId: string;
-  readonly predicateRank: number;
+  readonly predicate:
+    | Readonly<{
+        kind: "input";
+        resourceId: string;
+        rank: number;
+      }>
+    | Readonly<{
+        kind: "runtime-control";
+        controlId: string;
+      }>;
   readonly thenBody: readonly ExecutablePlan[];
   readonly elseBody: readonly ExecutablePlan[];
   readonly elementOperations: bigint;
@@ -271,6 +287,11 @@ interface AdmittedInput {
   readonly rank: number;
   readonly resourceId: string;
   readonly bytes: Uint8Array;
+}
+
+interface AdmittedControl {
+  readonly controlId: string;
+  readonly value: number;
 }
 
 type RankResources = readonly ReadonlyMap<string, Uint8Array>[];
@@ -442,6 +463,7 @@ export async function prepareHostGraphCpu(
       request,
       rankCount,
       inputResources,
+      preparedGraph.runtimeControlIds,
     );
     ensureExecutionActive(
       executionStartedAt,
@@ -496,6 +518,7 @@ export async function prepareHostGraphCpu(
         completedConditionals.push(await executeConditional(
           plan,
           rankResources,
+          captured.controls,
           executionStartedAt,
           normalized.maxExecutionMs,
           captured.signal,
@@ -557,6 +580,7 @@ export async function prepareHostGraphCpu(
     eventIds,
     repeats,
     conditionalNodeIds,
+    runtimeControlIds: Object.freeze([...preparedGraph.runtimeControlIds]),
     expandedNodeCount: preparedGraph.expandedNodeCount,
     elementOperations,
     execute,
@@ -659,11 +683,19 @@ async function prepareConditionalPlan(
   return Object.freeze({
     kind: "conditional",
     nodeId: node.nodeId,
-    predicateResourceId: node.predicate.resourceId,
-    predicateRank: safeNumber(
-      wireIntegerToBigInt(node.predicate.rank),
-      `$.nodes.${node.nodeId}.predicate.rank`,
-    ),
+    predicate: node.mode === "input-u32-branch-sequential"
+      ? Object.freeze({
+          kind: "input" as const,
+          resourceId: node.predicate.resourceId,
+          rank: safeNumber(
+            wireIntegerToBigInt(node.predicate.rank),
+            `$.nodes.${node.nodeId}.predicate.rank`,
+          ),
+        })
+      : Object.freeze({
+          kind: "runtime-control" as const,
+          controlId: node.predicate.controlId,
+        }),
     thenBody,
     elseBody,
     elementOperations: thenOperations,
@@ -889,31 +921,32 @@ async function executeRepeat(
 async function executeConditional(
   plan: ConditionalPlan,
   rankResources: RankResources,
+  controls: readonly AdmittedControl[],
   startedAt: number,
   maxExecutionMs: number,
   signal: AbortSignal | undefined,
 ): Promise<HostGraphConditionalCompletion> {
   ensureExecutionActive(startedAt, maxExecutionMs, signal);
-  const predicateBytes = rankResources[plan.predicateRank]?.get(
-    plan.predicateResourceId,
-  );
-  if (predicateBytes === undefined || predicateBytes.byteLength !== 4) {
+  let predicateValue: number | undefined;
+  if (plan.predicate.kind === "input") {
+    predicateValue = readInputPredicate(
+      plan.nodeId,
+      plan.predicate,
+      rankResources,
+    );
+  } else {
+    const controlId = plan.predicate.controlId;
+    predicateValue = controls.find((control) =>
+      control.controlId === controlId)?.value;
+  }
+  if (predicateValue === undefined) {
     fail(
       "BG-GRAPH-CPU-INTERNAL",
       `$.nodes.${plan.nodeId}.predicate`,
-      "verified conditional predicate storage disappeared",
+      "verified runtime conditional control disappeared",
     );
   }
-  const predicateView = new DATA_VIEW_CONSTRUCTOR(
-    predicateBytes.buffer,
-    predicateBytes.byteOffset,
-    predicateBytes.byteLength,
-  );
-  const selectedBranch = REFLECT_APPLY(
-    DATA_VIEW_GET_UINT32,
-    predicateView,
-    [0, true],
-  ) === 0
+  const selectedBranch = predicateValue === 0
     ? "else" as const
     : "then" as const;
   const body = selectedBranch === "then" ? plan.thenBody : plan.elseBody;
@@ -930,6 +963,37 @@ async function executeConditional(
     selectedBranch,
     bodyNodeIds: Object.freeze(body.map((bodyPlan) => bodyPlan.nodeId)),
   });
+}
+
+function readInputPredicate(
+  nodeId: string,
+  predicate: Readonly<{
+    kind: "input";
+    resourceId: string;
+    rank: number;
+  }>,
+  rankResources: RankResources,
+): number {
+  const predicateBytes = rankResources[predicate.rank]?.get(
+    predicate.resourceId,
+  );
+  if (predicateBytes === undefined || predicateBytes.byteLength !== 4) {
+    fail(
+      "BG-GRAPH-CPU-INTERNAL",
+      `$.nodes.${nodeId}.predicate`,
+      "verified conditional predicate storage disappeared",
+    );
+  }
+  const predicateView = new DATA_VIEW_CONSTRUCTOR(
+    predicateBytes.buffer,
+    predicateBytes.byteOffset,
+    predicateBytes.byteLength,
+  );
+  return REFLECT_APPLY(
+    DATA_VIEW_GET_UINT32,
+    predicateView,
+    [0, true],
+  );
 }
 
 async function executeExecutableBody(
@@ -1207,19 +1271,25 @@ function captureExecutionRequest(
   request: HostGraphCpuExecutionRequest,
   rankCount: number,
   inputResources: readonly HostGraphResource[],
+  runtimeControlIds: readonly string[],
 ): {
   readonly inputs: readonly AdmittedInput[];
+  readonly controls: readonly AdmittedControl[];
   readonly signal?: AbortSignal;
 } {
   const captured = inspectPlainObject(
     request,
-    ["inputs", "signal"],
+    ["inputs", "controls", "signal"],
     ["inputs"],
     "$.request",
   );
   const signal = captured.signal === undefined
     ? undefined
     : requireAbortSignal(captured.signal, "$.request.signal");
+  const controls = captureRuntimeControls(
+    captured.controls,
+    runtimeControlIds,
+  );
   const inputResourceMap = new Map(
     inputResources.map((resource) => [resource.resourceId, resource]),
   );
@@ -1270,8 +1340,75 @@ function captureExecutionRequest(
   }
   return Object.freeze({
     inputs: Object.freeze(admitted),
+    controls,
     ...(signal === undefined ? {} : { signal }),
   });
+}
+
+function captureRuntimeControls(
+  value: unknown,
+  runtimeControlIds: readonly string[],
+): readonly AdmittedControl[] {
+  const controlValues = value === undefined
+    ? []
+    : snapshotDenseArray(
+        value,
+        "$.request.controls",
+        runtimeControlIds.length + 1,
+      );
+  const expectedControls = new Set(runtimeControlIds);
+  const seenControls = new Set<string>();
+  const controls: AdmittedControl[] = [];
+  for (const [index, value] of controlValues.entries()) {
+    const path = `$.request.controls[${index}]`;
+    const binding = inspectPlainObject(
+      value,
+      ["controlId", "value"],
+      ["controlId", "value"],
+      path,
+    );
+    const controlId = stringValue(
+      binding.controlId,
+      `${path}.controlId`,
+    );
+    if (!expectedControls.has(controlId)) {
+      fail(
+        "BG-GRAPH-CPU-INVALID-BINDING",
+        `${path}.controlId`,
+        `control ${controlId} is not required by the graph`,
+      );
+    }
+    if (seenControls.has(controlId)) {
+      fail(
+        "BG-GRAPH-CPU-INVALID-BINDING",
+        path,
+        `duplicate runtime control ${controlId}`,
+      );
+    }
+    seenControls.add(controlId);
+    const controlValue = wireIntegerToBigInt(
+      parseWireU64(binding.value, `${path}.value`),
+    );
+    if (controlValue > MAX_U32) {
+      fail(
+        "BG-GRAPH-CPU-INVALID-BINDING",
+        `${path}.value`,
+        "runtime u32 control exceeds 4294967295",
+      );
+    }
+    controls.push(Object.freeze({
+      controlId,
+      value: Number(controlValue),
+    }));
+  }
+  if (controls.length !== runtimeControlIds.length) {
+    fail(
+      "BG-GRAPH-CPU-INVALID-BINDING",
+      "$.request.controls",
+      `expected exactly ${runtimeControlIds.length} runtime control bindings`,
+    );
+  }
+  return Object.freeze(controls);
 }
 
 function materializeRankResources(

@@ -38,6 +38,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   external-input predicate before device work, includes branch identity in
   specialization evidence, and reports completion only after whole-graph
   success. It grants no GPU-derived or mid-graph branch authority.
+- Host-graph program version 1.6 adds bounded
+  `runtime-u32-branch-sequential` conditionals through the same verified
+  branches. Execution requires exactly the graph's runtime control set,
+  captures every u32 value with the inputs before device access, selects zero
+  as else and nonzero as then, and rejects missing, duplicate, unknown, or
+  out-of-range bindings without granting GPU-derived, mid-graph, dynamic
+  launch, or runtime loop-count authority.
 - Graph execution snapshots complete direct/unshared inputs, initializes
   private temporary/output storage deterministically, bounds expanded steps
   and aggregate host/GPU storage, verifies device limits, and publishes fresh
@@ -47,8 +54,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Required headed-Chromium evidence on Apple Metal 3 bit-matches the semantic
   CPU graph oracle for rank-ordered f32 sum, signed-zero f32 min, wrapping i32
   sum, exact u32 max, exact u8 allocation copy, and three fixed repetitions of
-  f32 all-reduce plus both captured-input conditional branches, and separately
-  rejects non-finite f32 collectives.
+  f32 all-reduce plus both branches of captured-input and runtime-control
+  conditionals, and separately rejects non-finite f32 collectives.
 - A separate required host-graph performance lane compares version-1.4
   fixed-count repetition with a bit-exact, equal-work version-1.2 unrolled
   graph over two ranks and 65,536 f32 elements. It uses an untimed CPU and

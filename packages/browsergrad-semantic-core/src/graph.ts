@@ -13,6 +13,7 @@ export {
   type HostGraphEventNode,
   type HostGraphExecutableNode,
   type HostGraphInputPredicate,
+  type HostGraphInputConditionalNode,
   type HostGraphMaterializeNode,
   type HostGraphNode,
   type HostGraphProgram,
@@ -21,6 +22,8 @@ export {
   type HostGraphRepeatNode,
   type HostGraphResource,
   type HostGraphResourceRole,
+  type HostGraphRuntimeControlConditionalNode,
+  type HostGraphRuntimeControlPredicate,
 } from "./graph/model.js";
 export {
   HOST_GRAPH_ARTIFACT_MAJOR,
@@ -35,6 +38,7 @@ export {
   HOST_GRAPH_MAX_REPEAT_BODY_NODES,
   HOST_GRAPH_MAX_REPEAT_ITERATIONS,
   HOST_GRAPH_MAX_RESOURCES,
+  HOST_GRAPH_MAX_RUNTIME_CONTROLS,
   HOST_GRAPH_MAX_SEMANTIC_ARTIFACTS,
   HOST_GRAPH_MAX_TOTAL_RESOURCE_BYTES,
   decodeHostGraphArtifact,
@@ -61,6 +65,7 @@ export {
   HostGraphCpuError,
   prepareHostGraphCpu,
   type HostGraphCpuErrorCode,
+  type HostGraphCpuControlBinding,
   type HostGraphCpuExecutionRequest,
   type HostGraphCpuExecutionResult,
   type HostGraphCpuInputBinding,

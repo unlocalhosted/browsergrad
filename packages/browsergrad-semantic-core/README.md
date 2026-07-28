@@ -131,6 +131,13 @@ and runtime-generated work remain rejected. Verification conservatively merges
 all possible reads/writes, treats a write as guaranteed only when both branches
 write the resource, preserves exact one-branch work counts, and keeps
 top-level plus both branch bodies in one global node-ID namespace.
+Version 1.6 adds `runtime-u32-branch-sequential` conditionals. The predicate
+names one required host execution control rather than a graph resource; zero
+selects else and any other admitted `u32` selects then. The verifier retains
+the same bounded equal-shape branches, conservative effects, work accounting,
+and global node-ID rules, limits the graph to 64 unique controls, and grants no
+GPU/backend-derived predicate, mid-graph feedback, dynamic launch, or
+runtime-derived repetition authority.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -163,6 +170,11 @@ the declared input predicate. The CPU profile requires equal branch
 element-operation counts, admits that exact one-branch cost before execution,
 checks cancellation/time at every selected body node, and reports the selected
 branch and body IDs only with successful whole-graph publication.
+Version-1.6 conditionals require exactly one binding for every declared runtime
+control and reject missing, duplicate, unknown, or out-of-range values. The
+executor admits the complete control set before copying inputs, captures those
+values with the inputs before its first await, and then uses the same verified
+branch plan and fail-stop completion contract.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -174,7 +186,7 @@ does not imply device execution. Compiler owns the first concrete producer: it
 lowers one or more opaque prepared view-copy bindings into a verified linear
 host graph with derived intermediate resources. Kernels separately owns the
 authority-bound `browsergrad.host-graph.webgpu@1`
-DAG/fixed-repeat/bounded-input-conditional adapter and its required
+DAG/fixed-repeat/bounded-input-and-runtime-control-conditional adapter and its required
 actual-device evidence. Neither adapter grants transport, topology, retries,
 event timestamps or external waits, backend-derived predicates,
 runtime-derived loop/launch control, worker-mesh, native-companion,

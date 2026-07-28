@@ -200,6 +200,7 @@ export {
   type PreparedSemanticHostGraphWebGpu,
   type PrepareSemanticHostGraphWebGpuOptions,
   type SemanticHostGraphWebGpuDeviceFacts,
+  type SemanticHostGraphWebGpuControlBinding,
   type SemanticHostGraphWebGpuErrorCode,
   type SemanticHostGraphWebGpuExecutionRequest,
   type SemanticHostGraphWebGpuExecutionResult,

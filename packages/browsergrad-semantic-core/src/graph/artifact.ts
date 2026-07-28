@@ -53,6 +53,7 @@ import {
   type HostGraphDispatchResourceBinding,
   type HostGraphEventNode,
   type HostGraphExecutableNode,
+  type HostGraphInputPredicate,
   type HostGraphMaterializeNode,
   type HostGraphNode,
   type HostGraphProgram,
@@ -60,17 +61,19 @@ import {
   type HostGraphRepeatNode,
   type HostGraphResource,
   type HostGraphResourceRole,
+  type HostGraphRuntimeControlPredicate,
 } from "./model.js";
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 5;
+export const HOST_GRAPH_ARTIFACT_MINOR = 6;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
 export const HOST_GRAPH_MAX_REPEAT_BODY_NODES = 64;
 export const HOST_GRAPH_MAX_CONDITIONAL_BODY_NODES = 64;
 export const HOST_GRAPH_MAX_REPEAT_ITERATIONS = 1_024;
+export const HOST_GRAPH_MAX_RUNTIME_CONTROLS = 64;
 export const HOST_GRAPH_MAX_EXPANDED_NODES = 16_384;
 export const HOST_GRAPH_MAX_RANKS = 256;
 export const HOST_GRAPH_MAX_SEMANTIC_ARTIFACTS = 256;
@@ -134,6 +137,7 @@ export interface PreparedHostGraphProgram {
   readonly repeatCount: number;
   readonly repeatIterationCount: number;
   readonly conditionalCount: number;
+  readonly runtimeControlIds: readonly string[];
   readonly expandedNodeCount: number;
   readonly topologicalNodeIds: readonly string[];
   readonly outputResourceIds: readonly string[];
@@ -151,6 +155,7 @@ interface HostGraphAnalysis {
   readonly repeatCount: number;
   readonly repeatIterationCount: number;
   readonly conditionalCount: number;
+  readonly runtimeControlIds: readonly string[];
   readonly expandedNodeCount: number;
   readonly topologicalNodeIds: readonly string[];
   readonly outputResourceIds: readonly string[];
@@ -293,6 +298,7 @@ export async function prepareHostGraphProgram(
     repeatCount: analysis.repeatCount,
     repeatIterationCount: analysis.repeatIterationCount,
     conditionalCount: analysis.conditionalCount,
+    runtimeControlIds: Object.freeze([...analysis.runtimeControlIds]),
     expandedNodeCount: analysis.expandedNodeCount,
     topologicalNodeIds: Object.freeze([...analysis.topologicalNodeIds]),
     outputResourceIds: Object.freeze([...analysis.outputResourceIds]),
@@ -350,12 +356,13 @@ function parseProgram(
       version.minor !== 2 &&
       version.minor !== 3 &&
       version.minor !== 4 &&
-      version.minor !== 5)
+      version.minor !== 5 &&
+      version.minor !== 6)
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 through 1.5 only",
+      "host graph program reader supports versions 1.0 through 1.6 only",
     );
   }
   if (version.minor !== envelopeMinor) {
@@ -508,7 +515,7 @@ function parseResources(
 
 function parseNodes(
   value: JsonValue,
-  programMinor: 0 | 1 | 2 | 3 | 4 | 5,
+  programMinor: HostGraphProgram["version"]["minor"],
 ): readonly HostGraphNode[] {
   const values = arrayValue(value, "$.payload.program.nodes");
   if (values.length === 0 || values.length > HOST_GRAPH_MAX_NODES) {
@@ -558,7 +565,7 @@ function parseNodes(
 function parseNode(
   value: JsonValue,
   path: string,
-  programMinor: 0 | 1 | 2 | 3 | 4 | 5,
+  programMinor: HostGraphProgram["version"]["minor"],
   controlBody?: string,
 ): HostGraphNode {
   const object = objectValue(value, path);
@@ -641,12 +648,12 @@ function parseNode(
         "conditional nodes require host graph program version 1.5",
       );
     }
-    return parseConditionalNode(object, path);
+    return parseConditionalNode(object, path, programMinor);
   }
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 repeat, and version-1.5 conditional nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 repeat, and version-1.5/1.6 conditional nodes",
   );
 }
 
@@ -698,6 +705,7 @@ function parseRepeatNode(
 function parseConditionalNode(
   value: JsonObject,
   path: string,
+  programMinor: HostGraphProgram["version"]["minor"],
 ): HostGraphConditionalNode {
   const object = closedObject(
     value,
@@ -712,23 +720,39 @@ function parseConditionalNode(
     ],
     path,
   );
-  if (object.mode !== "input-u32-branch-sequential") {
+  if (
+    object.mode !== "input-u32-branch-sequential" &&
+    object.mode !== "runtime-u32-branch-sequential"
+  ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       `${path}.mode`,
-      "conditional mode must be input-u32-branch-sequential",
+      "conditional mode must be input-u32-branch-sequential or runtime-u32-branch-sequential",
     );
   }
+  if (
+    object.mode === "runtime-u32-branch-sequential" &&
+    programMinor < 6
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "runtime control conditionals require host graph program version 1.6",
+    );
+  }
+  const label = object.mode === "input-u32-branch-sequential"
+    ? "input conditional"
+    : "runtime control conditional";
   const thenBody = parseLinearControlBody(
     field(object, "thenBody", path),
     `${path}.thenBody`,
-    "input conditional",
+    label,
     HOST_GRAPH_MAX_CONDITIONAL_BODY_NODES,
   ) as readonly HostGraphConditionalBodyNode[];
   const elseBody = parseLinearControlBody(
     field(object, "elseBody", path),
     `${path}.elseBody`,
-    "input conditional",
+    label,
     HOST_GRAPH_MAX_CONDITIONAL_BODY_NODES,
   ) as readonly HostGraphConditionalBodyNode[];
   if (
@@ -741,24 +765,36 @@ function parseConditionalNode(
       "conditional branches require equal-length executable-kind structure",
     );
   }
-  return {
+  const common = {
     nodeId: identifier(field(object, "nodeId", path), `${path}.nodeId`),
-    kind: "conditional",
+    kind: "conditional" as const,
     dependsOn: dependencies(field(object, "dependsOn", path), path),
-    predicate: parseInputPredicate(
-      field(object, "predicate", path),
-      `${path}.predicate`,
-    ),
     thenBody,
     elseBody,
-    mode: "input-u32-branch-sequential",
   };
+  return object.mode === "input-u32-branch-sequential"
+    ? {
+        ...common,
+        predicate: parseInputPredicate(
+          field(object, "predicate", path),
+          `${path}.predicate`,
+        ),
+        mode: "input-u32-branch-sequential",
+      }
+    : {
+        ...common,
+        predicate: parseRuntimeControlPredicate(
+          field(object, "predicate", path),
+          `${path}.predicate`,
+        ),
+        mode: "runtime-u32-branch-sequential",
+      };
 }
 
 function parseInputPredicate(
   value: JsonValue,
   path: string,
-): HostGraphConditionalNode["predicate"] {
+): HostGraphInputPredicate {
   const object = closedObject(value, ["resourceId", "rank", "mode"], path);
   if (object.mode !== "u32-nonzero") {
     invalid(
@@ -773,6 +809,27 @@ function parseInputPredicate(
       `${path}.resourceId`,
     ),
     rank: parseWireU64(field(object, "rank", path), `${path}.rank`),
+    mode: "u32-nonzero",
+  };
+}
+
+function parseRuntimeControlPredicate(
+  value: JsonValue,
+  path: string,
+): HostGraphRuntimeControlPredicate {
+  const object = closedObject(value, ["controlId", "mode"], path);
+  if (object.mode !== "u32-nonzero") {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "runtime control predicate mode must be u32-nonzero",
+    );
+  }
+  return {
+    controlId: identifier(
+      field(object, "controlId", path),
+      `${path}.controlId`,
+    ),
     mode: "u32-nonzero",
   };
 }
@@ -1165,6 +1222,7 @@ function analyzeProgram(
   let repeatCount = 0;
   let repeatIterationCount = 0;
   let conditionalCount = 0;
+  const runtimeControlIds = new Set<string>();
   let expandedNodeCount = 0;
   const dispatchEffects = new Map<
     HostGraphDispatchNode,
@@ -1324,6 +1382,15 @@ function analyzeProgram(
     } else {
       conditionalCount += 1;
       verifyConditionalPredicate(node, resources, rankCount, path);
+      if (node.mode === "runtime-u32-branch-sequential") {
+        runtimeControlIds.add(node.predicate.controlId);
+        if (runtimeControlIds.size > HOST_GRAPH_MAX_RUNTIME_CONTROLS) {
+          resource(
+            `${path}.predicate.controlId`,
+            `runtime control count exceeds ${HOST_GRAPH_MAX_RUNTIME_CONTROLS}`,
+          );
+        }
+      }
       expandedNodeCount += node.thenBody.length;
       const branchEffects: Array<readonly HostGraphResourceEffect[]> = [];
       for (const [branchName, body] of [
@@ -1414,6 +1481,9 @@ function analyzeProgram(
     repeatCount,
     repeatIterationCount,
     conditionalCount,
+    runtimeControlIds: Object.freeze(
+      [...runtimeControlIds].sort(compareCanonicalStrings),
+    ),
     expandedNodeCount,
     topologicalNodeIds: Object.freeze(topologicalNodeIds),
     outputResourceIds: Object.freeze(
@@ -1650,6 +1720,7 @@ function verifyConditionalPredicate(
   rankCount: bigint,
   path: string,
 ): void {
+  if (node.mode === "runtime-u32-branch-sequential") return;
   const predicate = resources.get(node.predicate.resourceId);
   if (predicate === undefined) {
     invalid(
@@ -1692,8 +1763,12 @@ function mergeConditionalEffects(
     effect.resourceId,
     effect,
   ]));
+  const predicateResourceId = node.mode ===
+      "input-u32-branch-sequential"
+    ? node.predicate.resourceId
+    : undefined;
   const resourceIds = new Set([
-    node.predicate.resourceId,
+    ...(predicateResourceId === undefined ? [] : [predicateResourceId]),
     ...thenByResource.keys(),
     ...elseByResource.keys(),
   ]);
@@ -1702,7 +1777,7 @@ function mergeConditionalEffects(
     .map((resourceId) => {
       const thenEffect = thenByResource.get(resourceId);
       const elseEffect = elseByResource.get(resourceId);
-      const predicateRead = resourceId === node.predicate.resourceId;
+      const predicateRead = resourceId === predicateResourceId;
       const read = predicateRead ||
         (thenEffect !== undefined && reads(thenEffect.access)) ||
         (elseEffect !== undefined && reads(elseEffect.access));

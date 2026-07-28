@@ -26,6 +26,7 @@ import {
   encodeWireU64,
   hashNamedComponents,
   hashSemanticArtifact,
+  parseWireU64,
   SemanticSchemaError,
   wireIntegerToBigInt,
   type JsonObject,
@@ -58,7 +59,7 @@ import {
 
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.5.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.6.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -73,6 +74,7 @@ const DEFAULT_MAX_WORKING_BYTES = 256 * 1024 * 1024;
 const DEFAULT_MAX_PREPARATION_MS = 30_000;
 const DEFAULT_MAX_EXECUTION_MS = 30_000;
 const MAX_VIEW_COPY_ELEMENTS = 16_777_216;
+const MAX_U32 = 0xffff_ffffn;
 const NUMERICAL_STATUS_STORAGE = "bg_graph_numerical_status";
 const PREPARED = new WeakMap<object, PreparedState>();
 const ACTIVE_DEVICES = new WeakSet<GPUDevice>();
@@ -169,8 +171,14 @@ export interface SemanticHostGraphWebGpuInputBinding {
   readonly bytes: Uint8Array;
 }
 
+export interface SemanticHostGraphWebGpuControlBinding {
+  readonly controlId: string;
+  readonly value: WireU64;
+}
+
 export interface SemanticHostGraphWebGpuExecutionRequest {
   readonly inputs: readonly SemanticHostGraphWebGpuInputBinding[];
+  readonly controls?: readonly SemanticHostGraphWebGpuControlBinding[];
 }
 
 export interface SemanticHostGraphWebGpuRunOptions {
@@ -219,6 +227,7 @@ export interface PreparedSemanticHostGraphWebGpu {
   readonly repeatIterationCount: number;
   readonly conditionalCount: number;
   readonly conditionalNodeIds: readonly string[];
+  readonly runtimeControlIds: readonly string[];
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -291,6 +300,7 @@ interface PreparedState {
   readonly steps: readonly WgslKernelSequenceStep[];
   readonly deviceAdmissionSteps: readonly WgslKernelSequenceStep[];
   readonly conditionals: readonly PreparedConditionalPlan[];
+  readonly runtimeControlIds: readonly string[];
   readonly storageMetadata:
     Readonly<Record<string, WgslStorageBufferMetadata>>;
   readonly boundStorageNames: ReadonlySet<string>;
@@ -325,8 +335,16 @@ interface PreparedConditionalBranch {
 
 interface PreparedConditionalPlan {
   readonly nodeId: string;
-  readonly predicateResourceId: string;
-  readonly predicateRank: number;
+  readonly predicate:
+    | Readonly<{
+        kind: "input";
+        resourceId: string;
+        rank: number;
+      }>
+    | Readonly<{
+        kind: "runtime-control";
+        controlId: string;
+      }>;
   readonly startStepIndex: number;
   readonly stepCount: number;
   readonly thenBranch: PreparedConditionalBranch;
@@ -342,6 +360,16 @@ interface CapturedInput {
   readonly rank: number;
   readonly resourceId: string;
   readonly bytes: Uint8Array;
+}
+
+interface CapturedControl {
+  readonly controlId: string;
+  readonly value: number;
+}
+
+interface CapturedExecutionRequest {
+  readonly inputs: readonly CapturedInput[];
+  readonly controls: readonly CapturedControl[];
 }
 
 interface NativeUint8Slots {
@@ -626,6 +654,9 @@ export async function prepareSemanticHostGraphWebGpu(
     repeatIterationCount: preparedGraph.repeatIterationCount,
     conditionalCount: preparedGraph.conditionalCount,
     conditionalNodeIds,
+    runtimeControlIds: Object.freeze([
+      ...preparedGraph.runtimeControlIds,
+    ]),
     collectiveReductionStepCount: counts.reduction,
     collectiveReplicationStepCount: counts.replication,
     wgslModuleHashes: publicModuleHashes,
@@ -648,6 +679,9 @@ export async function prepareSemanticHostGraphWebGpu(
     steps: Object.freeze([...steps]),
     deviceAdmissionSteps,
     conditionals: Object.freeze([...conditionals]),
+    runtimeControlIds: Object.freeze([
+      ...preparedGraph.runtimeControlIds,
+    ]),
     storageMetadata: Object.freeze({ ...storageMetadata }),
     boundStorageNames,
     readbackStorageNames,
@@ -836,11 +870,19 @@ async function appendConditionalSteps(
   addPreparationCounts(counts, thenPrepared.branch.counts);
   conditionals.push(Object.freeze({
     nodeId: node.nodeId,
-    predicateResourceId: node.predicate.resourceId,
-    predicateRank: safeNumber(
-      wireIntegerToBigInt(node.predicate.rank),
-      `$.nodes.${node.nodeId}.predicate.rank`,
-    ),
+    predicate: node.mode === "input-u32-branch-sequential"
+      ? Object.freeze({
+          kind: "input" as const,
+          resourceId: node.predicate.resourceId,
+          rank: safeNumber(
+            wireIntegerToBigInt(node.predicate.rank),
+            `$.nodes.${node.nodeId}.predicate.rank`,
+          ),
+        })
+      : Object.freeze({
+          kind: "runtime-control" as const,
+          controlId: node.predicate.controlId,
+        }),
     startStepIndex,
     stepCount: thenPrepared.branch.steps.length,
     thenBranch: thenPrepared.branch,
@@ -986,10 +1028,10 @@ export async function runSemanticHostGraphWebGpu(
   }
   const capturedOptions = captureRunOptions(options);
   throwIfCancelled(capturedOptions.signal);
-  const capturedInputs = captureExecutionRequest(request, state);
+  const captured = captureExecutionRequest(request, state);
   const selectedExecution = selectConditionalExecution(
     state,
-    capturedInputs,
+    captured,
   );
   if (!HOST_IS_LITTLE_ENDIAN) {
     fail(
@@ -1014,7 +1056,7 @@ export async function runSemanticHostGraphWebGpu(
     SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXECUTION_MS,
     "$.options.timeoutMs",
   );
-  const materialized = materializePrivateBuffers(state, capturedInputs);
+  const materialized = materializePrivateBuffers(state, captured.inputs);
 
   if (selectedExecution.steps.length === 0) {
     const backendSpecializationHash = await hashBackendSpecialization(
@@ -1099,7 +1141,7 @@ export async function runSemanticHostGraphWebGpu(
 
 function selectConditionalExecution(
   state: PreparedState,
-  inputs: readonly CapturedInput[],
+  captured: CapturedExecutionRequest,
 ): SelectedExecution {
   if (state.conditionals.length === 0) {
     return Object.freeze({
@@ -1107,33 +1149,32 @@ function selectConditionalExecution(
       completedConditionals: Object.freeze([]),
     });
   }
-  const inputMap = new Map(inputs.map((input) => [
+  const inputMap = new Map(captured.inputs.map((input) => [
     `${input.rank}\0${input.resourceId}`,
     input.bytes,
+  ]));
+  const controlMap = new Map(captured.controls.map((control) => [
+    control.controlId,
+    control.value,
   ]));
   const steps = [...state.steps];
   const completedConditionals: HostGraphConditionalCompletion[] = [];
   for (const conditional of state.conditionals) {
-    const predicate = inputMap.get(
-      `${conditional.predicateRank}\0${conditional.predicateResourceId}`,
-    );
-    if (predicate === undefined || predicate.byteLength !== 4) {
+    const predicateValue = conditional.predicate.kind === "input"
+      ? readCapturedInputPredicate(
+          conditional.nodeId,
+          conditional.predicate,
+          inputMap,
+        )
+      : controlMap.get(conditional.predicate.controlId);
+    if (predicateValue === undefined) {
       fail(
         "BG-WEBGPU-GRAPH-INTERNAL",
         `$.nodes.${conditional.nodeId}.predicate`,
-        "verified conditional predicate input disappeared",
+        "verified runtime conditional control disappeared",
       );
     }
-    const view = new DATA_VIEW_CONSTRUCTOR(
-      predicate.buffer,
-      predicate.byteOffset,
-      predicate.byteLength,
-    );
-    const selectedBranch = REFLECT_APPLY(
-      DATA_VIEW_GET_UINT32,
-      view,
-      [0, true],
-    ) === 0
+    const selectedBranch = predicateValue === 0
       ? "else" as const
       : "then" as const;
     const branch = selectedBranch === "then"
@@ -1154,6 +1195,31 @@ function selectConditionalExecution(
     steps: Object.freeze(steps),
     completedConditionals: Object.freeze(completedConditionals),
   });
+}
+
+function readCapturedInputPredicate(
+  nodeId: string,
+  predicate: Readonly<{
+    kind: "input";
+    resourceId: string;
+    rank: number;
+  }>,
+  inputs: ReadonlyMap<string, Uint8Array>,
+): number {
+  const bytes = inputs.get(`${predicate.rank}\0${predicate.resourceId}`);
+  if (bytes === undefined || bytes.byteLength !== 4) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${nodeId}.predicate`,
+      "verified conditional predicate input disappeared",
+    );
+  }
+  const view = new DATA_VIEW_CONSTRUCTOR(
+    bytes.buffer,
+    bytes.byteOffset,
+    bytes.byteLength,
+  );
+  return REFLECT_APPLY(DATA_VIEW_GET_UINT32, view, [0, true]);
 }
 
 async function appendDispatchSteps(
@@ -1699,12 +1765,16 @@ function copyArrayBytes(
 function captureExecutionRequest(
   request: SemanticHostGraphWebGpuExecutionRequest,
   state: PreparedState,
-): readonly CapturedInput[] {
+): CapturedExecutionRequest {
   const object = inspectPlainObject(
     request,
-    ["inputs"],
+    ["inputs", "controls"],
     ["inputs"],
     "$.request",
+  );
+  const controls = captureRuntimeControls(
+    object.controls,
+    state.runtimeControlIds,
   );
   const expected = state.rankCount * state.inputs.length;
   const values = snapshotDenseArray(
@@ -1761,7 +1831,76 @@ function captureExecutionRequest(
       bytes: snapshotInputBytes(binding.bytes, resource, `${path}.bytes`),
     }));
   }
-  return Object.freeze(inputs);
+  return Object.freeze({
+    inputs: Object.freeze(inputs),
+    controls,
+  });
+}
+
+function captureRuntimeControls(
+  value: unknown,
+  runtimeControlIds: readonly string[],
+): readonly CapturedControl[] {
+  const controlValues = value === undefined
+    ? []
+    : snapshotDenseArray(
+        value,
+        "$.request.controls",
+        runtimeControlIds.length + 1,
+      );
+  const expectedControls = new Set(runtimeControlIds);
+  const seenControls = new Set<string>();
+  const controls: CapturedControl[] = [];
+  for (const [index, value] of controlValues.entries()) {
+    const path = `$.request.controls[${index}]`;
+    const binding = inspectPlainObject(
+      value,
+      ["controlId", "value"],
+      ["controlId", "value"],
+      path,
+    );
+    const controlId = stringValue(
+      binding.controlId,
+      `${path}.controlId`,
+    );
+    if (!expectedControls.has(controlId)) {
+      fail(
+        "BG-WEBGPU-GRAPH-INVALID-BINDING",
+        `${path}.controlId`,
+        `control ${controlId} is not required by the graph`,
+      );
+    }
+    if (seenControls.has(controlId)) {
+      fail(
+        "BG-WEBGPU-GRAPH-INVALID-BINDING",
+        path,
+        `duplicate runtime control ${controlId}`,
+      );
+    }
+    seenControls.add(controlId);
+    const controlValue = wireIntegerToBigInt(
+      parseWireU64(binding.value, `${path}.value`),
+    );
+    if (controlValue > MAX_U32) {
+      fail(
+        "BG-WEBGPU-GRAPH-INVALID-BINDING",
+        `${path}.value`,
+        "runtime u32 control exceeds 4294967295",
+      );
+    }
+    controls.push(Object.freeze({
+      controlId,
+      value: Number(controlValue),
+    }));
+  }
+  if (controls.length !== runtimeControlIds.length) {
+    fail(
+      "BG-WEBGPU-GRAPH-INVALID-BINDING",
+      "$.request.controls",
+      `expected exactly ${runtimeControlIds.length} runtime control bindings`,
+    );
+  }
+  return Object.freeze(controls);
 }
 
 function snapshotInputBytes(

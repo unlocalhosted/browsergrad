@@ -375,6 +375,22 @@ function conditionalCopyProgram(): HostGraphProgram {
   };
 }
 
+function runtimeConditionalCopyProgram(): HostGraphProgram {
+  const program = clone(conditionalCopyProgram());
+  program.version.minor = 6;
+  program.resources = program.resources.filter((resource) =>
+    resource.resourceId !== "predicate");
+  const node = program.nodes.find((candidate) =>
+    candidate.kind === "conditional");
+  if (node?.kind !== "conditional") throw new Error("missing conditional");
+  node.mode = "runtime-u32-branch-sequential";
+  node.predicate = {
+    controlId: "choose",
+    mode: "u32-nonzero",
+  };
+  return program;
+}
+
 async function diagnostic(
   run: () => Promise<unknown> | unknown,
 ): Promise<SemanticSchemaError> {
@@ -453,6 +469,71 @@ describe("host graph artifact", () => {
       conditionalCount: 1,
       topologicalNodeIds: ["choose-output", "materialize-output"],
     });
+  });
+
+  it("normalizes runtime u32 conditionals in version 1.6", async () => {
+    const constructed = await createVerifiedHostGraphArtifact(
+      runtimeConditionalCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    );
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+
+    expect(payload.program.version).toEqual({ major: 1, minor: 6 });
+    expect(payload.program.nodes.find((node) => node.kind === "conditional"))
+      .toMatchObject({
+        nodeId: "choose-output",
+        mode: "runtime-u32-branch-sequential",
+        predicate: {
+          controlId: "choose",
+          mode: "u32-nonzero",
+        },
+      });
+    expect(prepared).toMatchObject({
+      conditionalCount: 1,
+      runtimeControlIds: ["choose"],
+      expandedNodeCount: 2,
+    });
+  });
+
+  it("rejects runtime conditional version and control drift", async () => {
+    const oldVersion = clone(runtimeConditionalCopyProgram());
+    oldVersion.version.minor = 5;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      oldVersion,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const missingControl = clone(runtimeConditionalCopyProgram());
+    const missingControlNode = missingControl.nodes.find((node) =>
+      node.kind === "conditional");
+    if (
+      missingControlNode?.kind !== "conditional" ||
+      missingControlNode.mode !== "runtime-u32-branch-sequential"
+    ) {
+      throw new Error("missing runtime conditional");
+    }
+    missingControlNode.predicate.controlId = "";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      missingControl,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidArtifact);
+
+    const predicateMode = clone(runtimeConditionalCopyProgram());
+    const predicateModeNode = predicateMode.nodes.find((node) =>
+      node.kind === "conditional");
+    if (
+      predicateModeNode?.kind !== "conditional" ||
+      predicateModeNode.mode !== "runtime-u32-branch-sequential"
+    ) {
+      throw new Error("missing runtime conditional");
+    }
+    predicateModeNode.predicate.mode =
+      "i32-positive" as typeof predicateModeNode.predicate.mode;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      predicateMode,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
   });
 
   it("rejects forged conditional versions, predicates, shapes, and control", async () => {
@@ -1018,7 +1099,7 @@ describe("host graph artifact", () => {
 
   it("rejects copy version, mode, resource, dtype, and hazard drift", async () => {
     const future = clone(copyProgram());
-    future.version.minor = 6 as typeof future.version.minor;
+    future.version.minor = 7 as unknown as typeof future.version.minor;
     expect((await diagnostic(() => createVerifiedHostGraphArtifact(
       future,
       { kernelArtifacts: [], layoutArtifacts: [] },

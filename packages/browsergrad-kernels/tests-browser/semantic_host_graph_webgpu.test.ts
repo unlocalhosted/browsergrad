@@ -35,6 +35,7 @@ import {
   prepareSemanticHostGraphWebGpu,
   runSemanticHostGraphWebGpu,
   type PreparedSemanticHostGraphWebGpu,
+  type SemanticHostGraphWebGpuControlBinding,
   type SemanticHostGraphWebGpuInputBinding,
 } from "../src/semantic_host_graph";
 
@@ -56,6 +57,8 @@ const CASE_IDS = Object.freeze([
   "f32-fixed-repeat-sum",
   "u8-input-conditional-then",
   "u8-input-conditional-else",
+  "u8-runtime-conditional-then",
+  "u8-runtime-conditional-else",
 ]);
 const PRODUCER_VERSIONS = Object.freeze({
   "@unlocalhosted/browsergrad-kernels": __BG_KERNELS_VERSION__,
@@ -78,6 +81,7 @@ interface PreparedCase {
   readonly graph: VerifiedHostGraphArtifact;
   readonly prepared: PreparedSemanticHostGraphWebGpu;
   readonly inputs: readonly SemanticHostGraphWebGpuInputBinding[];
+  readonly controls?: readonly SemanticHostGraphWebGpuControlBinding[];
   readonly artifactHash: string;
 }
 
@@ -99,7 +103,9 @@ interface CaseObservation extends JsonObject {
   readonly submitted: boolean;
   readonly cpuComparison: "bit-exact-complete-outputs";
   readonly inputSnapshot:
-    "caller-mutated-after-admission-bit-exact";
+    "caller-bindings-mutated-after-admission-bit-exact";
+  readonly runtimeControlSnapshot?:
+    "caller-controls-mutated-after-admission-bit-exact";
 }
 
 it("executes multi-rank host graphs on a required real GPUDevice", async (context) => {
@@ -164,6 +170,14 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       ),
       prepareConditionalRawCopyCase(
         "u8-input-conditional-else",
+        0,
+      ),
+      prepareRuntimeConditionalRawCopyCase(
+        "u8-runtime-conditional-then",
+        1,
+      ),
+      prepareRuntimeConditionalRawCopyCase(
+        "u8-runtime-conditional-else",
         0,
       ),
     ]);
@@ -241,13 +255,29 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         ...binding,
         bytes: new Uint8Array(binding.bytes),
       }));
-      const expectedPromise = cpu.execute({ inputs: preparedCase.inputs });
+      const mutableControls = preparedCase.controls?.map((binding) => ({
+        ...binding,
+      }));
+      const expectedPromise = cpu.execute({
+        inputs: preparedCase.inputs,
+        ...(preparedCase.controls === undefined
+          ? {}
+          : { controls: preparedCase.controls }),
+      });
       const actualPromise = runSemanticHostGraphWebGpu(
         kernelDevice,
         preparedCase.prepared,
-        { inputs: mutableInputs },
+        {
+          inputs: mutableInputs,
+          ...(mutableControls === undefined
+            ? {}
+            : { controls: mutableControls }),
+        },
       );
       for (const binding of mutableInputs) binding.bytes.fill(0);
+      for (const binding of mutableControls ?? []) {
+        binding.value = binding.value === wire(0) ? wire(1) : wire(0);
+      }
       const [expected, actual] = await Promise.all([
         expectedPromise,
         actualPromise,
@@ -282,7 +312,14 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         wgslModuleHashes: actual.trace.wgslModuleHashes,
         submitted: actual.trace.submitted,
         cpuComparison: "bit-exact-complete-outputs",
-        inputSnapshot: "caller-mutated-after-admission-bit-exact",
+        inputSnapshot:
+          "caller-bindings-mutated-after-admission-bit-exact",
+        ...(mutableControls === undefined
+          ? {}
+          : {
+              runtimeControlSnapshot:
+                "caller-controls-mutated-after-admission-bit-exact" as const,
+            }),
       }));
     }
     const thenConditional = completedCases.find(({ caseId }) =>
@@ -291,6 +328,12 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       caseId === "u8-input-conditional-else");
     expect(thenConditional?.backendSpecializationHash)
       .not.toBe(elseConditional?.backendSpecializationHash);
+    const thenRuntimeConditional = completedCases.find(({ caseId }) =>
+      caseId === "u8-runtime-conditional-then");
+    const elseRuntimeConditional = completedCases.find(({ caseId }) =>
+      caseId === "u8-runtime-conditional-else");
+    expect(thenRuntimeConditional?.backendSpecializationHash)
+      .not.toBe(elseRuntimeConditional?.backendSpecializationHash);
 
     stage = "non-finite-fail-stop";
     const finiteCase = cases[0] as PreparedCase;
@@ -524,6 +567,50 @@ async function prepareConditionalRawCopyCase(
   });
 }
 
+async function prepareRuntimeConditionalRawCopyCase(
+  caseId:
+    | "u8-runtime-conditional-then"
+    | "u8-runtime-conditional-else",
+  predicate: 0 | 1,
+): Promise<PreparedCase> {
+  const thenBytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+  const elseBytes = new Uint8Array([8, 7, 6, 5, 4, 3, 2, 1]);
+  const graph = (await createVerifiedHostGraphArtifact(
+    runtimeConditionalRawCopyProgram(),
+    { kernelArtifacts: [], layoutArtifacts: [] },
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+    kernelArtifacts: [],
+    layoutArtifacts: [],
+  });
+  const inputs = Object.freeze([
+    namedInput(0, "then-input", thenBytes),
+    namedInput(0, "else-input", elseBytes),
+  ]);
+  const controls = Object.freeze([{
+    controlId: "choose",
+    value: wire(predicate),
+  }]);
+  return Object.freeze({
+    caseId,
+    graph,
+    prepared,
+    inputs,
+    controls,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: inputs.map(({ rank, resourceId, bytes }) => ({
+        rank,
+        resourceId,
+        bytes: Array.from(bytes),
+      })),
+      controls,
+    }),
+  });
+}
+
 function collectiveProgram(
   artifacts: VerifiedViewCopyArtifacts,
   dtype: "f32" | "i32" | "u32",
@@ -732,6 +819,27 @@ function conditionalRawCopyProgram(): HostGraphProgram {
         mode: "host-readback-after-graph-success",
       },
     ],
+  };
+}
+
+function runtimeConditionalRawCopyProgram(): HostGraphProgram {
+  const base = conditionalRawCopyProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 6 },
+    resources: base.resources.filter((resource) =>
+      resource.resourceId !== "predicate"),
+    nodes: base.nodes.map((node) =>
+      node.kind === "conditional"
+        ? {
+            ...node,
+            predicate: {
+              controlId: "choose",
+              mode: "u32-nonzero" as const,
+            },
+            mode: "runtime-u32-branch-sequential" as const,
+          }
+        : node),
   };
 }
 

@@ -351,6 +351,27 @@ function conditionalRawCopyProgram(): HostGraphProgram {
   };
 }
 
+function runtimeConditionalRawCopyProgram(): HostGraphProgram {
+  const base = conditionalRawCopyProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 6 },
+    resources: base.resources.filter((resource) =>
+      resource.resourceId !== "predicate"),
+    nodes: base.nodes.map((node) =>
+      node.kind === "conditional"
+        ? {
+            ...node,
+            predicate: {
+              controlId: "choose",
+              mode: "u32-nonzero" as const,
+            },
+            mode: "runtime-u32-branch-sequential" as const,
+          }
+        : node),
+  };
+}
+
 async function verified(
   program: HostGraphProgram,
   artifacts: VerifiedViewCopyArtifacts,
@@ -507,6 +528,113 @@ describe("host graph CPU reference", () => {
       code: "BG-GRAPH-CPU-RESOURCE-LIMIT",
       path: "$.maxElementOperations",
     });
+  });
+
+  it("selects runtime conditionals from captured execution controls", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      runtimeConditionalRawCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+    const thenBytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+    const elseBytes = new Uint8Array([8, 7, 6, 5, 4, 3, 2, 1]);
+    const control = { controlId: "choose", value: wire("7") };
+    const request = {
+      inputs: [
+        {
+          rank: wire("0"),
+          resourceId: "then-input",
+          bytes: thenBytes,
+        },
+        {
+          rank: wire("0"),
+          resourceId: "else-input",
+          bytes: elseBytes,
+        },
+      ],
+      controls: [control],
+    };
+    const pending = prepared.execute(request);
+    control.value = wire("0");
+    thenBytes.fill(0);
+    elseBytes.fill(0);
+    const thenResult = await pending;
+
+    expect(prepared.runtimeControlIds).toEqual(["choose"]);
+    expect(thenResult.completedConditionals).toEqual([{
+      nodeId: "choose-output",
+      selectedBranch: "then",
+      bodyNodeIds: ["copy-then"],
+    }]);
+    expect(thenResult.outputs[0]?.bytes).toEqual(
+      new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]),
+    );
+
+    const elseResult = await prepared.execute({
+      inputs: [
+        {
+          rank: wire("0"),
+          resourceId: "then-input",
+          bytes: new Uint8Array(8).fill(1),
+        },
+        {
+          rank: wire("0"),
+          resourceId: "else-input",
+          bytes: new Uint8Array(8).fill(2),
+        },
+      ],
+      controls: [{ controlId: "choose", value: wire("0") }],
+    });
+    expect(elseResult.completedConditionals[0]?.selectedBranch).toBe("else");
+    expect(elseResult.outputs[0]?.bytes).toEqual(new Uint8Array(8).fill(2));
+  });
+
+  it("rejects missing, duplicate, unknown, and out-of-range runtime controls", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      runtimeConditionalRawCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+    const inputs = [
+      {
+        rank: wire("0"),
+        resourceId: "then-input",
+        bytes: new Uint8Array(8),
+      },
+      {
+        rank: wire("0"),
+        resourceId: "else-input",
+        bytes: new Uint8Array(8),
+      },
+    ];
+    await expect(prepared.execute({
+      inputs: null as unknown as typeof inputs,
+    })).rejects.toMatchObject({
+      code: "BG-GRAPH-CPU-INVALID-BINDING",
+      path: "$.request.controls",
+    });
+    for (const controls of [
+      undefined,
+      [
+        { controlId: "choose", value: wire("0") },
+        { controlId: "choose", value: wire("1") },
+      ],
+      [{ controlId: "other", value: wire("0") }],
+      [{ controlId: "choose", value: wire("4294967296") }],
+    ]) {
+      await expect(prepared.execute({
+        inputs,
+        ...(controls === undefined ? {} : { controls }),
+      })).rejects.toMatchObject({
+        code: "BG-GRAPH-CPU-INVALID-BINDING",
+      });
+    }
   });
 
   it("executes bounded repetition with cancellation points per iteration", async () => {

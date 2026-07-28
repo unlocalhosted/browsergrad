@@ -31,7 +31,7 @@ PyTorch-shaped surface.
 | `runThreadGrid`, `referenceSaxpy`, `referenceExclusiveScan`, `referenceFindRepeats`, `referenceOrderedCircleRender` | Thread-grid teaching references for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
 | `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` / `simulateCuda1DGrid` | CUDA-shaped compatibility aliases for labs and rubrics that teach CUDA vocabulary | ✅ |
 | `prepareSemanticViewCopyWgsl` / `runSemanticViewCopyWebGpu` | Verified `view-copy@1.0` lowering over canonical layout/index artifacts, with exact 32-bit-word storage and structured guarded padding | ✅ 13-case strict CPU/WebGPU parity on Apple Metal 3 across f32/i32/u32, ranks 1–4, striding, broadcast, offsets, and float padding; release evidence remains commit-scoped |
-| `prepareSemanticHostGraphWebGpu` / `runSemanticHostGraphWebGpu` | Authority-bound `browsergrad.host-graph@1` execution with per-rank private storage, canonical view-copy dispatches, whole-allocation raw copies, dependency-ordered completion events, bounded fixed-count repetition, captured-input u32 conditionals, terminal materialization, and ordered f32/i32/u32 all-reduce | ✅ required real-WebGPU complete-output bit parity with the CPU graph oracle for finite f32 sum/signed-zero min, wrapping i32 sum, exact u32 max, event-marked/materialized u8 allocation copy, repeated f32 sum, and both conditional branches, plus a separate observational fixed-repeat/unrolled performance record; runtime/backend-derived control, transport, and native companions remain separate |
+| `prepareSemanticHostGraphWebGpu` / `runSemanticHostGraphWebGpu` | Authority-bound `browsergrad.host-graph@1` execution with per-rank private storage, canonical view-copy dispatches, whole-allocation raw copies, dependency-ordered completion events, bounded fixed-count repetition, captured-input and captured-runtime-control u32 conditionals, terminal materialization, and ordered f32/i32/u32 all-reduce | ✅ required real-WebGPU complete-output bit parity with the CPU graph oracle for finite f32 sum/signed-zero min, wrapping i32 sum, exact u32 max, event-marked/materialized u8 allocation copy, repeated f32 sum, and both branches of both conditional sources, plus a separate observational fixed-repeat/unrolled performance record; GPU/backend-derived control, transport, and native companions remain separate |
 | `prepareSemanticGemmWgsl` / `runSemanticGemmWebGpu` | Verified logical GEMM plus independent schedule lowering with cooperative workgroup staging, uniform barriers, and masked boundary tiles | ✅ bit-exact only for semantic-core certified exact f32 inputs; required irregular two-schedule WebGPU evidence |
 | `prepareSemanticAttentionWgsl` / `runSemanticAttentionWebGpu` | Verified attention plus independent online K/V-tile schedule lowering/execution with cooperative staging, uniform barriers, and causal/tail masks before state updates | ✅ required causal/non-causal two-schedule CPU/WebGPU comparison plus separate observational host-API performance record on Apple Metal 3 |
 | `rowWiseOnlineAttentionDirect` | Fused row-wise online-softmax attention baseline with strict real-WebGPU parity vs composed reference; not block-tiled FlashAttention. | ✅ |
@@ -202,6 +202,14 @@ branch resources/modules, and selects only from the complete captured
 external-input u32 predicate before device work. Branch identity is included
 in the backend specialization hash and successful trace. This is bounded
 host-known selection, not shader, GPU-derived, or mid-graph control flow.
+Version-1.6 conditionals use the same pre-lowered branch path but name a
+required runtime u32 control. Execution accepts exactly the graph's unique
+control set, rejects missing, duplicate, unknown, or greater-than-u32 values,
+and admits that set before copying inputs. It captures controls with all inputs
+before its first device access or await. Zero selects else and nonzero selects
+then; branch identity remains part of specialization and terminal evidence.
+This adds bounded request-time host control, not GPU/backend-derived
+predicates, mid-graph feedback, dynamic launches, or runtime loop counts.
 
 Execution snapshots every rank-local input before its first await, creates only
 private zero-initialized temporary/output storage, checks device allocation,
@@ -228,15 +236,15 @@ that has bit-exact CPU/WebGPU outputs, equal element-operation counts, and the
 same eight expanded WebGPU steps. The f32 two-rank, 65,536-element workload
 uses eight warmups and twelve alternating paired samples around the complete
 production host API, including readback and queue drain. The current Apple
-Metal 3 observation records 1.90 ms candidate and 2.60 ms unrolled medians; it
+Metal 3 observation records 1.60 ms candidate and 1.90 ms unrolled medians; it
 asserts no superiority or regression threshold.
 
-This profile is a bounded DAG plus fixed-count sequential repetition and one
-captured-input conditional profile. It does not claim GPU/backend-derived
-predicates, runtime-derived loop counts or launches, event timestamps/external
-waits, transport/topology, a worker mesh, or native collectives. Its
-performance record is observational and does not establish a general
-performance advantage.
+This profile is a bounded DAG plus fixed-count sequential repetition and
+captured-input/runtime-control conditional profiles. It does not claim
+GPU/backend-derived or mid-graph predicates, runtime-derived loop counts or
+launches, event timestamps/external waits, transport/topology, a worker mesh,
+or native collectives. Its performance record is observational and does not
+establish a general performance advantage.
 
 ## Quick start
 
