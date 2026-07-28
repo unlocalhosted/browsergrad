@@ -24,6 +24,7 @@ import type {
   HostGraphAllReduceNode,
   HostGraphCopyNode,
   HostGraphDispatchNode,
+  HostGraphEventNode,
   HostGraphMaterializeNode,
   HostGraphResource,
 } from "./model.js";
@@ -147,6 +148,7 @@ export interface HostGraphCpuExecutionResult {
   readonly graphSemanticHash: string;
   readonly failureModel: "fail-stop-no-partial-output-commit";
   readonly executedNodeIds: readonly string[];
+  readonly completedEventIds: readonly string[];
   readonly elementOperations: WireU64;
   readonly outputs: readonly HostGraphCpuOutputBinding[];
 }
@@ -157,6 +159,7 @@ export interface PreparedHostGraphCpu {
   readonly rankCount: bigint;
   readonly inputResourceIds: readonly string[];
   readonly outputResourceIds: readonly string[];
+  readonly eventIds: readonly string[];
   readonly elementOperations: bigint;
   readonly execute: (
     request: HostGraphCpuExecutionRequest,
@@ -214,11 +217,19 @@ interface MaterializePlan {
   readonly elementOperations: 0n;
 }
 
+interface EventPlan {
+  readonly kind: "event";
+  readonly nodeId: string;
+  readonly eventId: string;
+  readonly elementOperations: 0n;
+}
+
 type CpuNodePlan =
   | DispatchPlan
   | CollectivePlan
   | CopyPlan
-  | MaterializePlan;
+  | MaterializePlan
+  | EventPlan;
 
 interface NativeUint8Slots {
   readonly buffer: ArrayBufferLike;
@@ -320,7 +331,9 @@ export async function prepareHostGraphCpu(
         ? prepareCollectivePlan(node, resources)
         : node.kind === "copy"
           ? prepareCopyPlan(node, resources, rankCount)
-          : prepareMaterializePlan(node, resources);
+          : node.kind === "materialize"
+            ? prepareMaterializePlan(node, resources)
+            : prepareEventPlan(node);
     elementOperations += plan.elementOperations;
     if (elementOperations > BigInt(normalized.maxElementOperations)) {
       fail(
@@ -353,6 +366,8 @@ export async function prepareHostGraphCpu(
   );
   const frozenPlans = Object.freeze(plans);
   const executedNodeIds = Object.freeze(frozenPlans.map((plan) => plan.nodeId));
+  const eventIds = Object.freeze(frozenPlans.flatMap((plan) =>
+    plan.kind === "event" ? [plan.eventId] : []));
 
   const execute = async (
     request: HostGraphCpuExecutionRequest,
@@ -439,6 +454,7 @@ export async function prepareHostGraphCpu(
       graphSemanticHash: preparedGraph.graphSemanticHash,
       failureModel: "fail-stop-no-partial-output-commit",
       executedNodeIds,
+      completedEventIds: eventIds,
       elementOperations: encodeWireU64(elementOperations),
       outputs,
     });
@@ -454,6 +470,7 @@ export async function prepareHostGraphCpu(
     outputResourceIds: Object.freeze(
       outputResources.map((resource) => resource.resourceId),
     ),
+    eventIds,
     elementOperations,
     execute,
   });
@@ -618,6 +635,15 @@ function prepareMaterializePlan(
     kind: "materialize",
     nodeId: node.nodeId,
     resourceId: node.resourceId,
+    elementOperations: 0n,
+  });
+}
+
+function prepareEventPlan(node: HostGraphEventNode): EventPlan {
+  return Object.freeze({
+    kind: "event",
+    nodeId: node.nodeId,
+    eventId: node.eventId,
     elementOperations: 0n,
   });
 }

@@ -87,6 +87,7 @@ interface CaseObservation extends JsonObject {
   readonly dispatchStepCount: number;
   readonly copyStepCount: number;
   readonly materializationCount: number;
+  readonly completedEventIds: readonly string[];
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -241,6 +242,8 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       expect(actual.trace.submitted).toBe(true);
       expect(actual.trace.executedNodeIds)
         .toEqual(expected.executedNodeIds);
+      expect(actual.trace.completedEventIds)
+        .toEqual(expected.completedEventIds);
       completedCases.push(Object.freeze({
         caseId: preparedCase.caseId,
         artifactHash: preparedCase.artifactHash,
@@ -251,6 +254,7 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         dispatchStepCount: actual.trace.dispatchStepCount,
         copyStepCount: actual.trace.copyStepCount,
         materializationCount: actual.trace.materializationCount,
+        completedEventIds: actual.trace.completedEventIds,
         collectiveReductionStepCount:
           actual.trace.collectiveReductionStepCount,
         collectiveReplicationStepCount:
@@ -469,7 +473,7 @@ function collectiveProgram(
 function rawCopyProgram(): HostGraphProgram {
   return {
     kind: "host-graph",
-    version: { major: 1, minor: 2 },
+    version: { major: 1, minor: 3 },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire(2),
     resources: [
@@ -502,9 +506,16 @@ function rawCopyProgram(): HostGraphProgram {
         mode: "whole-allocation-bytes-per-rank",
       },
       {
+        nodeId: "copy-complete-event",
+        kind: "event",
+        dependsOn: ["raw-copy"],
+        eventId: "copy-complete",
+        mode: "completion-after-dependencies",
+      },
+      {
         nodeId: "materialize-output",
         kind: "materialize",
-        dependsOn: ["raw-copy"],
+        dependsOn: ["copy-complete-event"],
         resourceId: "output",
         mode: "host-readback-after-graph-success",
       },

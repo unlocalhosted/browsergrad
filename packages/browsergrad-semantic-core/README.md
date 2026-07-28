@@ -111,6 +111,10 @@ Version 1.2 requires every declared output to have exactly one terminal
 `host-readback-after-graph-success` materialization node. That node is an
 ordered read effect: it must follow the output's final writer, cannot expose an
 input or temporary resource, cannot be duplicated, and cannot have dependents.
+Version 1.3 adds unique `completion-after-dependencies` events. Events carry
+no resource effect, timing value, queue identity, or external wait authority;
+they are dependency-ordered completion markers reported only with a successful
+whole-graph result.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -132,7 +136,8 @@ all rank-local inputs, runs dispatches, exact byte copies, and f32/i32/u32
 all-reduces against private storage, and exposes outputs only after the
 complete graph succeeds. Version-1.2 results are selected only by verified
 materialization nodes; the node adds no element work and preserves the
-fail-stop publication point.
+fail-stop publication point. Version-1.3 events likewise add no element work;
+completed event IDs are returned only after every later node also succeeds.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -145,8 +150,8 @@ lowers one or more opaque prepared view-copy bindings into a verified linear
 host graph with derived intermediate resources. Kernels separately owns the
 authority-bound `browsergrad.host-graph.webgpu@1` static-DAG adapter and its
 required actual-device evidence. Neither adapter grants transport, topology,
-retries, event semantics, dynamic control, worker-mesh, native-companion,
-performance, or release authority.
+retries, event timestamps or external waits, dynamic control, worker-mesh,
+native-companion, performance, or release authority.
 
 Frontends construct the operation through one `/kernel` sink rather than
 assembling allocation, alias, index-map, view, and operation IDs themselves.

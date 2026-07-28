@@ -1,7 +1,7 @@
 # BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
 - **Status:** normative platform architecture; implementation status is not implied
-- **Last reviewed:** 2026-07-27
+- **Last reviewed:** 2026-07-28
 - **Implementation ledger:**
   [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
 - **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
@@ -13,7 +13,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
 describe requirement strength. They are used deliberately rather than as
 general emphasis.
 
-## Implementation Checkpoint — Active 2026-07-27
+## Implementation Checkpoint — Active 2026-07-28
 
 This checkpoint is informational. The rest of this document is normative, and
 the [implementation ledger](../internal/package-requirements-implementation-ledger.md)
@@ -30,7 +30,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified static DAG, compiler pipeline consumer, whole-allocation copy nodes, explicit fail-stop materialization, CPU oracle, and authority-bound portable WebGPU executor have exact f32/i32/u32 plus raw-u8 actual-device parity; dynamic control, events, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified static DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, explicit fail-stop materialization, CPU oracle, and authority-bound portable WebGPU executor have exact f32/i32/u32 plus raw-u8 actual-device parity; dynamic control, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every exit criterion for the declared gate profile is
 complete. Verification of a closed initial profile does not imply broader
@@ -45,9 +45,15 @@ The 90-minute build is no longer an engineering iteration loop:
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
   exact build lock, both zero-import Worker bundles, and the strict matrix
   authoring projection; it passes 100 files/802 tests in 16.52 seconds.
-- The complete compiler unit suite passes 106 files/1,655 tests in 21.89 seconds.
-- The required native boundary passes 55 files/289 tests with nine explicit
-  skips in 67.05 seconds; optimized, UBSan, and ASan stay outside the edit loop.
+- The complete compiler unit suite passes 106 files/1,658 tests in 12.03 seconds.
+- The required native boundary is a single isolated prerequisite: 12 files/30
+  tests pass with nine explicit platform skips in 71.82 seconds. Every
+  behavioral native compile/run child uses the same no-shell, bounded-output,
+  process-group termination boundary as the production build executor.
+- The remaining 43 Clang-Wasm surface files/261 tests run in the parallel
+  compiler lane in 16.13 seconds. The complete compiler verifier, including
+  builds, native tests, four parallel lanes, architecture checks, and 1,658
+  compiler tests, passes in 114.23 seconds.
 - Cache-free LLVM/Clang builds exist only to mint clean-build and
   reproducibility evidence. Their two jobs run concurrently and never replace
   the focused or fast local paths.
@@ -2129,7 +2135,10 @@ input-immutability, dependency, and unordered-hazard checks. Program version
 output. Materialization is an ordered read after the final writer, cannot
 expose an input or temporary resource, cannot be duplicated, and cannot have
 dependents. Versions 1.0 and 1.1 retain their exact implicit-output behavior.
-The
+Program version 1.3 adds unique `completion-after-dependencies` events. An
+event has no resource effect, timestamp, queue identity, or external wait
+authority; it is a named dependency milestone reported only with a successful
+whole-graph result. The
 authority-bound `browsergrad.host-graph.cpu-reference@1` profile snapshots all
 rank-local inputs, executes dispatches, arbitrary-byte copies, and finite
 rank-ordered f32 or wrapping/exact 32-bit integer all-reduces in private
@@ -2144,7 +2153,8 @@ to one raw-word copy per rank; implements arbitrary-rank collectives as ordered
 pairwise reductions followed by raw-word replication; and retains one private
 GPU buffer per bound rank/resource. The portable copy profile requires whole
 32-bit words but preserves dtype bits, including the required u8 case.
-Materialization selects terminal readback without adding a GPU dispatch. F32
+Materialization selects terminal readback without adding a GPU dispatch.
+Completion events preserve topological ordering and add no GPU command. F32
 collectives use a separately
 read back atomic numerical-status word and preserve CPU signed-zero min/max;
 i32 sum wraps explicitly and u32/integer min/max remains exact. Complete input
@@ -2154,12 +2164,13 @@ diagnostics, device-loss invalidation, cancellation/timeout stale-result
 suppression, and output publication after complete readback preserve the graph
 failure model. Required headed Chromium on Apple Metal 3 bit-matches the CPU
 reference for rank-ordered f32 sum, signed-zero f32 min, wrapping i32 sum,
-exact u32 max, and whole-allocation u8 copy, and separately proves non-finite
-f32 and lost-device refusal.
+exact u32 max, and event-marked/materialized whole-allocation u8 copy, and
+separately proves non-finite f32 and lost-device refusal.
 
-No event semantic node, bounded conditional/repetition node, pipeline
-authority, transport/topology adapter, worker mesh, native companion, or
-performance evidence exists yet, so Gate 7 remains `in progress`.
+No bounded conditional/repetition node, pipeline authority,
+transport/topology adapter, worker mesh, native companion, or performance
+evidence exists yet, so Gate 7 remains `in progress`. Current events do not
+claim timestamps, external waits, or cross-queue/cross-worker synchronization.
 
 ## Proof Matrix and Release Gates
 

@@ -208,6 +208,31 @@ function materializedRawCopyProgram(byteLength = "8"): HostGraphProgram {
   };
 }
 
+function eventfulRawCopyProgram(byteLength = "8"): HostGraphProgram {
+  const program = materializedRawCopyProgram(byteLength);
+  return {
+    ...program,
+    version: { major: 1, minor: 3 },
+    nodes: [
+      ...program.nodes.filter((node) => node.kind !== "materialize"),
+      {
+        nodeId: "copy-complete-event",
+        kind: "event",
+        dependsOn: ["raw-copy"],
+        eventId: "copy-complete",
+        mode: "completion-after-dependencies",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["copy-complete-event"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 async function verified(
   program: HostGraphProgram,
   artifacts: VerifiedViewCopyArtifacts,
@@ -230,6 +255,27 @@ function input(
 }
 
 describe("semantic host-graph WebGPU preparation", () => {
+  it("retains version-1.3 completion events without an extra GPU step", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      eventfulRawCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+
+    expect(prepared).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 3,
+      expandedStepCount: 2,
+      copyStepCount: 2,
+      materializationCount: 1,
+      eventCount: 1,
+      eventIds: ["copy-complete"],
+    });
+  });
+
   it("prepares explicit version-1.2 materialization without an extra GPU step", async () => {
     const graph = (await createVerifiedHostGraphArtifact(
       materializedRawCopyProgram(),
@@ -248,6 +294,8 @@ describe("semantic host-graph WebGPU preparation", () => {
       dispatchStepCount: 0,
       copyStepCount: 2,
       materializationCount: 1,
+      eventCount: 0,
+      eventIds: [],
       collectiveReductionStepCount: 0,
       collectiveReplicationStepCount: 0,
     });
@@ -270,6 +318,8 @@ describe("semantic host-graph WebGPU preparation", () => {
       dispatchStepCount: 0,
       copyStepCount: 2,
       materializationCount: 0,
+      eventCount: 0,
+      eventIds: [],
       collectiveReductionStepCount: 0,
       collectiveReplicationStepCount: 0,
       plannedTransientGpuBytes: "48",
@@ -310,6 +360,8 @@ describe("semantic host-graph WebGPU preparation", () => {
       dispatchStepCount: 4,
       copyStepCount: 0,
       materializationCount: 0,
+      eventCount: 0,
+      eventIds: [],
       collectiveReductionStepCount: 0,
       collectiveReplicationStepCount: 0,
       plannedTransientGpuBytes: "64",

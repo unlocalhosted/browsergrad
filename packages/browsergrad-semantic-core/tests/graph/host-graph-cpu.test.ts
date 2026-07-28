@@ -195,6 +195,31 @@ function materializedRawCopyProgram(): HostGraphProgram {
   };
 }
 
+function eventfulRawCopyProgram(): HostGraphProgram {
+  const program = materializedRawCopyProgram();
+  return {
+    ...program,
+    version: { major: 1, minor: 3 },
+    nodes: [
+      ...program.nodes.filter((node) => node.kind !== "materialize"),
+      {
+        nodeId: "copy-complete-event",
+        kind: "event",
+        dependsOn: ["raw-copy"],
+        eventId: "copy-complete",
+        mode: "completion-after-dependencies",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["copy-complete-event"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 async function verified(
   program: HostGraphProgram,
   artifacts: VerifiedViewCopyArtifacts,
@@ -262,6 +287,34 @@ function readU32(bytes: Uint8Array): number[] {
 }
 
 describe("host graph CPU reference", () => {
+  it("reports completion events only with a successful whole-graph result", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      eventfulRawCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+    const source = new Uint8Array([0, 1, 2, 3, 4, 5, 255]);
+    const result = await prepared.execute({
+      inputs: [input(0, source), input(1, source)],
+    });
+
+    expect(prepared.eventIds).toEqual(["copy-complete"]);
+    expect(prepared.elementOperations).toBe(14n);
+    expect(result.executedNodeIds).toEqual([
+      "raw-copy",
+      "copy-complete-event",
+      "materialize-output",
+    ]);
+    expect(result.completedEventIds).toEqual(["copy-complete"]);
+    expect(result.outputs.map(({ bytes }) => bytes)).toEqual([
+      source,
+      source,
+    ]);
+  });
+
   it("publishes only explicitly materialized version-1.2 outputs", async () => {
     const graph = (await createVerifiedHostGraphArtifact(
       materializedRawCopyProgram(),
@@ -282,6 +335,7 @@ describe("host graph CPU reference", () => {
       "raw-copy",
       "materialize-output",
     ]);
+    expect(result.completedEventIds).toEqual([]);
     expect(result.outputs.map(({ bytes }) => bytes)).toEqual([
       source,
       source,

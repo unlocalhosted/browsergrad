@@ -52,7 +52,7 @@ import {
 
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.2.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.3.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -204,6 +204,8 @@ export interface PreparedSemanticHostGraphWebGpu {
   readonly dispatchStepCount: number;
   readonly copyStepCount: number;
   readonly materializationCount: number;
+  readonly eventCount: number;
+  readonly eventIds: readonly string[];
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -225,6 +227,7 @@ export interface SemanticHostGraphWebGpuTrace {
   readonly dispatchStepCount: number;
   readonly copyStepCount: number;
   readonly materializationCount: number;
+  readonly completedEventIds: readonly string[];
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -277,6 +280,7 @@ interface PreparedState {
   readonly readbackStorageNames: readonly string[];
   readonly usesNumericalStatus: boolean;
   readonly topologicalNodeIds: readonly string[];
+  readonly eventIds: readonly string[];
   readonly maximumBoundAllocationBytes: bigint;
   readonly workgroupSize: number;
 }
@@ -285,6 +289,7 @@ interface MutablePreparationCounts {
   dispatch: number;
   copy: number;
   materialization: number;
+  event: number;
   reduction: number;
   replication: number;
 }
@@ -366,6 +371,7 @@ export async function prepareSemanticHostGraphWebGpu(
     dispatch: 0,
     copy: 0,
     materialization: 0,
+    event: 0,
     reduction: 0,
     replication: 0,
   };
@@ -421,13 +427,15 @@ export async function prepareSemanticHostGraphWebGpu(
         storageMetadata,
         moduleHashes,
       );
-    } else {
+    } else if (node.kind === "materialize") {
       appendMaterialization(
         node,
         resourcesById,
         boundStorageNames,
         counts,
       );
+    } else {
+      appendEvent(counts);
     }
     if (steps.length > normalized.maxExpandedSteps) {
       fail(
@@ -538,6 +546,8 @@ export async function prepareSemanticHostGraphWebGpu(
     dispatchStepCount: counts.dispatch,
     copyStepCount: counts.copy,
     materializationCount: counts.materialization,
+    eventCount: counts.event,
+    eventIds: Object.freeze([...preparedGraph.eventIds]),
     collectiveReductionStepCount: counts.reduction,
     collectiveReplicationStepCount: counts.replication,
     wgslModuleHashes: publicModuleHashes,
@@ -565,6 +575,7 @@ export async function prepareSemanticHostGraphWebGpu(
     topologicalNodeIds: Object.freeze([
       ...preparedGraph.topologicalNodeIds,
     ]),
+    eventIds: Object.freeze([...preparedGraph.eventIds]),
     maximumBoundAllocationBytes,
     workgroupSize: normalized.workgroupSize,
   }));
@@ -973,6 +984,10 @@ function appendMaterialization(
     );
   }
   counts.materialization += 1;
+}
+
+function appendEvent(counts: MutablePreparationCounts): void {
+  counts.event += 1;
 }
 
 function resourceBinding(
@@ -1600,6 +1615,7 @@ function createTrace(
     dispatchStepCount: prepared.dispatchStepCount,
     copyStepCount: prepared.copyStepCount,
     materializationCount: prepared.materializationCount,
+    completedEventIds: state.eventIds,
     collectiveReductionStepCount:
       prepared.collectiveReductionStepCount,
     collectiveReplicationStepCount:

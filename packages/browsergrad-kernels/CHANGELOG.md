@@ -22,6 +22,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `host-readback-after-graph-success` materialization node per output.
   Materialization selects fail-stop readback without adding a GPU dispatch;
   required actual-device u8 evidence now crosses that explicit node.
+- Host-graph program version 1.3 adds unique dependency-ordered completion
+  events. Successful CPU/WebGPU traces report completed event IDs without
+  adding element work, GPU commands, timestamps, queue fences, or external
+  wait authority.
 - Graph execution snapshots complete direct/unshared inputs, initializes
   private temporary/output storage deterministically, bounds expanded steps
   and aggregate host/GPU storage, verifies device limits, and publishes fresh

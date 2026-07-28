@@ -199,6 +199,33 @@ function materializedCopyProgram(): HostGraphProgram {
   };
 }
 
+function eventfulCopyProgram(): HostGraphProgram {
+  const program = materializedCopyProgram();
+  const materialization = program.nodes.find((node) =>
+    node.kind === "materialize");
+  if (materialization?.kind !== "materialize") {
+    throw new Error("missing materialize node");
+  }
+  return {
+    ...program,
+    version: { major: 1, minor: 3 },
+    nodes: [
+      ...program.nodes.filter((node) => node.kind !== "materialize"),
+      {
+        nodeId: "copy-complete-event",
+        kind: "event",
+        dependsOn: ["copy-output"],
+        eventId: "copy-complete",
+        mode: "completion-after-dependencies",
+      },
+      {
+        ...materialization,
+        dependsOn: ["copy-complete-event"],
+      },
+    ],
+  };
+}
+
 async function diagnostic(
   run: () => Promise<unknown> | unknown,
 ): Promise<SemanticSchemaError> {
@@ -232,6 +259,81 @@ function artifactsFor(artifacts: VerifiedViewCopyArtifacts) {
 }
 
 describe("host graph artifact", () => {
+  it("normalizes dependency-ordered completion events in version 1.3", async () => {
+    const constructed = await createVerifiedHostGraphArtifact(
+      eventfulCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    );
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+
+    expect(payload.program.version).toEqual({ major: 1, minor: 3 });
+    expect(payload.program.nodes.find((node) => node.kind === "event"))
+      .toEqual({
+        nodeId: "copy-complete-event",
+        kind: "event",
+        dependsOn: ["copy-output"],
+        eventId: "copy-complete",
+        mode: "completion-after-dependencies",
+      });
+    expect(prepared).toMatchObject({
+      nodeCount: 4,
+      copyCount: 2,
+      materializationCount: 1,
+      eventCount: 1,
+      eventIds: ["copy-complete"],
+      topologicalNodeIds: [
+        "copy-input",
+        "copy-output",
+        "copy-complete-event",
+        "materialize-output",
+      ],
+    });
+  });
+
+  it("rejects forged event versions, modes, and duplicate identities", async () => {
+    const version = clone(eventfulCopyProgram());
+    version.version.minor = 2;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      version,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const mode = clone(eventfulCopyProgram());
+    const modeNode = mode.nodes.find((node) => node.kind === "event");
+    if (modeNode?.kind !== "event") throw new Error("missing event node");
+    modeNode.mode = "timestamp" as typeof modeNode.mode;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      mode,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const duplicate = clone(eventfulCopyProgram());
+    duplicate.nodes.push({
+      nodeId: "copy-complete-event-again",
+      kind: "event",
+      dependsOn: ["copy-output"],
+      eventId: "copy-complete",
+      mode: "completion-after-dependencies",
+    });
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      duplicate,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.duplicateId);
+
+    const unordered = clone(eventfulCopyProgram());
+    const unorderedEvent = unordered.nodes.find((node) =>
+      node.kind === "event");
+    if (unorderedEvent?.kind !== "event") {
+      throw new Error("missing event node");
+    }
+    unorderedEvent.dependsOn = [];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      unordered,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.readBeforeWrite);
+  });
+
   it("normalizes explicit terminal materialization in version 1.2", async () => {
     const constructed = await createVerifiedHostGraphArtifact(
       materializedCopyProgram(),
@@ -255,6 +357,8 @@ describe("host graph artifact", () => {
       collectiveCount: 0,
       copyCount: 2,
       materializationCount: 1,
+      eventCount: 0,
+      eventIds: [],
       topologicalNodeIds: [
         "copy-input",
         "copy-output",
@@ -390,13 +494,15 @@ describe("host graph artifact", () => {
       collectiveCount: 0,
       copyCount: 2,
       materializationCount: 0,
+      eventCount: 0,
+      eventIds: [],
       topologicalNodeIds: ["copy-input", "copy-output"],
     });
   });
 
   it("rejects copy version, mode, resource, dtype, and hazard drift", async () => {
     const future = clone(copyProgram());
-    future.version.minor = 3 as typeof future.version.minor;
+    future.version.minor = 4 as typeof future.version.minor;
     expect((await diagnostic(() => createVerifiedHostGraphArtifact(
       future,
       { kernelArtifacts: [], layoutArtifacts: [] },
@@ -526,6 +632,8 @@ describe("host graph artifact", () => {
       collectiveCount: 1,
       copyCount: 0,
       materializationCount: 0,
+      eventCount: 0,
+      eventIds: [],
       topologicalNodeIds: ["transform", "synchronize", "store"],
       outputResourceIds: ["output"],
     });

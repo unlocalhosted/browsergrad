@@ -49,6 +49,7 @@ import {
   type HostGraphCopyNode,
   type HostGraphDispatchNode,
   type HostGraphDispatchResourceBinding,
+  type HostGraphEventNode,
   type HostGraphMaterializeNode,
   type HostGraphNode,
   type HostGraphProgram,
@@ -58,7 +59,7 @@ import {
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 2;
+export const HOST_GRAPH_ARTIFACT_MINOR = 3;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
@@ -119,6 +120,8 @@ export interface PreparedHostGraphProgram {
   readonly collectiveCount: number;
   readonly copyCount: number;
   readonly materializationCount: number;
+  readonly eventCount: number;
+  readonly eventIds: readonly string[];
   readonly topologicalNodeIds: readonly string[];
   readonly outputResourceIds: readonly string[];
 }
@@ -130,6 +133,8 @@ interface HostGraphAnalysis {
   readonly collectiveCount: number;
   readonly copyCount: number;
   readonly materializationCount: number;
+  readonly eventCount: number;
+  readonly eventIds: readonly string[];
   readonly topologicalNodeIds: readonly string[];
   readonly outputResourceIds: readonly string[];
 }
@@ -263,6 +268,8 @@ export async function prepareHostGraphProgram(
     collectiveCount: analysis.collectiveCount,
     copyCount: analysis.copyCount,
     materializationCount: analysis.materializationCount,
+    eventCount: analysis.eventCount,
+    eventIds: Object.freeze([...analysis.eventIds]),
     topologicalNodeIds: Object.freeze([...analysis.topologicalNodeIds]),
     outputResourceIds: Object.freeze([...analysis.outputResourceIds]),
   });
@@ -314,12 +321,15 @@ function parseProgram(
   );
   if (
     version.major !== 1 ||
-    (version.minor !== 0 && version.minor !== 1 && version.minor !== 2)
+    (version.minor !== 0 &&
+      version.minor !== 1 &&
+      version.minor !== 2 &&
+      version.minor !== 3)
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0, 1.1, and 1.2 only",
+      "host graph program reader supports versions 1.0 through 1.3 only",
     );
   }
   if (version.minor !== envelopeMinor) {
@@ -472,7 +482,7 @@ function parseResources(
 
 function parseNodes(
   value: JsonValue,
-  programMinor: 0 | 1 | 2,
+  programMinor: 0 | 1 | 2 | 3,
 ): readonly HostGraphNode[] {
   const values = arrayValue(value, "$.payload.program.nodes");
   if (values.length === 0 || values.length > HOST_GRAPH_MAX_NODES) {
@@ -494,13 +504,20 @@ function parseNodes(
     "$.payload.program.nodes",
     "node",
   );
+  unique(
+    nodes
+      .filter((node): node is HostGraphEventNode => node.kind === "event")
+      .map((node) => node.eventId),
+    "$.payload.program.nodes",
+    "event",
+  );
   return nodes;
 }
 
 function parseNode(
   value: JsonValue,
   path: string,
-  programMinor: 0 | 1 | 2,
+  programMinor: 0 | 1 | 2 | 3,
 ): HostGraphNode {
   const object = objectValue(value, path);
   const kind = stringValue(field(object, "kind", path), `${path}.kind`);
@@ -526,11 +543,49 @@ function parseNode(
     }
     return parseMaterializeNode(object, path);
   }
+  if (kind === "event") {
+    if (programMinor < 3) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.kind`,
+        "event nodes require host graph program version 1.3",
+      );
+    }
+    return parseEventNode(object, path);
+  }
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, and version-1.2 materialize nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, and version-1.3 event nodes",
   );
+}
+
+function parseEventNode(
+  value: JsonObject,
+  path: string,
+): HostGraphEventNode {
+  const object = closedObject(
+    value,
+    ["nodeId", "kind", "dependsOn", "eventId", "mode"],
+    path,
+  );
+  if (object.mode !== "completion-after-dependencies") {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "event mode must be completion-after-dependencies",
+    );
+  }
+  return {
+    nodeId: identifier(field(object, "nodeId", path), `${path}.nodeId`),
+    kind: "event",
+    dependsOn: dependencies(field(object, "dependsOn", path), path),
+    eventId: identifier(
+      field(object, "eventId", path),
+      `${path}.eventId`,
+    ),
+    mode: "completion-after-dependencies",
+  };
 }
 
 function parseMaterializeNode(
@@ -840,6 +895,7 @@ function analyzeProgram(
   let collectiveCount = 0;
   let copyCount = 0;
   let materializationCount = 0;
+  let eventCount = 0;
   const dispatchEffects = new Map<
     string,
     readonly HostGraphResourceEffect[]
@@ -1006,8 +1062,10 @@ function analyzeProgram(
       collectiveCount += 1;
     } else if (node.kind === "copy") {
       copyCount += 1;
-    } else {
+    } else if (node.kind === "materialize") {
       materializationCount += 1;
+    } else {
+      eventCount += 1;
     }
   }
   const topologicalNodeIds = topologicalOrder(program.nodes, nodes);
@@ -1028,6 +1086,11 @@ function analyzeProgram(
     collectiveCount,
     copyCount,
     materializationCount,
+    eventCount,
+    eventIds: Object.freeze(topologicalNodeIds.flatMap((nodeId) => {
+      const node = nodes.get(nodeId);
+      return node?.kind === "event" ? [node.eventId] : [];
+    })),
     topologicalNodeIds: Object.freeze(topologicalNodeIds),
     outputResourceIds: Object.freeze(
       program.version.minor < 2
@@ -1453,7 +1516,10 @@ function nodeEffects(
       { resourceId: node.destinationResourceId, access: "write" },
     ];
   }
-  return [{ resourceId: node.resourceId, access: "read" }];
+  if (node.kind === "materialize") {
+    return [{ resourceId: node.resourceId, access: "read" }];
+  }
+  return [];
 }
 
 function reads(access: HostGraphResourceAccess): boolean {
