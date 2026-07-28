@@ -181,6 +181,7 @@ export interface PreparedHostGraphCpu {
   readonly repeatNodeIds: readonly string[];
   readonly repeats: readonly HostGraphRepeatCompletion[];
   readonly runtimeRepeatCount: number;
+  readonly resourceRepeatCount: number;
   readonly dynamicDispatchCount: number;
   readonly conditionalNodeIds: readonly string[];
   readonly resourceConditionalCount: number;
@@ -281,7 +282,17 @@ interface RuntimeRepeatPlan extends RepeatPlanBase {
   readonly maxIterationCount: number;
 }
 
-type RepeatPlan = FixedRepeatPlan | RuntimeRepeatPlan;
+interface ResourceRepeatPlan extends RepeatPlanBase {
+  readonly mode: "resource";
+  readonly resourceId: string;
+  readonly rank: number;
+  readonly maxIterationCount: number;
+}
+
+type RepeatPlan =
+  | FixedRepeatPlan
+  | RuntimeRepeatPlan
+  | ResourceRepeatPlan;
 
 interface ConditionalPlan {
   readonly kind: "conditional";
@@ -663,6 +674,7 @@ export async function prepareHostGraphCpu(
     repeatNodeIds,
     repeats: fixedRepeats,
     runtimeRepeatCount: preparedGraph.runtimeRepeatCount,
+    resourceRepeatCount: preparedGraph.resourceRepeatCount,
     dynamicDispatchCount: preparedGraph.dynamicDispatchCount,
     conditionalNodeIds,
     resourceConditionalCount: preparedGraph.resourceConditionalCount,
@@ -733,6 +745,22 @@ async function prepareRepeatPlan(
     wireIntegerToBigInt(node.maxIterationCount),
     `$.nodes.${node.nodeId}.maxIterationCount`,
   );
+  if (node.mode === "resource-u32-count-sequential") {
+    return Object.freeze({
+      kind: "repeat",
+      mode: "resource",
+      nodeId: node.nodeId,
+      resourceId: node.iterationSource.resourceId,
+      rank: safeNumber(
+        wireIntegerToBigInt(node.iterationSource.rank),
+        `$.nodes.${node.nodeId}.iterationSource.rank`,
+      ),
+      maxIterationCount,
+      body,
+      bodyElementOperations,
+      elementOperations: bodyElementOperations * BigInt(maxIterationCount),
+    });
+  }
   return Object.freeze({
     kind: "repeat",
     mode: "runtime-control",
@@ -1049,8 +1077,10 @@ async function executeRepeat(
 ): Promise<HostGraphRepeatCompletion> {
   const iterationCount = plan.mode === "fixed"
     ? plan.iterationCount
-    : controls.find((control) =>
-      control.controlId === plan.controlId)?.value;
+    : plan.mode === "resource"
+      ? readResourceRepeatCount(plan, rankResources)
+      : controls.find((control) =>
+        control.controlId === plan.controlId)?.value;
   if (iterationCount === undefined) {
     fail(
       "BG-GRAPH-CPU-INTERNAL",
@@ -1059,13 +1089,19 @@ async function executeRepeat(
     );
   }
   if (
-    plan.mode === "runtime-control" &&
+    plan.mode !== "fixed" &&
     iterationCount > plan.maxIterationCount
   ) {
     fail(
-      "BG-GRAPH-CPU-INTERNAL",
-      `$.nodes.${plan.nodeId}.iterationControl`,
-      "admitted runtime repeat control exceeds its verified bound",
+      plan.mode === "resource"
+        ? "BG-GRAPH-CPU-RESOURCE-LIMIT"
+        : "BG-GRAPH-CPU-INTERNAL",
+      plan.mode === "resource"
+        ? `$.nodes.${plan.nodeId}.iterationSource`
+        : `$.nodes.${plan.nodeId}.iterationControl`,
+      plan.mode === "resource"
+        ? "produced resource repeat count exceeds its verified bound"
+        : "admitted runtime repeat control exceeds its verified bound",
     );
   }
   for (let iteration = 0; iteration < iterationCount; iteration += 1) {
@@ -1084,6 +1120,26 @@ async function executeRepeat(
     iterationCount: encodeWireU64(BigInt(iterationCount)),
     bodyNodeIds: Object.freeze(plan.body.map((bodyPlan) => bodyPlan.nodeId)),
   });
+}
+
+function readResourceRepeatCount(
+  plan: ResourceRepeatPlan,
+  rankResources: RankResources,
+): number {
+  const bytes = rankResources[plan.rank]?.get(plan.resourceId);
+  if (bytes === undefined || bytes.byteLength !== 4) {
+    fail(
+      "BG-GRAPH-CPU-INTERNAL",
+      `$.nodes.${plan.nodeId}.iterationSource`,
+      "verified resource repeat source disappeared",
+    );
+  }
+  const view = new DATA_VIEW_CONSTRUCTOR(
+    bytes.buffer,
+    bytes.byteOffset,
+    bytes.byteLength,
+  );
+  return REFLECT_APPLY(DATA_VIEW_GET_UINT32, view, [0, true]);
 }
 
 async function executeConditional(

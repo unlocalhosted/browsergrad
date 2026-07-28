@@ -339,6 +339,49 @@ function runtimeRepeatedCollectiveProgram(): HostGraphProgram {
   };
 }
 
+function resourceRepeatedCollectiveProgram(): HostGraphProgram {
+  const base = repeatedCollectiveProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 10 },
+    resources: [
+      ...base.resources,
+      resource("iteration-input", "input", "u32", "4"),
+      resource("iteration-count", "temporary", "u32", "4"),
+    ],
+    nodes: [
+      {
+        nodeId: "produce-iteration-count",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "iteration-input",
+        destinationResourceId: "iteration-count",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      ...base.nodes.map((node) => {
+        if (
+          node.kind !== "repeat" ||
+          node.mode !== "fixed-count-sequential"
+        ) {
+          return node;
+        }
+        const { iterationCount: _iterationCount, ...common } = node;
+        return {
+          ...common,
+          dependsOn: ["initialize", "produce-iteration-count"],
+          iterationSource: {
+            resourceId: "iteration-count",
+            rank: wire("0"),
+            mode: "u32-count" as const,
+          },
+          maxIterationCount: wire("3"),
+          mode: "resource-u32-count-sequential" as const,
+        };
+      }),
+    ],
+  };
+}
+
 function conditionalRawCopyProgram(): HostGraphProgram {
   return {
     kind: "host-graph",
@@ -619,6 +662,34 @@ describe("semantic host-graph WebGPU preparation", () => {
       repeatIterationCount: 3,
       runtimeRepeatCount: 1,
       runtimeControlIds: ["iterations"],
+      collectiveReductionStepCount: 3,
+      collectiveReplicationStepCount: 3,
+    });
+  });
+
+  it("prewarms one version-1.10 produced-resource repeat schedule", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      resourceRepeatedCollectiveProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+
+    expect(prepared).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 4,
+      expandedNodeCount: 6,
+      expandedStepCount: 10,
+      copyStepCount: 4,
+      repeatCount: 1,
+      repeatIterationCount: 3,
+      runtimeRepeatCount: 0,
+      resourceRepeatCount: 1,
+      resourceConditionalCount: 0,
+      midGraphFeedbackCount: 1,
+      runtimeControlIds: [],
       collectiveReductionStepCount: 3,
       collectiveReplicationStepCount: 3,
     });

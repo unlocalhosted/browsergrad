@@ -161,6 +161,13 @@ than the verified view-copy semantic domain. Values from one through the
 maximum execute exactly that logical linear prefix; zero and larger values
 fail before input copying. Dynamic dispatch cannot appear in repeat or
 conditional bodies, and its maximum work enters preparation budgets.
+Version 1.10 adds one `resource-u32-count-sequential` repeat. Its
+`iterationSource` names an exact rank-local, four-byte, aligned, zero-filled
+temporary `u32` with an ordered graph writer. Zero through a positive artifact
+maximum execute the bounded linear body exactly that many times. The body
+cannot access the captured count resource, zero-possible body writes are not
+guaranteed, and a graph admits only one produced-resource conditional or
+repeat feedback node.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -210,6 +217,11 @@ Version-1.9 dynamic dispatch admits its positive prefix count with the same
 exact control snapshot, reserves the artifact maximum, executes only that
 logical prefix, and reports both the completed element count and actual
 element-operation total after whole-graph success.
+Version-1.10 repeats read the count from private rank-local storage only after
+its ordered producer has executed, reject values above the artifact maximum,
+reserve maximum work, execute zero through that maximum with per-iteration
+cancellation/time checks, and publish actual completion/work only with
+whole-graph success.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -221,12 +233,13 @@ does not imply device execution. Compiler owns the first concrete producer: it
 lowers one or more opaque prepared view-copy bindings into a verified linear
 host graph with derived intermediate resources. Kernels separately owns the
 authority-bound `browsergrad.host-graph.webgpu@1`
-DAG/fixed/runtime-repeat/dynamic-dispatch/bounded-input/runtime-control/resource-conditional adapter and
+DAG/fixed/runtime/resource-repeat/dynamic-dispatch/bounded-input/runtime-control/resource-conditional adapter and
 its required actual-device evidence. The version-1.7 backend profile uses one
 explicit bounded host readback/resubmission point for its GPU-produced
-predicate. Neither adapter grants transport, topology, retries, event
-timestamps or external waits, GPU/backend-derived loop or launch control,
-broader dynamic schedules, worker-mesh, native-companion,
+predicate; version 1.10 reuses that authority for one bounded GPU-produced
+loop count. Neither adapter grants transport, topology, retries, event
+timestamps or external waits, repeated/device-side feedback,
+GPU-produced dynamic launch control, broader dynamic schedules, worker-mesh, native-companion,
 performance, or release authority.
 
 Frontends construct the operation through one `/kernel` sink rather than

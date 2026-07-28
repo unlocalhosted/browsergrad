@@ -51,6 +51,7 @@ import {
   destroyWgslStorageBuffer,
   prepareWgslKernelPipelineSet,
   prepareWgslKernelProgramSequence,
+  readWgslStorageBuffer,
   WgslPipelineCreationError,
   WgslPipelineSetResourceLimitError,
   WgslShaderCreationError,
@@ -73,7 +74,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.10.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.11.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -251,6 +252,7 @@ export interface PreparedSemanticHostGraphWebGpu {
   readonly repeatCount: number;
   readonly repeatIterationCount: number;
   readonly runtimeRepeatCount: number;
+  readonly resourceRepeatCount: number;
   readonly dynamicDispatchCount: number;
   readonly conditionalCount: number;
   readonly conditionalNodeIds: readonly string[];
@@ -351,6 +353,7 @@ interface PreparedState {
   readonly conditionals: readonly PreparedConditionalPlan[];
   readonly resourceConditional?: PreparedConditionalPlan;
   readonly runtimeRepeats: readonly PreparedRuntimeRepeatPlan[];
+  readonly resourceRepeat?: PreparedResourceRepeatPlan;
   readonly runtimeRepeatLimits: ReadonlyMap<string, number>;
   readonly dynamicDispatches: readonly PreparedDynamicDispatchPlan[];
   readonly dynamicDispatchLimits: ReadonlyMap<string, number>;
@@ -397,6 +400,17 @@ interface PreparedRepeatBodyTemplate {
 interface PreparedRuntimeRepeatPlan {
   readonly nodeId: string;
   readonly controlId: string;
+  readonly maxIterationCount: number;
+  readonly startStepIndex: number;
+  readonly stepCountPerIteration: number;
+  readonly countsPerIteration: Readonly<MutablePreparationCounts>;
+  readonly bodyNodeIds: readonly string[];
+}
+
+interface PreparedResourceRepeatPlan {
+  readonly nodeId: string;
+  readonly resourceId: string;
+  readonly rank: number;
   readonly maxIterationCount: number;
   readonly startStepIndex: number;
   readonly stepCountPerIteration: number;
@@ -453,6 +467,7 @@ interface SelectedExecution {
     readonly HostGraphDynamicDispatchCompletion[];
   readonly completedConditionals: readonly HostGraphConditionalCompletion[];
   readonly resourceConditional?: PreparedConditionalPlan;
+  readonly resourceRepeat?: PreparedResourceRepeatPlan;
 }
 
 interface ExecutedGraph {
@@ -570,6 +585,7 @@ export async function prepareSemanticHostGraphWebGpu(
   const moduleHashes: string[] = [];
   const conditionals: PreparedConditionalPlan[] = [];
   const runtimeRepeats: PreparedRuntimeRepeatPlan[] = [];
+  const resourceRepeats: PreparedResourceRepeatPlan[] = [];
   const dynamicDispatches: PreparedDynamicDispatchPlan[] = [];
   let usesNumericalStatus = false;
 
@@ -640,6 +656,7 @@ export async function prepareSemanticHostGraphWebGpu(
         storageMetadata,
         moduleHashes,
         runtimeRepeats,
+        resourceRepeats,
       );
       usesNumericalStatus ||= repeatUsesNumericalStatus;
     } else {
@@ -733,7 +750,28 @@ export async function prepareSemanticHostGraphWebGpu(
     );
   }
   const resourceConditional = resourceConditionals[0];
-  const feedbackBytes = resourceConditional === undefined ? 0n : 4n;
+  if (resourceRepeats.length !== preparedGraph.resourceRepeatCount) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      "$.artifact",
+      "prepared resource repeat count diverged",
+    );
+  }
+  const resourceRepeat = resourceRepeats[0];
+  if (
+    resourceConditional !== undefined &&
+    resourceRepeat !== undefined
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      "$.artifact",
+      "verified graph contains more than one resource feedback node",
+    );
+  }
+  const feedbackBytes =
+    resourceConditional === undefined && resourceRepeat === undefined
+      ? 0n
+      : 4n;
   const plannedTransientGpuBytes =
     boundResourceBytes + boundOutputBytes + (statusBytes * 2n) +
     feedbackBytes;
@@ -825,11 +863,14 @@ export async function prepareSemanticHostGraphWebGpu(
     repeatCount: preparedGraph.repeatCount,
     repeatIterationCount: preparedGraph.repeatIterationCount,
     runtimeRepeatCount: preparedGraph.runtimeRepeatCount,
+    resourceRepeatCount: preparedGraph.resourceRepeatCount,
     dynamicDispatchCount: preparedGraph.dynamicDispatchCount,
     conditionalCount: preparedGraph.conditionalCount,
     conditionalNodeIds,
     resourceConditionalCount: preparedGraph.resourceConditionalCount,
-    midGraphFeedbackCount: preparedGraph.resourceConditionalCount,
+    midGraphFeedbackCount:
+      preparedGraph.resourceConditionalCount +
+      preparedGraph.resourceRepeatCount,
     runtimeControlIds: Object.freeze([
       ...preparedGraph.runtimeControlIds,
     ]),
@@ -859,6 +900,7 @@ export async function prepareSemanticHostGraphWebGpu(
     ...(resourceConditional === undefined
       ? {}
       : { resourceConditional }),
+    ...(resourceRepeat === undefined ? {} : { resourceRepeat }),
     runtimeRepeats: Object.freeze([...runtimeRepeats]),
     runtimeRepeatLimits: runtimeRepeatControlLimits(runtimeRepeats),
     dynamicDispatches: Object.freeze([...dynamicDispatches]),
@@ -951,6 +993,7 @@ async function appendRepeatSteps(
   storageMetadata: Record<string, WgslStorageBufferMetadata>,
   moduleHashes: string[],
   runtimeRepeats: PreparedRuntimeRepeatPlan[],
+  resourceRepeats: PreparedResourceRepeatPlan[],
 ): Promise<boolean> {
   const iterationCount = safeNumber(
     wireIntegerToBigInt(
@@ -1006,14 +1049,13 @@ async function appendRepeatSteps(
       addPreparationCounts(counts, template.counts);
     }
   }
-  if (node.mode === "runtime-u32-count-sequential") {
+  if (node.mode !== "fixed-count-sequential") {
     const countsPerIteration = emptyPreparationCounts();
     for (const template of templates) {
       addPreparationCounts(countsPerIteration, template.counts);
     }
-    runtimeRepeats.push(Object.freeze({
+    const shared = {
       nodeId: node.nodeId,
-      controlId: node.iterationControl.controlId,
       maxIterationCount: iterationCount,
       startStepIndex,
       stepCountPerIteration: templates.reduce(
@@ -1024,7 +1066,22 @@ async function appendRepeatSteps(
       bodyNodeIds: Object.freeze(
         node.body.map((bodyNode) => bodyNode.nodeId),
       ),
-    }));
+    };
+    if (node.mode === "runtime-u32-count-sequential") {
+      runtimeRepeats.push(Object.freeze({
+        ...shared,
+        controlId: node.iterationControl.controlId,
+      }));
+    } else {
+      resourceRepeats.push(Object.freeze({
+        ...shared,
+        resourceId: node.iterationSource.resourceId,
+        rank: safeNumber(
+          wireIntegerToBigInt(node.iterationSource.rank),
+          `$.nodes.${node.nodeId}.iterationSource.rank`,
+        ),
+      }));
+    }
   }
   return usesNumericalStatus;
 }
@@ -1548,7 +1605,8 @@ async function executeCapturedHostGraph(
   }
   ACTIVE_DEVICES.add(gpu);
   const execution = (
-    selectedExecution.resourceConditional === undefined
+    selectedExecution.resourceConditional === undefined &&
+      selectedExecution.resourceRepeat === undefined
       ? executeGraph(
         device,
         gpu,
@@ -1805,6 +1863,9 @@ function selectConditionalExecution(
     ...(state.resourceConditional === undefined
       ? {}
       : { resourceConditional: state.resourceConditional }),
+    ...(state.resourceRepeat === undefined
+      ? {}
+      : { resourceRepeat: state.resourceRepeat }),
   });
 }
 
@@ -2409,6 +2470,17 @@ async function executeGraphWithResourceFeedback(
   pipelineSet: WgslPreparedPipelineSet,
   signal: AbortSignal | undefined,
 ): Promise<ExecutedGraph> {
+  if (selectedExecution.resourceRepeat !== undefined) {
+    return executeGraphWithResourceRepeatFeedback(
+      device,
+      gpu,
+      state,
+      selectedExecution,
+      buffers,
+      pipelineSet,
+      signal,
+    );
+  }
   const conditional = selectedExecution.resourceConditional;
   if (
     conditional === undefined ||
@@ -2562,6 +2634,188 @@ async function executeGraphWithResourceFeedback(
   }
 }
 
+async function executeGraphWithResourceRepeatFeedback(
+  device: KernelDevice,
+  gpu: GPUDevice,
+  state: PreparedState,
+  selectedExecution: SelectedExecution,
+  buffers: Readonly<Record<string, WgslTypedArray>>,
+  pipelineSet: WgslPreparedPipelineSet,
+  signal: AbortSignal | undefined,
+): Promise<ExecutedGraph> {
+  const repeat = selectedExecution.resourceRepeat;
+  if (repeat === undefined) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      "$.feedback",
+      "resource feedback execution lost its verified repeat",
+    );
+  }
+  const residents = await createResidentGraphBuffers(
+    device,
+    gpu,
+    buffers,
+  );
+  try {
+    const sourcePlan = state.resourcesById.get(repeat.resourceId);
+    const sourceStorageName = sourcePlan?.storageNames[repeat.rank];
+    if (
+      sourcePlan === undefined ||
+      sourceStorageName === undefined ||
+      sourcePlan.byteLength !== 4 ||
+      residents[sourceStorageName] === undefined
+    ) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        `$.nodes.${repeat.nodeId}.iterationSource`,
+        "verified resource repeat source storage disappeared",
+      );
+    }
+    const selectedRepeatIndex =
+      selectedExecution.pipelineStepIndices.indexOf(
+        repeat.startStepIndex,
+      );
+    if (selectedRepeatIndex < 0) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        `$.nodes.${repeat.nodeId}.iterationSource`,
+        "verified resource repeat step disappeared after runtime selection",
+      );
+    }
+    const prefixSteps = selectedExecution.steps.slice(
+      0,
+      selectedRepeatIndex,
+    );
+    const prefixPipelineStepIndices =
+      selectedExecution.pipelineStepIndices.slice(
+        0,
+        selectedRepeatIndex,
+      );
+    if (prefixSteps.length === 0) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        `$.nodes.${repeat.nodeId}.iterationSource`,
+        "verified resource repeat producer disappeared",
+      );
+    }
+    const prefix = await executeResidentGraphStage(
+      device,
+      gpu,
+      state,
+      prefixSteps,
+      residents,
+      pipelineSet,
+      prefixPipelineStepIndices,
+      [sourceStorageName],
+      "$.feedback.prefix",
+    );
+    throwIfCancelled(signal);
+    const sourceValue = prefix.buffers[sourceStorageName];
+    if (!(sourceValue instanceof Uint32Array) || sourceValue.length !== 1) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        `$.nodes.${repeat.nodeId}.iterationSource`,
+        "resource repeat feedback returned an invalid u32 allocation",
+      );
+    }
+    const iterationCount = sourceValue[0] as number;
+    if (iterationCount > repeat.maxIterationCount) {
+      fail(
+        "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
+        `$.nodes.${repeat.nodeId}.iterationSource`,
+        `produced resource repeat count ${iterationCount} exceeds its artifact bound ${repeat.maxIterationCount}`,
+      );
+    }
+    const maximumRepeatEnd = repeat.startStepIndex +
+      (repeat.maxIterationCount * repeat.stepCountPerIteration);
+    const selectedRepeatEnd = selectedRepeatIndex +
+      (iterationCount * repeat.stepCountPerIteration);
+    let afterMaximumIndex = selectedExecution.pipelineStepIndices.findIndex(
+      (pipelineIndex, selectedIndex) =>
+        selectedIndex >= selectedRepeatIndex &&
+        pipelineIndex >= maximumRepeatEnd,
+    );
+    if (afterMaximumIndex < 0) {
+      afterMaximumIndex = selectedExecution.steps.length;
+    }
+    const steps = Object.freeze([
+      ...selectedExecution.steps.slice(0, selectedRepeatEnd),
+      ...selectedExecution.steps.slice(afterMaximumIndex),
+    ]);
+    const pipelineStepIndices = Object.freeze([
+      ...selectedExecution.pipelineStepIndices.slice(0, selectedRepeatEnd),
+      ...selectedExecution.pipelineStepIndices.slice(afterMaximumIndex),
+    ]);
+    const skippedIterations =
+      repeat.maxIterationCount - iterationCount;
+    const completion = Object.freeze({
+      nodeId: repeat.nodeId,
+      iterationCount: encodeWireU64(BigInt(iterationCount)),
+      bodyNodeIds: repeat.bodyNodeIds,
+    });
+    const completionsByNodeId = new Map(
+      selectedExecution.completedRepeats.map((item) => [
+        item.nodeId,
+        item,
+      ]),
+    );
+    completionsByNodeId.set(repeat.nodeId, completion);
+    const completedRepeats = Object.freeze(
+      state.topologicalNodeIds.flatMap((nodeId) => {
+        const item = completionsByNodeId.get(nodeId);
+        return item === undefined ? [] : [item];
+      }),
+    );
+    const finalSelection = Object.freeze({
+      steps,
+      pipelineStepIndices,
+      dispatchStepCount:
+        selectedExecution.dispatchStepCount -
+        (repeat.countsPerIteration.dispatch * skippedIterations),
+      copyStepCount:
+        selectedExecution.copyStepCount -
+        (repeat.countsPerIteration.copy * skippedIterations),
+      collectiveReductionStepCount:
+        selectedExecution.collectiveReductionStepCount -
+        (repeat.countsPerIteration.reduction * skippedIterations),
+      collectiveReplicationStepCount:
+        selectedExecution.collectiveReplicationStepCount -
+        (repeat.countsPerIteration.replication * skippedIterations),
+      completedRepeats,
+      completedDynamicDispatches:
+        selectedExecution.completedDynamicDispatches,
+      completedConditionals: selectedExecution.completedConditionals,
+      resourceRepeat: repeat,
+    });
+    throwIfCancelled(signal);
+    const suffixSteps = finalSelection.steps.slice(selectedRepeatIndex);
+    const suffixPipelineStepIndices =
+      finalSelection.pipelineStepIndices.slice(selectedRepeatIndex);
+    const result = suffixSteps.length === 0
+      ? await readResidentGraphBuffers(
+        device,
+        gpu,
+        residents,
+        state.readbackStorageNames,
+        "$.feedback.suffix",
+      )
+      : await executeResidentGraphStage(
+        device,
+        gpu,
+        state,
+        suffixSteps,
+        residents,
+        pipelineSet,
+        suffixPipelineStepIndices,
+        state.readbackStorageNames,
+        "$.feedback.suffix",
+      );
+    return Object.freeze({ result, selectedExecution: finalSelection });
+  } finally {
+    destroyResidentGraphBuffers(residents);
+  }
+}
+
 async function createResidentGraphBuffers(
   device: KernelDevice,
   gpu: GPUDevice,
@@ -2652,6 +2906,38 @@ async function executeResidentGraphStage(
     translateExecutionFailure(cause, `${path}.dispatch`);
   } finally {
     sequence.destroy();
+  }
+}
+
+async function readResidentGraphBuffers(
+  device: KernelDevice,
+  gpu: GPUDevice,
+  residentBuffers: Readonly<Record<string, WgslResidentBuffer>>,
+  readback: readonly string[],
+  path: string,
+): Promise<WgslKernelRunResult> {
+  try {
+    return await issueAsyncWithWebGpuErrorScopes(
+      gpu,
+      `${path}.readback`,
+      async () => {
+        const buffers: Record<string, WgslTypedArray> = {};
+        for (const name of readback) {
+          const resident = residentBuffers[name];
+          if (resident === undefined) {
+            fail(
+              "BG-WEBGPU-GRAPH-INTERNAL",
+              `${path}.readback`,
+              `resident readback ${name} disappeared`,
+            );
+          }
+          buffers[name] = await readWgslStorageBuffer(device, resident);
+        }
+        return Object.freeze({ buffers: Object.freeze(buffers) });
+      },
+    );
+  } catch (cause) {
+    translateExecutionFailure(cause, `${path}.readback`);
   }
 }
 

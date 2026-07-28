@@ -9,6 +9,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Host-graph program version 1.10 adds one bounded
+  `resource-u32-count-sequential` repeat. CPU reads the ordered temporary u32
+  count after its producer. Portable WebGPU prewarms the artifact maximum,
+  submits the exact producer prefix, reads back only the four-byte count, and
+  submits zero through the admitted maximum iterations plus the suffix over
+  the same resident private buffers and exact pipeline slots. Above-bound
+  produced counts fail without output publication. Required real-device
+  evidence covers zero and two iterations through one graph/pipeline identity.
 - Host-graph program version 1.9 adds bounded top-level
   `dynamic-dispatch` with a positive request-time u32 logical-prefix element
   count. The portable WebGPU initial profile uses exactly one invocation per

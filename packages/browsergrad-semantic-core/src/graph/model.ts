@@ -129,9 +129,23 @@ export interface HostGraphRuntimeControlRepeatNode
   readonly mode: "runtime-u32-count-sequential";
 }
 
+export interface HostGraphResourceRepeatSource extends JsonObject {
+  readonly resourceId: string;
+  readonly rank: WireU64;
+  readonly mode: "u32-count";
+}
+
+export interface HostGraphResourceRepeatNode
+  extends HostGraphRepeatNodeBase {
+  readonly iterationSource: HostGraphResourceRepeatSource;
+  readonly maxIterationCount: WireU64;
+  readonly mode: "resource-u32-count-sequential";
+}
+
 export type HostGraphRepeatNode =
   | HostGraphFixedRepeatNode
-  | HostGraphRuntimeControlRepeatNode;
+  | HostGraphRuntimeControlRepeatNode
+  | HostGraphResourceRepeatNode;
 
 export interface HostGraphRepeatCompletion extends JsonObject {
   readonly nodeId: string;
@@ -213,7 +227,7 @@ export interface HostGraphProgram extends JsonObject {
   readonly kind: "host-graph";
   readonly version: {
     readonly major: 1;
-    readonly minor: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+    readonly minor: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
   };
   readonly failureModel: typeof HOST_GRAPH_FAILURE_MODEL;
   readonly rankCount: WireU64;

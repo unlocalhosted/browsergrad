@@ -63,6 +63,8 @@ import {
   type HostGraphRepeatNode,
   type HostGraphResource,
   type HostGraphResourcePredicate,
+  type HostGraphResourceRepeatNode,
+  type HostGraphResourceRepeatSource,
   type HostGraphResourceRole,
   type HostGraphRuntimeControlPredicate,
   type HostGraphRuntimeRepeatControl,
@@ -70,7 +72,7 @@ import {
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 9;
+export const HOST_GRAPH_ARTIFACT_MINOR = 10;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
@@ -79,6 +81,7 @@ export const HOST_GRAPH_MAX_CONDITIONAL_BODY_NODES = 64;
 export const HOST_GRAPH_MAX_REPEAT_ITERATIONS = 1_024;
 export const HOST_GRAPH_MAX_RUNTIME_CONTROLS = 64;
 export const HOST_GRAPH_MAX_RESOURCE_CONDITIONALS = 1;
+export const HOST_GRAPH_MAX_RESOURCE_FEEDBACK_NODES = 1;
 export const HOST_GRAPH_MAX_EXPANDED_NODES = 16_384;
 export const HOST_GRAPH_MAX_RANKS = 256;
 export const HOST_GRAPH_MAX_SEMANTIC_ARTIFACTS = 256;
@@ -143,6 +146,7 @@ export interface PreparedHostGraphProgram {
   readonly repeatCount: number;
   readonly repeatIterationCount: number;
   readonly runtimeRepeatCount: number;
+  readonly resourceRepeatCount: number;
   readonly conditionalCount: number;
   readonly resourceConditionalCount: number;
   readonly runtimeControlIds: readonly string[];
@@ -164,6 +168,7 @@ interface HostGraphAnalysis {
   readonly repeatCount: number;
   readonly repeatIterationCount: number;
   readonly runtimeRepeatCount: number;
+  readonly resourceRepeatCount: number;
   readonly conditionalCount: number;
   readonly resourceConditionalCount: number;
   readonly runtimeControlIds: readonly string[];
@@ -320,6 +325,7 @@ export async function prepareHostGraphProgram(
     repeatCount: analysis.repeatCount,
     repeatIterationCount: analysis.repeatIterationCount,
     runtimeRepeatCount: analysis.runtimeRepeatCount,
+    resourceRepeatCount: analysis.resourceRepeatCount,
     conditionalCount: analysis.conditionalCount,
     resourceConditionalCount: analysis.resourceConditionalCount,
     runtimeControlIds: Object.freeze([...analysis.runtimeControlIds]),
@@ -384,12 +390,13 @@ function parseProgram(
       version.minor !== 6 &&
       version.minor !== 7 &&
       version.minor !== 8 &&
-      version.minor !== 9)
+      version.minor !== 9 &&
+      version.minor !== 10)
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 through 1.9 only",
+      "host graph program reader supports versions 1.0 through 1.10 only",
     );
   }
   if (version.minor !== envelopeMinor) {
@@ -697,7 +704,7 @@ function parseNode(
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, and version-1.9 dynamic dispatch nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, and version-1.10 resource repeat nodes",
   );
 }
 
@@ -707,6 +714,53 @@ function parseRepeatNode(
   programMinor: HostGraphProgram["version"]["minor"],
 ): HostGraphRepeatNode {
   const mode = stringValue(field(value, "mode", path), `${path}.mode`);
+  if (mode === "resource-u32-count-sequential") {
+    if (programMinor < 10) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.mode`,
+        "resource count repeats require host graph program version 1.10",
+      );
+    }
+    const object = closedObject(
+      value,
+      [
+        "nodeId",
+        "kind",
+        "dependsOn",
+        "iterationSource",
+        "maxIterationCount",
+        "body",
+        "mode",
+      ],
+      path,
+    );
+    const maxIterationCount = positiveWire(
+      field(object, "maxIterationCount", path),
+      `${path}.maxIterationCount`,
+    );
+    verifyRepeatIterationBound(
+      maxIterationCount,
+      `${path}.maxIterationCount`,
+    );
+    return {
+      nodeId: identifier(field(object, "nodeId", path), `${path}.nodeId`),
+      kind: "repeat",
+      dependsOn: dependencies(field(object, "dependsOn", path), path),
+      iterationSource: parseResourceRepeatSource(
+        field(object, "iterationSource", path),
+        `${path}.iterationSource`,
+      ),
+      maxIterationCount,
+      body: parseLinearControlBody(
+        field(object, "body", path),
+        `${path}.body`,
+        "resource count repeat",
+        HOST_GRAPH_MAX_REPEAT_BODY_NODES,
+      ) as readonly HostGraphRepeatBodyNode[],
+      mode: "resource-u32-count-sequential",
+    };
+  }
   if (mode === "runtime-u32-count-sequential") {
     if (programMinor < 8) {
       invalid(
@@ -763,7 +817,7 @@ function parseRepeatNode(
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       `${path}.mode`,
-      "repeat mode must be fixed-count-sequential or runtime-u32-count-sequential",
+      "repeat mode must be fixed-count-sequential, runtime-u32-count-sequential, or resource-u32-count-sequential",
     );
   }
   const iterationCount = positiveWire(
@@ -784,6 +838,32 @@ function parseRepeatNode(
     iterationCount,
     body,
     mode: "fixed-count-sequential",
+  };
+}
+
+function parseResourceRepeatSource(
+  value: JsonValue,
+  path: string,
+): HostGraphResourceRepeatSource {
+  const object = closedObject(
+    value,
+    ["resourceId", "rank", "mode"],
+    path,
+  );
+  if (object.mode !== "u32-count") {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "resource repeat source mode must be u32-count",
+    );
+  }
+  return {
+    resourceId: identifier(
+      field(object, "resourceId", path),
+      `${path}.resourceId`,
+    ),
+    rank: parseWireU64(field(object, "rank", path), `${path}.rank`),
+    mode: "u32-count",
   };
 }
 
@@ -1469,6 +1549,7 @@ function analyzeProgram(
   let repeatCount = 0;
   let repeatIterationCount = 0;
   let runtimeRepeatCount = 0;
+  let resourceRepeatCount = 0;
   let conditionalCount = 0;
   let resourceConditionalCount = 0;
   const runtimeControlIds = new Set<string>();
@@ -1609,6 +1690,18 @@ function analyzeProgram(
             `runtime control count exceeds ${HOST_GRAPH_MAX_RUNTIME_CONTROLS}`,
           );
         }
+      } else if (node.mode === "resource-u32-count-sequential") {
+        resourceRepeatCount += 1;
+        verifyResourceRepeatSource(
+          node.iterationSource,
+          resources,
+          rankCount,
+          `${path}.iterationSource`,
+        );
+        verifyResourceFeedbackBound(
+          resourceConditionalCount + resourceRepeatCount,
+          `${path}.mode`,
+        );
       }
       const bodyExpandedNodeCount = iterationCount * node.body.length;
       expandedNodeCount += bodyExpandedNodeCount;
@@ -1662,7 +1755,9 @@ function analyzeProgram(
         node,
         node.mode === "fixed-count-sequential"
           ? effects
-          : runtimeRepeatEffects(effects),
+          : node.mode === "runtime-u32-count-sequential"
+            ? runtimeRepeatEffects(effects)
+            : resourceRepeatEffects(node, effects, path),
       );
     } else {
       conditionalCount += 1;
@@ -1678,6 +1773,10 @@ function analyzeProgram(
             `resource conditional count exceeds ${HOST_GRAPH_MAX_RESOURCE_CONDITIONALS}`,
           );
         }
+        verifyResourceFeedbackBound(
+          resourceConditionalCount + resourceRepeatCount,
+          `${path}.mode`,
+        );
       }
       if (node.mode === "runtime-u32-branch-sequential") {
         runtimeControlIds.add(node.predicate.controlId);
@@ -1779,6 +1878,7 @@ function analyzeProgram(
     repeatCount,
     repeatIterationCount,
     runtimeRepeatCount,
+    resourceRepeatCount,
     conditionalCount,
     resourceConditionalCount,
     runtimeControlIds: Object.freeze(
@@ -2036,6 +2136,79 @@ function runtimeRepeatEffects(
     // only by this repeat cannot dominate later reads or satisfy ownership.
     guaranteesWrite: false,
   })));
+}
+
+function resourceRepeatEffects(
+  node: HostGraphResourceRepeatNode,
+  effects: readonly HostGraphResourceEffect[],
+  path: string,
+): readonly HostGraphResourceEffect[] {
+  if (effects.some((effect) =>
+    effect.resourceId === node.iterationSource.resourceId)) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      `${path}.body`,
+      "resource repeat body cannot access its captured iteration source",
+    );
+  }
+  return Object.freeze([
+    Object.freeze({
+      resourceId: node.iterationSource.resourceId,
+      access: "read" as const,
+      requiresPriorWriter: true,
+      guaranteesWrite: false,
+    }),
+    ...runtimeRepeatEffects(effects),
+  ].sort((left, right) =>
+    compareCanonicalStrings(left.resourceId, right.resourceId)));
+}
+
+function verifyResourceRepeatSource(
+  source: HostGraphResourceRepeatSource,
+  resources: ReadonlyMap<string, HostGraphResource>,
+  rankCount: bigint,
+  path: string,
+): void {
+  const resource = resources.get(source.resourceId);
+  if (resource === undefined) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.danglingReference,
+      `${path}.resourceId`,
+      `resource repeat source references missing resource ${source.resourceId}`,
+    );
+  }
+  if (
+    resource.role !== "temporary" ||
+    resource.initialization !== "zero-fill" ||
+    resource.dtype !== "u32" ||
+    resource.byteLength !== "4" ||
+    resource.alignmentBytes < 4
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      `${path}.resourceId`,
+      "resource repeat source requires one 4-byte-aligned zero-filled temporary u32 resource",
+    );
+  }
+  if (wireIntegerToBigInt(source.rank) >= rankCount) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      `${path}.rank`,
+      "resource repeat source rank is outside the graph rank count",
+    );
+  }
+}
+
+function verifyResourceFeedbackBound(
+  count: number,
+  path: string,
+): void {
+  if (count > HOST_GRAPH_MAX_RESOURCE_FEEDBACK_NODES) {
+    resource(
+      path,
+      `resource feedback node count exceeds ${HOST_GRAPH_MAX_RESOURCE_FEEDBACK_NODES}`,
+    );
+  }
 }
 
 function verifyConditionalPredicate(

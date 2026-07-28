@@ -326,6 +326,65 @@ function runtimeRepeatedCollectiveProgram(): HostGraphProgram {
   };
 }
 
+function resourceRepeatedCollectiveProgram(): HostGraphProgram {
+  const base = repeatedCollectiveProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 10 },
+    resources: [
+      ...base.resources,
+      {
+        resourceId: "iteration-input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u32",
+        byteLength: wire("4"),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "iteration-count",
+        role: "temporary",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u32",
+        byteLength: wire("4"),
+        alignmentBytes: 4,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "produce-iteration-count",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "iteration-input",
+        destinationResourceId: "iteration-count",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      ...base.nodes.map((node) => {
+        if (
+          node.kind !== "repeat" ||
+          node.mode !== "fixed-count-sequential"
+        ) {
+          return node;
+        }
+        const { iterationCount: _iterationCount, ...common } = node;
+        return {
+          ...common,
+          dependsOn: ["initialize", "produce-iteration-count"],
+          iterationSource: {
+            resourceId: "iteration-count",
+            rank: wire("0"),
+            mode: "u32-count" as const,
+          },
+          maxIterationCount: wire("3"),
+          mode: "resource-u32-count-sequential" as const,
+        };
+      }),
+    ],
+  };
+}
+
 function conditionalRawCopyProgram(): HostGraphProgram {
   return {
     kind: "host-graph",
@@ -900,6 +959,74 @@ describe("host graph CPU reference", () => {
       path: "$.request.controls[0].value",
     });
     expect(inputReads).toBe(0);
+  });
+
+  it("executes one produced-resource repeat count within its artifact bound", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      resourceRepeatedCollectiveProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+    const executionInputs = (count: number): HostGraphCpuInputBinding[] => [
+      input(0, f32Bytes([1, 2])),
+      input(1, f32Bytes([3, 4])),
+      {
+        rank: wire("0"),
+        resourceId: "iteration-input",
+        bytes: u32Bytes([count]),
+      },
+      {
+        rank: wire("1"),
+        resourceId: "iteration-input",
+        bytes: u32Bytes([0]),
+      },
+    ];
+
+    expect(prepared).toMatchObject({
+      runtimeRepeatCount: 0,
+      resourceRepeatCount: 1,
+      repeatNodeIds: ["repeat-reduction"],
+      repeats: [],
+      elementOperations: 36n,
+    });
+
+    const zero = await prepared.execute({ inputs: executionInputs(0) });
+    expect(zero).toMatchObject({
+      completedRepeats: [{
+        nodeId: "repeat-reduction",
+        iterationCount: "0",
+        bodyNodeIds: ["reduce-step"],
+      }],
+      elementOperations: "24",
+    });
+    expect(zero.outputs.map(({ bytes }) => readF32(bytes))).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
+
+    const two = await prepared.execute({ inputs: executionInputs(2) });
+    expect(two).toMatchObject({
+      completedRepeats: [{
+        nodeId: "repeat-reduction",
+        iterationCount: "2",
+        bodyNodeIds: ["reduce-step"],
+      }],
+      elementOperations: "32",
+    });
+    expect(two.outputs.map(({ bytes }) => readF32(bytes))).toEqual([
+      [8, 12],
+      [8, 12],
+    ]);
+
+    await expect(prepared.execute({
+      inputs: executionInputs(4),
+    })).rejects.toMatchObject({
+      code: "BG-GRAPH-CPU-RESOURCE-LIMIT",
+      path: "$.nodes.repeat-reduction.iterationSource",
+    });
   });
 
   it("reports completion events only with a successful whole-graph result", async () => {

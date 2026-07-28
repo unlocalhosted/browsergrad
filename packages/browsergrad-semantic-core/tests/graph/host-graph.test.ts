@@ -313,6 +313,65 @@ function runtimeRepeatedCollectiveProgram(): HostGraphProgram {
   };
 }
 
+function resourceRepeatedCollectiveProgram(): HostGraphProgram {
+  const base = repeatedCollectiveProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 10 },
+    resources: [
+      ...base.resources,
+      {
+        resourceId: "iteration-input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u32",
+        byteLength: wire("4"),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "iteration-count",
+        role: "temporary",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u32",
+        byteLength: wire("4"),
+        alignmentBytes: 4,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "produce-iteration-count",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "iteration-input",
+        destinationResourceId: "iteration-count",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      ...base.nodes.map((node) => {
+        if (
+          node.kind !== "repeat" ||
+          node.mode !== "fixed-count-sequential"
+        ) {
+          return node;
+        }
+        const { iterationCount: _iterationCount, ...common } = node;
+        return {
+          ...common,
+          dependsOn: ["initialize", "produce-iteration-count"],
+          iterationSource: {
+            resourceId: "iteration-count",
+            rank: wire("0"),
+            mode: "u32-count" as const,
+          },
+          maxIterationCount: wire("3"),
+          mode: "resource-u32-count-sequential" as const,
+        };
+      }),
+    ],
+  };
+}
+
 function dynamicDispatchProgram(
   artifacts: VerifiedViewCopyArtifacts,
 ): HostGraphProgram {
@@ -1038,6 +1097,93 @@ describe("host graph artifact", () => {
     ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.readBeforeWrite);
   });
 
+  it("normalizes one bounded produced-resource repeat in version 1.10", async () => {
+    const constructed = await createVerifiedHostGraphArtifact(
+      resourceRepeatedCollectiveProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    );
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+
+    expect(payload.program.version).toEqual({ major: 1, minor: 10 });
+    expect(payload.program.nodes.find((node) =>
+      node.kind === "repeat")).toMatchObject({
+        nodeId: "repeat-reduction",
+        iterationSource: {
+          resourceId: "iteration-count",
+          rank: "0",
+          mode: "u32-count",
+        },
+        maxIterationCount: "3",
+        mode: "resource-u32-count-sequential",
+      });
+    expect(prepared).toMatchObject({
+      repeatCount: 1,
+      runtimeRepeatCount: 0,
+      resourceRepeatCount: 1,
+      repeatIterationCount: 3,
+      runtimeControlIds: [],
+      expandedNodeCount: 6,
+    });
+  });
+
+  it("rejects malformed, unordered, body-mutated, and pre-version resource repeats", async () => {
+    const oldVersion = clone(resourceRepeatedCollectiveProgram());
+    oldVersion.version.minor = 9;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      oldVersion,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const wrongRole = clone(resourceRepeatedCollectiveProgram());
+    const countResource = wrongRole.resources.find((resource) =>
+      resource.resourceId === "iteration-count");
+    if (countResource === undefined) throw new Error("missing count resource");
+    countResource.role = "input";
+    countResource.initialization = "external-input";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      wrongRole,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+
+    const unordered = clone(resourceRepeatedCollectiveProgram());
+    const unorderedRepeat = unordered.nodes.find((node) =>
+      node.kind === "repeat");
+    if (
+      unorderedRepeat?.kind !== "repeat" ||
+      unorderedRepeat.mode !== "resource-u32-count-sequential"
+    ) {
+      throw new Error("missing resource repeat");
+    }
+    unorderedRepeat.dependsOn = ["initialize"];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      unordered,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.readBeforeWrite);
+
+    const bodyMutation = clone(resourceRepeatedCollectiveProgram());
+    const mutatedRepeat = bodyMutation.nodes.find((node) =>
+      node.kind === "repeat");
+    if (
+      mutatedRepeat?.kind !== "repeat" ||
+      mutatedRepeat.mode !== "resource-u32-count-sequential"
+    ) {
+      throw new Error("missing resource repeat");
+    }
+    mutatedRepeat.body = [{
+      nodeId: "mutate-count",
+      kind: "copy",
+      dependsOn: [],
+      sourceResourceId: "iteration-input",
+      destinationResourceId: "iteration-count",
+      mode: "whole-allocation-bytes-per-rank",
+    }];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      bodyMutation,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+  });
+
   it("normalizes bounded request-time dynamic dispatch in version 1.9", async () => {
     const artifacts = await semantic();
     const constructed = await createVerifiedHostGraphArtifact(
@@ -1488,7 +1634,7 @@ describe("host graph artifact", () => {
 
   it("rejects copy version, mode, resource, dtype, and hazard drift", async () => {
     const future = clone(copyProgram());
-    future.version.minor = 10 as unknown as typeof future.version.minor;
+    future.version.minor = 11 as unknown as typeof future.version.minor;
     expect((await diagnostic(() => createVerifiedHostGraphArtifact(
       future,
       { kernelArtifacts: [], layoutArtifacts: [] },

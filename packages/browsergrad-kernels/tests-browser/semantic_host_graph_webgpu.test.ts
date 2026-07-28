@@ -60,6 +60,8 @@ const CASE_IDS = Object.freeze([
   "f32-fixed-repeat-sum",
   "f32-runtime-repeat-zero",
   "f32-runtime-repeat-two",
+  "f32-resource-repeat-zero",
+  "f32-resource-repeat-two",
   "f32-dynamic-dispatch-one",
   "f32-dynamic-dispatch-two",
   "u8-input-conditional-then",
@@ -182,6 +184,14 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       ),
       prepareRuntimeRepeatedCollectiveCase(
         "f32-runtime-repeat-two",
+        2,
+      ),
+      prepareResourceRepeatedCollectiveCase(
+        "f32-resource-repeat-zero",
+        0,
+      ),
+      prepareResourceRepeatedCollectiveCase(
+        "f32-resource-repeat-two",
         2,
       ),
       prepareDynamicDispatchCase(
@@ -429,6 +439,18 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       .not.toBe(twoRuntimeRepeat?.backendSpecializationHash);
     expect(zeroRuntimeRepeat?.expandedStepCount).toBe(2);
     expect(twoRuntimeRepeat?.expandedStepCount).toBe(6);
+    const zeroResourceRepeat = completedCases.find(({ caseId }) =>
+      caseId === "f32-resource-repeat-zero");
+    const twoResourceRepeat = completedCases.find(({ caseId }) =>
+      caseId === "f32-resource-repeat-two");
+    expect(zeroResourceRepeat?.pipelineIdentityHash)
+      .toBe(twoResourceRepeat?.pipelineIdentityHash);
+    expect(zeroResourceRepeat?.backendSpecializationHash)
+      .not.toBe(twoResourceRepeat?.backendSpecializationHash);
+    expect(zeroResourceRepeat?.expandedStepCount).toBe(4);
+    expect(twoResourceRepeat?.expandedStepCount).toBe(8);
+    expect(zeroResourceRepeat?.midGraphFeedbackCount).toBe(1);
+    expect(twoResourceRepeat?.midGraphFeedbackCount).toBe(1);
     const oneDynamicDispatch = completedCases.find(({ caseId }) =>
       caseId === "f32-dynamic-dispatch-one");
     const twoDynamicDispatch = completedCases.find(({ caseId }) =>
@@ -439,6 +461,30 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       .not.toBe(twoDynamicDispatch?.backendSpecializationHash);
     expect(oneDynamicDispatch?.expandedStepCount).toBe(2);
     expect(twoDynamicDispatch?.expandedStepCount).toBe(2);
+
+    stage = "resource-repeat-bound-refusal";
+    const resourceRepeatCase = cases.find(({ caseId }) =>
+      caseId === "f32-resource-repeat-two");
+    if (resourceRepeatCase === undefined) {
+      throw new Error("missing resource repeat case");
+    }
+    await expect(runSemanticHostGraphWebGpu(
+      kernelDevice,
+      resourceRepeatCase.prepared,
+      {
+        inputs: resourceRepeatCase.inputs.map((binding) => ({
+          ...binding,
+          bytes:
+            binding.resourceId === "iteration-input" &&
+              binding.rank === wire(0)
+              ? u32Bytes([4])
+              : new Uint8Array(binding.bytes),
+        })),
+      },
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
+      path: "$.nodes.repeat-reduction.iterationSource",
+    });
 
     stage = "non-finite-fail-stop";
     const finiteCase = cases[0] as PreparedCase;
@@ -689,6 +735,48 @@ async function prepareRuntimeRepeatedCollectiveCase(
       modules: prepared.wgslModuleHashes,
       inputs: values.map((bytes) => Array.from(bytes)),
       controls,
+    }),
+  });
+}
+
+async function prepareResourceRepeatedCollectiveCase(
+  caseId:
+    | "f32-resource-repeat-zero"
+    | "f32-resource-repeat-two",
+  iterationCount: 0 | 2,
+): Promise<PreparedCase> {
+  const values = [f32Bytes([1, 2]), f32Bytes([3, 4])];
+  const graph = (await createVerifiedHostGraphArtifact(
+    resourceRepeatedCollectiveProgram(),
+    { kernelArtifacts: [], layoutArtifacts: [] },
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+    kernelArtifacts: [],
+    layoutArtifacts: [],
+  });
+  const inputs = Object.freeze([
+    ...values.map((bytes, rank) => input(rank, bytes)),
+    namedInput(
+      0,
+      "iteration-input",
+      u32Bytes([iterationCount]),
+    ),
+    namedInput(1, "iteration-input", u32Bytes([0])),
+  ]);
+  return Object.freeze({
+    caseId,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: inputs.map(({ rank, resourceId, bytes }) => ({
+        rank,
+        resourceId,
+        bytes: Array.from(bytes),
+      })),
     }),
   });
 }
@@ -1051,6 +1139,65 @@ function runtimeRepeatedCollectiveProgram(): HostGraphProgram {
         mode: "runtime-u32-count-sequential" as const,
       };
     }),
+  };
+}
+
+function resourceRepeatedCollectiveProgram(): HostGraphProgram {
+  const base = repeatedCollectiveProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 10 },
+    resources: [
+      ...base.resources,
+      {
+        resourceId: "iteration-input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u32",
+        byteLength: wire(4),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "iteration-count",
+        role: "temporary",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u32",
+        byteLength: wire(4),
+        alignmentBytes: 4,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "produce-iteration-count",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "iteration-input",
+        destinationResourceId: "iteration-count",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      ...base.nodes.map((node) => {
+        if (
+          node.kind !== "repeat" ||
+          node.mode !== "fixed-count-sequential"
+        ) {
+          return node;
+        }
+        const { iterationCount: _iterationCount, ...common } = node;
+        return {
+          ...common,
+          dependsOn: ["initialize", "produce-iteration-count"],
+          iterationSource: {
+            resourceId: "iteration-count",
+            rank: wire(0),
+            mode: "u32-count" as const,
+          },
+          maxIterationCount: wire(3),
+          mode: "resource-u32-count-sequential" as const,
+        };
+      }),
+    ],
   };
 }
 
