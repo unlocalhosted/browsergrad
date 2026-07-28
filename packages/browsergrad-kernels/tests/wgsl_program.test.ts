@@ -36,6 +36,14 @@ describe("generic WGSL kernel programs", () => {
       undefined,
       1,
     )).rejects.toThrow(/step offset requires a pipeline set/);
+    await expect(prepareWgslKernelProgramSequence(
+      {} as KernelDevice,
+      [{ program, launch: { dispatchCount: [1, 1, 1] } }],
+      { buffers: {} },
+      undefined,
+      0,
+      [0],
+    )).rejects.toThrow(/step indices require a pipeline set/);
   });
 
   it("supports f16 storage bindings explicitly", () => {

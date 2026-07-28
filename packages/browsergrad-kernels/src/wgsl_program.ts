@@ -543,6 +543,7 @@ export async function prepareWgslKernelProgramSequence(
   input: WgslKernelRunInput,
   pipelineSet?: WgslPreparedPipelineSet,
   pipelineStepOffset = 0,
+  pipelineStepIndices?: readonly number[],
 ): Promise<WgslPreparedKernelSequence> {
   if (steps.length === 0) throw new KernelError("WGSL program sequence must contain at least one step");
   if (!Number.isInteger(pipelineStepOffset) || pipelineStepOffset < 0) {
@@ -555,6 +556,19 @@ export async function prepareWgslKernelProgramSequence(
       "prepared WGSL pipeline step offset requires a pipeline set",
     );
   }
+  if (pipelineSet === undefined && pipelineStepIndices !== undefined) {
+    throw new KernelError(
+      "prepared WGSL pipeline step indices require a pipeline set",
+    );
+  }
+  if (pipelineStepIndices !== undefined && pipelineStepOffset !== 0) {
+    throw new KernelError(
+      "prepared WGSL pipeline step indices cannot be combined with an offset",
+    );
+  }
+  const selectedPipelineStepIndices = pipelineStepIndices === undefined
+    ? undefined
+    : validatePipelineStepIndices(pipelineStepIndices, steps.length);
   const impl = asImpl(device);
   const gpu = impl.gpu;
   const dispatchCounts = steps.map((step, index) => validateDispatchCountWithName(step.launch.dispatchCount, `steps[${index}].launch.dispatchCount`));
@@ -566,6 +580,7 @@ export async function prepareWgslKernelProgramSequence(
       steps,
       pipelineSet,
       pipelineStepOffset,
+      selectedPipelineStepIndices,
     );
   const readbackNames = new Set(
     input.readback ??
@@ -1083,6 +1098,7 @@ function resolvePreparedPipelineSet(
   steps: readonly WgslKernelSequenceStep[],
   prepared: WgslPreparedPipelineSet,
   stepOffset: number,
+  stepIndices?: readonly number[],
 ): readonly PendingWgslPipeline[] {
   const state = PREPARED_PIPELINE_SETS.get(prepared as object);
   if (state === undefined) {
@@ -1105,16 +1121,42 @@ function resolvePreparedPipelineSet(
       state.cacheNamespace,
     )
   );
-  if (
-    stepOffset + pipelineKeys.length > state.pipelineKeysByStep.length ||
-    pipelineKeys.some((key, index) =>
-      !state.pipelineKeysByStep[stepOffset + index]?.includes(key))
-  ) {
+  const resolvedStepIndices = stepIndices ??
+    pipelineKeys.map((_, index) => stepOffset + index);
+  if (pipelineKeys.some((key, index) =>
+    !state.pipelineKeysByStep[resolvedStepIndices[index]!]?.includes(key)
+  )) {
     throw new KernelError(
       "prepared WGSL pipeline set does not authorize this exact program sequence",
     );
   }
   return pipelineKeys.map((key) => state.pipelinesByKey.get(key)!);
+}
+
+function validatePipelineStepIndices(
+  values: readonly number[],
+  expectedLength: number,
+): readonly number[] {
+  if (values.length !== expectedLength) {
+    throw new KernelError(
+      "prepared WGSL pipeline step indices must match the program sequence length",
+    );
+  }
+  const indices = [...values];
+  for (let index = 0; index < indices.length; index += 1) {
+    const value = indices[index]!;
+    if (!Number.isInteger(value) || value < 0) {
+      throw new KernelError(
+        "prepared WGSL pipeline step indices must be non-negative integers",
+      );
+    }
+    if (index > 0 && value <= indices[index - 1]!) {
+      throw new KernelError(
+        "prepared WGSL pipeline step indices must be strictly increasing",
+      );
+    }
+  }
+  return Object.freeze(indices);
 }
 
 function pipelineCacheKey(

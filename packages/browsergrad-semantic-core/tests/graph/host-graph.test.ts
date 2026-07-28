@@ -292,6 +292,27 @@ function repeatedCollectiveProgram(): HostGraphProgram {
   };
 }
 
+function runtimeRepeatedCollectiveProgram(): HostGraphProgram {
+  const base = repeatedCollectiveProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 8 },
+    nodes: base.nodes.map((node) => {
+      if (node.kind !== "repeat") return node;
+      const { iterationCount: _iterationCount, ...common } = node;
+      return {
+        ...common,
+        iterationControl: {
+          controlId: "iterations",
+          mode: "u32-count" as const,
+        },
+        maxIterationCount: wire("3"),
+        mode: "runtime-u32-count-sequential" as const,
+      };
+    }),
+  };
+}
+
 function conditionalCopyProgram(): HostGraphProgram {
   return {
     kind: "host-graph",
@@ -860,6 +881,131 @@ describe("host graph artifact", () => {
     });
   });
 
+  it("normalizes zero-through-bound runtime repetition in version 1.8", async () => {
+    const constructed = await createVerifiedHostGraphArtifact(
+      runtimeRepeatedCollectiveProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    );
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+
+    expect(payload.program.version).toEqual({ major: 1, minor: 8 });
+    expect(payload.program.nodes.find((node) => node.kind === "repeat"))
+      .toEqual({
+        nodeId: "repeat-reduction",
+        kind: "repeat",
+        dependsOn: ["initialize"],
+        iterationControl: {
+          controlId: "iterations",
+          mode: "u32-count",
+        },
+        maxIterationCount: "3",
+        body: [{
+          nodeId: "reduce-step",
+          kind: "all-reduce",
+          dependsOn: [],
+          resourceId: "output",
+          reduction: "sum",
+          dtype: "f32",
+          numericalPolicy: "rank-order-f32",
+          participants: ["0", "1"],
+          result: "replicated-to-all-participants",
+        }],
+        mode: "runtime-u32-count-sequential",
+      });
+    expect(prepared).toMatchObject({
+      repeatCount: 1,
+      runtimeRepeatCount: 1,
+      repeatIterationCount: 3,
+      runtimeControlIds: ["iterations"],
+      expandedNodeCount: 5,
+    });
+  });
+
+  it("rejects unbounded, malformed, and pre-version runtime repetition", async () => {
+    const oldVersion = clone(runtimeRepeatedCollectiveProgram());
+    oldVersion.version.minor = 7;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      oldVersion,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const zeroBound = clone(runtimeRepeatedCollectiveProgram());
+    const zeroRepeat = zeroBound.nodes.find((node) =>
+      node.kind === "repeat");
+    if (
+      zeroRepeat?.kind !== "repeat" ||
+      zeroRepeat.mode !== "runtime-u32-count-sequential"
+    ) {
+      throw new Error("missing runtime repeat");
+    }
+    zeroRepeat.maxIterationCount = wire("0");
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      zeroBound,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidArtifact);
+
+    const excessive = clone(runtimeRepeatedCollectiveProgram());
+    const excessiveRepeat = excessive.nodes.find((node) =>
+      node.kind === "repeat");
+    if (
+      excessiveRepeat?.kind !== "repeat" ||
+      excessiveRepeat.mode !== "runtime-u32-count-sequential"
+    ) {
+      throw new Error("missing runtime repeat");
+    }
+    excessiveRepeat.maxIterationCount = wire(String(
+      HOST_GRAPH_MAX_REPEAT_ITERATIONS + 1,
+    ));
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      excessive,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.resourceLimit);
+
+    const wrongControlMode = clone(runtimeRepeatedCollectiveProgram());
+    const wrongRepeat = wrongControlMode.nodes.find((node) =>
+      node.kind === "repeat");
+    if (
+      wrongRepeat?.kind !== "repeat" ||
+      wrongRepeat.mode !== "runtime-u32-count-sequential"
+    ) {
+      throw new Error("missing runtime repeat");
+    }
+    wrongRepeat.iterationControl.mode =
+      "i32-count" as typeof wrongRepeat.iterationControl.mode;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      wrongControlMode,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+  });
+
+  it("does not treat a zero-iteration runtime repeat as a guaranteed writer", async () => {
+    const candidate = clone(runtimeRepeatedCollectiveProgram());
+    const repeat = candidate.nodes.find((node) => node.kind === "repeat");
+    if (
+      repeat?.kind !== "repeat" ||
+      repeat.mode !== "runtime-u32-count-sequential"
+    ) {
+      throw new Error("missing runtime repeat");
+    }
+    repeat.dependsOn = [];
+    repeat.body = [{
+      nodeId: "write-output",
+      kind: "copy",
+      dependsOn: [],
+      sourceResourceId: "input",
+      destinationResourceId: "output",
+      mode: "whole-allocation-bytes-per-rank",
+    }];
+    candidate.nodes = candidate.nodes.filter((node) =>
+      node.nodeId !== "initialize");
+
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      candidate,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.readBeforeWrite);
+  });
+
   it("rejects forged repeat versions, modes, bounds, and body control", async () => {
     const oldVersion = clone(repeatedCollectiveProgram());
     oldVersion.version.minor = 3;
@@ -1215,7 +1361,7 @@ describe("host graph artifact", () => {
 
   it("rejects copy version, mode, resource, dtype, and hazard drift", async () => {
     const future = clone(copyProgram());
-    future.version.minor = 8 as unknown as typeof future.version.minor;
+    future.version.minor = 9 as unknown as typeof future.version.minor;
     expect((await diagnostic(() => createVerifiedHostGraphArtifact(
       future,
       { kernelArtifacts: [], layoutArtifacts: [] },

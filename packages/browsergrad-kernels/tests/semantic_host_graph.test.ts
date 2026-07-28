@@ -281,6 +281,32 @@ function repeatedCollectiveProgram(): HostGraphProgram {
   };
 }
 
+function runtimeRepeatedCollectiveProgram(): HostGraphProgram {
+  const base = repeatedCollectiveProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 8 },
+    nodes: base.nodes.map((node) => {
+      if (
+        node.kind !== "repeat" ||
+        node.mode !== "fixed-count-sequential"
+      ) {
+        return node;
+      }
+      const { iterationCount: _iterationCount, ...common } = node;
+      return {
+        ...common,
+        iterationControl: {
+          controlId: "iterations",
+          mode: "u32-count" as const,
+        },
+        maxIterationCount: wire("3"),
+        mode: "runtime-u32-count-sequential" as const,
+      };
+    }),
+  };
+}
+
 function conditionalRawCopyProgram(): HostGraphProgram {
   return {
     kind: "host-graph",
@@ -541,6 +567,31 @@ describe("semantic host-graph WebGPU preparation", () => {
     });
   });
 
+  it("prewarms the maximum version-1.8 runtime repeat schedule", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      runtimeRepeatedCollectiveProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+
+    expect(prepared).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 3,
+      expandedNodeCount: 5,
+      expandedStepCount: 8,
+      copyStepCount: 2,
+      repeatCount: 1,
+      repeatIterationCount: 3,
+      runtimeRepeatCount: 1,
+      runtimeControlIds: ["iterations"],
+      collectiveReductionStepCount: 3,
+      collectiveReplicationStepCount: 3,
+    });
+  });
+
   it("retains version-1.3 completion events without an extra GPU step", async () => {
     const graph = (await createVerifiedHostGraphArtifact(
       eventfulRawCopyProgram(),
@@ -751,6 +802,47 @@ describe("semantic host-graph WebGPU preparation", () => {
 });
 
 describe("semantic host-graph WebGPU execution admission", () => {
+  it("rejects a runtime repeat count above its artifact bound before device access", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      runtimeRepeatedCollectiveProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+    let inputReads = 0;
+    const unreadInput = {
+      rank: wire("0"),
+      resourceId: "input",
+    } as SemanticHostGraphWebGpuInputBinding;
+    Object.defineProperty(unreadInput, "bytes", {
+      enumerable: true,
+      get() {
+        inputReads += 1;
+        return new Uint8Array(8);
+      },
+    });
+    await expect(runSemanticHostGraphWebGpu(
+      NO_DEVICE,
+      prepared,
+      {
+        inputs: [
+          unreadInput,
+          input(1, new Uint8Array(8)),
+        ],
+        controls: [{
+          controlId: "iterations",
+          value: wire("4"),
+        }],
+      },
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-INVALID-BINDING",
+      path: "$.request.controls[0].value",
+    });
+    expect(inputReads).toBe(0);
+  });
+
   it("rejects missing, duplicate, unknown, and out-of-range controls before device access", async () => {
     const graph = (await createVerifiedHostGraphArtifact(
       runtimeConditionalRawCopyProgram(),

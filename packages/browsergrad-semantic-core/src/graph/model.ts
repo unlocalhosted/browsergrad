@@ -82,14 +82,33 @@ export type HostGraphExecutableNode =
 
 export type HostGraphRepeatBodyNode = HostGraphExecutableNode;
 
-export interface HostGraphRepeatNode extends JsonObject {
+interface HostGraphRepeatNodeBase extends JsonObject {
   readonly nodeId: string;
   readonly kind: "repeat";
   readonly dependsOn: readonly string[];
-  readonly iterationCount: WireU64;
   readonly body: readonly HostGraphRepeatBodyNode[];
+}
+
+export interface HostGraphFixedRepeatNode extends HostGraphRepeatNodeBase {
+  readonly iterationCount: WireU64;
   readonly mode: "fixed-count-sequential";
 }
+
+export interface HostGraphRuntimeRepeatControl extends JsonObject {
+  readonly controlId: string;
+  readonly mode: "u32-count";
+}
+
+export interface HostGraphRuntimeControlRepeatNode
+  extends HostGraphRepeatNodeBase {
+  readonly iterationControl: HostGraphRuntimeRepeatControl;
+  readonly maxIterationCount: WireU64;
+  readonly mode: "runtime-u32-count-sequential";
+}
+
+export type HostGraphRepeatNode =
+  | HostGraphFixedRepeatNode
+  | HostGraphRuntimeControlRepeatNode;
 
 export interface HostGraphRepeatCompletion extends JsonObject {
   readonly nodeId: string;
@@ -170,7 +189,7 @@ export interface HostGraphProgram extends JsonObject {
   readonly kind: "host-graph";
   readonly version: {
     readonly major: 1;
-    readonly minor: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+    readonly minor: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
   };
   readonly failureModel: typeof HOST_GRAPH_FAILURE_MODEL;
   readonly rankCount: WireU64;

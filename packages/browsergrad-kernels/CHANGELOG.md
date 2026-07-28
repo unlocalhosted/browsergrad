@@ -9,6 +9,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Host-graph program version 1.8 adds bounded
+  `runtime-u32-count-sequential` repetition. Preparation prewarms the
+  artifact-maximum schedule; execution admits the exact request-time u32 count
+  before copying inputs or accessing the device, rejects values above the
+  maximum, and selects exact authorized slots for zero through the maximum
+  iterations. Terminal traces report actual work and completion while
+  preparation retains maximum budgets.
+- Generic WGSL pipeline-set authority now accepts a strictly increasing exact
+  step-index selection in addition to contiguous ranges. This authorizes
+  omission of artifact-prewarmed runtime-repeat slots without permitting
+  reordering, duplicated slots, cross-device use, or program substitution.
 - Host-graph program version 1.7 adds one bounded
   `resource-u32-branch-sequential` conditional. The predicate is an ordered
   rank-local temporary u32 written by prior graph work. The CPU oracle reads it

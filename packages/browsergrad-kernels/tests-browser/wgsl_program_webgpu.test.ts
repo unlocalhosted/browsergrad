@@ -272,6 +272,56 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     )).rejects.toThrow(/step offset must be a non-negative integer/);
     rangePipelines.destroy();
 
+    const gappedSteps = [
+      ...steps,
+      {
+        program: differentProgram,
+        launch: { dispatchCount: [1, 1, 1] as const },
+      },
+      ...steps,
+    ];
+    const gappedPipelines = await prepareWgslKernelPipelineSet(
+      device,
+      gappedSteps,
+    );
+    const gapped = await prepareWgslKernelProgramSequence(
+      device,
+      [gappedSteps[0]!, gappedSteps[2]!],
+      { buffers: { x: new Float32Array([1]) }, readback: ["x"] },
+      gappedPipelines,
+      0,
+      [0, 2],
+    );
+    expect([
+      ...(await gapped.run()).buffers.x as Float32Array,
+    ]).toEqual([3]);
+    gapped.destroy();
+    await expect(prepareWgslKernelProgramSequence(
+      device,
+      [gappedSteps[0]!, gappedSteps[2]!],
+      { buffers: { x: new Float32Array([1]) } },
+      gappedPipelines,
+      0,
+      [2, 0],
+    )).rejects.toThrow(/strictly increasing/);
+    await expect(prepareWgslKernelProgramSequence(
+      device,
+      [gappedSteps[0]!, gappedSteps[2]!],
+      { buffers: { x: new Float32Array([1]) } },
+      gappedPipelines,
+      0,
+      [0],
+    )).rejects.toThrow(/must match the program sequence length/);
+    await expect(prepareWgslKernelProgramSequence(
+      device,
+      [gappedSteps[0]!, gappedSteps[2]!],
+      { buffers: { x: new Float32Array([1]) } },
+      gappedPipelines,
+      0,
+      [0, 3],
+    )).rejects.toThrow(/does not authorize this exact program sequence/);
+    gappedPipelines.destroy();
+
     const otherDevice = await createDevice();
     try {
       await expect(prepareWgslKernelProgramSequence(

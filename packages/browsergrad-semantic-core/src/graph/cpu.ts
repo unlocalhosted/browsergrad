@@ -174,7 +174,9 @@ export interface PreparedHostGraphCpu {
   readonly inputResourceIds: readonly string[];
   readonly outputResourceIds: readonly string[];
   readonly eventIds: readonly string[];
+  readonly repeatNodeIds: readonly string[];
   readonly repeats: readonly HostGraphRepeatCompletion[];
+  readonly runtimeRepeatCount: number;
   readonly conditionalNodeIds: readonly string[];
   readonly resourceConditionalCount: number;
   readonly runtimeControlIds: readonly string[];
@@ -243,13 +245,26 @@ interface EventPlan {
   readonly elementOperations: 0n;
 }
 
-interface RepeatPlan {
+interface RepeatPlanBase {
   readonly kind: "repeat";
   readonly nodeId: string;
-  readonly iterationCount: number;
   readonly body: readonly ExecutablePlan[];
+  readonly bodyElementOperations: bigint;
   readonly elementOperations: bigint;
 }
+
+interface FixedRepeatPlan extends RepeatPlanBase {
+  readonly mode: "fixed";
+  readonly iterationCount: number;
+}
+
+interface RuntimeRepeatPlan extends RepeatPlanBase {
+  readonly mode: "runtime-control";
+  readonly controlId: string;
+  readonly maxIterationCount: number;
+}
+
+type RepeatPlan = FixedRepeatPlan | RuntimeRepeatPlan;
 
 interface ConditionalPlan {
   readonly kind: "conditional";
@@ -449,8 +464,10 @@ export async function prepareHostGraphCpu(
   const executedNodeIds = Object.freeze(frozenPlans.map((plan) => plan.nodeId));
   const eventIds = Object.freeze(frozenPlans.flatMap((plan) =>
     plan.kind === "event" ? [plan.eventId] : []));
-  const repeats = Object.freeze(frozenPlans.flatMap((plan) =>
-    plan.kind === "repeat"
+  const repeatNodeIds = Object.freeze(frozenPlans.flatMap((plan) =>
+    plan.kind === "repeat" ? [plan.nodeId] : []));
+  const fixedRepeats = Object.freeze(frozenPlans.flatMap((plan) =>
+    plan.kind === "repeat" && plan.mode === "fixed"
       ? [Object.freeze({
           nodeId: plan.nodeId,
           iterationCount: encodeWireU64(BigInt(plan.iterationCount)),
@@ -458,6 +475,7 @@ export async function prepareHostGraphCpu(
             bodyPlan.nodeId)),
         })]
       : []));
+  const runtimeRepeatLimits = runtimeRepeatControlLimits(frozenPlans);
   const conditionalNodeIds = Object.freeze(frozenPlans.flatMap((plan) =>
     plan.kind === "conditional" ? [plan.nodeId] : []));
 
@@ -470,6 +488,7 @@ export async function prepareHostGraphCpu(
       rankCount,
       inputResources,
       preparedGraph.runtimeControlIds,
+      runtimeRepeatLimits,
     );
     ensureExecutionActive(
       executionStartedAt,
@@ -481,7 +500,9 @@ export async function prepareHostGraphCpu(
       payload.program.resources,
       captured.inputs,
     );
+    const completedRepeats: HostGraphRepeatCompletion[] = [];
     const completedConditionals: HostGraphConditionalCompletion[] = [];
+    let executedElementOperations = 0n;
     for (const plan of frozenPlans) {
       ensureExecutionActive(
         executionStartedAt,
@@ -489,6 +510,7 @@ export async function prepareHostGraphCpu(
         captured.signal,
       );
       if (plan.kind === "dispatch") {
+        executedElementOperations += plan.elementOperations;
         executeDispatch(
           plan,
           rankResources,
@@ -497,6 +519,7 @@ export async function prepareHostGraphCpu(
           captured.signal,
         );
       } else if (plan.kind === "all-reduce") {
+        executedElementOperations += plan.elementOperations;
         await executeAllReduce(
           plan,
           rankResources,
@@ -505,6 +528,7 @@ export async function prepareHostGraphCpu(
           captured.signal,
         );
       } else if (plan.kind === "copy") {
+        executedElementOperations += plan.elementOperations;
         executeCopy(
           plan,
           rankResources,
@@ -513,14 +537,19 @@ export async function prepareHostGraphCpu(
           captured.signal,
         );
       } else if (plan.kind === "repeat") {
-        await executeRepeat(
+        const completion = await executeRepeat(
           plan,
           rankResources,
+          captured.controls,
           executionStartedAt,
           normalized.maxExecutionMs,
           captured.signal,
         );
+        completedRepeats.push(completion);
+        executedElementOperations += plan.bodyElementOperations *
+          wireIntegerToBigInt(completion.iterationCount);
       } else if (plan.kind === "conditional") {
+        executedElementOperations += plan.elementOperations;
         completedConditionals.push(await executeConditional(
           plan,
           rankResources,
@@ -566,9 +595,9 @@ export async function prepareHostGraphCpu(
       failureModel: "fail-stop-no-partial-output-commit",
       executedNodeIds,
       completedEventIds: eventIds,
-      completedRepeats: repeats,
+      completedRepeats: Object.freeze(completedRepeats),
       completedConditionals: Object.freeze(completedConditionals),
-      elementOperations: encodeWireU64(elementOperations),
+      elementOperations: encodeWireU64(executedElementOperations),
       outputs,
     });
   };
@@ -584,7 +613,9 @@ export async function prepareHostGraphCpu(
       outputResources.map((resource) => resource.resourceId),
     ),
     eventIds,
-    repeats,
+    repeatNodeIds,
+    repeats: fixedRepeats,
+    runtimeRepeatCount: preparedGraph.runtimeRepeatCount,
     conditionalNodeIds,
     resourceConditionalCount: preparedGraph.resourceConditionalCount,
     runtimeControlIds: Object.freeze([...preparedGraph.runtimeControlIds]),
@@ -635,16 +666,34 @@ async function prepareRepeatPlan(
     (total, plan) => total + plan.elementOperations,
     0n,
   );
-  const iterationCount = safeNumber(
-    wireIntegerToBigInt(node.iterationCount),
-    `$.nodes.${node.nodeId}.iterationCount`,
+  if (node.mode === "fixed-count-sequential") {
+    const iterationCount = safeNumber(
+      wireIntegerToBigInt(node.iterationCount),
+      `$.nodes.${node.nodeId}.iterationCount`,
+    );
+    return Object.freeze({
+      kind: "repeat",
+      mode: "fixed",
+      nodeId: node.nodeId,
+      iterationCount,
+      body,
+      bodyElementOperations,
+      elementOperations: bodyElementOperations * BigInt(iterationCount),
+    });
+  }
+  const maxIterationCount = safeNumber(
+    wireIntegerToBigInt(node.maxIterationCount),
+    `$.nodes.${node.nodeId}.maxIterationCount`,
   );
   return Object.freeze({
     kind: "repeat",
+    mode: "runtime-control",
     nodeId: node.nodeId,
-    iterationCount,
+    controlId: node.iterationControl.controlId,
+    maxIterationCount,
     body,
-    elementOperations: bodyElementOperations * BigInt(iterationCount),
+    bodyElementOperations,
+    elementOperations: bodyElementOperations * BigInt(maxIterationCount),
   });
 }
 
@@ -910,11 +959,33 @@ function prepareEventPlan(node: HostGraphEventNode): EventPlan {
 async function executeRepeat(
   plan: RepeatPlan,
   rankResources: RankResources,
+  controls: readonly AdmittedControl[],
   startedAt: number,
   maxExecutionMs: number,
   signal: AbortSignal | undefined,
-): Promise<void> {
-  for (let iteration = 0; iteration < plan.iterationCount; iteration += 1) {
+): Promise<HostGraphRepeatCompletion> {
+  const iterationCount = plan.mode === "fixed"
+    ? plan.iterationCount
+    : controls.find((control) =>
+      control.controlId === plan.controlId)?.value;
+  if (iterationCount === undefined) {
+    fail(
+      "BG-GRAPH-CPU-INTERNAL",
+      `$.nodes.${plan.nodeId}.iterationControl`,
+      "verified runtime repeat control disappeared",
+    );
+  }
+  if (
+    plan.mode === "runtime-control" &&
+    iterationCount > plan.maxIterationCount
+  ) {
+    fail(
+      "BG-GRAPH-CPU-INTERNAL",
+      `$.nodes.${plan.nodeId}.iterationControl`,
+      "admitted runtime repeat control exceeds its verified bound",
+    );
+  }
+  for (let iteration = 0; iteration < iterationCount; iteration += 1) {
     ensureExecutionActive(startedAt, maxExecutionMs, signal);
     await executeExecutableBody(
       plan.body,
@@ -925,6 +996,11 @@ async function executeRepeat(
     );
   }
   ensureExecutionActive(startedAt, maxExecutionMs, signal);
+  return Object.freeze({
+    nodeId: plan.nodeId,
+    iterationCount: encodeWireU64(BigInt(iterationCount)),
+    bodyNodeIds: Object.freeze(plan.body.map((bodyPlan) => bodyPlan.nodeId)),
+  });
 }
 
 async function executeConditional(
@@ -1284,6 +1360,7 @@ function captureExecutionRequest(
   rankCount: number,
   inputResources: readonly HostGraphResource[],
   runtimeControlIds: readonly string[],
+  runtimeRepeatLimits: ReadonlyMap<string, number>,
 ): {
   readonly inputs: readonly AdmittedInput[];
   readonly controls: readonly AdmittedControl[];
@@ -1301,6 +1378,7 @@ function captureExecutionRequest(
   const controls = captureRuntimeControls(
     captured.controls,
     runtimeControlIds,
+    runtimeRepeatLimits,
   );
   const inputResourceMap = new Map(
     inputResources.map((resource) => [resource.resourceId, resource]),
@@ -1360,6 +1438,7 @@ function captureExecutionRequest(
 function captureRuntimeControls(
   value: unknown,
   runtimeControlIds: readonly string[],
+  runtimeRepeatLimits: ReadonlyMap<string, number>,
 ): readonly AdmittedControl[] {
   const controlValues = value === undefined
     ? []
@@ -1408,6 +1487,17 @@ function captureRuntimeControls(
         "runtime u32 control exceeds 4294967295",
       );
     }
+    const repeatLimit = runtimeRepeatLimits.get(controlId);
+    if (
+      repeatLimit !== undefined &&
+      controlValue > BigInt(repeatLimit)
+    ) {
+      fail(
+        "BG-GRAPH-CPU-INVALID-BINDING",
+        `${path}.value`,
+        `runtime repeat control ${controlId} exceeds its artifact bound ${repeatLimit}`,
+      );
+    }
     controls.push(Object.freeze({
       controlId,
       value: Number(controlValue),
@@ -1421,6 +1511,23 @@ function captureRuntimeControls(
     );
   }
   return Object.freeze(controls);
+}
+
+function runtimeRepeatControlLimits(
+  plans: readonly CpuNodePlan[],
+): ReadonlyMap<string, number> {
+  const limits = new Map<string, number>();
+  for (const plan of plans) {
+    if (plan.kind !== "repeat" || plan.mode !== "runtime-control") continue;
+    const existing = limits.get(plan.controlId);
+    limits.set(
+      plan.controlId,
+      existing === undefined
+        ? plan.maxIterationCount
+        : Math.min(existing, plan.maxIterationCount),
+    );
+  }
+  return limits;
 }
 
 function materializeRankResources(

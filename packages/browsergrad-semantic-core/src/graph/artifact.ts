@@ -63,11 +63,12 @@ import {
   type HostGraphResourcePredicate,
   type HostGraphResourceRole,
   type HostGraphRuntimeControlPredicate,
+  type HostGraphRuntimeRepeatControl,
 } from "./model.js";
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 7;
+export const HOST_GRAPH_ARTIFACT_MINOR = 8;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
@@ -138,6 +139,7 @@ export interface PreparedHostGraphProgram {
   readonly eventIds: readonly string[];
   readonly repeatCount: number;
   readonly repeatIterationCount: number;
+  readonly runtimeRepeatCount: number;
   readonly conditionalCount: number;
   readonly resourceConditionalCount: number;
   readonly runtimeControlIds: readonly string[];
@@ -157,6 +159,7 @@ interface HostGraphAnalysis {
   readonly eventIds: readonly string[];
   readonly repeatCount: number;
   readonly repeatIterationCount: number;
+  readonly runtimeRepeatCount: number;
   readonly conditionalCount: number;
   readonly resourceConditionalCount: number;
   readonly runtimeControlIds: readonly string[];
@@ -301,6 +304,7 @@ export async function prepareHostGraphProgram(
     eventIds: Object.freeze([...analysis.eventIds]),
     repeatCount: analysis.repeatCount,
     repeatIterationCount: analysis.repeatIterationCount,
+    runtimeRepeatCount: analysis.runtimeRepeatCount,
     conditionalCount: analysis.conditionalCount,
     resourceConditionalCount: analysis.resourceConditionalCount,
     runtimeControlIds: Object.freeze([...analysis.runtimeControlIds]),
@@ -363,12 +367,13 @@ function parseProgram(
       version.minor !== 4 &&
       version.minor !== 5 &&
       version.minor !== 6 &&
-      version.minor !== 7)
+      version.minor !== 7 &&
+      version.minor !== 8)
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 through 1.7 only",
+      "host graph program reader supports versions 1.0 through 1.8 only",
     );
   }
   if (version.minor !== envelopeMinor) {
@@ -637,7 +642,7 @@ function parseNode(
         "repeat nodes require host graph program version 1.4",
       );
     }
-    return parseRepeatNode(object, path);
+    return parseRepeatNode(object, path, programMinor);
   }
   if (kind === "conditional") {
     if (controlBody !== undefined) {
@@ -659,39 +664,80 @@ function parseNode(
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 repeat, and version-1.5 through 1.7 conditional nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, and version-1.8 runtime repeat nodes",
   );
 }
 
 function parseRepeatNode(
   value: JsonObject,
   path: string,
+  programMinor: HostGraphProgram["version"]["minor"],
 ): HostGraphRepeatNode {
+  const mode = stringValue(field(value, "mode", path), `${path}.mode`);
+  if (mode === "runtime-u32-count-sequential") {
+    if (programMinor < 8) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.mode`,
+        "runtime control repeats require host graph program version 1.8",
+      );
+    }
+    const object = closedObject(
+      value,
+      [
+        "nodeId",
+        "kind",
+        "dependsOn",
+        "iterationControl",
+        "maxIterationCount",
+        "body",
+        "mode",
+      ],
+      path,
+    );
+    const maxIterationCount = positiveWire(
+      field(object, "maxIterationCount", path),
+      `${path}.maxIterationCount`,
+    );
+    verifyRepeatIterationBound(
+      maxIterationCount,
+      `${path}.maxIterationCount`,
+    );
+    return {
+      nodeId: identifier(field(object, "nodeId", path), `${path}.nodeId`),
+      kind: "repeat",
+      dependsOn: dependencies(field(object, "dependsOn", path), path),
+      iterationControl: parseRuntimeRepeatControl(
+        field(object, "iterationControl", path),
+        `${path}.iterationControl`,
+      ),
+      maxIterationCount,
+      body: parseLinearControlBody(
+        field(object, "body", path),
+        `${path}.body`,
+        "runtime control repeat",
+        HOST_GRAPH_MAX_REPEAT_BODY_NODES,
+      ) as readonly HostGraphRepeatBodyNode[],
+      mode: "runtime-u32-count-sequential",
+    };
+  }
   const object = closedObject(
     value,
     ["nodeId", "kind", "dependsOn", "iterationCount", "body", "mode"],
     path,
   );
-  if (object.mode !== "fixed-count-sequential") {
+  if (mode !== "fixed-count-sequential") {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       `${path}.mode`,
-      "repeat mode must be fixed-count-sequential",
+      "repeat mode must be fixed-count-sequential or runtime-u32-count-sequential",
     );
   }
   const iterationCount = positiveWire(
     field(object, "iterationCount", path),
     `${path}.iterationCount`,
   );
-  if (
-    wireIntegerToBigInt(iterationCount) >
-    BigInt(HOST_GRAPH_MAX_REPEAT_ITERATIONS)
-  ) {
-    resource(
-      `${path}.iterationCount`,
-      `repeat iteration count exceeds ${HOST_GRAPH_MAX_REPEAT_ITERATIONS}`,
-    );
-  }
+  verifyRepeatIterationBound(iterationCount, `${path}.iterationCount`);
   const body = parseLinearControlBody(
     field(object, "body", path),
     `${path}.body`,
@@ -705,6 +751,42 @@ function parseRepeatNode(
     iterationCount,
     body,
     mode: "fixed-count-sequential",
+  };
+}
+
+function verifyRepeatIterationBound(
+  value: WireU64,
+  path: string,
+): void {
+  if (
+    wireIntegerToBigInt(value) >
+    BigInt(HOST_GRAPH_MAX_REPEAT_ITERATIONS)
+  ) {
+    resource(
+      path,
+      `repeat iteration count exceeds ${HOST_GRAPH_MAX_REPEAT_ITERATIONS}`,
+    );
+  }
+}
+
+function parseRuntimeRepeatControl(
+  value: JsonValue,
+  path: string,
+): HostGraphRuntimeRepeatControl {
+  const object = closedObject(value, ["controlId", "mode"], path);
+  if (object.mode !== "u32-count") {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "runtime repeat control mode must be u32-count",
+    );
+  }
+  return {
+    controlId: identifier(
+      field(object, "controlId", path),
+      `${path}.controlId`,
+    ),
+    mode: "u32-count",
   };
 }
 
@@ -1273,6 +1355,7 @@ function analyzeProgram(
   let eventCount = 0;
   let repeatCount = 0;
   let repeatIterationCount = 0;
+  let runtimeRepeatCount = 0;
   let conditionalCount = 0;
   let resourceConditionalCount = 0;
   const runtimeControlIds = new Set<string>();
@@ -1382,8 +1465,22 @@ function analyzeProgram(
       expandedNodeCount += 1;
     } else if (node.kind === "repeat") {
       repeatCount += 1;
-      const iterationCount = Number(wireIntegerToBigInt(node.iterationCount));
+      const iterationCount = Number(wireIntegerToBigInt(
+        node.mode === "fixed-count-sequential"
+          ? node.iterationCount
+          : node.maxIterationCount,
+      ));
       repeatIterationCount += iterationCount;
+      if (node.mode === "runtime-u32-count-sequential") {
+        runtimeRepeatCount += 1;
+        runtimeControlIds.add(node.iterationControl.controlId);
+        if (runtimeControlIds.size > HOST_GRAPH_MAX_RUNTIME_CONTROLS) {
+          resource(
+            `${path}.iterationControl.controlId`,
+            `runtime control count exceeds ${HOST_GRAPH_MAX_RUNTIME_CONTROLS}`,
+          );
+        }
+      }
       const bodyExpandedNodeCount = iterationCount * node.body.length;
       expandedNodeCount += bodyExpandedNodeCount;
       if (expandedNodeCount > HOST_GRAPH_MAX_EXPANDED_NODES) {
@@ -1427,11 +1524,17 @@ function analyzeProgram(
             copyCount,
           ));
       }
-      repeatEffects.set(node, aggregateLinearEffects(
+      const effects = aggregateLinearEffects(
         node.body,
         bodyEffects,
         "repeat",
-      ));
+      );
+      repeatEffects.set(
+        node,
+        node.mode === "fixed-count-sequential"
+          ? effects
+          : runtimeRepeatEffects(effects),
+      );
     } else {
       conditionalCount += 1;
       verifyConditionalPredicate(node, resources, rankCount, path);
@@ -1545,6 +1648,7 @@ function analyzeProgram(
     })),
     repeatCount,
     repeatIterationCount,
+    runtimeRepeatCount,
     conditionalCount,
     resourceConditionalCount,
     runtimeControlIds: Object.freeze(
@@ -1778,6 +1882,17 @@ function aggregateLinearEffects(
       requiresPriorWriter: state.requiresPriorWriter,
       guaranteesWrite: state.write,
     })));
+}
+
+function runtimeRepeatEffects(
+  effects: readonly HostGraphResourceEffect[],
+): readonly HostGraphResourceEffect[] {
+  return Object.freeze(effects.map((effect) => Object.freeze({
+    ...effect,
+    // A request-time count of zero executes no body node, so writes performed
+    // only by this repeat cannot dominate later reads or satisfy ownership.
+    guaranteesWrite: false,
+  })));
 }
 
 function verifyConditionalPredicate(

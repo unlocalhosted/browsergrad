@@ -20,17 +20,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   incompatible bindings, and invalid all-reduce rank/numerical contracts; and
   fixes a fail-stop, no-partial-output-commit failure model without claiming
   execution, transport, topology, retries, or backend pipelines.
-- Additive host-graph versions 1.1 through 1.7 add exact whole-allocation
+- Additive host-graph versions 1.1 through 1.8 add exact whole-allocation
   copies, terminal fail-stop materialization, dependency-ordered completion
   events, bounded fixed-count repetition, captured-input u32 conditionals, and
-  runtime-control u32 conditionals, plus one ordered temporary-resource u32
-  conditional while retaining exact older-version decoding. Resource control
-  requires an ordered writer and makes one graph-derived feedback boundary
-  explicit; it grants no nested control, dynamic launch, or runtime loop-count
-  authority.
+  runtime-control u32 conditionals, one ordered temporary-resource u32
+  conditional, and bounded request-time u32-count repetition while retaining
+  exact older-version decoding. Resource control requires an ordered writer
+  and makes one graph-derived feedback boundary explicit. Runtime repetition
+  binds an artifact maximum, admits zero through that maximum before copying
+  inputs, charges maximum work, and does not treat a zero-possible body write
+  as guaranteed. Neither profile grants nested control, dynamic launch, or
+  GPU/backend-derived loop authority.
 - Authority-bound `browsergrad.host-graph.cpu-reference@1` preparation and
   execution for dispatches, all-reduces, copies, events, materialization,
-  fixed repetition, and bounded input/runtime-control/resource conditionals. The
+  fixed/runtime repetition, and bounded input/runtime-control/resource conditionals. The
   reference snapshots rank-local inputs and exact runtime controls into private
   state, bounds memory, element operations, preparation/execution time, and
   cancellation, applies explicit finite rank-ordered f32 and wrapping/exact

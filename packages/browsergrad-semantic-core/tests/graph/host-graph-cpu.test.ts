@@ -268,6 +268,32 @@ function repeatedCollectiveProgram(): HostGraphProgram {
   };
 }
 
+function runtimeRepeatedCollectiveProgram(): HostGraphProgram {
+  const base = repeatedCollectiveProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 8 },
+    nodes: base.nodes.map((node) => {
+      if (
+        node.kind !== "repeat" ||
+        node.mode !== "fixed-count-sequential"
+      ) {
+        return node;
+      }
+      const { iterationCount: _iterationCount, ...common } = node;
+      return {
+        ...common,
+        iterationControl: {
+          controlId: "iterations",
+          mode: "u32-count" as const,
+        },
+        maxIterationCount: wire("3"),
+        mode: "runtime-u32-count-sequential" as const,
+      };
+    }),
+  };
+}
+
 function conditionalRawCopyProgram(): HostGraphProgram {
   return {
     kind: "host-graph",
@@ -767,6 +793,81 @@ describe("host graph CPU reference", () => {
       code: "BG-GRAPH-CPU-RESOURCE-LIMIT",
       path: "$.maxElementOperations",
     });
+  });
+
+  it("executes the exact captured runtime repeat count within its artifact bound", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      runtimeRepeatedCollectiveProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+    const inputs = [
+      input(0, f32Bytes([1, 2])),
+      input(1, f32Bytes([3, 4])),
+    ];
+
+    expect(prepared.runtimeRepeatCount).toBe(1);
+    expect(prepared.repeatNodeIds).toEqual(["repeat-reduction"]);
+    expect(prepared.repeats).toEqual([]);
+    expect(prepared.elementOperations).toBe(28n);
+
+    const zero = await prepared.execute({
+      inputs,
+      controls: [{ controlId: "iterations", value: wire("0") }],
+    });
+    expect(zero.completedRepeats).toEqual([{
+      nodeId: "repeat-reduction",
+      iterationCount: "0",
+      bodyNodeIds: ["reduce-step"],
+    }]);
+    expect(zero.elementOperations).toBe("16");
+    expect(zero.outputs.map(({ bytes }) => readF32(bytes))).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
+
+    const two = await prepared.execute({
+      inputs,
+      controls: [{ controlId: "iterations", value: wire("2") }],
+    });
+    expect(two.completedRepeats[0]?.iterationCount).toBe("2");
+    expect(two.elementOperations).toBe("24");
+    expect(two.outputs.map(({ bytes }) => readF32(bytes))).toEqual([
+      [8, 12],
+      [8, 12],
+    ]);
+
+    await expect(prepared.execute({
+      inputs,
+      controls: [{ controlId: "iterations", value: wire("4") }],
+    })).rejects.toMatchObject({
+      code: "BG-GRAPH-CPU-INVALID-BINDING",
+      path: "$.request.controls[0].value",
+    });
+
+    let inputReads = 0;
+    const unreadInput = {
+      rank: wire("0"),
+      resourceId: "input",
+    } as HostGraphCpuInputBinding;
+    Object.defineProperty(unreadInput, "bytes", {
+      enumerable: true,
+      get() {
+        inputReads += 1;
+        return f32Bytes([1, 2]);
+      },
+    });
+    await expect(prepared.execute({
+      inputs: [unreadInput, input(1, f32Bytes([3, 4]))],
+      controls: [{ controlId: "iterations", value: wire("4") }],
+    })).rejects.toMatchObject({
+      code: "BG-GRAPH-CPU-INVALID-BINDING",
+      path: "$.request.controls[0].value",
+    });
+    expect(inputReads).toBe(0);
   });
 
   it("reports completion events only with a successful whole-graph result", async () => {

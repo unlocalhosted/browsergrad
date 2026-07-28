@@ -58,6 +58,8 @@ const CASE_IDS = Object.freeze([
   "u8-whole-allocation-copy",
   "u32-exact-max",
   "f32-fixed-repeat-sum",
+  "f32-runtime-repeat-zero",
+  "f32-runtime-repeat-two",
   "u8-input-conditional-then",
   "u8-input-conditional-else",
   "u8-runtime-conditional-then",
@@ -171,6 +173,14 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         ],
       ),
       prepareRepeatedCollectiveCase(),
+      prepareRuntimeRepeatedCollectiveCase(
+        "f32-runtime-repeat-zero",
+        0,
+      ),
+      prepareRuntimeRepeatedCollectiveCase(
+        "f32-runtime-repeat-two",
+        2,
+      ),
       prepareConditionalRawCopyCase(
         "u8-input-conditional-then",
         1,
@@ -394,6 +404,16 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       .not.toBe(elseResourceConditional?.backendSpecializationHash);
     expect(thenResourceConditional?.midGraphFeedbackCount).toBe(1);
     expect(elseResourceConditional?.midGraphFeedbackCount).toBe(1);
+    const zeroRuntimeRepeat = completedCases.find(({ caseId }) =>
+      caseId === "f32-runtime-repeat-zero");
+    const twoRuntimeRepeat = completedCases.find(({ caseId }) =>
+      caseId === "f32-runtime-repeat-two");
+    expect(zeroRuntimeRepeat?.pipelineIdentityHash)
+      .toBe(twoRuntimeRepeat?.pipelineIdentityHash);
+    expect(zeroRuntimeRepeat?.backendSpecializationHash)
+      .not.toBe(twoRuntimeRepeat?.backendSpecializationHash);
+    expect(zeroRuntimeRepeat?.expandedStepCount).toBe(2);
+    expect(twoRuntimeRepeat?.expandedStepCount).toBe(6);
 
     stage = "non-finite-fail-stop";
     const finiteCase = cases[0] as PreparedCase;
@@ -609,6 +629,41 @@ async function prepareRepeatedCollectiveCase(): Promise<PreparedCase> {
       graph: prepared.graphSemanticHash,
       modules: prepared.wgslModuleHashes,
       inputs: values.map((bytes) => Array.from(bytes)),
+    }),
+  });
+}
+
+async function prepareRuntimeRepeatedCollectiveCase(
+  caseId: "f32-runtime-repeat-zero" | "f32-runtime-repeat-two",
+  iterationCount: 0 | 2,
+): Promise<PreparedCase> {
+  const values = [f32Bytes([1, 2]), f32Bytes([3, 4])];
+  const graph = (await createVerifiedHostGraphArtifact(
+    runtimeRepeatedCollectiveProgram(),
+    { kernelArtifacts: [], layoutArtifacts: [] },
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+    kernelArtifacts: [],
+    layoutArtifacts: [],
+  });
+  const inputs = Object.freeze(values.map((bytes, rank) =>
+    input(rank, bytes)));
+  const controls = Object.freeze([{
+    controlId: "iterations",
+    value: wire(iterationCount),
+  }]);
+  return Object.freeze({
+    caseId,
+    graph,
+    prepared,
+    inputs,
+    controls,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: values.map((bytes) => Array.from(bytes)),
+      controls,
     }),
   });
 }
@@ -867,6 +922,32 @@ function repeatedCollectiveProgram(): HostGraphProgram {
         mode: "host-readback-after-graph-success",
       },
     ],
+  };
+}
+
+function runtimeRepeatedCollectiveProgram(): HostGraphProgram {
+  const base = repeatedCollectiveProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 8 },
+    nodes: base.nodes.map((node) => {
+      if (
+        node.kind !== "repeat" ||
+        node.mode !== "fixed-count-sequential"
+      ) {
+        return node;
+      }
+      const { iterationCount: _iterationCount, ...common } = node;
+      return {
+        ...common,
+        iterationControl: {
+          controlId: "iterations",
+          mode: "u32-count" as const,
+        },
+        maxIterationCount: wire(3),
+        mode: "runtime-u32-count-sequential" as const,
+      };
+    }),
   };
 }
 
