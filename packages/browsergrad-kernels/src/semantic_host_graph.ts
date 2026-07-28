@@ -45,6 +45,8 @@ import {
 import type { KernelDevice } from "./types.js";
 import {
   clearWgslPipelineCache,
+  createWgslStorageBuffer,
+  destroyWgslStorageBuffer,
   prepareWgslKernelPipelineSet,
   prepareWgslKernelProgramSequence,
   WgslPipelineCreationError,
@@ -55,11 +57,13 @@ import {
   type WgslKernelPipelineAlternative,
   type WgslKernelSequenceStep,
   type WgslPreparedPipelineSet,
+  type WgslResidentBuffer,
   type WgslStorageBufferMetadata,
   type WgslTypedArray,
 } from "./wgsl_program.js";
 import {
   issueAsyncWithWebGpuErrorScopes,
+  issueWithWebGpuErrorScopes,
   ScopedWebGpuIssueError,
 } from "./webgpu_error_scope.js";
 
@@ -67,7 +71,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.7.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.8.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -246,6 +250,8 @@ export interface PreparedSemanticHostGraphWebGpu {
   readonly repeatIterationCount: number;
   readonly conditionalCount: number;
   readonly conditionalNodeIds: readonly string[];
+  readonly resourceConditionalCount: number;
+  readonly midGraphFeedbackCount: number;
   readonly runtimeControlIds: readonly string[];
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
@@ -286,6 +292,7 @@ export interface SemanticHostGraphWebGpuTrace {
   readonly completedEventIds: readonly string[];
   readonly completedRepeats: readonly HostGraphRepeatCompletion[];
   readonly completedConditionals: readonly HostGraphConditionalCompletion[];
+  readonly midGraphFeedbackCount: number;
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -336,6 +343,7 @@ interface PreparedState {
   readonly pipelineAlternatives:
     readonly WgslKernelPipelineAlternative[];
   readonly conditionals: readonly PreparedConditionalPlan[];
+  readonly resourceConditional?: PreparedConditionalPlan;
   readonly runtimeControlIds: readonly string[];
   readonly storageMetadata:
     Readonly<Record<string, WgslStorageBufferMetadata>>;
@@ -392,6 +400,11 @@ interface PreparedConditionalPlan {
     | Readonly<{
         kind: "runtime-control";
         controlId: string;
+      }>
+    | Readonly<{
+        kind: "resource";
+        resourceId: string;
+        rank: number;
       }>;
   readonly startStepIndex: number;
   readonly stepCount: number;
@@ -402,6 +415,12 @@ interface PreparedConditionalPlan {
 interface SelectedExecution {
   readonly steps: readonly WgslKernelSequenceStep[];
   readonly completedConditionals: readonly HostGraphConditionalCompletion[];
+  readonly resourceConditional?: PreparedConditionalPlan;
+}
+
+interface ExecutedGraph {
+  readonly result: WgslKernelRunResult;
+  readonly selectedExecution: SelectedExecution;
 }
 
 interface CapturedInput {
@@ -646,11 +665,26 @@ export async function prepareSemanticHostGraphWebGpu(
     0n,
   );
   const statusBytes = usesNumericalStatus ? 4n : 0n;
+  const resourceConditionals = conditionals.filter((conditional) =>
+    conditional.predicate.kind === "resource");
+  if (
+    resourceConditionals.length !==
+    preparedGraph.resourceConditionalCount
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      "$.artifact",
+      "prepared resource conditional count diverged",
+    );
+  }
+  const resourceConditional = resourceConditionals[0];
+  const feedbackBytes = resourceConditional === undefined ? 0n : 4n;
   const plannedTransientGpuBytes =
-    boundResourceBytes + boundOutputBytes + (statusBytes * 2n);
+    boundResourceBytes + boundOutputBytes + (statusBytes * 2n) +
+    feedbackBytes;
   const plannedTransientHostBytes =
     inputBytes + boundResourceBytes + boundOutputBytes +
-    outputBytes + statusBytes;
+    outputBytes + statusBytes + feedbackBytes;
   const plannedTransientWorkingSetBytes =
     plannedTransientGpuBytes + plannedTransientHostBytes;
   if (
@@ -736,6 +770,8 @@ export async function prepareSemanticHostGraphWebGpu(
     repeatIterationCount: preparedGraph.repeatIterationCount,
     conditionalCount: preparedGraph.conditionalCount,
     conditionalNodeIds,
+    resourceConditionalCount: preparedGraph.resourceConditionalCount,
+    midGraphFeedbackCount: preparedGraph.resourceConditionalCount,
     runtimeControlIds: Object.freeze([
       ...preparedGraph.runtimeControlIds,
     ]),
@@ -762,6 +798,9 @@ export async function prepareSemanticHostGraphWebGpu(
     deviceAdmissionSteps,
     pipelineAlternatives,
     conditionals: Object.freeze([...conditionals]),
+    ...(resourceConditional === undefined
+      ? {}
+      : { resourceConditional }),
     runtimeControlIds: Object.freeze([
       ...preparedGraph.runtimeControlIds,
     ]),
@@ -950,22 +989,34 @@ async function appendConditionalSteps(
     );
   }
   const startStepIndex = steps.length;
+  if (
+    node.mode === "resource-u32-branch-sequential" &&
+    startStepIndex === 0
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
+      `$.nodes.${node.nodeId}.predicate`,
+      "resource conditional requires at least one lowered producer step before feedback",
+    );
+  }
   steps.push(...thenPrepared.branch.steps);
   addPreparationCounts(counts, thenPrepared.branch.counts);
   conditionals.push(Object.freeze({
     nodeId: node.nodeId,
-    predicate: node.mode === "input-u32-branch-sequential"
+    predicate: node.mode === "runtime-u32-branch-sequential"
       ? Object.freeze({
-          kind: "input" as const,
+          kind: "runtime-control" as const,
+          controlId: node.predicate.controlId,
+        })
+      : Object.freeze({
+          kind: node.mode === "input-u32-branch-sequential"
+            ? "input" as const
+            : "resource" as const,
           resourceId: node.predicate.resourceId,
           rank: safeNumber(
             wireIntegerToBigInt(node.predicate.rank),
             `$.nodes.${node.nodeId}.predicate.rank`,
           ),
-        })
-      : Object.freeze({
-          kind: "runtime-control" as const,
-          controlId: node.predicate.controlId,
         }),
     startStepIndex,
     stepCount: thenPrepared.branch.steps.length,
@@ -1403,27 +1454,41 @@ async function executeCapturedHostGraph(
     );
   }
   ACTIVE_DEVICES.add(gpu);
-  const execution = executeGraph(
-    device,
-    gpu,
-    state,
-    selectedExecution.steps,
-    materialized.buffers,
-    pipelineSet,
+  const execution = (
+    selectedExecution.resourceConditional === undefined
+      ? executeGraph(
+        device,
+        gpu,
+        state,
+        selectedExecution.steps,
+        materialized.buffers,
+        pipelineSet,
+      ).then((result) => Object.freeze({
+        result,
+        selectedExecution,
+      }))
+      : executeGraphWithResourceFeedback(
+        device,
+        gpu,
+        state,
+        selectedExecution,
+        materialized.buffers,
+        pipelineSet,
+        options.signal,
+      )
   ).finally(() => {
     ACTIVE_DEVICES.delete(gpu);
   });
-  const [result, backendSpecializationHash] = await Promise.all([
-    awaitBoundedExecution(
-      execution,
-      options.signal,
-      timeoutMs,
-    ),
-    hashBackendSpecialization(
-      pipelineIdentityHash,
-      selectedExecution,
-    ),
-  ]);
+  const outcome = await awaitBoundedExecution(
+    execution,
+    options.signal,
+    timeoutMs,
+  );
+  const { result } = outcome;
+  const backendSpecializationHash = await hashBackendSpecialization(
+    pipelineIdentityHash,
+    outcome.selectedExecution,
+  );
   if (state.usesNumericalStatus) {
     const status = result.buffers[NUMERICAL_STATUS_STORAGE];
     if (!(status instanceof Uint32Array) || status.length !== 1) {
@@ -1451,7 +1516,7 @@ async function executeCapturedHostGraph(
       backendSpecializationHash,
       deviceFacts,
       true,
-      selectedExecution.completedConditionals,
+      outcome.selectedExecution.completedConditionals,
     ),
   });
 }
@@ -1477,6 +1542,7 @@ function selectConditionalExecution(
   const steps = [...state.steps];
   const completedConditionals: HostGraphConditionalCompletion[] = [];
   for (const conditional of state.conditionals) {
+    if (conditional.predicate.kind === "resource") continue;
     const predicateValue = conditional.predicate.kind === "input"
       ? readCapturedInputPredicate(
           conditional.nodeId,
@@ -1511,6 +1577,9 @@ function selectConditionalExecution(
   return Object.freeze({
     steps: Object.freeze(steps),
     completedConditionals: Object.freeze(completedConditionals),
+    ...(state.resourceConditional === undefined
+      ? {}
+      : { resourceConditional: state.resourceConditional }),
   });
 }
 
@@ -2001,6 +2070,234 @@ async function executeGraph(
     );
   } catch (cause) {
     translateExecutionFailure(cause, "$.dispatch");
+  } finally {
+    sequence.destroy();
+  }
+}
+
+async function executeGraphWithResourceFeedback(
+  device: KernelDevice,
+  gpu: GPUDevice,
+  state: PreparedState,
+  selectedExecution: SelectedExecution,
+  buffers: Readonly<Record<string, WgslTypedArray>>,
+  pipelineSet: WgslPreparedPipelineSet,
+  signal: AbortSignal | undefined,
+): Promise<ExecutedGraph> {
+  const conditional = selectedExecution.resourceConditional;
+  if (
+    conditional === undefined ||
+    conditional.predicate.kind !== "resource"
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      "$.feedback",
+      "resource feedback execution lost its verified conditional",
+    );
+  }
+  const residents = await createResidentGraphBuffers(
+    device,
+    gpu,
+    buffers,
+  );
+  try {
+    const predicatePlan = state.resourcesById.get(
+      conditional.predicate.resourceId,
+    );
+    const predicateStorageName = predicatePlan?.storageNames[
+      conditional.predicate.rank
+    ];
+    if (
+      predicatePlan === undefined ||
+      predicateStorageName === undefined ||
+      predicatePlan.byteLength !== 4 ||
+      residents[predicateStorageName] === undefined
+    ) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        `$.nodes.${conditional.nodeId}.predicate`,
+        "verified resource conditional storage disappeared",
+      );
+    }
+    const prefixSteps = selectedExecution.steps.slice(
+      0,
+      conditional.startStepIndex,
+    );
+    if (prefixSteps.length === 0) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        `$.nodes.${conditional.nodeId}.predicate`,
+        "verified resource conditional producer disappeared",
+      );
+    }
+    const prefix = await executeResidentGraphStage(
+      device,
+      gpu,
+      state,
+      prefixSteps,
+      residents,
+      pipelineSet,
+      0,
+      [predicateStorageName],
+      "$.feedback.prefix",
+    );
+    throwIfCancelled(signal);
+    const predicateValue = prefix.buffers[predicateStorageName];
+    if (!(predicateValue instanceof Uint32Array) ||
+        predicateValue.length !== 1) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        `$.nodes.${conditional.nodeId}.predicate`,
+        "resource conditional feedback returned an invalid u32 allocation",
+      );
+    }
+    const selectedBranch = predicateValue[0] === 0
+      ? "else" as const
+      : "then" as const;
+    const branch = selectedBranch === "then"
+      ? conditional.thenBranch
+      : conditional.elseBranch;
+    const steps = [...selectedExecution.steps];
+    steps.splice(
+      conditional.startStepIndex,
+      conditional.stepCount,
+      ...branch.steps,
+    );
+    const completion = Object.freeze({
+      nodeId: conditional.nodeId,
+      selectedBranch,
+      bodyNodeIds: branch.bodyNodeIds,
+    });
+    const completedByNodeId = new Map(
+      selectedExecution.completedConditionals.map((item) => [
+        item.nodeId,
+        item,
+      ]),
+    );
+    completedByNodeId.set(conditional.nodeId, completion);
+    const completedConditionals = Object.freeze(
+      state.conditionals.map((item) => {
+        const completed = completedByNodeId.get(item.nodeId);
+        if (completed === undefined) {
+          fail(
+            "BG-WEBGPU-GRAPH-INTERNAL",
+            `$.nodes.${item.nodeId}`,
+            "conditional completion disappeared during feedback staging",
+          );
+        }
+        return completed;
+      }),
+    );
+    const finalSelection = Object.freeze({
+      steps: Object.freeze(steps),
+      completedConditionals,
+      resourceConditional: conditional,
+    });
+    throwIfCancelled(signal);
+    const result = await executeResidentGraphStage(
+      device,
+      gpu,
+      state,
+      finalSelection.steps.slice(conditional.startStepIndex),
+      residents,
+      pipelineSet,
+      conditional.startStepIndex,
+      state.readbackStorageNames,
+      "$.feedback.suffix",
+    );
+    return Object.freeze({ result, selectedExecution: finalSelection });
+  } finally {
+    destroyResidentGraphBuffers(residents);
+  }
+}
+
+async function createResidentGraphBuffers(
+  device: KernelDevice,
+  gpu: GPUDevice,
+  buffers: Readonly<Record<string, WgslTypedArray>>,
+): Promise<Readonly<Record<string, WgslResidentBuffer>>> {
+  try {
+    return await issueWithWebGpuErrorScopes(
+      gpu,
+      "$.feedback.storage",
+      () => {
+        const residents: Record<string, WgslResidentBuffer> = {};
+        try {
+          for (const [name, data] of Object.entries(buffers)) {
+            residents[name] = createWgslStorageBuffer(device, {
+              valueType: "u32",
+              byteLength: data.byteLength,
+              data: data as Uint32Array,
+              label: `bg-host-graph-${name}`,
+            });
+          }
+          return Object.freeze(residents);
+        } catch (cause) {
+          destroyResidentGraphBuffers(residents);
+          throw cause;
+        }
+      },
+      { cleanup: destroyResidentGraphBuffers },
+    );
+  } catch (cause) {
+    translateExecutionFailure(cause, "$.feedback.storage");
+  }
+}
+
+function destroyResidentGraphBuffers(
+  residents: Readonly<Record<string, WgslResidentBuffer>>,
+): void {
+  for (const resident of Object.values(residents)) {
+    destroyWgslStorageBuffer(resident);
+  }
+}
+
+async function executeResidentGraphStage(
+  device: KernelDevice,
+  gpu: GPUDevice,
+  state: PreparedState,
+  steps: readonly WgslKernelSequenceStep[],
+  residentBuffers: Readonly<Record<string, WgslResidentBuffer>>,
+  pipelineSet: WgslPreparedPipelineSet,
+  pipelineStepOffset: number,
+  readback: readonly string[],
+  path: string,
+): Promise<WgslKernelRunResult> {
+  let sequence: Awaited<
+    ReturnType<typeof prepareWgslKernelProgramSequence>
+  >;
+  try {
+    sequence = await issueAsyncWithWebGpuErrorScopes(
+      gpu,
+      `${path}.pipeline`,
+      () => prepareWgslKernelProgramSequence(
+        device,
+        steps,
+        {
+          buffers: {},
+          residentBuffers,
+          storageMetadata: state.storageMetadata,
+          readback,
+        },
+        pipelineSet,
+        pipelineStepOffset,
+      ),
+      { cleanup: (prepared) => prepared.destroy() },
+    );
+  } catch (cause) {
+    translateExecutionFailure(cause, `${path}.pipeline`);
+  }
+  try {
+    return await issueAsyncWithWebGpuErrorScopes(
+      gpu,
+      `${path}.dispatch`,
+      () => sequence.run({
+        readback,
+        awaitCompletion: true,
+      }),
+    );
+  } catch (cause) {
+    translateExecutionFailure(cause, `${path}.dispatch`);
   } finally {
     sequence.destroy();
   }
@@ -2544,6 +2841,7 @@ async function hashPipelineIdentity(
     selectedFeatures: device.features,
     limits: device.limits as unknown as JsonObject,
     numericalPolicies: state.numericalPolicies,
+    midGraphFeedbackCount: prepared.midGraphFeedbackCount,
   });
 }
 
@@ -2581,6 +2879,7 @@ function createTrace(
     completedEventIds: state.eventIds,
     completedRepeats: state.repeats,
     completedConditionals,
+    midGraphFeedbackCount: prepared.midGraphFeedbackCount,
     collectiveReductionStepCount:
       prepared.collectiveReductionStepCount,
     collectiveReplicationStepCount:

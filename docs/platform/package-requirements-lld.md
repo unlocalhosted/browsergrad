@@ -30,7 +30,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count repetition, bounded captured-input and runtime-control u32 conditionals, explicit fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; GPU/backend-derived or mid-graph control, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count repetition, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional with explicit mid-graph feedback, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; general runtime-derived control/launch, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every exit criterion for the declared gate profile is
 complete. Verification of a closed initial profile does not imply broader
@@ -187,10 +187,10 @@ exact-payload CPU/required-WebGPU convergence is no longer a blocker.
    backend/final-release authority is minted in one process. Serialized
    observations and synthetic fixtures grant no production authority.
 
-Gate 7 remains incomplete: its CPU and portable-WebGPU executors cover the closed
-DAG, fixed repetition, and both bounded u32 conditional profiles; its WebGPU
-adapter exposes a separate exact device-bound pipeline authority. GPU/backend-derived or mid-graph control,
-transport/topology, worker meshes, and native systems remain unimplemented.
+Gate 7 remains incomplete: its CPU and portable-WebGPU executors cover the closed DAG, fixed repetition, three bounded conditional sources including one
+explicit produced-resource feedback stage, and exact device-bound pipeline
+authority. General runtime-derived loops/launches, transport/topology, worker meshes,
+and native systems remain unimplemented.
 
 ## Purpose
 
@@ -749,11 +749,13 @@ dependencies.
 
 Version 1 is a validated DAG with an explicit version-1.4 fixed-count
 sequential-repeat node, a version-1.5 captured-input u32 conditional, and a
-version-1.6 request-time runtime-control u32 conditional. Cycles are illegal.
-Dynamic launch, runtime-derived repetition, GPU/backend-derived predicates, or
-mid-graph host/device feedback require additional explicit versioned node
-kinds and cancellation points rather than hidden emitter loops. The verifier
-performs resource lifetime and read/write hazard checks before execution.
+version-1.6 request-time runtime-control u32 conditional. Version 1.7 adds one
+ordered temporary-resource u32 conditional with an explicit bounded mid-graph
+feedback boundary. Cycles are illegal. Additional GPU/backend-derived
+predicates, dynamic launch, runtime-derived repetition, or nested control
+require separately versioned node kinds and cancellation points rather than
+hidden emitter loops. The verifier performs resource lifetime and read/write
+hazard checks before execution.
 
 ## Frontend Contracts
 
@@ -2157,7 +2159,16 @@ required host execution control rather than a graph resource; zero selects
 else and any nonzero admitted `u32` selects then. The verifier limits unique
 control IDs, preserves the same branch-shape, effect, work, and identity rules,
 and grants no GPU/backend-derived predicate, mid-graph feedback,
-runtime-derived loop count, or dynamic-launch authority. The
+runtime-derived loop count, or dynamic-launch authority. Program version 1.7
+adds one `resource-u32-branch-sequential` conditional. Its predicate names one
+exact rank-local, aligned, four-byte temporary `u32` with an ordered graph
+writer. Zero selects else and nonzero selects then. The same bounded
+equal-shape branch, conservative-effect, guaranteed-write, exact-work, and
+global-ID rules apply. The verifier admits at most one such node and treats
+the predicate as a read requiring a dominating ordered writer; external-input
+or output predicate resources, unordered/read-before-write use, a second
+resource conditional, nested control, dynamic launches, and runtime loop
+counts fail closed. The
 authority-bound `browsergrad.host-graph.cpu-reference@1` profile snapshots all
 rank-local inputs and the exact required runtime-control set, executes
 dispatches, arbitrary-byte copies, and finite
@@ -2168,7 +2179,9 @@ It requires equal conditional branch element-operation counts, rejects
 missing, duplicate, unknown, or greater-than-u32 runtime controls before
 copying inputs or beginning execution, selects from the private input/control
 snapshot, and reports branch identity only with the successful whole-graph
-result.
+result. For version 1.7 it reads the predicate from private rank-local storage
+only after ordered producer work has executed, so the oracle proves
+graph-derived branch meaning without exposing intermediate state.
 
 Kernels owns the separate
 `browsergrad.host-graph.webgpu@1` portable adapter. It accepts only exact
@@ -2194,8 +2207,20 @@ publishes branch completion only after whole-graph success. Version-1.6
 runtime-control conditionals use the same pre-lowered branches and require the
 exact unique control set to be captured with inputs before device access.
 Zero selects else and nonzero selects then. This grants no GPU/backend-derived
-predicate, mid-graph feedback, runtime loop-count, or dynamic-launch authority. F32
-collectives use a separately
+predicate, mid-graph feedback, runtime loop-count, or dynamic-launch authority.
+Version-1.7 resource conditionals pre-lower and prewarm both branches through
+the same paths, then keep all private graph buffers resident across one
+explicit feedback boundary. The backend submits the exact prefix, reads back
+only the four-byte produced predicate, chooses zero as else or nonzero as then,
+and submits the authorized branch plus suffix against the same resident
+buffers. Exact contiguous pipeline-slot range authorization prevents either
+stage from reordering or substituting work. One execution timeout,
+cancellation signal, per-device in-flight owner, device-loss handling,
+resource cleanup, numerical-status check, and terminal publication contract
+span both submissions; intermediate resources and partial outputs never
+escape. This is one bounded host-mediated GPU-produced predicate, not
+device-side branching, nested control, a runtime loop count, or dynamic
+launch. F32 collectives use a separately
 read back atomic numerical-status word and preserve CPU signed-zero min/max;
 i32 sum wraps explicitly and u32/integer min/max remains exact. Complete input
 snapshots, deterministic zero-fill, expanded-step and aggregate transient
@@ -2206,7 +2231,8 @@ failure model. Required headed Chromium on Apple Metal 3 bit-matches the CPU
 reference for rank-ordered f32 sum, signed-zero f32 min, wrapping i32 sum,
 exact u32 max, event-marked/materialized whole-allocation u8 copy, and three
 fixed repetitions of f32 sum plus both captured-input and both runtime-control
-u8-copy branches, and separately proves non-finite f32 and lost-device refusal.
+u8-copy branches and both produced-resource u8-copy branches, and separately
+proves non-finite f32 and lost-device refusal.
 
 The separate `browsergrad.host-graph.webgpu-pipeline@1` authority binds one
 exact prepared graph to one `GPUDevice`. Preparation validates the complete
@@ -2216,13 +2242,14 @@ conditional, before request-owned buffers exist. The opaque immutable result
 records graph/backend identity, exact feature and relevant-limit facts,
 WGSL-module set, workgroup schedule, and explicit collective numerical
 policies in `pipelineIdentityHash`; preparation also enforces a caller-
-lowerable maximum under the fixed 128-pipeline portable ceiling. Execution accepts only pipelines in the
-authorized step slot; copied, destroyed, cross-device, or program-mismatched
-authorities fail closed. Request inputs and runtime controls are still captured
-before the convenience path's first device access or await. That path creates
-an ephemeral authority through the same implementation; hot callers may
-prepare once, reuse it across runs, and destroy it explicitly. Device loss
-invalidates both the authority and underlying bounded cache.
+lowerable maximum under the fixed 128-pipeline portable ceiling. Execution
+accepts only pipelines in the authorized step slot or exact contiguous slot
+range; invalid offsets, copied, destroyed, cross-device, reordered, or
+program-mismatched authorities fail closed. Request inputs and runtime controls
+are still captured before the convenience path's first device access or await.
+That path creates an ephemeral authority through the same implementation; hot
+callers may prepare once, reuse it across runs, and destroy it explicitly.
+Device loss invalidates both the authority and underlying bounded cache.
 
 A separate required performance record compares the fixed-repeat graph with a
 statically unrolled graph that has bit-exact CPU/WebGPU outputs, equal
@@ -2231,15 +2258,16 @@ two-rank 65,536-element f32 workload uses an untimed correctness preflight,
 eight warmups, and twelve alternating paired authority-bound execution samples
 with complete readback and queue drain after both exact pipeline authorities
 are prewarmed outside the measurement. The current Apple Metal 3 observation
-has 1.60 ms fixed-repeat and 1.70 ms unrolled medians under backend 1.7.0.
+has 2.00 ms fixed-repeat and 1.90 ms unrolled medians under backend 1.8.0.
 Raw samples, pipeline identities, and exact environment identity are retained;
 no superiority or regression threshold is asserted.
 
-No GPU/backend-derived or mid-graph control node, transport/topology adapter,
-worker mesh, or native companion exists yet, so Gate 7 remains `in progress`.
-Runtime controls are request-time host inputs, not dynamic launches or loop
-counts. Current events do not claim timestamps, external waits, or
-cross-queue/cross-worker synchronization.
+Only the single version-1.7 GPU-produced u32 feedback node is implemented; no
+general runtime-derived loop/launch control, nested/device-side branching,
+transport/topology adapter, worker mesh, or native companion exists yet, so
+Gate 7 remains `in progress`. Runtime controls are request-time host inputs,
+not dynamic launches or loop counts. Current events do not claim timestamps,
+external waits, or cross-queue/cross-worker synchronization.
 
 ## Proof Matrix and Release Gates
 

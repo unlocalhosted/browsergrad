@@ -12,9 +12,10 @@ import { createDevice } from "../src/device";
 import {
   prepareWgslKernelProgramSequence,
 } from "../src/wgsl_program";
+import type { KernelDevice } from "../src/types";
 
 describe("generic WGSL kernel programs", () => {
-  it("normalizes binding indices and storage access", () => {
+  it("normalizes binding indices and storage access", async () => {
     const program = defineWgslKernelProgram({
       name: "copy_kernel",
       wgsl: "@compute @workgroup_size(1) fn main() {}",
@@ -28,6 +29,13 @@ describe("generic WGSL kernel programs", () => {
 
     expect(program.bindings.map((binding) => binding.binding)).toEqual([0, 1, 2]);
     expect(program.bindings[1]).toMatchObject({ kind: "storage", access: "read_write" });
+    await expect(prepareWgslKernelProgramSequence(
+      {} as KernelDevice,
+      [{ program, launch: { dispatchCount: [1, 1, 1] } }],
+      { buffers: {} },
+      undefined,
+      1,
+    )).rejects.toThrow(/step offset requires a pipeline set/);
   });
 
   it("supports f16 storage bindings explicitly", () => {

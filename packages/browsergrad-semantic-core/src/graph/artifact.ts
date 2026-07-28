@@ -60,13 +60,14 @@ import {
   type HostGraphRepeatBodyNode,
   type HostGraphRepeatNode,
   type HostGraphResource,
+  type HostGraphResourcePredicate,
   type HostGraphResourceRole,
   type HostGraphRuntimeControlPredicate,
 } from "./model.js";
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 6;
+export const HOST_GRAPH_ARTIFACT_MINOR = 7;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
@@ -74,6 +75,7 @@ export const HOST_GRAPH_MAX_REPEAT_BODY_NODES = 64;
 export const HOST_GRAPH_MAX_CONDITIONAL_BODY_NODES = 64;
 export const HOST_GRAPH_MAX_REPEAT_ITERATIONS = 1_024;
 export const HOST_GRAPH_MAX_RUNTIME_CONTROLS = 64;
+export const HOST_GRAPH_MAX_RESOURCE_CONDITIONALS = 1;
 export const HOST_GRAPH_MAX_EXPANDED_NODES = 16_384;
 export const HOST_GRAPH_MAX_RANKS = 256;
 export const HOST_GRAPH_MAX_SEMANTIC_ARTIFACTS = 256;
@@ -137,6 +139,7 @@ export interface PreparedHostGraphProgram {
   readonly repeatCount: number;
   readonly repeatIterationCount: number;
   readonly conditionalCount: number;
+  readonly resourceConditionalCount: number;
   readonly runtimeControlIds: readonly string[];
   readonly expandedNodeCount: number;
   readonly topologicalNodeIds: readonly string[];
@@ -155,6 +158,7 @@ interface HostGraphAnalysis {
   readonly repeatCount: number;
   readonly repeatIterationCount: number;
   readonly conditionalCount: number;
+  readonly resourceConditionalCount: number;
   readonly runtimeControlIds: readonly string[];
   readonly expandedNodeCount: number;
   readonly topologicalNodeIds: readonly string[];
@@ -298,6 +302,7 @@ export async function prepareHostGraphProgram(
     repeatCount: analysis.repeatCount,
     repeatIterationCount: analysis.repeatIterationCount,
     conditionalCount: analysis.conditionalCount,
+    resourceConditionalCount: analysis.resourceConditionalCount,
     runtimeControlIds: Object.freeze([...analysis.runtimeControlIds]),
     expandedNodeCount: analysis.expandedNodeCount,
     topologicalNodeIds: Object.freeze([...analysis.topologicalNodeIds]),
@@ -357,12 +362,13 @@ function parseProgram(
       version.minor !== 3 &&
       version.minor !== 4 &&
       version.minor !== 5 &&
-      version.minor !== 6)
+      version.minor !== 6 &&
+      version.minor !== 7)
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 through 1.6 only",
+      "host graph program reader supports versions 1.0 through 1.7 only",
     );
   }
   if (version.minor !== envelopeMinor) {
@@ -653,7 +659,7 @@ function parseNode(
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 repeat, and version-1.5/1.6 conditional nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 repeat, and version-1.5 through 1.7 conditional nodes",
   );
 }
 
@@ -722,12 +728,13 @@ function parseConditionalNode(
   );
   if (
     object.mode !== "input-u32-branch-sequential" &&
-    object.mode !== "runtime-u32-branch-sequential"
+    object.mode !== "runtime-u32-branch-sequential" &&
+    object.mode !== "resource-u32-branch-sequential"
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       `${path}.mode`,
-      "conditional mode must be input-u32-branch-sequential or runtime-u32-branch-sequential",
+      "conditional mode must be input-u32-branch-sequential, runtime-u32-branch-sequential, or resource-u32-branch-sequential",
     );
   }
   if (
@@ -740,9 +747,21 @@ function parseConditionalNode(
       "runtime control conditionals require host graph program version 1.6",
     );
   }
+  if (
+    object.mode === "resource-u32-branch-sequential" &&
+    programMinor < 7
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "resource conditionals require host graph program version 1.7",
+    );
+  }
   const label = object.mode === "input-u32-branch-sequential"
     ? "input conditional"
-    : "runtime control conditional";
+    : object.mode === "runtime-u32-branch-sequential"
+      ? "runtime control conditional"
+      : "resource conditional";
   const thenBody = parseLinearControlBody(
     field(object, "thenBody", path),
     `${path}.thenBody`,
@@ -772,23 +791,34 @@ function parseConditionalNode(
     thenBody,
     elseBody,
   };
-  return object.mode === "input-u32-branch-sequential"
-    ? {
-        ...common,
-        predicate: parseInputPredicate(
-          field(object, "predicate", path),
-          `${path}.predicate`,
-        ),
-        mode: "input-u32-branch-sequential",
-      }
-    : {
-        ...common,
-        predicate: parseRuntimeControlPredicate(
-          field(object, "predicate", path),
-          `${path}.predicate`,
-        ),
-        mode: "runtime-u32-branch-sequential",
-      };
+  if (object.mode === "input-u32-branch-sequential") {
+    return {
+      ...common,
+      predicate: parseInputPredicate(
+        field(object, "predicate", path),
+        `${path}.predicate`,
+      ),
+      mode: "input-u32-branch-sequential",
+    };
+  }
+  if (object.mode === "runtime-u32-branch-sequential") {
+    return {
+      ...common,
+      predicate: parseRuntimeControlPredicate(
+        field(object, "predicate", path),
+        `${path}.predicate`,
+      ),
+      mode: "runtime-u32-branch-sequential",
+    };
+  }
+  return {
+    ...common,
+    predicate: parseResourcePredicate(
+      field(object, "predicate", path),
+      `${path}.predicate`,
+    ),
+    mode: "resource-u32-branch-sequential",
+  };
 }
 
 function parseInputPredicate(
@@ -830,6 +860,28 @@ function parseRuntimeControlPredicate(
       field(object, "controlId", path),
       `${path}.controlId`,
     ),
+    mode: "u32-nonzero",
+  };
+}
+
+function parseResourcePredicate(
+  value: JsonValue,
+  path: string,
+): HostGraphResourcePredicate {
+  const object = closedObject(value, ["resourceId", "rank", "mode"], path);
+  if (object.mode !== "u32-nonzero") {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "resource predicate mode must be u32-nonzero",
+    );
+  }
+  return {
+    resourceId: identifier(
+      field(object, "resourceId", path),
+      `${path}.resourceId`,
+    ),
+    rank: parseWireU64(field(object, "rank", path), `${path}.rank`),
     mode: "u32-nonzero",
   };
 }
@@ -1222,6 +1274,7 @@ function analyzeProgram(
   let repeatCount = 0;
   let repeatIterationCount = 0;
   let conditionalCount = 0;
+  let resourceConditionalCount = 0;
   const runtimeControlIds = new Set<string>();
   let expandedNodeCount = 0;
   const dispatchEffects = new Map<
@@ -1382,6 +1435,18 @@ function analyzeProgram(
     } else {
       conditionalCount += 1;
       verifyConditionalPredicate(node, resources, rankCount, path);
+      if (node.mode === "resource-u32-branch-sequential") {
+        resourceConditionalCount += 1;
+        if (
+          resourceConditionalCount >
+          HOST_GRAPH_MAX_RESOURCE_CONDITIONALS
+        ) {
+          resource(
+            `${path}.mode`,
+            `resource conditional count exceeds ${HOST_GRAPH_MAX_RESOURCE_CONDITIONALS}`,
+          );
+        }
+      }
       if (node.mode === "runtime-u32-branch-sequential") {
         runtimeControlIds.add(node.predicate.controlId);
         if (runtimeControlIds.size > HOST_GRAPH_MAX_RUNTIME_CONTROLS) {
@@ -1481,6 +1546,7 @@ function analyzeProgram(
     repeatCount,
     repeatIterationCount,
     conditionalCount,
+    resourceConditionalCount,
     runtimeControlIds: Object.freeze(
       [...runtimeControlIds].sort(compareCanonicalStrings),
     ),
@@ -1729,8 +1795,11 @@ function verifyConditionalPredicate(
       `conditional predicate references missing resource ${node.predicate.resourceId}`,
     );
   }
+  const expectedRole = node.mode === "resource-u32-branch-sequential"
+    ? "temporary"
+    : "input";
   if (
-    predicate.role !== "input" ||
+    predicate.role !== expectedRole ||
     predicate.dtype !== "u32" ||
     predicate.byteLength !== "4" ||
     predicate.alignmentBytes < 4
@@ -1738,7 +1807,9 @@ function verifyConditionalPredicate(
     invalid(
       GRAPH_DIAGNOSTIC_CODES.invalidBinding,
       `${path}.predicate.resourceId`,
-      "conditional predicate requires one 4-byte-aligned external-input u32 resource",
+      node.mode === "resource-u32-branch-sequential"
+        ? "resource conditional predicate requires one 4-byte-aligned zero-filled temporary u32 resource"
+        : "input conditional predicate requires one 4-byte-aligned external-input u32 resource",
     );
   }
   if (wireIntegerToBigInt(node.predicate.rank) >= rankCount) {
@@ -1763,8 +1834,8 @@ function mergeConditionalEffects(
     effect.resourceId,
     effect,
   ]));
-  const predicateResourceId = node.mode ===
-      "input-u32-branch-sequential"
+  const predicateResourceId = node.mode !==
+      "runtime-u32-branch-sequential"
     ? node.predicate.resourceId
     : undefined;
   const resourceIds = new Set([
@@ -1785,6 +1856,8 @@ function mergeConditionalEffects(
         (thenEffect !== undefined && writes(thenEffect.access)) ||
         (elseEffect !== undefined && writes(elseEffect.access));
       const requiresPriorWriter =
+        (predicateRead &&
+          node.mode === "resource-u32-branch-sequential") ||
         (thenEffect?.requiresPriorWriter ?? false) ||
         (elseEffect?.requiresPriorWriter ?? false);
       const guaranteesWrite =

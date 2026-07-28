@@ -232,6 +232,46 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       pipelines,
     )).rejects.toThrow(/does not authorize this exact program sequence/);
 
+    const rangePipelines = await prepareWgslKernelPipelineSet(device, [
+      ...steps,
+      {
+        program: differentProgram,
+        launch: { dispatchCount: [1, 1, 1] },
+      },
+    ]);
+    const suffix = await prepareWgslKernelProgramSequence(
+      device,
+      [{
+        program: differentProgram,
+        launch: { dispatchCount: [1, 1, 1] },
+      }],
+      { buffers: { x: new Float32Array([1]) }, readback: ["x"] },
+      rangePipelines,
+      1,
+    );
+    expect([
+      ...(await suffix.run()).buffers.x as Float32Array,
+    ]).toEqual([3]);
+    suffix.destroy();
+    await expect(prepareWgslKernelProgramSequence(
+      device,
+      [{
+        program: differentProgram,
+        launch: { dispatchCount: [1, 1, 1] },
+      }],
+      { buffers: { x: new Float32Array([1]) } },
+      rangePipelines,
+      0,
+    )).rejects.toThrow(/does not authorize this exact program sequence/);
+    await expect(prepareWgslKernelProgramSequence(
+      device,
+      steps,
+      { buffers: { x: new Float32Array([1]) } },
+      rangePipelines,
+      -1,
+    )).rejects.toThrow(/step offset must be a non-negative integer/);
+    rangePipelines.destroy();
+
     const otherDevice = await createDevice();
     try {
       await expect(prepareWgslKernelProgramSequence(

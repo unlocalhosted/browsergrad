@@ -9,6 +9,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Host-graph program version 1.7 adds one bounded
+  `resource-u32-branch-sequential` conditional. The predicate is an ordered
+  rank-local temporary u32 written by prior graph work. The CPU oracle reads it
+  after its producer; WebGPU retains private buffers across one explicit
+  four-byte readback/resubmission boundary, resumes an already-prewarmed exact
+  branch slot, and preserves one timeout, cancellation, device-ownership,
+  cleanup, numerical-status, and terminal-publication contract across both
+  submissions.
+- Generic WGSL pipeline-set authority now admits exact contiguous step ranges
+  at validated slot offsets. This lets a bounded feedback executor split one
+  authorized sequence without granting program reordering, arbitrary
+  omission, cross-device use, or an unadmitted branch.
 - Add `browsergrad.wgsl.pipeline-set@1` and
   `browsergrad.host-graph.webgpu-pipeline@1` as separate opaque,
   device-bound pipeline authorities. Preparation prewarms every unique program
@@ -68,8 +80,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Required headed-Chromium evidence on Apple Metal 3 bit-matches the semantic
   CPU graph oracle for rank-ordered f32 sum, signed-zero f32 min, wrapping i32
   sum, exact u32 max, exact u8 allocation copy, and three fixed repetitions of
-  f32 all-reduce plus both branches of captured-input and runtime-control
-  conditionals, and separately rejects non-finite f32 collectives.
+  f32 all-reduce plus both branches of captured-input, runtime-control, and
+  produced-resource conditionals, and separately rejects non-finite f32
+  collectives.
 - A separate required host-graph performance lane compares version-1.4
   fixed-count repetition with a bit-exact, equal-work version-1.2 unrolled
   graph over two ranks and 65,536 f32 elements. It uses an untimed CPU and

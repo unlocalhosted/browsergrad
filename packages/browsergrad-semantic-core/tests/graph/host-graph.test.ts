@@ -391,6 +391,41 @@ function runtimeConditionalCopyProgram(): HostGraphProgram {
   return program;
 }
 
+function resourceConditionalCopyProgram(): HostGraphProgram {
+  const program = clone(conditionalCopyProgram());
+  program.version.minor = 7;
+  const predicate = program.resources.find((resource) =>
+    resource.resourceId === "predicate");
+  if (predicate === undefined) throw new Error("missing predicate resource");
+  predicate.role = "temporary";
+  predicate.initialization = "zero-fill";
+  program.resources.push({
+    resourceId: "predicate-source",
+    role: "input",
+    multiplicity: "per-rank",
+    initialization: "external-input",
+    dtype: "u32",
+    byteLength: wire("4"),
+    alignmentBytes: 4,
+  });
+  const conditional = program.nodes.find((node) =>
+    node.kind === "conditional");
+  if (conditional?.kind !== "conditional") {
+    throw new Error("missing conditional");
+  }
+  conditional.mode = "resource-u32-branch-sequential";
+  conditional.dependsOn = ["produce-predicate"];
+  program.nodes.push({
+    nodeId: "produce-predicate",
+    kind: "copy",
+    dependsOn: [],
+    sourceResourceId: "predicate-source",
+    destinationResourceId: "predicate",
+    mode: "whole-allocation-bytes-per-rank",
+  });
+  return program;
+}
+
 async function diagnostic(
   run: () => Promise<unknown> | unknown,
 ): Promise<SemanticSchemaError> {
@@ -494,6 +529,87 @@ describe("host graph artifact", () => {
       runtimeControlIds: ["choose"],
       expandedNodeCount: 2,
     });
+  });
+
+  it("normalizes one ordered resource u32 conditional in version 1.7", async () => {
+    const constructed = await createVerifiedHostGraphArtifact(
+      resourceConditionalCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    );
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+
+    expect(payload.program.version).toEqual({ major: 1, minor: 7 });
+    expect(payload.program.nodes.find((node) => node.kind === "conditional"))
+      .toMatchObject({
+        nodeId: "choose-output",
+        dependsOn: ["produce-predicate"],
+        mode: "resource-u32-branch-sequential",
+        predicate: {
+          resourceId: "predicate",
+          rank: "0",
+          mode: "u32-nonzero",
+        },
+      });
+    expect(prepared).toMatchObject({
+      conditionalCount: 1,
+      resourceConditionalCount: 1,
+      runtimeControlIds: [],
+      copyCount: 2,
+      expandedNodeCount: 3,
+      topologicalNodeIds: [
+        "produce-predicate",
+        "choose-output",
+        "materialize-output",
+      ],
+    });
+  });
+
+  it("rejects resource conditional version, authority, ordering, and count drift", async () => {
+    const oldVersion = clone(resourceConditionalCopyProgram());
+    oldVersion.version.minor = 6;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      oldVersion,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const externalPredicate = clone(resourceConditionalCopyProgram());
+    const externalResource = externalPredicate.resources.find((resource) =>
+      resource.resourceId === "predicate");
+    if (externalResource === undefined) {
+      throw new Error("missing predicate resource");
+    }
+    externalResource.role = "input";
+    externalResource.initialization = "external-input";
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      externalPredicate,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+
+    const unordered = clone(resourceConditionalCopyProgram());
+    const unorderedConditional = unordered.nodes.find((node) =>
+      node.kind === "conditional");
+    if (unorderedConditional?.kind !== "conditional") {
+      throw new Error("missing conditional");
+    }
+    unorderedConditional.dependsOn = [];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      unordered,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.readBeforeWrite);
+
+    const multiple = clone(resourceConditionalCopyProgram());
+    const first = multiple.nodes.find((node) => node.kind === "conditional");
+    if (first?.kind !== "conditional") throw new Error("missing conditional");
+    const second = clone(first);
+    second.nodeId = "choose-output-second";
+    second.thenBody[0]!.nodeId = "copy-then-second";
+    second.elseBody[0]!.nodeId = "copy-else-second";
+    multiple.nodes.push(second);
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      multiple,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.resourceLimit);
   });
 
   it("rejects runtime conditional version and control drift", async () => {
@@ -1099,7 +1215,7 @@ describe("host graph artifact", () => {
 
   it("rejects copy version, mode, resource, dtype, and hazard drift", async () => {
     const future = clone(copyProgram());
-    future.version.minor = 7 as unknown as typeof future.version.minor;
+    future.version.minor = 8 as unknown as typeof future.version.minor;
     expect((await diagnostic(() => createVerifiedHostGraphArtifact(
       future,
       { kernelArtifacts: [], layoutArtifacts: [] },

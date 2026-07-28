@@ -176,6 +176,7 @@ export interface PreparedHostGraphCpu {
   readonly eventIds: readonly string[];
   readonly repeats: readonly HostGraphRepeatCompletion[];
   readonly conditionalNodeIds: readonly string[];
+  readonly resourceConditionalCount: number;
   readonly runtimeControlIds: readonly string[];
   readonly expandedNodeCount: number;
   readonly elementOperations: bigint;
@@ -262,6 +263,11 @@ interface ConditionalPlan {
     | Readonly<{
         kind: "runtime-control";
         controlId: string;
+      }>
+    | Readonly<{
+        kind: "resource";
+        resourceId: string;
+        rank: number;
       }>;
   readonly thenBody: readonly ExecutablePlan[];
   readonly elseBody: readonly ExecutablePlan[];
@@ -580,6 +586,7 @@ export async function prepareHostGraphCpu(
     eventIds,
     repeats,
     conditionalNodeIds,
+    resourceConditionalCount: preparedGraph.resourceConditionalCount,
     runtimeControlIds: Object.freeze([...preparedGraph.runtimeControlIds]),
     expandedNodeCount: preparedGraph.expandedNodeCount,
     elementOperations,
@@ -683,18 +690,20 @@ async function prepareConditionalPlan(
   return Object.freeze({
     kind: "conditional",
     nodeId: node.nodeId,
-    predicate: node.mode === "input-u32-branch-sequential"
+    predicate: node.mode === "runtime-u32-branch-sequential"
       ? Object.freeze({
-          kind: "input" as const,
+          kind: "runtime-control" as const,
+          controlId: node.predicate.controlId,
+        })
+      : Object.freeze({
+          kind: node.mode === "input-u32-branch-sequential"
+            ? "input" as const
+            : "resource" as const,
           resourceId: node.predicate.resourceId,
           rank: safeNumber(
             wireIntegerToBigInt(node.predicate.rank),
             `$.nodes.${node.nodeId}.predicate.rank`,
           ),
-        })
-      : Object.freeze({
-          kind: "runtime-control" as const,
-          controlId: node.predicate.controlId,
         }),
     thenBody,
     elseBody,
@@ -928,8 +937,11 @@ async function executeConditional(
 ): Promise<HostGraphConditionalCompletion> {
   ensureExecutionActive(startedAt, maxExecutionMs, signal);
   let predicateValue: number | undefined;
-  if (plan.predicate.kind === "input") {
-    predicateValue = readInputPredicate(
+  if (
+    plan.predicate.kind === "input" ||
+    plan.predicate.kind === "resource"
+  ) {
+    predicateValue = readResourcePredicate(
       plan.nodeId,
       plan.predicate,
       rankResources,
@@ -965,10 +977,10 @@ async function executeConditional(
   });
 }
 
-function readInputPredicate(
+function readResourcePredicate(
   nodeId: string,
   predicate: Readonly<{
-    kind: "input";
+    kind: "input" | "resource";
     resourceId: string;
     rank: number;
   }>,
@@ -981,7 +993,7 @@ function readInputPredicate(
     fail(
       "BG-GRAPH-CPU-INTERNAL",
       `$.nodes.${nodeId}.predicate`,
-      "verified conditional predicate storage disappeared",
+      "verified conditional predicate resource disappeared",
     );
   }
   const predicateView = new DATA_VIEW_CONSTRUCTOR(

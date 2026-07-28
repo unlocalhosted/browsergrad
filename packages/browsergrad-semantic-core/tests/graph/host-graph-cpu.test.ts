@@ -372,6 +372,52 @@ function runtimeConditionalRawCopyProgram(): HostGraphProgram {
   };
 }
 
+function resourceConditionalRawCopyProgram(): HostGraphProgram {
+  const base = conditionalRawCopyProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 7 },
+    resources: [
+      ...base.resources.map((resource) =>
+        resource.resourceId === "predicate"
+          ? {
+              ...resource,
+              role: "temporary" as const,
+              initialization: "zero-fill" as const,
+            }
+          : resource),
+      {
+        resourceId: "predicate-source",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u32",
+        byteLength: wire("4"),
+        alignmentBytes: 4,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "produce-predicate",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "predicate-source",
+        destinationResourceId: "predicate",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      ...base.nodes.map((node) =>
+        node.kind === "conditional" &&
+          node.mode === "input-u32-branch-sequential"
+          ? {
+              ...node,
+              dependsOn: ["produce-predicate"],
+              mode: "resource-u32-branch-sequential" as const,
+            }
+          : node),
+    ],
+  };
+}
+
 async function verified(
   program: HostGraphProgram,
   artifacts: VerifiedViewCopyArtifacts,
@@ -590,6 +636,48 @@ describe("host graph CPU reference", () => {
     });
     expect(elseResult.completedConditionals[0]?.selectedBranch).toBe("else");
     expect(elseResult.outputs[0]?.bytes).toEqual(new Uint8Array(8).fill(2));
+  });
+
+  it("selects an ordered resource conditional after its producer executes", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      resourceConditionalRawCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+    const inputs = (predicate: number) => [
+      {
+        rank: wire("0"),
+        resourceId: "predicate-source",
+        bytes: u32Bytes([predicate]),
+      },
+      {
+        rank: wire("0"),
+        resourceId: "then-input",
+        bytes: new Uint8Array(8).fill(3),
+      },
+      {
+        rank: wire("0"),
+        resourceId: "else-input",
+        bytes: new Uint8Array(8).fill(9),
+      },
+    ];
+
+    const thenResult = await prepared.execute({ inputs: inputs(5) });
+    const elseResult = await prepared.execute({ inputs: inputs(0) });
+
+    expect(prepared.resourceConditionalCount).toBe(1);
+    expect(prepared.elementOperations).toBe(12n);
+    expect(thenResult.completedConditionals).toEqual([{
+      nodeId: "choose-output",
+      selectedBranch: "then",
+      bodyNodeIds: ["copy-then"],
+    }]);
+    expect(thenResult.outputs[0]?.bytes).toEqual(new Uint8Array(8).fill(3));
+    expect(elseResult.completedConditionals[0]?.selectedBranch).toBe("else");
+    expect(elseResult.outputs[0]?.bytes).toEqual(new Uint8Array(8).fill(9));
   });
 
   it("rejects missing, duplicate, unknown, and out-of-range runtime controls", async () => {

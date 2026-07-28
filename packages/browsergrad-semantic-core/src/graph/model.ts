@@ -110,6 +110,12 @@ export interface HostGraphRuntimeControlPredicate extends JsonObject {
   readonly mode: "u32-nonzero";
 }
 
+export interface HostGraphResourcePredicate extends JsonObject {
+  readonly resourceId: string;
+  readonly rank: WireU64;
+  readonly mode: "u32-nonzero";
+}
+
 interface HostGraphConditionalNodeBase extends JsonObject {
   readonly nodeId: string;
   readonly kind: "conditional";
@@ -130,9 +136,16 @@ export interface HostGraphRuntimeControlConditionalNode
   readonly mode: "runtime-u32-branch-sequential";
 }
 
+export interface HostGraphResourceConditionalNode
+  extends HostGraphConditionalNodeBase {
+  readonly predicate: HostGraphResourcePredicate;
+  readonly mode: "resource-u32-branch-sequential";
+}
+
 export type HostGraphConditionalNode =
   | HostGraphInputConditionalNode
-  | HostGraphRuntimeControlConditionalNode;
+  | HostGraphRuntimeControlConditionalNode
+  | HostGraphResourceConditionalNode;
 
 export interface HostGraphConditionalCompletion extends JsonObject {
   readonly nodeId: string;
@@ -157,7 +170,7 @@ export interface HostGraphProgram extends JsonObject {
   readonly kind: "host-graph";
   readonly version: {
     readonly major: 1;
-    readonly minor: 0 | 1 | 2 | 3 | 4 | 5 | 6;
+    readonly minor: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
   };
   readonly failureModel: typeof HOST_GRAPH_FAILURE_MODEL;
   readonly rankCount: WireU64;

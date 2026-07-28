@@ -542,15 +542,31 @@ export async function prepareWgslKernelProgramSequence(
   steps: readonly WgslKernelSequenceStep[],
   input: WgslKernelRunInput,
   pipelineSet?: WgslPreparedPipelineSet,
+  pipelineStepOffset = 0,
 ): Promise<WgslPreparedKernelSequence> {
   if (steps.length === 0) throw new KernelError("WGSL program sequence must contain at least one step");
+  if (!Number.isInteger(pipelineStepOffset) || pipelineStepOffset < 0) {
+    throw new KernelError(
+      "prepared WGSL pipeline step offset must be a non-negative integer",
+    );
+  }
+  if (pipelineSet === undefined && pipelineStepOffset !== 0) {
+    throw new KernelError(
+      "prepared WGSL pipeline step offset requires a pipeline set",
+    );
+  }
   const impl = asImpl(device);
   const gpu = impl.gpu;
   const dispatchCounts = steps.map((step, index) => validateDispatchCountWithName(step.launch.dispatchCount, `steps[${index}].launch.dispatchCount`));
   const programs = steps.map((step) => step.program);
   const authorizedPipelines = pipelineSet === undefined
     ? undefined
-    : resolvePreparedPipelineSet(gpu, steps, pipelineSet);
+    : resolvePreparedPipelineSet(
+      gpu,
+      steps,
+      pipelineSet,
+      pipelineStepOffset,
+    );
   const readbackNames = new Set(
     input.readback ??
       steps
@@ -1066,6 +1082,7 @@ function resolvePreparedPipelineSet(
   gpu: GPUDevice,
   steps: readonly WgslKernelSequenceStep[],
   prepared: WgslPreparedPipelineSet,
+  stepOffset: number,
 ): readonly PendingWgslPipeline[] {
   const state = PREPARED_PIPELINE_SETS.get(prepared as object);
   if (state === undefined) {
@@ -1089,9 +1106,9 @@ function resolvePreparedPipelineSet(
     )
   );
   if (
-    pipelineKeys.length !== state.pipelineKeysByStep.length ||
+    stepOffset + pipelineKeys.length > state.pipelineKeysByStep.length ||
     pipelineKeys.some((key, index) =>
-      !state.pipelineKeysByStep[index]?.includes(key))
+      !state.pipelineKeysByStep[stepOffset + index]?.includes(key))
   ) {
     throw new KernelError(
       "prepared WGSL pipeline set does not authorize this exact program sequence",

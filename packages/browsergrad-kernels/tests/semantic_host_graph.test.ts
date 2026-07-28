@@ -365,6 +365,44 @@ function runtimeConditionalRawCopyProgram(): HostGraphProgram {
   };
 }
 
+function resourceConditionalRawCopyProgram(): HostGraphProgram {
+  const base = conditionalRawCopyProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 7 },
+    resources: [
+      ...base.resources.map((item) =>
+        item.resourceId === "predicate"
+          ? {
+              ...item,
+              role: "temporary" as const,
+              initialization: "zero-fill" as const,
+            }
+          : item),
+      resource("predicate-source", "input", "u32", "4"),
+    ],
+    nodes: [
+      {
+        nodeId: "produce-predicate",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "predicate-source",
+        destinationResourceId: "predicate",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      ...base.nodes.map((node) =>
+        node.kind === "conditional" &&
+          node.mode === "input-u32-branch-sequential"
+          ? {
+              ...node,
+              dependsOn: ["produce-predicate"],
+              mode: "resource-u32-branch-sequential" as const,
+            }
+          : node),
+    ],
+  };
+}
+
 async function verified(
   program: HostGraphProgram,
   artifacts: VerifiedViewCopyArtifacts,
@@ -435,6 +473,34 @@ describe("semantic host-graph WebGPU preparation", () => {
       conditionalCount: 1,
       conditionalNodeIds: ["choose-output"],
       runtimeControlIds: ["choose"],
+    });
+    expect(prepared.wgslModuleHashes).toHaveLength(1);
+  });
+
+  it("pre-lowers version-1.7 resource control with one bounded feedback stage", async () => {
+    const graph = (await createVerifiedHostGraphArtifact(
+      resourceConditionalRawCopyProgram(),
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+
+    expect(prepared).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 3,
+      expandedNodeCount: 3,
+      expandedStepCount: 2,
+      copyStepCount: 2,
+      conditionalCount: 1,
+      conditionalNodeIds: ["choose-output"],
+      resourceConditionalCount: 1,
+      midGraphFeedbackCount: 1,
+      runtimeControlIds: [],
+      plannedTransientGpuBytes: "44",
+      plannedTransientHostBytes: "72",
+      plannedTransientWorkingSetBytes: "116",
     });
     expect(prepared.wgslModuleHashes).toHaveLength(1);
   });

@@ -62,6 +62,8 @@ const CASE_IDS = Object.freeze([
   "u8-input-conditional-else",
   "u8-runtime-conditional-then",
   "u8-runtime-conditional-else",
+  "u8-resource-conditional-then",
+  "u8-resource-conditional-else",
 ]);
 const PRODUCER_VERSIONS = Object.freeze({
   "@unlocalhosted/browsergrad-kernels": __BG_KERNELS_VERSION__,
@@ -101,6 +103,7 @@ interface CaseObservation extends JsonObject {
   readonly completedEventIds: readonly string[];
   readonly completedRepeats: readonly JsonObject[];
   readonly completedConditionals: readonly JsonObject[];
+  readonly midGraphFeedbackCount: number;
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -182,6 +185,14 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       ),
       prepareRuntimeConditionalRawCopyCase(
         "u8-runtime-conditional-else",
+        0,
+      ),
+      prepareResourceConditionalRawCopyCase(
+        "u8-resource-conditional-then",
+        1,
+      ),
+      prepareResourceConditionalRawCopyCase(
+        "u8-resource-conditional-else",
         0,
       ),
     ]);
@@ -339,6 +350,7 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         completedEventIds: actual.trace.completedEventIds,
         completedRepeats: actual.trace.completedRepeats,
         completedConditionals: actual.trace.completedConditionals,
+        midGraphFeedbackCount: actual.trace.midGraphFeedbackCount,
         collectiveReductionStepCount:
           actual.trace.collectiveReductionStepCount,
         collectiveReplicationStepCount:
@@ -372,6 +384,16 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       .toBe(elseRuntimeConditional?.pipelineIdentityHash);
     expect(thenRuntimeConditional?.backendSpecializationHash)
       .not.toBe(elseRuntimeConditional?.backendSpecializationHash);
+    const thenResourceConditional = completedCases.find(({ caseId }) =>
+      caseId === "u8-resource-conditional-then");
+    const elseResourceConditional = completedCases.find(({ caseId }) =>
+      caseId === "u8-resource-conditional-else");
+    expect(thenResourceConditional?.pipelineIdentityHash)
+      .toBe(elseResourceConditional?.pipelineIdentityHash);
+    expect(thenResourceConditional?.backendSpecializationHash)
+      .not.toBe(elseResourceConditional?.backendSpecializationHash);
+    expect(thenResourceConditional?.midGraphFeedbackCount).toBe(1);
+    expect(elseResourceConditional?.midGraphFeedbackCount).toBe(1);
 
     stage = "non-finite-fail-stop";
     const finiteCase = cases[0] as PreparedCase;
@@ -672,6 +694,45 @@ async function prepareRuntimeConditionalRawCopyCase(
   });
 }
 
+async function prepareResourceConditionalRawCopyCase(
+  caseId:
+    | "u8-resource-conditional-then"
+    | "u8-resource-conditional-else",
+  predicate: 0 | 1,
+): Promise<PreparedCase> {
+  const thenBytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+  const elseBytes = new Uint8Array([8, 7, 6, 5, 4, 3, 2, 1]);
+  const graph = (await createVerifiedHostGraphArtifact(
+    resourceConditionalRawCopyProgram(),
+    { kernelArtifacts: [], layoutArtifacts: [] },
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+    kernelArtifacts: [],
+    layoutArtifacts: [],
+  });
+  const inputs = Object.freeze([
+    namedInput(0, "predicate-source", u32Bytes([predicate])),
+    namedInput(0, "then-input", thenBytes),
+    namedInput(0, "else-input", elseBytes),
+  ]);
+  return Object.freeze({
+    caseId,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: inputs.map(({ rank, resourceId, bytes }) => ({
+        rank,
+        resourceId,
+        bytes: Array.from(bytes),
+      })),
+    }),
+  });
+}
+
 function collectiveProgram(
   artifacts: VerifiedViewCopyArtifacts,
   dtype: "f32" | "i32" | "u32",
@@ -901,6 +962,52 @@ function runtimeConditionalRawCopyProgram(): HostGraphProgram {
             mode: "runtime-u32-branch-sequential" as const,
           }
         : node),
+  };
+}
+
+function resourceConditionalRawCopyProgram(): HostGraphProgram {
+  const base = conditionalRawCopyProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 7 },
+    resources: [
+      ...base.resources.map((item) =>
+        item.resourceId === "predicate"
+          ? {
+              ...item,
+              role: "temporary" as const,
+              initialization: "zero-fill" as const,
+            }
+          : item),
+      {
+        resourceId: "predicate-source",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u32",
+        byteLength: wire(4),
+        alignmentBytes: 4,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "produce-predicate",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "predicate-source",
+        destinationResourceId: "predicate",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      ...base.nodes.map((node) =>
+        node.kind === "conditional" &&
+          node.mode === "input-u32-branch-sequential"
+          ? {
+              ...node,
+              dependsOn: ["produce-predicate"],
+              mode: "resource-u32-branch-sequential" as const,
+            }
+          : node),
+    ],
   };
 }
 

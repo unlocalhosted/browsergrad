@@ -138,6 +138,13 @@ the same bounded equal-shape branches, conservative effects, work accounting,
 and global node-ID rules, limits the graph to 64 unique controls, and grants no
 GPU/backend-derived predicate, mid-graph feedback, dynamic launch, or
 runtime-derived repetition authority.
+Version 1.7 adds one `resource-u32-branch-sequential` conditional. Its
+predicate is an exact rank-local, four-byte, aligned temporary `u32` that must
+have an ordered graph writer before the conditional. Zero selects else and
+nonzero selects then. The same bounded branch-shape, conservative-effect,
+exact-work, and global-ID rules apply. The one-node profile makes a single
+mid-graph feedback boundary explicit without admitting nested control,
+runtime-derived loop counts, dynamic launches, or opaque callbacks.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -175,6 +182,10 @@ control and reject missing, duplicate, unknown, or out-of-range values. The
 executor admits the complete control set before copying inputs, captures those
 values with the inputs before its first await, and then uses the same verified
 branch plan and fail-stop completion contract.
+Version-1.7 conditionals read the predicate from private rank-local storage
+only after all ordered producer work has executed. The CPU oracle therefore
+proves the same graph-derived branch meaning without treating a request-time
+value as the predicate or exposing intermediate storage.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -186,11 +197,12 @@ does not imply device execution. Compiler owns the first concrete producer: it
 lowers one or more opaque prepared view-copy bindings into a verified linear
 host graph with derived intermediate resources. Kernels separately owns the
 authority-bound `browsergrad.host-graph.webgpu@1`
-DAG/fixed-repeat/bounded-input-and-runtime-control-conditional adapter and its required
-actual-device evidence. Neither adapter grants transport, topology, retries,
-event timestamps or external waits, backend-derived predicates,
-runtime-derived loop/launch control, worker-mesh, native-companion,
-performance, or release authority.
+DAG/fixed-repeat/bounded-input/runtime-control/resource-conditional adapter and
+its required actual-device evidence. The version-1.7 backend profile uses one
+explicit bounded host readback/resubmission point for its GPU-produced
+predicate. Neither adapter grants transport, topology, retries, event
+timestamps or external waits, general runtime-derived loop/launch control,
+worker-mesh, native-companion, performance, or release authority.
 
 Frontends construct the operation through one `/kernel` sink rather than
 assembling allocation, alias, index-map, view, and operation IDs themselves.
