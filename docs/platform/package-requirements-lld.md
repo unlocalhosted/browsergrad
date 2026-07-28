@@ -2258,7 +2258,7 @@ two-rank 65,536-element f32 workload uses an untimed correctness preflight,
 eight warmups, and twelve alternating paired authority-bound execution samples
 with complete readback and queue drain after both exact pipeline authorities
 are prewarmed outside the measurement. The current Apple Metal 3 observation
-has 2.00 ms fixed-repeat and 1.90 ms unrolled medians under backend 1.8.0.
+has 1.70 ms fixed-repeat and 1.60 ms unrolled medians under backend 1.8.0.
 Raw samples, pipeline identities, and exact environment identity are retained;
 no superiority or regression threshold is asserted.
 

@@ -267,7 +267,7 @@ same eight expanded WebGPU steps. The f32 two-rank, 65,536-element workload
 prewarms both exact device-bound pipeline authorities, then uses eight warmups
 and twelve alternating paired samples around authority-bound execution,
 including readback and queue drain. The current Apple Metal 3 observation
-records 2.00 ms candidate and 1.90 ms unrolled medians under backend 1.8.0; it
+records 1.70 ms candidate and 1.60 ms unrolled medians under backend 1.8.0; it
 asserts no superiority or regression threshold.
 
 This profile is a bounded DAG plus fixed-count sequential repetition,
