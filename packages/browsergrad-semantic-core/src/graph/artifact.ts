@@ -62,6 +62,7 @@ import {
   type HostGraphRepeatBodyNode,
   type HostGraphRepeatNode,
   type HostGraphResource,
+  type HostGraphResourceDynamicDispatchSource,
   type HostGraphResourcePredicate,
   type HostGraphResourceRepeatNode,
   type HostGraphResourceRepeatSource,
@@ -72,7 +73,7 @@ import {
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 10;
+export const HOST_GRAPH_ARTIFACT_MINOR = 11;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
@@ -138,6 +139,7 @@ export interface PreparedHostGraphProgram {
   readonly edgeCount: number;
   readonly dispatchCount: number;
   readonly dynamicDispatchCount: number;
+  readonly resourceDynamicDispatchCount: number;
   readonly collectiveCount: number;
   readonly copyCount: number;
   readonly materializationCount: number;
@@ -160,6 +162,7 @@ interface HostGraphAnalysis {
   readonly edgeCount: number;
   readonly dispatchCount: number;
   readonly dynamicDispatchCount: number;
+  readonly resourceDynamicDispatchCount: number;
   readonly collectiveCount: number;
   readonly copyCount: number;
   readonly materializationCount: number;
@@ -317,6 +320,7 @@ export async function prepareHostGraphProgram(
     edgeCount: analysis.edgeCount,
     dispatchCount: analysis.dispatchCount,
     dynamicDispatchCount: analysis.dynamicDispatchCount,
+    resourceDynamicDispatchCount: analysis.resourceDynamicDispatchCount,
     collectiveCount: analysis.collectiveCount,
     copyCount: analysis.copyCount,
     materializationCount: analysis.materializationCount,
@@ -391,12 +395,13 @@ function parseProgram(
       version.minor !== 7 &&
       version.minor !== 8 &&
       version.minor !== 9 &&
-      version.minor !== 10)
+      version.minor !== 10 &&
+      version.minor !== 11)
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 through 1.10 only",
+      "host graph program reader supports versions 1.0 through 1.11 only",
     );
   }
   if (version.minor !== envelopeMinor) {
@@ -620,7 +625,7 @@ function parseNode(
         "dynamic dispatch nodes require host graph program version 1.9",
       );
     }
-    return parseDynamicDispatchNode(object, path);
+    return parseDynamicDispatchNode(object, path, programMinor);
   }
   if (kind === "all-reduce") return parseAllReduceNode(object, path);
   if (kind === "copy") {
@@ -704,7 +709,7 @@ function parseNode(
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, and version-1.10 resource repeat nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, version-1.10 resource repeat, and version-1.11 resource dynamic dispatch nodes",
   );
 }
 
@@ -1251,7 +1256,44 @@ function parseDispatchNode(
 function parseDynamicDispatchNode(
   value: JsonObject,
   path: string,
+  programMinor: HostGraphProgram["version"]["minor"],
 ): HostGraphDynamicDispatchNode {
+  const mode = stringValue(field(value, "mode", path), `${path}.mode`);
+  if (mode === "resource-u32-prefix-elements") {
+    if (programMinor < 11) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.mode`,
+        "resource dynamic dispatch requires host graph program version 1.11",
+      );
+    }
+    const object = closedObject(
+      value,
+      [
+        "nodeId",
+        "kind",
+        "dependsOn",
+        "semanticArtifactHash",
+        "entrypointId",
+        "dimensionBindings",
+        "bindings",
+        "launchSource",
+        "maxElementCount",
+        "mode",
+      ],
+      path,
+    );
+    return {
+      ...parseDispatchFields(object, path),
+      kind: "dynamic-dispatch",
+      launchSource: parseResourceDynamicDispatchSource(
+        field(object, "launchSource", path),
+        `${path}.launchSource`,
+      ),
+      maxElementCount: parseDynamicDispatchMaximum(object, path),
+      mode: "resource-u32-prefix-elements",
+    };
+  }
   const object = closedObject(
     value,
     [
@@ -1272,9 +1314,25 @@ function parseDynamicDispatchNode(
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       `${path}.mode`,
-      "dynamic dispatch mode must be runtime-u32-prefix-elements",
+      "dynamic dispatch mode must be runtime-u32-prefix-elements or resource-u32-prefix-elements",
     );
   }
+  return {
+    ...parseDispatchFields(object, path),
+    kind: "dynamic-dispatch",
+    launchControl: parseDynamicDispatchControl(
+      field(object, "launchControl", path),
+      `${path}.launchControl`,
+    ),
+    maxElementCount: parseDynamicDispatchMaximum(object, path),
+    mode: "runtime-u32-prefix-elements",
+  };
+}
+
+function parseDynamicDispatchMaximum(
+  object: JsonObject,
+  path: string,
+): WireU64 {
   const maxElementCount = positiveWire(
     field(object, "maxElementCount", path),
     `${path}.maxElementCount`,
@@ -1285,15 +1343,32 @@ function parseDynamicDispatchNode(
       "dynamic dispatch maximum exceeds the u32 control domain",
     );
   }
+  return maxElementCount;
+}
+
+function parseResourceDynamicDispatchSource(
+  value: JsonValue,
+  path: string,
+): HostGraphResourceDynamicDispatchSource {
+  const object = closedObject(
+    value,
+    ["resourceId", "rank", "mode"],
+    path,
+  );
+  if (object.mode !== "u32-prefix-element-count") {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      `${path}.mode`,
+      "resource dynamic dispatch source mode must be u32-prefix-element-count",
+    );
+  }
   return {
-    ...parseDispatchFields(object, path),
-    kind: "dynamic-dispatch",
-    launchControl: parseDynamicDispatchControl(
-      field(object, "launchControl", path),
-      `${path}.launchControl`,
+    resourceId: identifier(
+      field(object, "resourceId", path),
+      `${path}.resourceId`,
     ),
-    maxElementCount,
-    mode: "runtime-u32-prefix-elements",
+    rank: parseWireU64(field(object, "rank", path), `${path}.rank`),
+    mode: "u32-prefix-element-count",
   };
 }
 
@@ -1542,6 +1617,7 @@ function analyzeProgram(
   let edgeCount = 0;
   let dispatchCount = 0;
   let dynamicDispatchCount = 0;
+  let resourceDynamicDispatchCount = 0;
   let collectiveCount = 0;
   let copyCount = 0;
   let materializationCount = 0;
@@ -1641,21 +1717,38 @@ function analyzeProgram(
         dispatchGeometry,
         path,
       );
-      if (
-        node.kind === "dispatch" ||
-        node.kind === "dynamic-dispatch"
-      ) {
-        dispatchEffects.set(node, effects);
-      }
       if (node.kind === "dynamic-dispatch") {
         dynamicDispatchCount += 1;
-        runtimeControlIds.add(node.launchControl.controlId);
-        if (runtimeControlIds.size > HOST_GRAPH_MAX_RUNTIME_CONTROLS) {
-          resource(
-            `${path}.launchControl.controlId`,
-            `runtime control count exceeds ${HOST_GRAPH_MAX_RUNTIME_CONTROLS}`,
+        if (node.mode === "runtime-u32-prefix-elements") {
+          runtimeControlIds.add(node.launchControl.controlId);
+          if (runtimeControlIds.size > HOST_GRAPH_MAX_RUNTIME_CONTROLS) {
+            resource(
+              `${path}.launchControl.controlId`,
+              `runtime control count exceeds ${HOST_GRAPH_MAX_RUNTIME_CONTROLS}`,
+            );
+          }
+          dispatchEffects.set(node, effects);
+        } else {
+          resourceDynamicDispatchCount += 1;
+          verifyResourceDynamicDispatchSource(
+            node.launchSource,
+            resources,
+            rankCount,
+            `${path}.launchSource`,
+          );
+          verifyResourceFeedbackBound(
+            resourceConditionalCount +
+              resourceRepeatCount +
+              resourceDynamicDispatchCount,
+            `${path}.mode`,
+          );
+          dispatchEffects.set(
+            node,
+            resourceDynamicDispatchEffects(node, effects, path),
           );
         }
+      } else if (node.kind === "dispatch") {
+        dispatchEffects.set(node, effects);
       }
       ({ dispatchCount, collectiveCount, copyCount } =
         addExecutableCounts(
@@ -1699,7 +1792,9 @@ function analyzeProgram(
           `${path}.iterationSource`,
         );
         verifyResourceFeedbackBound(
-          resourceConditionalCount + resourceRepeatCount,
+          resourceConditionalCount +
+            resourceRepeatCount +
+            resourceDynamicDispatchCount,
           `${path}.mode`,
         );
       }
@@ -1774,7 +1869,9 @@ function analyzeProgram(
           );
         }
         verifyResourceFeedbackBound(
-          resourceConditionalCount + resourceRepeatCount,
+          resourceConditionalCount +
+            resourceRepeatCount +
+            resourceDynamicDispatchCount,
           `${path}.mode`,
         );
       }
@@ -1867,6 +1964,7 @@ function analyzeProgram(
     edgeCount,
     dispatchCount,
     dynamicDispatchCount,
+    resourceDynamicDispatchCount,
     collectiveCount,
     copyCount,
     materializationCount,
@@ -2161,6 +2259,69 @@ function resourceRepeatEffects(
     ...runtimeRepeatEffects(effects),
   ].sort((left, right) =>
     compareCanonicalStrings(left.resourceId, right.resourceId)));
+}
+
+function resourceDynamicDispatchEffects(
+  node: Extract<
+    HostGraphDynamicDispatchNode,
+    { readonly mode: "resource-u32-prefix-elements" }
+  >,
+  effects: readonly HostGraphResourceEffect[],
+  path: string,
+): readonly HostGraphResourceEffect[] {
+  if (effects.some((effect) =>
+    effect.resourceId === node.launchSource.resourceId)) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      `${path}.bindings`,
+      "resource dynamic dispatch cannot access its captured launch source",
+    );
+  }
+  return Object.freeze([
+    ...effects,
+    Object.freeze({
+      resourceId: node.launchSource.resourceId,
+      access: "read" as const,
+      requiresPriorWriter: true,
+      guaranteesWrite: false,
+    }),
+  ]);
+}
+
+function verifyResourceDynamicDispatchSource(
+  source: HostGraphResourceDynamicDispatchSource,
+  resources: ReadonlyMap<string, HostGraphResource>,
+  rankCount: bigint,
+  path: string,
+): void {
+  const resource = resources.get(source.resourceId);
+  if (resource === undefined) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.danglingReference,
+      `${path}.resourceId`,
+      `resource dynamic dispatch source references missing resource ${source.resourceId}`,
+    );
+  }
+  if (
+    resource.role !== "temporary" ||
+    resource.initialization !== "zero-fill" ||
+    resource.dtype !== "u32" ||
+    resource.byteLength !== "4" ||
+    resource.alignmentBytes < 4
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      `${path}.resourceId`,
+      "resource dynamic dispatch source requires one 4-byte-aligned zero-filled temporary u32 resource",
+    );
+  }
+  if (wireIntegerToBigInt(source.rank) >= rankCount) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      `${path}.rank`,
+      "resource dynamic dispatch source rank is outside the graph rank count",
+    );
+  }
 }
 
 function verifyResourceRepeatSource(
@@ -2647,8 +2808,12 @@ function verifyEffects(
         conditionalEffects,
       ).entries()) {
       const effectPath =
-        node.kind === "dispatch" || node.kind === "dynamic-dispatch"
-        ? `${path}.bindings[${effectIndex}]`
+        node.kind === "dynamic-dispatch" &&
+            node.mode === "resource-u32-prefix-elements" &&
+            effect.resourceId === node.launchSource.resourceId
+          ? `${path}.launchSource`
+          : node.kind === "dispatch" || node.kind === "dynamic-dispatch"
+            ? `${path}.bindings[${effectIndex}]`
         : node.kind === "all-reduce"
           ? `${path}.resourceId`
           : node.kind === "copy"

@@ -9,6 +9,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Host-graph program version 1.11 adds one bounded
+  `resource-u32-prefix-elements` dynamic dispatch. CPU and portable WebGPU read
+  one ordered temporary u32 after its producer, reject zero and above-maximum
+  counts without output publication, and execute the exact positive prefix.
+  WebGPU prewarms the maximum once, reads back only four bytes, substitutes
+  launch geometry in the same exact pipeline slots over resident buffers, and
+  submits the suffix under the existing one-feedback-stage lifecycle.
+  Required real-device evidence covers one- and two-element launches through
+  one graph/pipeline identity.
 - Host-graph program version 1.10 adds one bounded
   `resource-u32-count-sequential` repeat. CPU reads the ordered temporary u32
   count after its producer. Portable WebGPU prewarms the artifact maximum,

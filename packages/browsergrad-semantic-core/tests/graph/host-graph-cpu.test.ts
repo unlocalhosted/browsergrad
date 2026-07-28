@@ -136,6 +136,66 @@ function dynamicPipelineProgram(
   };
 }
 
+function resourceDynamicPipelineProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  const base = dynamicPipelineProgram(artifacts);
+  return {
+    ...base,
+    version: { major: 1, minor: 11 },
+    resources: [
+      ...base.resources,
+      {
+        resourceId: "launch-input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u32",
+        byteLength: wire("4"),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "launch-count",
+        role: "temporary",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u32",
+        byteLength: wire("4"),
+        alignmentBytes: 4,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "produce-launch-count",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "launch-input",
+        destinationResourceId: "launch-count",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      ...base.nodes.map((node) => {
+        if (
+          node.kind !== "dynamic-dispatch" ||
+          node.mode !== "runtime-u32-prefix-elements"
+        ) {
+          return node;
+        }
+        const { launchControl: _launchControl, ...common } = node;
+        return {
+          ...common,
+          dependsOn: ["produce-launch-count"],
+          launchSource: {
+            resourceId: "launch-count",
+            rank: wire("0"),
+            mode: "u32-prefix-element-count" as const,
+          },
+          mode: "resource-u32-prefix-elements" as const,
+        };
+      }),
+    ],
+  };
+}
+
 function collectiveProgram(
   artifacts: VerifiedViewCopyArtifacts,
   dtype: "f32" | "i32" | "u32",
@@ -1176,6 +1236,70 @@ describe("host graph CPU reference", () => {
       elementOperations: "3",
     });
     expect(readF32(result.outputs[0]!.bytes)).toEqual([1.25, 0]);
+  });
+
+  it("executes one produced-resource dynamic dispatch prefix within its artifact bound", async () => {
+    const artifacts = await identityArtifacts();
+    const graph = await verified(
+      resourceDynamicPipelineProgram(artifacts),
+      artifacts,
+    );
+    const prepared = await prepareHostGraphCpu(
+      graph,
+      artifactOptions(artifacts),
+    );
+    const executionInputs = (
+      elementCount: number,
+    ): HostGraphCpuInputBinding[] => [
+      input(0, f32Bytes([1.25, -2.5])),
+      {
+        rank: wire("0"),
+        resourceId: "launch-input",
+        bytes: u32Bytes([elementCount]),
+      },
+    ];
+
+    expect(prepared).toMatchObject({
+      dynamicDispatchCount: 1,
+      resourceDynamicDispatchCount: 1,
+      runtimeControlIds: [],
+      elementOperations: 8n,
+    });
+
+    const one = await prepared.execute({ inputs: executionInputs(1) });
+    expect(one).toMatchObject({
+      executedNodeIds: [
+        "produce-launch-count",
+        "first",
+        "second",
+        "materialize-output",
+      ],
+      completedDynamicDispatches: [{
+        nodeId: "first",
+        elementCount: "1",
+      }],
+      elementOperations: "7",
+    });
+    expect(readF32(one.outputs[0]!.bytes)).toEqual([1.25, 0]);
+
+    const two = await prepared.execute({ inputs: executionInputs(2) });
+    expect(two).toMatchObject({
+      completedDynamicDispatches: [{
+        nodeId: "first",
+        elementCount: "2",
+      }],
+      elementOperations: "8",
+    });
+    expect(readF32(two.outputs[0]!.bytes)).toEqual([1.25, -2.5]);
+
+    for (const elementCount of [0, 3]) {
+      await expect(prepared.execute({
+        inputs: executionInputs(elementCount),
+      })).rejects.toMatchObject({
+        code: "BG-GRAPH-CPU-RESOURCE-LIMIT",
+        path: "$.nodes.first.launchSource",
+      });
+    }
   });
 
   it("rejects dynamic dispatch values before reading caller inputs", async () => {

@@ -149,6 +149,50 @@ function dynamicPipelineProgram(
   };
 }
 
+function resourceDynamicPipelineProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  const base = dynamicPipelineProgram(artifacts);
+  return {
+    ...base,
+    version: { major: 1, minor: 11 },
+    resources: [
+      ...base.resources,
+      resource("launch-input", "input", "u32", "4"),
+      resource("launch-count", "temporary", "u32", "4"),
+    ],
+    nodes: [
+      {
+        nodeId: "produce-launch-count",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "launch-input",
+        destinationResourceId: "launch-count",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      ...base.nodes.map((node) => {
+        if (
+          node.kind !== "dynamic-dispatch" ||
+          node.mode !== "runtime-u32-prefix-elements"
+        ) {
+          return node;
+        }
+        const { launchControl: _launchControl, ...common } = node;
+        return {
+          ...common,
+          dependsOn: ["produce-launch-count"],
+          launchSource: {
+            resourceId: "launch-count",
+            rank: wire("0"),
+            mode: "u32-prefix-element-count" as const,
+          },
+          mode: "resource-u32-prefix-elements" as const,
+        };
+      }),
+    ],
+  };
+}
+
 function collectiveProgram(
   artifacts: VerifiedViewCopyArtifacts,
   dtype: "f32" | "i32" | "u32",
@@ -840,6 +884,31 @@ describe("semantic host-graph WebGPU preparation", () => {
       materializationCount: 1,
       dynamicDispatchCount: 1,
       runtimeControlIds: ["prefix-elements"],
+    });
+  });
+
+  it("prewarms one bounded version-1.11 produced-resource dynamic dispatch", async () => {
+    const artifacts = await identityArtifacts();
+    const graph = await verified(
+      resourceDynamicPipelineProgram(artifacts),
+      artifacts,
+    );
+    const prepared = await prepareSemanticHostGraphWebGpu(
+      graph,
+      { ...artifactOptions(artifacts), workgroupSize: 1 },
+    );
+
+    expect(prepared).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 4,
+      expandedStepCount: 6,
+      dispatchStepCount: 4,
+      copyStepCount: 2,
+      materializationCount: 1,
+      dynamicDispatchCount: 1,
+      resourceDynamicDispatchCount: 1,
+      midGraphFeedbackCount: 1,
+      runtimeControlIds: [],
     });
   });
 

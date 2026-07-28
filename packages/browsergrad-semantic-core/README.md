@@ -168,6 +168,12 @@ maximum execute the bounded linear body exactly that many times. The body
 cannot access the captured count resource, zero-possible body writes are not
 guaranteed, and a graph admits only one produced-resource conditional or
 repeat feedback node.
+Version 1.11 adds `resource-u32-prefix-elements` dynamic dispatch. Its
+`launchSource` names the same exact ordered temporary-u32 class, one through a
+positive artifact maximum execute the exact logical prefix, and zero or larger
+values fail closed. The dispatch cannot bind its launch source as data, maximum
+work enters preparation budgets, and the graph-wide at-most-one produced-
+resource feedback bound now spans conditional, repeat, and dynamic dispatch.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -222,6 +228,10 @@ its ordered producer has executed, reject values above the artifact maximum,
 reserve maximum work, execute zero through that maximum with per-iteration
 cancellation/time checks, and publish actual completion/work only with
 whole-graph success.
+Version-1.11 dynamic dispatch likewise reads its positive prefix count only
+after the ordered producer, rejects zero and above-maximum values without
+output publication, executes the exact canonical prefix for every rank, and
+reports actual completion/work only with whole-graph success.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -233,13 +243,14 @@ does not imply device execution. Compiler owns the first concrete producer: it
 lowers one or more opaque prepared view-copy bindings into a verified linear
 host graph with derived intermediate resources. Kernels separately owns the
 authority-bound `browsergrad.host-graph.webgpu@1`
-DAG/fixed/runtime/resource-repeat/dynamic-dispatch/bounded-input/runtime-control/resource-conditional adapter and
+DAG/repeat/dynamic-dispatch/bounded-input/runtime-control/resource-feedback adapter and
 its required actual-device evidence. The version-1.7 backend profile uses one
 explicit bounded host readback/resubmission point for its GPU-produced
-predicate; version 1.10 reuses that authority for one bounded GPU-produced
-loop count. Neither adapter grants transport, topology, retries, event
+predicate; versions 1.10 and 1.11 reuse that authority for one bounded
+GPU-produced loop count or dynamic-launch prefix. Neither adapter grants
+transport, topology, retries, event
 timestamps or external waits, repeated/device-side feedback,
-GPU-produced dynamic launch control, broader dynamic schedules, worker-mesh, native-companion,
+broader dynamic schedules, worker-mesh, native-companion,
 performance, or release authority.
 
 Frontends construct the operation through one `/kernel` sink rather than

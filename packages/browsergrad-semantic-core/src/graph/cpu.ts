@@ -183,6 +183,7 @@ export interface PreparedHostGraphCpu {
   readonly runtimeRepeatCount: number;
   readonly resourceRepeatCount: number;
   readonly dynamicDispatchCount: number;
+  readonly resourceDynamicDispatchCount: number;
   readonly conditionalNodeIds: readonly string[];
   readonly resourceConditionalCount: number;
   readonly runtimeControlIds: readonly string[];
@@ -217,17 +218,31 @@ interface DispatchPlan {
   readonly elementOperations: bigint;
 }
 
-interface DynamicDispatchPlan {
+interface DynamicDispatchPlanBase {
   readonly kind: "dynamic-dispatch";
   readonly nodeId: string;
   readonly sourceResourceId: string;
   readonly destinationResourceId: string;
   readonly prepared: PreparedViewCopyCpu;
-  readonly controlId: string;
   readonly maxElementCount: number;
   readonly rankCount: number;
   readonly elementOperations: bigint;
 }
+
+interface RuntimeDynamicDispatchPlan extends DynamicDispatchPlanBase {
+  readonly mode: "runtime-control";
+  readonly controlId: string;
+}
+
+interface ResourceDynamicDispatchPlan extends DynamicDispatchPlanBase {
+  readonly mode: "resource";
+  readonly resourceId: string;
+  readonly rank: number;
+}
+
+type DynamicDispatchPlan =
+  | RuntimeDynamicDispatchPlan
+  | ResourceDynamicDispatchPlan;
 
 interface CollectivePlan {
   readonly kind: "all-reduce";
@@ -676,6 +691,8 @@ export async function prepareHostGraphCpu(
     runtimeRepeatCount: preparedGraph.runtimeRepeatCount,
     resourceRepeatCount: preparedGraph.resourceRepeatCount,
     dynamicDispatchCount: preparedGraph.dynamicDispatchCount,
+    resourceDynamicDispatchCount:
+      preparedGraph.resourceDynamicDispatchCount,
     conditionalNodeIds,
     resourceConditionalCount: preparedGraph.resourceConditionalCount,
     runtimeControlIds: Object.freeze([...preparedGraph.runtimeControlIds]),
@@ -962,7 +979,19 @@ async function prepareDynamicDispatchPlan(
   return Object.freeze({
     ...base,
     kind: "dynamic-dispatch",
-    controlId: node.launchControl.controlId,
+    ...(node.mode === "runtime-u32-prefix-elements"
+      ? {
+          mode: "runtime-control" as const,
+          controlId: node.launchControl.controlId,
+        }
+      : {
+          mode: "resource" as const,
+          resourceId: node.launchSource.resourceId,
+          rank: safeNumber(
+            wireIntegerToBigInt(node.launchSource.rank),
+            `$.nodes.${node.nodeId}.launchSource.rank`,
+          ),
+        }),
     maxElementCount,
     rankCount,
     elementOperations: BigInt(maxElementCount * rankCount),
@@ -1078,7 +1107,14 @@ async function executeRepeat(
   const iterationCount = plan.mode === "fixed"
     ? plan.iterationCount
     : plan.mode === "resource"
-      ? readResourceRepeatCount(plan, rankResources)
+      ? readProducedU32(
+        plan.nodeId,
+        plan.resourceId,
+        plan.rank,
+        rankResources,
+        "iterationSource",
+        "resource repeat source",
+      )
       : controls.find((control) =>
         control.controlId === plan.controlId)?.value;
   if (iterationCount === undefined) {
@@ -1122,16 +1158,20 @@ async function executeRepeat(
   });
 }
 
-function readResourceRepeatCount(
-  plan: ResourceRepeatPlan,
+function readProducedU32(
+  nodeId: string,
+  resourceId: string,
+  rank: number,
   rankResources: RankResources,
+  fieldName: "iterationSource" | "launchSource",
+  label: string,
 ): number {
-  const bytes = rankResources[plan.rank]?.get(plan.resourceId);
+  const bytes = rankResources[rank]?.get(resourceId);
   if (bytes === undefined || bytes.byteLength !== 4) {
     fail(
       "BG-GRAPH-CPU-INTERNAL",
-      `$.nodes.${plan.nodeId}.iterationSource`,
-      "verified resource repeat source disappeared",
+      `$.nodes.${nodeId}.${fieldName}`,
+      `verified ${label} disappeared`,
     );
   }
   const view = new DATA_VIEW_CONSTRUCTOR(
@@ -1299,8 +1339,17 @@ function executeDynamicDispatch(
   maxExecutionMs: number,
   signal: AbortSignal | undefined,
 ): HostGraphDynamicDispatchCompletion {
-  const elementCount = controls.find((control) =>
-    control.controlId === plan.controlId)?.value;
+  const elementCount = plan.mode === "resource"
+    ? readProducedU32(
+      plan.nodeId,
+      plan.resourceId,
+      plan.rank,
+      rankResources,
+      "launchSource",
+      "dynamic dispatch source",
+    )
+    : controls.find((control) =>
+      control.controlId === plan.controlId)?.value;
   if (elementCount === undefined) {
     fail(
       "BG-GRAPH-CPU-INTERNAL",
@@ -1310,9 +1359,15 @@ function executeDynamicDispatch(
   }
   if (elementCount <= 0 || elementCount > plan.maxElementCount) {
     fail(
-      "BG-GRAPH-CPU-INTERNAL",
-      `$.nodes.${plan.nodeId}.launchControl`,
-      "admitted dynamic dispatch control is outside its verified bound",
+      plan.mode === "resource"
+        ? "BG-GRAPH-CPU-RESOURCE-LIMIT"
+        : "BG-GRAPH-CPU-INTERNAL",
+      plan.mode === "resource"
+        ? `$.nodes.${plan.nodeId}.launchSource`
+        : `$.nodes.${plan.nodeId}.launchControl`,
+      plan.mode === "resource"
+        ? "produced resource dynamic dispatch count must be between one and its verified bound"
+        : "admitted dynamic dispatch control is outside its verified bound",
     );
   }
   for (const [rank, resources] of rankResources.entries()) {
@@ -1744,7 +1799,12 @@ function dynamicDispatchControlLimits(
 ): ReadonlyMap<string, number> {
   const limits = new Map<string, number>();
   for (const plan of plans) {
-    if (plan.kind !== "dynamic-dispatch") continue;
+    if (
+      plan.kind !== "dynamic-dispatch" ||
+      plan.mode !== "runtime-control"
+    ) {
+      continue;
+    }
     const existing = limits.get(plan.controlId);
     limits.set(
       plan.controlId,

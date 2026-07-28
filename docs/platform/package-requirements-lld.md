@@ -30,7 +30,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time one-lane dynamic dispatch, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, an at-most-one produced-resource feedback-node bound across conditional and repeat control, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; repeated/device-side feedback, GPU-produced dynamic launch control, broader dynamic schedules, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource one-lane dynamic dispatch, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, an at-most-one produced-resource feedback-node bound across conditional, repeat, and dynamic-dispatch control, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; repeated/device-side feedback, broader dynamic schedules, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every exit criterion for the declared gate profile is
 complete. Verification of a closed initial profile does not imply broader
@@ -755,8 +755,9 @@ feedback boundary. Version 1.8 adds artifact-capped request-time u32-count
 repetition. Version 1.9 adds artifact-capped positive request-time logical-
 prefix dynamic dispatch. Version 1.10 adds one artifact-capped
 produced-resource u32-count repeat through the explicit feedback boundary.
-Cycles are illegal. Repeated/device-side feedback, GPU-produced dynamic launch
-control, broader dynamic launch schedules, or nested control
+Version 1.11 adds artifact-capped positive produced-resource logical-prefix
+dynamic dispatch through that same boundary. Cycles are illegal.
+Repeated/device-side feedback, broader dynamic launch schedules, or nested control
 require separately versioned node kinds and cancellation points rather than
 hidden emitter loops. The verifier performs resource lifetime and read/write
 hazard checks before execution.
@@ -2200,8 +2201,17 @@ that many times. The body cannot access the captured count resource, its
 writes are non-guaranteed because zero performs no body work, and the graph
 admits only one produced-resource conditional or repeat feedback node. This is
 one bounded host-mediated GPU-produced loop count, not a device-side loop,
-repeated feedback, or opaque callback. The
-authority-bound `browsergrad.host-graph.cpu-reference@1` profile snapshots all
+repeated feedback, or opaque callback. Program version 1.11 adds
+`resource-u32-prefix-elements` dynamic dispatch. Its
+`launchSource` names the same exact rank-local ordered temporary-u32 class.
+One through a positive artifact maximum no larger than the verified semantic
+domain execute the exact logical prefix; zero and larger values fail closed.
+The dispatch cannot bind the captured launch source as data, and the
+graph-wide at-most-one produced-resource feedback bound spans conditionals,
+repeats, and dynamic dispatches. This is one bounded host-mediated
+GPU-produced launch prefix, not a device-side loop, arbitrary grid, repeated
+feedback, or source-shaped backend path. The authority-bound
+`browsergrad.host-graph.cpu-reference@1` profile snapshots all
 rank-local inputs and the exact required runtime-control set, executes
 dispatches, arbitrary-byte copies, and finite
 rank-ordered f32 or wrapping/exact 32-bit integer all-reduces in private
@@ -2227,6 +2237,10 @@ private rank-local storage after the ordered producer, rejects values above the
 artifact maximum, reserves maximum work, executes the actual zero-through-
 maximum count with per-iteration checks, and publishes actual completion/work
 only with whole-graph success.
+For version 1.11 it reads the positive prefix count from private rank-local
+storage after the ordered producer, rejects zero and above-maximum values,
+reserves maximum work, executes the exact canonical prefix for every rank, and
+publishes actual completion/work only with whole-graph success.
 
 Kernels owns the separate
 `browsergrad.host-graph.webgpu@1` portable adapter. It accepts only exact
@@ -2287,8 +2301,14 @@ four-byte count, then submit zero through the admitted maximum iterations plus
 the suffix through the same exact pipeline slots. Above-bound produced counts
 fail without output publication. One execution timeout, cancellation signal,
 device owner, device-loss path, cleanup path, numerical-status check, and
-terminal-publication contract spans both stages. F32
-collectives use a separately
+terminal-publication contract spans both stages. Version-1.11 resource dynamic
+dispatch prewarms the artifact-maximum
+one-invocation-per-workgroup launch once, submits the ordered producer prefix
+over the same resident buffers, reads back only the exact four-byte count,
+rejects zero and above-maximum values, substitutes the exact positive
+x-workgroup count in the already-authorized rank slots, and submits that
+dispatch plus the suffix. The same single lifecycle contract spans both
+stages. F32 collectives use a separately
 read back atomic numerical-status word and preserve CPU signed-zero min/max;
 i32 sum wraps explicitly and u32/integer min/max remains exact. Complete input
 snapshots, deterministic zero-fill, expanded-step and aggregate transient
@@ -2302,7 +2322,9 @@ fixed repetitions of f32 sum plus both captured-input and both runtime-control
 u8-copy branches, both produced-resource u8-copy branches, and zero/two
 request-time repetitions of f32 sum, plus one/two-element f32 dynamic
 dispatches and zero/two produced-resource repetitions of f32 sum through their
-respective same graph and pipeline identities, and separately
+respective same graph and pipeline identities, plus one/two-element
+produced-resource f32 dynamic dispatches through one graph/pipeline identity,
+and separately
 proves non-finite f32 and lost-device refusal.
 
 The separate `browsergrad.host-graph.webgpu-pipeline@1` authority binds one
@@ -2330,16 +2352,16 @@ two-rank 65,536-element f32 workload uses an untimed correctness preflight,
 eight warmups, and twelve alternating paired authority-bound execution samples
 with complete readback and queue drain after both exact pipeline authorities
 are prewarmed outside the measurement. The current Apple Metal 3 observation
-has 1.90 ms fixed-repeat and 1.90 ms unrolled medians under backend 1.11.0.
+has 1.30 ms fixed-repeat and 1.30 ms unrolled medians under backend 1.12.0.
 Raw samples, pipeline identities, and exact environment identity are retained;
 no superiority or regression threshold is asserted.
 
 Bounded request-time u32-count repetition, one version-1.7 GPU-produced u32
 conditional, one version-1.10 GPU-produced u32 repeat count, and the
-version-1.9 one-invocation-per-workgroup positive prefix dynamic dispatch are
-implemented under an at-most-one-feedback-node graph bound. No repeated or
-device-side feedback, GPU-produced dynamic launch control, broader dynamic
-launch schedule, nested/device-side branching,
+version-1.9 request-time plus version-1.11 produced-resource
+one-invocation-per-workgroup positive prefix dynamic dispatch are implemented
+under an at-most-one-feedback-node graph bound. No repeated or device-side
+feedback, broader dynamic launch schedule, nested/device-side branching,
 transport/topology adapter, worker mesh, or native companion exists yet, so
 Gate 7 remains `in progress`. Runtime controls are request-time host inputs,
 not GPU/backend-derived loop or launch counts. Current events do not claim

@@ -64,6 +64,8 @@ const CASE_IDS = Object.freeze([
   "f32-resource-repeat-two",
   "f32-dynamic-dispatch-one",
   "f32-dynamic-dispatch-two",
+  "f32-resource-dynamic-dispatch-one",
+  "f32-resource-dynamic-dispatch-two",
   "u8-input-conditional-then",
   "u8-input-conditional-else",
   "u8-runtime-conditional-then",
@@ -200,6 +202,14 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       ),
       prepareDynamicDispatchCase(
         "f32-dynamic-dispatch-two",
+        2,
+      ),
+      prepareResourceDynamicDispatchCase(
+        "f32-resource-dynamic-dispatch-one",
+        1,
+      ),
+      prepareResourceDynamicDispatchCase(
+        "f32-resource-dynamic-dispatch-two",
         2,
       ),
       prepareConditionalRawCopyCase(
@@ -461,6 +471,18 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       .not.toBe(twoDynamicDispatch?.backendSpecializationHash);
     expect(oneDynamicDispatch?.expandedStepCount).toBe(2);
     expect(twoDynamicDispatch?.expandedStepCount).toBe(2);
+    const oneResourceDynamicDispatch = completedCases.find(({ caseId }) =>
+      caseId === "f32-resource-dynamic-dispatch-one");
+    const twoResourceDynamicDispatch = completedCases.find(({ caseId }) =>
+      caseId === "f32-resource-dynamic-dispatch-two");
+    expect(oneResourceDynamicDispatch?.pipelineIdentityHash)
+      .toBe(twoResourceDynamicDispatch?.pipelineIdentityHash);
+    expect(oneResourceDynamicDispatch?.backendSpecializationHash)
+      .not.toBe(twoResourceDynamicDispatch?.backendSpecializationHash);
+    expect(oneResourceDynamicDispatch?.expandedStepCount).toBe(4);
+    expect(twoResourceDynamicDispatch?.expandedStepCount).toBe(4);
+    expect(oneResourceDynamicDispatch?.midGraphFeedbackCount).toBe(1);
+    expect(twoResourceDynamicDispatch?.midGraphFeedbackCount).toBe(1);
 
     stage = "resource-repeat-bound-refusal";
     const resourceRepeatCase = cases.find(({ caseId }) =>
@@ -485,6 +507,32 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       code: "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
       path: "$.nodes.repeat-reduction.iterationSource",
     });
+
+    stage = "resource-dynamic-dispatch-bound-refusal";
+    const resourceDynamicDispatchCase = cases.find(({ caseId }) =>
+      caseId === "f32-resource-dynamic-dispatch-two");
+    if (resourceDynamicDispatchCase === undefined) {
+      throw new Error("missing resource dynamic dispatch case");
+    }
+    for (const elementCount of [0, 3]) {
+      await expect(runSemanticHostGraphWebGpu(
+        kernelDevice,
+        resourceDynamicDispatchCase.prepared,
+        {
+          inputs: resourceDynamicDispatchCase.inputs.map((binding) => ({
+            ...binding,
+            bytes:
+              binding.resourceId === "launch-input" &&
+                binding.rank === wire(0)
+                ? u32Bytes([elementCount])
+                : new Uint8Array(binding.bytes),
+          })),
+        },
+      )).rejects.toMatchObject({
+        code: "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
+        path: "$.nodes.copy.launchSource",
+      });
+    }
 
     stage = "non-finite-fail-stop";
     const finiteCase = cases[0] as PreparedCase;
@@ -824,6 +872,50 @@ async function prepareDynamicDispatchCase(
   });
 }
 
+async function prepareResourceDynamicDispatchCase(
+  caseId:
+    | "f32-resource-dynamic-dispatch-one"
+    | "f32-resource-dynamic-dispatch-two",
+  elementCount: 1 | 2,
+): Promise<PreparedCase> {
+  const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
+    inputShape: [parseWireI64("2")],
+    axes: [0],
+    dtype: "f32",
+  });
+  const values = [f32Bytes([1.25, -2.5]), f32Bytes([3.5, 4.75])];
+  const graph = (await createVerifiedHostGraphArtifact(
+    resourceDynamicDispatchProgram(artifacts),
+    artifactOptions(artifacts),
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(
+    graph,
+    { ...artifactOptions(artifacts), workgroupSize: 1 },
+  );
+  const inputs = Object.freeze([
+    ...values.map((bytes, rank) => input(rank, bytes)),
+    namedInput(0, "launch-input", u32Bytes([elementCount])),
+    namedInput(1, "launch-input", u32Bytes([0])),
+  ]);
+  return Object.freeze({
+    caseId,
+    artifacts,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: inputs.map(({ rank, resourceId, bytes }) => ({
+        rank,
+        resourceId,
+        bytes: Array.from(bytes),
+      })),
+    }),
+  });
+}
+
 async function prepareConditionalRawCopyCase(
   caseId: "u8-input-conditional-then" | "u8-input-conditional-else",
   predicate: 0 | 1,
@@ -1011,6 +1103,66 @@ function dynamicDispatchProgram(
         resourceId: "output",
         mode: "host-readback-after-graph-success",
       },
+    ],
+  };
+}
+
+function resourceDynamicDispatchProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  const base = dynamicDispatchProgram(artifacts);
+  return {
+    ...base,
+    version: { major: 1, minor: 11 },
+    resources: [
+      ...base.resources,
+      {
+        resourceId: "launch-input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u32",
+        byteLength: wire(4),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "launch-count",
+        role: "temporary",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u32",
+        byteLength: wire(4),
+        alignmentBytes: 4,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "produce-launch-count",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "launch-input",
+        destinationResourceId: "launch-count",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      ...base.nodes.map((node) => {
+        if (
+          node.kind !== "dynamic-dispatch" ||
+          node.mode !== "runtime-u32-prefix-elements"
+        ) {
+          return node;
+        }
+        const { launchControl: _launchControl, ...common } = node;
+        return {
+          ...common,
+          dependsOn: ["produce-launch-count"],
+          launchSource: {
+            resourceId: "launch-count",
+            rank: wire(0),
+            mode: "u32-prefix-element-count" as const,
+          },
+          mode: "resource-u32-prefix-elements" as const,
+        };
+      }),
     ],
   };
 }
