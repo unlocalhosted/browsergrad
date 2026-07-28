@@ -32,7 +32,10 @@ import { createDevice } from "../src/device";
 import {
   SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
   SemanticHostGraphWebGpuError,
+  destroySemanticHostGraphWebGpuPipeline,
+  prepareSemanticHostGraphWebGpuPipeline,
   prepareSemanticHostGraphWebGpu,
+  runSemanticHostGraphWebGpuPipeline,
   runSemanticHostGraphWebGpu,
   type PreparedSemanticHostGraphWebGpu,
   type SemanticHostGraphWebGpuControlBinding,
@@ -89,6 +92,7 @@ interface CaseObservation extends JsonObject {
   readonly caseId: string;
   readonly artifactHash: string;
   readonly graphSemanticHash: string;
+  readonly pipelineIdentityHash: string;
   readonly backendSpecializationHash: string;
   readonly expandedStepCount: number;
   readonly dispatchStepCount: number;
@@ -243,7 +247,31 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
     });
     const kernelDevice = await createDevice({ device });
 
+    stage = "pipeline-budget-refusal";
+    await expect(prepareSemanticHostGraphWebGpuPipeline(
+      kernelDevice,
+      cases[0]!.prepared,
+      { maxPipelineCount: 1 },
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
+      path: "$.options.maxPipelineCount",
+    });
+
     for (const preparedCase of cases) {
+      stage = `pipeline-authority:${preparedCase.caseId}`;
+      const preparedPipeline =
+        await prepareSemanticHostGraphWebGpuPipeline(
+          kernelDevice,
+          preparedCase.prepared,
+        );
+      expect(preparedPipeline).toMatchObject({
+        profile: "browsergrad.host-graph.webgpu-pipeline@1",
+        backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+        graphSemanticHash: preparedCase.prepared.graphSemanticHash,
+      });
+      expect(preparedPipeline.stepCount)
+        .toBe(preparedCase.prepared.expandedStepCount);
+      expect(preparedPipeline.pipelineCount).toBeGreaterThan(0);
       stage = `execute:${preparedCase.caseId}`;
       const cpu = await prepareHostGraphCpu(
         preparedCase.graph,
@@ -264,9 +292,8 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
           ? {}
           : { controls: preparedCase.controls }),
       });
-      const actualPromise = runSemanticHostGraphWebGpu(
-        kernelDevice,
-        preparedCase.prepared,
+      const actualPromise = runSemanticHostGraphWebGpuPipeline(
+        preparedPipeline,
         {
           inputs: mutableInputs,
           ...(mutableControls === undefined
@@ -278,10 +305,16 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       for (const binding of mutableControls ?? []) {
         binding.value = binding.value === wire(0) ? wire(1) : wire(0);
       }
-      const [expected, actual] = await Promise.all([
-        expectedPromise,
-        actualPromise,
-      ]);
+      let expected: Awaited<typeof expectedPromise>;
+      let actual: Awaited<typeof actualPromise>;
+      try {
+        [expected, actual] = await Promise.all([
+          expectedPromise,
+          actualPromise,
+        ]);
+      } finally {
+        destroySemanticHostGraphWebGpuPipeline(preparedPipeline);
+      }
       assertOutputEquality(actual.outputs, expected.outputs);
       expect(actual.trace.submitted).toBe(true);
       expect(actual.trace.executedNodeIds)
@@ -296,6 +329,7 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         caseId: preparedCase.caseId,
         artifactHash: preparedCase.artifactHash,
         graphSemanticHash: actual.trace.graphSemanticHash,
+        pipelineIdentityHash: actual.trace.pipelineIdentityHash,
         backendSpecializationHash:
           actual.trace.backendSpecializationHash,
         expandedStepCount: actual.trace.expandedStepCount,
@@ -326,12 +360,16 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       caseId === "u8-input-conditional-then");
     const elseConditional = completedCases.find(({ caseId }) =>
       caseId === "u8-input-conditional-else");
+    expect(thenConditional?.pipelineIdentityHash)
+      .toBe(elseConditional?.pipelineIdentityHash);
     expect(thenConditional?.backendSpecializationHash)
       .not.toBe(elseConditional?.backendSpecializationHash);
     const thenRuntimeConditional = completedCases.find(({ caseId }) =>
       caseId === "u8-runtime-conditional-then");
     const elseRuntimeConditional = completedCases.find(({ caseId }) =>
       caseId === "u8-runtime-conditional-else");
+    expect(thenRuntimeConditional?.pipelineIdentityHash)
+      .toBe(elseRuntimeConditional?.pipelineIdentityHash);
     expect(thenRuntimeConditional?.backendSpecializationHash)
       .not.toBe(elseRuntimeConditional?.backendSpecializationHash);
 
@@ -362,14 +400,37 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
     const disposableKernelDevice = await createDevice({
       device: disposableDevice,
     });
-    await runSemanticHostGraphWebGpu(
-      disposableKernelDevice,
-      finiteCase.prepared,
+    const disposablePipeline =
+      await prepareSemanticHostGraphWebGpuPipeline(
+        disposableKernelDevice,
+        finiteCase.prepared,
+      );
+    await runSemanticHostGraphWebGpuPipeline(
+      disposablePipeline,
       { inputs: finiteCase.inputs },
     );
     disposableDevice.destroy();
     await disposableDevice.lost;
     await nextWebGpuEvidenceTask();
+    await expect(runSemanticHostGraphWebGpuPipeline(
+      disposablePipeline,
+      { inputs: finiteCase.inputs },
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-DEVICE-LOST",
+    });
+    destroySemanticHostGraphWebGpuPipeline(disposablePipeline);
+    await expect(runSemanticHostGraphWebGpuPipeline(
+      disposablePipeline,
+      { inputs: finiteCase.inputs },
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-UNVERIFIED-PIPELINE",
+    });
+    await expect(runSemanticHostGraphWebGpuPipeline(
+      { ...disposablePipeline },
+      { inputs: finiteCase.inputs },
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-UNVERIFIED-PIPELINE",
+    });
     await expect(runSemanticHostGraphWebGpu(
       disposableKernelDevice,
       finiteCase.prepared,

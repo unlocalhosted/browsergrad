@@ -30,7 +30,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count repetition, bounded captured-input and runtime-control u32 conditionals, explicit fail-stop materialization, CPU oracle, and authority-bound portable WebGPU executor have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate fixed-repeat/unrolled performance observation; pipeline authority, GPU/backend-derived or mid-graph control, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count repetition, bounded captured-input and runtime-control u32 conditionals, explicit fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; GPU/backend-derived or mid-graph control, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every exit criterion for the declared gate profile is
 complete. Verification of a closed initial profile does not imply broader
@@ -187,9 +187,9 @@ exact-payload CPU/required-WebGPU convergence is no longer a blocker.
    backend/final-release authority is minted in one process. Serialized
    observations and synthetic fixtures grant no production authority.
 
-Gate 7 remains incomplete: its CPU and portable-WebGPU executors cover the
-closed DAG, fixed repetition, captured-input and request-time runtime-control
-u32 conditionals. Pipeline authority, GPU/backend-derived or mid-graph control,
+Gate 7 remains incomplete: its CPU and portable-WebGPU executors cover the closed
+DAG, fixed repetition, and both bounded u32 conditional profiles; its WebGPU
+adapter exposes a separate exact device-bound pipeline authority. GPU/backend-derived or mid-graph control,
 transport/topology, worker meshes, and native systems remain unimplemented.
 
 ## Purpose
@@ -2208,21 +2208,38 @@ exact u32 max, event-marked/materialized whole-allocation u8 copy, and three
 fixed repetitions of f32 sum plus both captured-input and both runtime-control
 u8-copy branches, and separately proves non-finite f32 and lost-device refusal.
 
+The separate `browsergrad.host-graph.webgpu-pipeline@1` authority binds one
+exact prepared graph to one `GPUDevice`. Preparation validates the complete
+device limit envelope and compiles every unique WGSL pipeline reachable at
+each exact graph step, including both alternatives of every bounded
+conditional, before request-owned buffers exist. The opaque immutable result
+records graph/backend identity, exact feature and relevant-limit facts,
+WGSL-module set, workgroup schedule, and explicit collective numerical
+policies in `pipelineIdentityHash`; preparation also enforces a caller-
+lowerable maximum under the fixed 128-pipeline portable ceiling. Execution accepts only pipelines in the
+authorized step slot; copied, destroyed, cross-device, or program-mismatched
+authorities fail closed. Request inputs and runtime controls are still captured
+before the convenience path's first device access or await. That path creates
+an ephemeral authority through the same implementation; hot callers may
+prepare once, reuse it across runs, and destroy it explicitly. Device loss
+invalidates both the authority and underlying bounded cache.
+
 A separate required performance record compares the fixed-repeat graph with a
 statically unrolled graph that has bit-exact CPU/WebGPU outputs, equal
 element-operation counts, and the same eight expanded WebGPU steps. The
 two-rank 65,536-element f32 workload uses an untimed correctness preflight,
-eight warmups, and twelve alternating paired end-to-end host-API samples with
-complete readback and queue drain. The current Apple Metal 3 observation has
-1.60 ms fixed-repeat and 1.90 ms unrolled medians. Raw samples and exact
-environment identity are retained; no superiority or regression threshold is
-asserted.
+eight warmups, and twelve alternating paired authority-bound execution samples
+with complete readback and queue drain after both exact pipeline authorities
+are prewarmed outside the measurement. The current Apple Metal 3 observation
+has 1.60 ms fixed-repeat and 1.70 ms unrolled medians under backend 1.7.0.
+Raw samples, pipeline identities, and exact environment identity are retained;
+no superiority or regression threshold is asserted.
 
-No pipeline authority, GPU/backend-derived or mid-graph control node,
-transport/topology adapter, worker mesh, or native companion exists yet, so
-Gate 7 remains `in progress`. Runtime controls are request-time host inputs,
-not dynamic launches or loop counts. Current events do not claim timestamps,
-external waits, or cross-queue/cross-worker synchronization.
+No GPU/backend-derived or mid-graph control node, transport/topology adapter,
+worker mesh, or native companion exists yet, so Gate 7 remains `in progress`.
+Runtime controls are request-time host inputs, not dynamic launches or loop
+counts. Current events do not claim timestamps, external waits, or
+cross-queue/cross-worker synchronization.
 
 ## Proof Matrix and Release Gates
 

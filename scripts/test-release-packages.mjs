@@ -655,6 +655,7 @@ try {
     "defineWgslKernelProgram",
     "WgslShaderCreationError",
     "WgslPipelineCreationError",
+    "prepareWgslKernelPipelineSet",
     "prepareWgslKernelProgramSequence",
     "createWgslStorageBuffer",
     "defineCuda1DProgram",
@@ -666,6 +667,9 @@ try {
     "prepareSemanticViewCopyWgsl",
     "runSemanticViewCopyWebGpu",
     "prepareSemanticHostGraphWebGpu",
+    "prepareSemanticHostGraphWebGpuPipeline",
+    "runSemanticHostGraphWebGpuPipeline",
+    "destroySemanticHostGraphWebGpuPipeline",
     "runSemanticHostGraphWebGpu",
     "prepareSemanticGemmWgsl",
     "runSemanticGemmWebGpu",
@@ -676,7 +680,7 @@ try {
   }
 
   for (const [subpath, exportName] of [
-    ["wgsl_program", "prepareWgslKernelProgramSequence"],
+    ["wgsl_program", "prepareWgslKernelPipelineSet"],
     ["float16", "createWgslFloat16Array"],
     ["cuda_concepts", "runThreadGrid"],
     ["cuda_program", "defineCuda1DProgram"],
@@ -1625,7 +1629,12 @@ import { HOST_GRAPH_CPU_PROFILE, createVerifiedHostGraphArtifact, hostGraphArtif
 import { hashSemanticArtifact, parseWireI64, parseWireU64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 import densePermutationFixtures from "@unlocalhosted/browsergrad-semantic-core/fixtures/kernel-v1/dense-permutation-view-copy.cases.json" with { type: "json" };
 import { prepareSemanticViewCopyWgsl } from "@unlocalhosted/browsergrad-kernels/semantic_view_copy";
-import { prepareSemanticHostGraphWebGpu } from "@unlocalhosted/browsergrad-kernels/semantic_host_graph";
+import {
+  destroySemanticHostGraphWebGpuPipeline,
+  prepareSemanticHostGraphWebGpu,
+  prepareSemanticHostGraphWebGpuPipeline,
+  runSemanticHostGraphWebGpuPipeline,
+} from "@unlocalhosted/browsergrad-kernels/semantic_host_graph";
 import {
   compileCudaLiteKernelWithLayoutBindings,
   compileCudaLiteKernelWithViewCopyBinding,
@@ -1824,6 +1833,11 @@ const rawCopyWebGpu = await prepareSemanticHostGraphWebGpu(
   rawCopyGraph.artifact,
   { kernelArtifacts: [], layoutArtifacts: [] },
 );
+if (
+  typeof prepareSemanticHostGraphWebGpuPipeline !== "function"
+  || typeof runSemanticHostGraphWebGpuPipeline !== "function"
+  || typeof destroySemanticHostGraphWebGpuPipeline !== "function"
+) throw new Error("fresh consumer lost semantic host-graph pipeline authority exports");
 const rawCopyBytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 255]);
 const rawCopyElseBytes = new Uint8Array([255, 6, 5, 4, 3, 2, 1, 0]);
 const rawCopyResult = await rawCopyCpu.execute({

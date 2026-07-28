@@ -9,6 +9,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Add `browsergrad.wgsl.pipeline-set@1` and
+  `browsergrad.host-graph.webgpu-pipeline@1` as separate opaque,
+  device-bound pipeline authorities. Preparation prewarms every unique program
+  admitted at each exact step slot, including bounded conditional
+  alternatives; copied, destroyed, cross-device, reordered, or program-
+  mismatched use fails closed before request resource allocation.
+- Host-graph pipeline identity binds the semantic graph, WebGPU backend
+  version, WGSL modules, schedule, negotiated device features, relevant
+  limits, and explicit numerical policies into the low-level cache namespace.
+  Preparation is bounded by a caller-lowerable maximum under the fixed
+  128-pipeline portable ceiling. The convenience graph runner captures caller
+  inputs/controls first and then delegates through the same ephemeral authority
+  path, while hot callers can prepare once, reuse, and explicitly destroy the
+  authority.
 - Authority-bound `browsergrad.host-graph.webgpu@1` preparation and execution.
   Verified static DAG dispatches expand through the canonical view-copy
   lowerer per rank; f32/i32/u32 all-reduce expands into bounded pairwise
@@ -59,10 +73,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - A separate required host-graph performance lane compares version-1.4
   fixed-count repetition with a bit-exact, equal-work version-1.2 unrolled
   graph over two ranks and 65,536 f32 elements. It uses an untimed CPU and
-  WebGPU correctness preflight, eight warmups, twelve alternating paired
-  complete-host-API samples, full readback, and queue drains. Raw samples and
-  the named browser/device configuration are retained; the record makes no
-  superiority or regression claim.
+  WebGPU correctness preflight, prewarms both exact pipeline authorities,
+  then takes eight warmups and twelve alternating paired authority-bound
+  execution samples with full readback and queue drains. Raw samples, pipeline
+  identities, and the named browser/device configuration are retained; the
+  record makes no superiority or regression claim.
 - Semantic attention preparation consumes exact verified rank-4 f32 logical
   meaning plus an independently authorized online K/V-tile schedule. Generated
   WGSL cooperatively stages K/V rows, keeps one Q/output row private per lane,

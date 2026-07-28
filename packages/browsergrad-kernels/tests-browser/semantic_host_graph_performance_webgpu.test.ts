@@ -28,8 +28,11 @@ import { createDevice } from "../src/device";
 import {
   SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
   SemanticHostGraphWebGpuError,
+  destroySemanticHostGraphWebGpuPipeline,
+  prepareSemanticHostGraphWebGpuPipeline,
   prepareSemanticHostGraphWebGpu,
-  runSemanticHostGraphWebGpu,
+  runSemanticHostGraphWebGpuPipeline,
+  type PreparedSemanticHostGraphWebGpuPipeline,
   type PreparedSemanticHostGraphWebGpu,
   type SemanticHostGraphWebGpuInputBinding,
   type SemanticHostGraphWebGpuOutputBinding,
@@ -69,9 +72,9 @@ const MEASUREMENT_METHOD = Object.freeze({
   measuredIterationsPerImplementation: MEASURED_ITERATIONS,
   ordering: "paired-alternating-first-implementation",
   candidateLifecycle:
-    "captured-input-fixed-repeat-cached-pipelines-dispatch-readback-validation-cleanup",
+    "prewarmed-pipeline-authority-captured-input-fixed-repeat-dispatch-readback-validation-cleanup",
   baselineLifecycle:
-    "captured-input-unrolled-cached-pipelines-dispatch-readback-validation-cleanup",
+    "prewarmed-pipeline-authority-captured-input-unrolled-dispatch-readback-validation-cleanup",
   semanticRelation: "bit-exact-equivalent-expanded-work",
   comparisonClaim: "observational-only-no-superiority-or-regression-threshold",
 });
@@ -138,6 +141,10 @@ it("records separate named semantic host-graph performance evidence", async (con
   const uncapturedErrors: string[] = [];
   let device: GPUDevice | undefined;
   let kernelDevice: KernelDevice | undefined;
+  let repeatedPipeline:
+    PreparedSemanticHostGraphWebGpuPipeline | undefined;
+  let unrolledPipeline:
+    PreparedSemanticHostGraphWebGpuPipeline | undefined;
   const uncapturedHandler = (event: GPUUncapturedErrorEvent) => {
     uncapturedErrors.push(event.error.message);
   };
@@ -206,15 +213,25 @@ it("records separate named semantic host-graph performance evidence", async (con
     kernelDevice = await createDevice({ device });
     device.addEventListener("uncapturederror", uncapturedHandler);
 
+    stage = "pipeline-authority-prewarm";
+    [repeatedPipeline, unrolledPipeline] = await Promise.all([
+      prepareSemanticHostGraphWebGpuPipeline(
+        kernelDevice,
+        fixture.repeatedPrepared,
+      ),
+      prepareSemanticHostGraphWebGpuPipeline(
+        kernelDevice,
+        fixture.unrolledPrepared,
+      ),
+    ]);
+
     stage = "separate-correctness-preflight";
     const candidate = await runGraph(
-      kernelDevice,
-      fixture.repeatedPrepared,
+      repeatedPipeline,
       fixture.inputs,
     );
     const baseline = await runGraph(
-      kernelDevice,
-      fixture.unrolledPrepared,
+      unrolledPipeline,
       fixture.inputs,
     );
     requireOutputEquality(
@@ -231,13 +248,11 @@ it("records separate named semantic host-graph performance evidence", async (con
     stage = "warmup";
     for (let index = 0; index < WARMUP_ITERATIONS; index += 1) {
       await runGraph(
-        kernelDevice,
-        fixture.repeatedPrepared,
+        repeatedPipeline,
         fixture.inputs,
       );
       await runGraph(
-        kernelDevice,
-        fixture.unrolledPrepared,
+        unrolledPipeline,
         fixture.inputs,
       );
     }
@@ -250,27 +265,23 @@ it("records separate named semantic host-graph performance evidence", async (con
       if (candidateFirst) {
         candidateSamples.push(await measure(device, () =>
           runGraph(
-            kernelDevice!,
-            fixture.repeatedPrepared,
+            repeatedPipeline!,
             fixture.inputs,
           )));
         baselineSamples.push(await measure(device, () =>
           runGraph(
-            kernelDevice!,
-            fixture.unrolledPrepared,
+            unrolledPipeline!,
             fixture.inputs,
           )));
       } else {
         baselineSamples.push(await measure(device, () =>
           runGraph(
-            kernelDevice!,
-            fixture.unrolledPrepared,
+            unrolledPipeline!,
             fixture.inputs,
           )));
         candidateSamples.push(await measure(device, () =>
           runGraph(
-            kernelDevice!,
-            fixture.repeatedPrepared,
+            repeatedPipeline!,
             fixture.inputs,
           )));
       }
@@ -283,10 +294,12 @@ it("records separate named semantic host-graph performance evidence", async (con
       method: MEASUREMENT_METHOD as unknown as JsonObject,
       candidate: Object.freeze({
         implementationId: CANDIDATE_ID,
+        pipelineIdentityHash: repeatedPipeline.pipelineIdentityHash,
         ...candidateStats,
       }),
       baseline: Object.freeze({
         implementationId: BASELINE_ID,
+        pipelineIdentityHash: unrolledPipeline.pipelineIdentityHash,
         ...baselineStats,
       }),
       candidateMedianOverBaselineMedian:
@@ -344,6 +357,12 @@ it("records separate named semantic host-graph performance evidence", async (con
     throw error;
   } finally {
     device?.removeEventListener("uncapturederror", uncapturedHandler);
+    if (repeatedPipeline !== undefined) {
+      destroySemanticHostGraphWebGpuPipeline(repeatedPipeline);
+    }
+    if (unrolledPipeline !== undefined) {
+      destroySemanticHostGraphWebGpuPipeline(unrolledPipeline);
+    }
     kernelDevice?.clearCache();
     device?.destroy();
   }
@@ -563,13 +582,11 @@ function patternedF32Bytes(length: number, modulus: number): Uint8Array {
 }
 
 async function runGraph(
-  device: KernelDevice,
-  prepared: PreparedSemanticHostGraphWebGpu,
+  preparedPipeline: PreparedSemanticHostGraphWebGpuPipeline,
   inputs: readonly SemanticHostGraphWebGpuInputBinding[],
 ): Promise<readonly SemanticHostGraphWebGpuOutputBinding[]> {
-  const result = await runSemanticHostGraphWebGpu(
-    device,
-    prepared,
+  const result = await runSemanticHostGraphWebGpuPipeline(
+    preparedPipeline,
     { inputs },
   );
   return result.outputs;

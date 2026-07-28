@@ -7,6 +7,7 @@ import {
   defineWgslKernelProgram,
   destroyWgslStorageBuffer,
   getWgslPipelineCacheStats,
+  prepareWgslKernelPipelineSet,
   prepareWgslKernelProgramSequence,
   readWgslStorageBuffer,
   runWgslKernelProgram,
@@ -142,6 +143,115 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       pipelineCacheHits: 1,
       pipelineCacheMisses: 2,
     });
+  });
+
+  it("prewarms an exact device-bound pipeline authority", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const program = defineWgslKernelProgram({
+      name: "wgsl_pipeline_authority",
+      workgroupSize: [1, 1, 1],
+      bindings: [{
+        kind: "storage",
+        name: "x",
+        valueType: "f32",
+        access: "read_write",
+      }],
+      wgsl: `
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@compute @workgroup_size(1, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&x)) { x[gid.x] = x[gid.x] + 1.0; }
+}`,
+    });
+    const steps = [{
+      program,
+      launch: { dispatchCount: [1, 1, 1] as const },
+    }];
+
+    clearWgslPipelineCache(device);
+    const pipelines = await prepareWgslKernelPipelineSet(device, steps);
+    expect(pipelines).toMatchObject({
+      profile: "browsergrad.wgsl.pipeline-set@1",
+      stepCount: 1,
+      pipelineCount: 1,
+    });
+    expect(Object.isFrozen(pipelines)).toBe(true);
+    expect(getWgslPipelineCacheStats(device)).toEqual({
+      pipelineCacheSize: 1,
+      pipelineCacheHits: 0,
+      pipelineCacheMisses: 1,
+    });
+    const isolatedNamespace = await prepareWgslKernelPipelineSet(
+      device,
+      steps,
+      [],
+      "browsergrad.test.pipeline-authority-b",
+    );
+    expect(getWgslPipelineCacheStats(device)).toEqual({
+      pipelineCacheSize: 2,
+      pipelineCacheHits: 0,
+      pipelineCacheMisses: 2,
+    });
+    isolatedNamespace.destroy();
+
+    const prepared = await prepareWgslKernelProgramSequence(
+      device,
+      steps,
+      { buffers: { x: new Float32Array([1]) }, readback: ["x"] },
+      pipelines,
+    );
+    expect(getWgslPipelineCacheStats(device)).toEqual({
+      pipelineCacheSize: 2,
+      pipelineCacheHits: 0,
+      pipelineCacheMisses: 2,
+    });
+    expect([
+      ...(await prepared.run()).buffers.x as Float32Array,
+    ]).toEqual([2]);
+    prepared.destroy();
+
+    await expect(prepareWgslKernelProgramSequence(
+      device,
+      steps,
+      { buffers: { x: new Float32Array([1]) } },
+      { ...pipelines },
+    )).rejects.toThrow(/was not issued by this module instance/);
+
+    const differentProgram = defineWgslKernelProgram({
+      ...program,
+      wgsl: program.wgsl.replace("+ 1.0", "+ 2.0"),
+    });
+    await expect(prepareWgslKernelProgramSequence(
+      device,
+      [{
+        program: differentProgram,
+        launch: { dispatchCount: [1, 1, 1] },
+      }],
+      { buffers: { x: new Float32Array([1]) } },
+      pipelines,
+    )).rejects.toThrow(/does not authorize this exact program sequence/);
+
+    const otherDevice = await createDevice();
+    try {
+      await expect(prepareWgslKernelProgramSequence(
+        otherDevice,
+        steps,
+        { buffers: { x: new Float32Array([1]) } },
+        pipelines,
+      )).rejects.toThrow(/belongs to a different GPUDevice/);
+    } finally {
+      otherDevice.gpu.destroy();
+    }
+
+    pipelines.destroy();
+    pipelines.destroy();
+    await expect(prepareWgslKernelProgramSequence(
+      device,
+      steps,
+      { buffers: { x: new Float32Array([1]) } },
+      pipelines,
+    )).rejects.toThrow(/has been destroyed/);
   });
 
   it("runs f32 texture2d bindings", async () => {

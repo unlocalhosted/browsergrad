@@ -141,6 +141,29 @@ export interface WgslPreparedKernelSequence {
   destroy(): void;
 }
 
+export const WGSL_PREPARED_PIPELINE_SET_PROFILE =
+  "browsergrad.wgsl.pipeline-set@1" as const;
+export const WGSL_PREPARED_PIPELINE_SET_MAX_PIPELINES = 128;
+
+/**
+ * Opaque, device-bound authority for exact WGSL sequence slots and their
+ * explicitly admitted alternatives. Preparation compiles every unique
+ * pipeline before request-owned resources are allocated; copied, destroyed,
+ * cross-device, reordered, or program-mismatched authorities fail closed.
+ */
+export interface WgslPreparedPipelineSet {
+  readonly profile: typeof WGSL_PREPARED_PIPELINE_SET_PROFILE;
+  readonly stepCount: number;
+  readonly pipelineCount: number;
+  readonly maxPipelineCount: number;
+  destroy(): void;
+}
+
+export interface WgslKernelPipelineAlternative {
+  readonly stepIndex: number;
+  readonly program: WgslKernelProgram;
+}
+
 /** Cache accounting for WGSL program/sequence preparation on one KernelDevice. */
 export interface WgslPipelineCacheStats {
   readonly pipelineCacheSize: number;
@@ -164,6 +187,13 @@ export class WgslPipelineCreationError extends KernelError {
   }
 }
 
+export class WgslPipelineSetResourceLimitError extends KernelError {
+  constructor(message: string) {
+    super(message);
+    this.name = "WgslPipelineSetResourceLimitError";
+  }
+}
+
 interface PendingWgslPipeline {
   readonly bindGroupLayout: GPUBindGroupLayout;
   readonly pipeline: Promise<GPUComputePipeline>;
@@ -175,13 +205,24 @@ interface WgslPipelineCache {
   misses: number;
 }
 
+interface PreparedPipelineSetState {
+  readonly gpu: GPUDevice;
+  readonly cacheNamespace: string;
+  readonly pipelineKeysByStep: readonly (readonly string[])[];
+  readonly pipelinesByKey: ReadonlyMap<string, PendingWgslPipeline>;
+  destroyed: boolean;
+}
+
 type KernelDeviceImpl = ReturnType<typeof asImpl>;
 type PreparedStorageBuffer = { binding: CollectedWgslStorageBinding; buffer: GPUBuffer; byteLength: number; owned: boolean };
 type PreparedUniformBuffer = { buffer: GPUBuffer; byteLength: number };
 type PreparedExecutableStep = { pipeline: GPUComputePipeline; bindGroup: GPUBindGroup; program: WgslKernelProgram };
 
-const WGSL_PIPELINE_CACHE_LIMIT = 128;
+const WGSL_PIPELINE_CACHE_LIMIT =
+  WGSL_PREPARED_PIPELINE_SET_MAX_PIPELINES;
 const WGSL_PIPELINE_CACHE = new WeakMap<GPUDevice, WgslPipelineCache>();
+const PREPARED_PIPELINE_SETS =
+  new WeakMap<object, PreparedPipelineSetState>();
 const PREPARED_READBACK_POOL_LIMIT_PER_SIZE = 2;
 
 export async function detectKernelFeatures(
@@ -398,16 +439,118 @@ export async function runWgslKernelProgramSequence(
   }
 }
 
+export async function prepareWgslKernelPipelineSet(
+  device: KernelDevice,
+  steps: readonly WgslKernelSequenceStep[],
+  alternatives: readonly WgslKernelPipelineAlternative[] = [],
+  cacheNamespace: string = WGSL_PREPARED_PIPELINE_SET_PROFILE,
+  maxPipelineCount = WGSL_PREPARED_PIPELINE_SET_MAX_PIPELINES,
+): Promise<WgslPreparedPipelineSet> {
+  if (cacheNamespace.length === 0) {
+    throw new KernelError("WGSL pipeline cache namespace must not be empty");
+  }
+  if (
+    !Number.isInteger(maxPipelineCount) ||
+    maxPipelineCount <= 0 ||
+    maxPipelineCount > WGSL_PREPARED_PIPELINE_SET_MAX_PIPELINES
+  ) {
+    throw new WgslPipelineSetResourceLimitError(
+      `WGSL pipeline set maxPipelineCount must be an integer between 1 and ${WGSL_PREPARED_PIPELINE_SET_MAX_PIPELINES}`,
+    );
+  }
+  const gpu = asImpl(device).gpu;
+  const programsByStep = steps.map(({ program }) => [program]);
+  for (const [index, alternative] of alternatives.entries()) {
+    if (
+      !Number.isInteger(alternative.stepIndex) ||
+      alternative.stepIndex < 0 ||
+      alternative.stepIndex >= steps.length
+    ) {
+      throw new KernelError(
+        `pipeline alternative ${index} has invalid stepIndex ${alternative.stepIndex}`,
+      );
+    }
+    programsByStep[alternative.stepIndex]!.push(alternative.program);
+  }
+  const pipelineKeysByStep = Object.freeze(programsByStep.map((programs) =>
+    Object.freeze([...new Set(programs.map((program) =>
+      pipelineCacheKey(
+        program,
+        layoutEntriesForProgram(program),
+        cacheNamespace,
+      )
+    ))])
+  ));
+  const uniquePipelineCount = new Set(pipelineKeysByStep.flat()).size;
+  if (uniquePipelineCount > maxPipelineCount) {
+    throw new WgslPipelineSetResourceLimitError(
+      `WGSL pipeline set requires ${uniquePipelineCount} unique pipelines; limit is ${maxPipelineCount}`,
+    );
+  }
+  const pipelinesByKey = new Map<string, PendingWgslPipeline>();
+  for (let index = 0; index < steps.length; index += 1) {
+    validateDispatchCountWithName(
+      steps[index]!.launch.dispatchCount,
+      `steps[${index}].launch.dispatchCount`,
+    );
+    for (const program of programsByStep[index]!) {
+      const key = pipelineCacheKey(
+        program,
+        layoutEntriesForProgram(program),
+        cacheNamespace,
+      );
+      if (!pipelinesByKey.has(key)) {
+        pipelinesByKey.set(
+          key,
+          getOrCreatePipeline(
+            gpu,
+            program,
+            layoutEntriesForProgram(program),
+            cacheNamespace,
+          ),
+        );
+      }
+    }
+  }
+  await Promise.all(
+    [...pipelinesByKey.values()].map(({ pipeline }) => pipeline),
+  );
+  const state: PreparedPipelineSetState = {
+    gpu,
+    cacheNamespace,
+    pipelineKeysByStep,
+    pipelinesByKey,
+    destroyed: false,
+  };
+  let prepared!: WgslPreparedPipelineSet;
+  prepared = Object.freeze({
+    profile: WGSL_PREPARED_PIPELINE_SET_PROFILE,
+    stepCount: steps.length,
+    pipelineCount: pipelinesByKey.size,
+    maxPipelineCount,
+    destroy(): void {
+      const current = PREPARED_PIPELINE_SETS.get(prepared as object);
+      if (current !== undefined) current.destroyed = true;
+    },
+  });
+  PREPARED_PIPELINE_SETS.set(prepared as object, state);
+  return prepared;
+}
+
 export async function prepareWgslKernelProgramSequence(
   device: KernelDevice,
   steps: readonly WgslKernelSequenceStep[],
   input: WgslKernelRunInput,
+  pipelineSet?: WgslPreparedPipelineSet,
 ): Promise<WgslPreparedKernelSequence> {
   if (steps.length === 0) throw new KernelError("WGSL program sequence must contain at least one step");
   const impl = asImpl(device);
   const gpu = impl.gpu;
   const dispatchCounts = steps.map((step, index) => validateDispatchCountWithName(step.launch.dispatchCount, `steps[${index}].launch.dispatchCount`));
   const programs = steps.map((step) => step.program);
+  const authorizedPipelines = pipelineSet === undefined
+    ? undefined
+    : resolvePreparedPipelineSet(gpu, steps, pipelineSet);
   const readbackNames = new Set(
     input.readback ??
       steps
@@ -506,7 +649,8 @@ export async function prepareWgslKernelProgramSequence(
         uniformBuffersForStep(uniformBuffersByStep, stepIndex),
         textureViewsByName,
       );
-      const pending = getOrCreatePipeline(gpu, program, layoutEntries);
+      const pending = authorizedPipelines?.[stepIndex] ??
+        getOrCreatePipeline(gpu, program, layoutEntries);
       const bindGroup = gpu.createBindGroup({
         layout: pending.bindGroupLayout,
         entries: [...bindGroupEntries],
@@ -884,17 +1028,103 @@ function bindGroupInputsForProgram(
   return { layoutEntries, bindGroupEntries };
 }
 
-function getOrCreatePipeline(
+function layoutEntriesForProgram(
+  program: WgslKernelProgram,
+): readonly GPUBindGroupLayoutEntry[] {
+  return program.bindings.map((binding): GPUBindGroupLayoutEntry => {
+    if (binding.kind === "storage") {
+      return {
+        binding: binding.binding,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: {
+          type: binding.access === "read"
+            ? "read-only-storage"
+            : "storage",
+        },
+      };
+    }
+    if (binding.kind === "uniform") {
+      return {
+        binding: binding.binding,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: "uniform" },
+      };
+    }
+    return {
+      binding: binding.binding,
+      visibility: GPUShaderStage.COMPUTE,
+      texture: {
+        sampleType: "unfilterable-float",
+        viewDimension: "2d",
+        multisampled: false,
+      },
+    };
+  });
+}
+
+function resolvePreparedPipelineSet(
   gpu: GPUDevice,
+  steps: readonly WgslKernelSequenceStep[],
+  prepared: WgslPreparedPipelineSet,
+): readonly PendingWgslPipeline[] {
+  const state = PREPARED_PIPELINE_SETS.get(prepared as object);
+  if (state === undefined) {
+    throw new KernelError(
+      "WGSL pipeline set was not issued by this module instance",
+    );
+  }
+  if (state.destroyed) {
+    throw new KernelError("prepared WGSL pipeline set has been destroyed");
+  }
+  if (state.gpu !== gpu) {
+    throw new KernelError(
+      "prepared WGSL pipeline set belongs to a different GPUDevice",
+    );
+  }
+  const pipelineKeys = steps.map(({ program }) =>
+    pipelineCacheKey(
+      program,
+      layoutEntriesForProgram(program),
+      state.cacheNamespace,
+    )
+  );
+  if (
+    pipelineKeys.length !== state.pipelineKeysByStep.length ||
+    pipelineKeys.some((key, index) =>
+      !state.pipelineKeysByStep[index]?.includes(key))
+  ) {
+    throw new KernelError(
+      "prepared WGSL pipeline set does not authorize this exact program sequence",
+    );
+  }
+  return pipelineKeys.map((key) => state.pipelinesByKey.get(key)!);
+}
+
+function pipelineCacheKey(
   program: WgslKernelProgram,
   layoutEntries: readonly GPUBindGroupLayoutEntry[],
-): PendingWgslPipeline {
-  const cacheKey = [
+  cacheNamespace = "",
+): string {
+  return [
+    cacheNamespace,
     program.name,
     hashString(program.wgsl),
     program.workgroupSize.join(","),
     layoutSignature(layoutEntries),
   ].join("::");
+}
+
+function getOrCreatePipeline(
+  gpu: GPUDevice,
+  program: WgslKernelProgram,
+  layoutEntries: readonly GPUBindGroupLayoutEntry[],
+  cacheNamespace = "",
+): PendingWgslPipeline {
+  const cacheKey = pipelineCacheKey(
+    program,
+    layoutEntries,
+    cacheNamespace,
+  );
   const cache = getOrCreateWgslPipelineCache(gpu);
   const existing = cache.entries.get(cacheKey);
   if (existing) {

@@ -31,7 +31,7 @@ PyTorch-shaped surface.
 | `runThreadGrid`, `referenceSaxpy`, `referenceExclusiveScan`, `referenceFindRepeats`, `referenceOrderedCircleRender` | Thread-grid teaching references for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
 | `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` / `simulateCuda1DGrid` | CUDA-shaped compatibility aliases for labs and rubrics that teach CUDA vocabulary | ✅ |
 | `prepareSemanticViewCopyWgsl` / `runSemanticViewCopyWebGpu` | Verified `view-copy@1.0` lowering over canonical layout/index artifacts, with exact 32-bit-word storage and structured guarded padding | ✅ 13-case strict CPU/WebGPU parity on Apple Metal 3 across f32/i32/u32, ranks 1–4, striding, broadcast, offsets, and float padding; release evidence remains commit-scoped |
-| `prepareSemanticHostGraphWebGpu` / `runSemanticHostGraphWebGpu` | Authority-bound `browsergrad.host-graph@1` execution with per-rank private storage, canonical view-copy dispatches, whole-allocation raw copies, dependency-ordered completion events, bounded fixed-count repetition, captured-input and captured-runtime-control u32 conditionals, terminal materialization, and ordered f32/i32/u32 all-reduce | ✅ required real-WebGPU complete-output bit parity with the CPU graph oracle for finite f32 sum/signed-zero min, wrapping i32 sum, exact u32 max, event-marked/materialized u8 allocation copy, repeated f32 sum, and both branches of both conditional sources, plus a separate observational fixed-repeat/unrolled performance record; GPU/backend-derived control, transport, and native companions remain separate |
+| `prepareSemanticHostGraphWebGpu` / `prepareSemanticHostGraphWebGpuPipeline` / `runSemanticHostGraphWebGpuPipeline` | Authority-bound `browsergrad.host-graph@1` execution with a separately prepared exact device-bound pipeline authority, per-rank private storage, canonical view-copy dispatches, whole-allocation raw copies, dependency-ordered completion events, bounded fixed-count repetition, captured-input and captured-runtime-control u32 conditionals, terminal materialization, and ordered f32/i32/u32 all-reduce | ✅ required real-WebGPU complete-output bit parity with the CPU graph oracle for finite f32 sum/signed-zero min, wrapping i32 sum, exact u32 max, event-marked/materialized u8 allocation copy, repeated f32 sum, and both branches of both conditional sources through prewarmed pipeline authority, plus a separate observational fixed-repeat/unrolled authority-reuse record; GPU/backend-derived control, transport, and native companions remain separate |
 | `prepareSemanticGemmWgsl` / `runSemanticGemmWebGpu` | Verified logical GEMM plus independent schedule lowering with cooperative workgroup staging, uniform barriers, and masked boundary tiles | ✅ bit-exact only for semantic-core certified exact f32 inputs; required irregular two-schedule WebGPU evidence |
 | `prepareSemanticAttentionWgsl` / `runSemanticAttentionWebGpu` | Verified attention plus independent online K/V-tile schedule lowering/execution with cooperative staging, uniform barriers, and causal/tail masks before state updates | ✅ required causal/non-causal two-schedule CPU/WebGPU comparison plus separate observational host-API performance record on Apple Metal 3 |
 | `rowWiseOnlineAttentionDirect` | Fused row-wise online-softmax attention baseline with strict real-WebGPU parity vs composed reference; not block-tiled FlashAttention. | ✅ |
@@ -81,6 +81,10 @@ PyTorch-shaped surface.
   avoid per-call upload and skip readback with `readback: []`.
 - `prepareWgslKernelProgramSequence()` — prebuilds pipelines and bind groups
   once, then reruns the same WGSL sequence over resident buffers for hot loops.
+- `prepareWgslKernelPipelineSet()` — prewarms an opaque device-bound set for
+  exact step slots and explicitly declared alternatives. Passing that set to
+  `prepareWgslKernelProgramSequence()` rejects copies, destroyed authorities,
+  cross-device use, reordering, and unadmitted programs before allocation.
 - `getWgslPipelineCacheStats()` / `clearWgslPipelineCache()` — inspect or
   invalidate only the generic WGSL program cache for one device. This is kept
   separate from `device.getStats()` so compiler-prepared sequences have
@@ -211,6 +215,20 @@ then; branch identity remains part of specialization and terminal evidence.
 This adds bounded request-time host control, not GPU/backend-derived
 predicates, mid-graph feedback, dynamic launches, or runtime loop counts.
 
+`prepareSemanticHostGraphWebGpuPipeline()` binds the exact graph to one
+`GPUDevice` and compiles every unique pipeline admitted at every exact step
+slot, including both sides of each conditional. Its immutable
+`browsergrad.host-graph.webgpu-pipeline@1` result hashes the graph, backend,
+WGSL modules, schedule, negotiated features, relevant limits, and numerical
+policies and enforces a caller-lowerable maximum under the fixed 128-pipeline
+portable ceiling. `runSemanticHostGraphWebGpuPipeline()` reuses that authority while
+creating private request buffers; copied, destroyed, cross-device, or
+program-mismatched authorities fail closed. Call
+`destroySemanticHostGraphWebGpuPipeline()` when the hot-run lifetime ends.
+`runSemanticHostGraphWebGpu()` remains the convenience API and delegates
+through an ephemeral instance of the same authority path after synchronously
+capturing caller inputs and controls.
+
 Execution snapshots every rank-local input before its first await, creates only
 private zero-initialized temporary/output storage, checks device allocation,
 binding, workgroup, and dispatch limits, and permits one graph run per device.
@@ -234,9 +252,10 @@ The separately retained performance record compares version-1.4
 `fixed-count-sequential` control with a version-1.2 statically unrolled graph
 that has bit-exact CPU/WebGPU outputs, equal element-operation counts, and the
 same eight expanded WebGPU steps. The f32 two-rank, 65,536-element workload
-uses eight warmups and twelve alternating paired samples around the complete
-production host API, including readback and queue drain. The current Apple
-Metal 3 observation records 1.60 ms candidate and 1.90 ms unrolled medians; it
+prewarms both exact device-bound pipeline authorities, then uses eight warmups
+and twelve alternating paired samples around authority-bound execution,
+including readback and queue drain. The current Apple Metal 3 observation
+records 1.60 ms candidate and 1.70 ms unrolled medians under backend 1.7.0; it
 asserts no superiority or regression threshold.
 
 This profile is a bounded DAG plus fixed-count sequential repetition and

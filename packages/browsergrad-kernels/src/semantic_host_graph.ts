@@ -9,6 +9,7 @@ import {
   type HostGraphDispatchNode,
   type HostGraphExecutableNode,
   type HostGraphMaterializeNode,
+  type HostGraphNode,
   type HostGraphRepeatBodyNode,
   type HostGraphRepeatCompletion,
   type HostGraphRepeatNode,
@@ -44,11 +45,16 @@ import {
 import type { KernelDevice } from "./types.js";
 import {
   clearWgslPipelineCache,
+  prepareWgslKernelPipelineSet,
   prepareWgslKernelProgramSequence,
   WgslPipelineCreationError,
+  WgslPipelineSetResourceLimitError,
   WgslShaderCreationError,
+  WGSL_PREPARED_PIPELINE_SET_MAX_PIPELINES,
   type WgslKernelRunResult,
+  type WgslKernelPipelineAlternative,
   type WgslKernelSequenceStep,
+  type WgslPreparedPipelineSet,
   type WgslStorageBufferMetadata,
   type WgslTypedArray,
 } from "./wgsl_program.js";
@@ -59,11 +65,15 @@ import {
 
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.6.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
+  "browsergrad.host-graph.webgpu-pipeline@1" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.7.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXECUTION_MS = 300_000;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PIPELINES =
+  WGSL_PREPARED_PIPELINE_SET_MAX_PIPELINES;
 
 const DEFAULT_WORKGROUP_SIZE = 64;
 const MAX_WORKGROUP_SIZE = 256;
@@ -77,6 +87,8 @@ const MAX_VIEW_COPY_ELEMENTS = 16_777_216;
 const MAX_U32 = 0xffff_ffffn;
 const NUMERICAL_STATUS_STORAGE = "bg_graph_numerical_status";
 const PREPARED = new WeakMap<object, PreparedState>();
+const PREPARED_PIPELINES =
+  new WeakMap<object, PreparedPipelineState>();
 const ACTIVE_DEVICES = new WeakSet<GPUDevice>();
 const LOST_DEVICES = new WeakSet<GPUDevice>();
 const WATCHED_DEVICES = new WeakSet<GPUDevice>();
@@ -127,6 +139,7 @@ export type SemanticHostGraphWebGpuErrorCode =
   | "BG-WEBGPU-GRAPH-INVALID-AUTHORITY"
   | "BG-WEBGPU-GRAPH-INVALID-BINDING"
   | "BG-WEBGPU-GRAPH-UNVERIFIED-PREPARED"
+  | "BG-WEBGPU-GRAPH-UNVERIFIED-PIPELINE"
   | "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE"
   | "BG-WEBGPU-GRAPH-RESOURCE-LIMIT"
   | "BG-WEBGPU-GRAPH-DEVICE-LIMIT"
@@ -188,6 +201,12 @@ export interface SemanticHostGraphWebGpuRunOptions {
   readonly timeoutMs?: number;
 }
 
+export interface PrepareSemanticHostGraphWebGpuPipelineOptions {
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
+  readonly maxPipelineCount?: number;
+}
+
 export interface SemanticHostGraphWebGpuOutputBinding {
   readonly rank: WireU64;
   readonly resourceId: string;
@@ -237,11 +256,26 @@ export interface PreparedSemanticHostGraphWebGpu {
   readonly maxTransientWorkingSetBytes: WireU64;
 }
 
+export interface PreparedSemanticHostGraphWebGpuPipeline {
+  readonly profile:
+    typeof SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE;
+  readonly backendVersion:
+    typeof SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION;
+  readonly graphSemanticHash: string;
+  readonly pipelineIdentityHash: string;
+  readonly stepCount: number;
+  readonly pipelineCount: number;
+  readonly maxPipelineCount: number;
+  readonly numericalPolicies: readonly string[];
+  readonly device: SemanticHostGraphWebGpuDeviceFacts;
+}
+
 export interface SemanticHostGraphWebGpuTrace {
   readonly profile: typeof SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE;
   readonly backendVersion:
     typeof SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION;
   readonly graphSemanticHash: string;
+  readonly pipelineIdentityHash: string;
   readonly backendSpecializationHash: string;
   readonly failureModel: typeof HOST_GRAPH_FAILURE_MODEL;
   readonly executedNodeIds: readonly string[];
@@ -299,6 +333,8 @@ interface PreparedState {
   readonly outputs: readonly ResourcePlan[];
   readonly steps: readonly WgslKernelSequenceStep[];
   readonly deviceAdmissionSteps: readonly WgslKernelSequenceStep[];
+  readonly pipelineAlternatives:
+    readonly WgslKernelPipelineAlternative[];
   readonly conditionals: readonly PreparedConditionalPlan[];
   readonly runtimeControlIds: readonly string[];
   readonly storageMetadata:
@@ -311,6 +347,18 @@ interface PreparedState {
   readonly repeats: readonly HostGraphRepeatCompletion[];
   readonly maximumBoundAllocationBytes: bigint;
   readonly workgroupSize: number;
+  readonly numericalPolicies: readonly string[];
+}
+
+interface PreparedPipelineState {
+  readonly prepared: PreparedSemanticHostGraphWebGpu;
+  readonly state: PreparedState;
+  readonly device: KernelDevice;
+  readonly gpu: GPUDevice;
+  readonly deviceFacts: SemanticHostGraphWebGpuDeviceFacts;
+  readonly pipelineSet: WgslPreparedPipelineSet;
+  readonly pipelineIdentityHash: string;
+  destroyed: boolean;
 }
 
 interface MutablePreparationCounts {
@@ -376,6 +424,27 @@ interface NativeUint8Slots {
   readonly buffer: ArrayBufferLike;
   readonly byteOffset: number;
   readonly byteLength: number;
+}
+
+function collectNodeNumericalPolicies(
+  node: HostGraphNode,
+): readonly string[] {
+  if (node.kind === "all-reduce") return [node.numericalPolicy];
+  if (node.kind === "repeat") {
+    return node.body.flatMap((bodyNode) =>
+      bodyNode.kind === "all-reduce"
+        ? [bodyNode.numericalPolicy]
+        : []
+    );
+  }
+  if (node.kind === "conditional") {
+    return [...node.thenBody, ...node.elseBody].flatMap((bodyNode) =>
+      bodyNode.kind === "all-reduce"
+        ? [bodyNode.numericalPolicy]
+        : []
+    );
+  }
+  return [];
 }
 
 /**
@@ -617,6 +686,19 @@ export async function prepareSemanticHostGraphWebGpu(
     ...conditionals.flatMap((conditional) =>
       conditional.elseBranch.steps),
   ]);
+  const pipelineAlternatives = Object.freeze(
+    conditionals.flatMap((conditional) =>
+      conditional.elseBranch.steps.map((step, index) =>
+        Object.freeze({
+          stepIndex: conditional.startStepIndex + index,
+          program: step.program,
+        })
+      )
+    ),
+  );
+  const numericalPolicies = Object.freeze(unique(
+    payload.program.nodes.flatMap(collectNodeNumericalPolicies),
+  ).sort());
   const repeats = Object.freeze(preparedGraph.topologicalNodeIds.flatMap(
     (nodeId): readonly HostGraphRepeatCompletion[] => {
       const node = nodes.get(nodeId);
@@ -678,6 +760,7 @@ export async function prepareSemanticHostGraphWebGpu(
     outputs,
     steps: Object.freeze([...steps]),
     deviceAdmissionSteps,
+    pipelineAlternatives,
     conditionals: Object.freeze([...conditionals]),
     runtimeControlIds: Object.freeze([
       ...preparedGraph.runtimeControlIds,
@@ -693,6 +776,7 @@ export async function prepareSemanticHostGraphWebGpu(
     repeats,
     maximumBoundAllocationBytes,
     workgroupSize: normalized.workgroupSize,
+    numericalPolicies,
   }));
   return prepared;
 }
@@ -1009,8 +1093,52 @@ function addPreparationCounts(
 }
 
 /**
- * Execute against private rank-local buffers and publish fresh output copies
- * only after every dispatch, collective, readback, and numerical check passes.
+ * Bind an exact verifier-issued graph to one admitted GPUDevice and compile
+ * every pipeline reachable through its bounded control-flow envelope.
+ */
+export async function prepareSemanticHostGraphWebGpuPipeline(
+  device: KernelDevice,
+  prepared: PreparedSemanticHostGraphWebGpu,
+  options: PrepareSemanticHostGraphWebGpuPipelineOptions = {},
+): Promise<PreparedSemanticHostGraphWebGpuPipeline> {
+  const state = PREPARED.get(prepared as object);
+  if (state === undefined) {
+    fail(
+      "BG-WEBGPU-GRAPH-UNVERIFIED-PREPARED",
+      "$.prepared",
+      "prepared graph was not issued by this module instance",
+    );
+  }
+  const capturedOptions = capturePipelineOptions(options);
+  throwIfCancelled(capturedOptions.signal);
+  return preparePipelineAuthority(
+    device,
+    prepared,
+    state,
+    capturedOptions,
+  );
+}
+
+export function destroySemanticHostGraphWebGpuPipeline(
+  preparedPipeline: PreparedSemanticHostGraphWebGpuPipeline,
+): void {
+  const state = PREPARED_PIPELINES.get(preparedPipeline as object);
+  if (state === undefined) {
+    fail(
+      "BG-WEBGPU-GRAPH-UNVERIFIED-PIPELINE",
+      "$.preparedPipeline",
+      "prepared pipeline was not issued by this module instance",
+    );
+  }
+  if (state.destroyed) return;
+  state.destroyed = true;
+  state.pipelineSet.destroy();
+}
+
+/**
+ * Convenience execution path. It captures caller-owned inputs before device
+ * access, prepares an ephemeral pipeline authority through the same public
+ * contract, and then delegates to the authority-bound executor.
  */
 export async function runSemanticHostGraphWebGpu(
   device: KernelDevice,
@@ -1033,6 +1161,84 @@ export async function runSemanticHostGraphWebGpu(
     state,
     captured,
   );
+  const preparedPipeline = await preparePipelineAuthority(
+    device,
+    prepared,
+    state,
+    capturedOptions,
+  );
+  const pipelineState = PREPARED_PIPELINES.get(
+    preparedPipeline as object,
+  )!;
+  try {
+    return await executeCapturedHostGraph(
+      prepared,
+      pipelineState,
+      captured,
+      selectedExecution,
+      capturedOptions,
+    );
+  } finally {
+    destroySemanticHostGraphWebGpuPipeline(preparedPipeline);
+  }
+}
+
+/**
+ * Execute against private rank-local buffers using an explicit pipeline
+ * authority. Fresh outputs are published only after every dispatch,
+ * collective, readback, and numerical check passes.
+ */
+export async function runSemanticHostGraphWebGpuPipeline(
+  preparedPipeline: PreparedSemanticHostGraphWebGpuPipeline,
+  request: SemanticHostGraphWebGpuExecutionRequest,
+  options: SemanticHostGraphWebGpuRunOptions = {},
+): Promise<SemanticHostGraphWebGpuExecutionResult> {
+  const pipelineState = PREPARED_PIPELINES.get(
+    preparedPipeline as object,
+  );
+  if (pipelineState === undefined) {
+    fail(
+      "BG-WEBGPU-GRAPH-UNVERIFIED-PIPELINE",
+      "$.preparedPipeline",
+      "prepared pipeline was not issued by this module instance",
+    );
+  }
+  if (pipelineState.destroyed) {
+    fail(
+      "BG-WEBGPU-GRAPH-UNVERIFIED-PIPELINE",
+      "$.preparedPipeline",
+      "prepared pipeline authority has been destroyed",
+    );
+  }
+  const capturedOptions = captureRunOptions(options);
+  throwIfCancelled(capturedOptions.signal);
+  const captured = captureExecutionRequest(
+    request,
+    pipelineState.state,
+  );
+  const selectedExecution = selectConditionalExecution(
+    pipelineState.state,
+    captured,
+  );
+  return executeCapturedHostGraph(
+    pipelineState.prepared,
+    pipelineState,
+    captured,
+    selectedExecution,
+    capturedOptions,
+  );
+}
+
+async function preparePipelineAuthority(
+  device: KernelDevice,
+  prepared: PreparedSemanticHostGraphWebGpu,
+  state: PreparedState,
+  options: {
+    readonly signal?: AbortSignal;
+    readonly timeoutMs?: number;
+    readonly maxPipelineCount?: number;
+  },
+): Promise<PreparedSemanticHostGraphWebGpuPipeline> {
   if (!HOST_IS_LITTLE_ENDIAN) {
     fail(
       "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
@@ -1051,7 +1257,119 @@ export async function runSemanticHostGraphWebGpu(
   }
   const deviceFacts = readAndVerifyDeviceFacts(gpu, state);
   const timeoutMs = resolvePositiveInteger(
-    capturedOptions.timeoutMs,
+    options.timeoutMs,
+    DEFAULT_MAX_PREPARATION_MS,
+    SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS,
+    "$.options.timeoutMs",
+  );
+  const maxPipelineCount = resolvePositiveInteger(
+    options.maxPipelineCount,
+    SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PIPELINES,
+    SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PIPELINES,
+    "$.options.maxPipelineCount",
+  );
+  let pipelineIdentityHash: string;
+  try {
+    pipelineIdentityHash = await hashPipelineIdentity(
+      prepared,
+      state,
+      deviceFacts,
+      maxPipelineCount,
+    );
+    throwIfCancelled(options.signal);
+  } catch (cause) {
+    translateExecutionFailure(cause, "$.pipeline.identity");
+  }
+  const preparation = issueAsyncWithWebGpuErrorScopes(
+    gpu,
+    "$.pipeline",
+    () => prepareWgslKernelPipelineSet(
+      device,
+      state.steps,
+      state.pipelineAlternatives,
+      pipelineIdentityHash,
+      maxPipelineCount,
+    ),
+    { cleanup: (pipelineSet) => pipelineSet.destroy() },
+  );
+  let pipelineSet: WgslPreparedPipelineSet;
+  try {
+    pipelineSet = await awaitBoundedExecution(
+      preparation,
+      options.signal,
+      timeoutMs,
+    );
+  } catch (cause) {
+    void preparation.then(
+      (latePipelineSet) => latePipelineSet.destroy(),
+      () => undefined,
+    );
+    translateExecutionFailure(cause, "$.pipeline");
+  }
+  try {
+    throwIfCancelled(options.signal);
+    const publicPipeline = Object.freeze({
+      profile: SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE,
+      backendVersion: prepared.backendVersion,
+      graphSemanticHash: prepared.graphSemanticHash,
+      pipelineIdentityHash,
+      stepCount: state.steps.length,
+      pipelineCount: pipelineSet.pipelineCount,
+      maxPipelineCount,
+      numericalPolicies: state.numericalPolicies,
+      device: deviceFacts,
+    });
+    PREPARED_PIPELINES.set(publicPipeline, {
+      prepared,
+      state,
+      device,
+      gpu,
+      deviceFacts,
+      pipelineSet,
+      pipelineIdentityHash,
+      destroyed: false,
+    });
+    return publicPipeline;
+  } catch (cause) {
+    pipelineSet.destroy();
+    translateExecutionFailure(cause, "$.pipeline");
+  }
+}
+
+async function executeCapturedHostGraph(
+  prepared: PreparedSemanticHostGraphWebGpu,
+  pipelineState: PreparedPipelineState,
+  captured: CapturedExecutionRequest,
+  selectedExecution: SelectedExecution,
+  options: {
+    readonly signal?: AbortSignal;
+    readonly timeoutMs?: number;
+  },
+): Promise<SemanticHostGraphWebGpuExecutionResult> {
+  if (pipelineState.destroyed) {
+    fail(
+      "BG-WEBGPU-GRAPH-UNVERIFIED-PIPELINE",
+      "$.preparedPipeline",
+      "prepared pipeline authority has been destroyed",
+    );
+  }
+  const {
+    device,
+    gpu,
+    deviceFacts,
+    pipelineIdentityHash,
+    pipelineSet,
+    state,
+  } = pipelineState;
+  if (LOST_DEVICES.has(gpu)) {
+    fail(
+      "BG-WEBGPU-GRAPH-DEVICE-LOST",
+      "$.device",
+      "WebGPU device was previously lost",
+    );
+  }
+  const timeoutMs = resolvePositiveInteger(
+    options.timeoutMs,
     DEFAULT_MAX_EXECUTION_MS,
     SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXECUTION_MS,
     "$.options.timeoutMs",
@@ -1060,17 +1378,16 @@ export async function runSemanticHostGraphWebGpu(
 
   if (selectedExecution.steps.length === 0) {
     const backendSpecializationHash = await hashBackendSpecialization(
-      prepared,
-      state,
-      deviceFacts,
+      pipelineIdentityHash,
       selectedExecution,
     );
-    throwIfCancelled(capturedOptions.signal);
+    throwIfCancelled(options.signal);
     return Object.freeze({
       outputs: collectOutputs(state, materialized.buffers, {}),
       trace: createTrace(
         prepared,
         state,
+        pipelineIdentityHash,
         backendSpecializationHash,
         deviceFacts,
         false,
@@ -1092,19 +1409,18 @@ export async function runSemanticHostGraphWebGpu(
     state,
     selectedExecution.steps,
     materialized.buffers,
+    pipelineSet,
   ).finally(() => {
     ACTIVE_DEVICES.delete(gpu);
   });
   const [result, backendSpecializationHash] = await Promise.all([
     awaitBoundedExecution(
       execution,
-      capturedOptions.signal,
+      options.signal,
       timeoutMs,
     ),
     hashBackendSpecialization(
-      prepared,
-      state,
-      deviceFacts,
+      pipelineIdentityHash,
       selectedExecution,
     ),
   ]);
@@ -1125,12 +1441,13 @@ export async function runSemanticHostGraphWebGpu(
       );
     }
   }
-  throwIfCancelled(capturedOptions.signal);
+  throwIfCancelled(options.signal);
   return Object.freeze({
     outputs: collectOutputs(state, materialized.buffers, result.buffers),
     trace: createTrace(
       prepared,
       state,
+      pipelineIdentityHash,
       backendSpecializationHash,
       deviceFacts,
       true,
@@ -1649,6 +1966,7 @@ async function executeGraph(
   state: PreparedState,
   steps: readonly WgslKernelSequenceStep[],
   buffers: Readonly<Record<string, WgslTypedArray>>,
+  pipelineSet: WgslPreparedPipelineSet,
 ): Promise<WgslKernelRunResult> {
   let sequence: Awaited<
     ReturnType<typeof prepareWgslKernelProgramSequence>
@@ -1665,6 +1983,7 @@ async function executeGraph(
           storageMetadata: state.storageMetadata,
           readback: state.readbackStorageNames,
         },
+        pipelineSet,
       ),
       { cleanup: (prepared) => prepared.destroy() },
     );
@@ -2087,6 +2406,37 @@ function captureRunOptions(
   });
 }
 
+function capturePipelineOptions(
+  options: PrepareSemanticHostGraphWebGpuPipelineOptions,
+): {
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
+  readonly maxPipelineCount?: number;
+} {
+  const object = inspectPlainObject(
+    options,
+    ["signal", "timeoutMs", "maxPipelineCount"],
+    [],
+    "$.options",
+  );
+  const signal = object.signal === undefined
+    ? undefined
+    : requireAbortSignal(object.signal, "$.options.signal");
+  const timeoutMs = numberOrUndefined(
+    object.timeoutMs,
+    "$.options.timeoutMs",
+  );
+  const maxPipelineCount = numberOrUndefined(
+    object.maxPipelineCount,
+    "$.options.maxPipelineCount",
+  );
+  return Object.freeze({
+    ...(signal === undefined ? {} : { signal }),
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(maxPipelineCount === undefined ? {} : { maxPipelineCount }),
+  });
+}
+
 function readAndVerifyDeviceFacts(
   gpu: GPUDevice,
   state: PreparedState,
@@ -2176,28 +2526,41 @@ function readAndVerifyDeviceFacts(
   return Object.freeze({ features, limits });
 }
 
-async function hashBackendSpecialization(
+async function hashPipelineIdentity(
   prepared: PreparedSemanticHostGraphWebGpu,
   state: PreparedState,
   device: SemanticHostGraphWebGpuDeviceFacts,
+  maxPipelineCount: number,
+): Promise<string> {
+  return hashNamedComponents({
+    profile: SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE,
+    backendVersion: prepared.backendVersion,
+    graph: prepared.graphSemanticHash,
+    steps: state.steps.length,
+    alternativePrograms: state.pipelineAlternatives.length,
+    maxPipelineCount,
+    wgslModules: prepared.wgslModuleHashes,
+    workgroupSize: state.workgroupSize,
+    selectedFeatures: device.features,
+    limits: device.limits as unknown as JsonObject,
+    numericalPolicies: state.numericalPolicies,
+  });
+}
+
+async function hashBackendSpecialization(
+  pipelineIdentityHash: string,
   selectedExecution: SelectedExecution,
 ): Promise<string> {
   return hashNamedComponents({
-    profile: prepared.profile,
-    backendVersion: prepared.backendVersion,
-    graph: prepared.graphSemanticHash,
-    steps: prepared.expandedStepCount,
-    wgslModules: prepared.wgslModuleHashes,
+    pipelineAuthority: pipelineIdentityHash,
     selectedConditionals: selectedExecution.completedConditionals,
-    workgroupSize: state.workgroupSize,
-    selectedFeatures: [],
-    limits: device.limits as unknown as JsonObject,
   });
 }
 
 function createTrace(
   prepared: PreparedSemanticHostGraphWebGpu,
   state: PreparedState,
+  pipelineIdentityHash: string,
   backendSpecializationHash: string,
   device: SemanticHostGraphWebGpuDeviceFacts,
   submitted: boolean,
@@ -2207,6 +2570,7 @@ function createTrace(
     profile: prepared.profile,
     backendVersion: prepared.backendVersion,
     graphSemanticHash: prepared.graphSemanticHash,
+    pipelineIdentityHash,
     backendSpecializationHash,
     failureModel: HOST_GRAPH_FAILURE_MODEL,
     executedNodeIds: state.topologicalNodeIds,
@@ -2354,6 +2718,14 @@ function translateExecutionFailure(cause: unknown, path: string): never {
       throw new SemanticHostGraphWebGpuError(
         "BG-WEBGPU-GRAPH-PIPELINE",
         "$.pipeline",
+        current.message,
+        { cause },
+      );
+    }
+    if (current instanceof WgslPipelineSetResourceLimitError) {
+      throw new SemanticHostGraphWebGpuError(
+        "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
+        "$.options.maxPipelineCount",
         current.message,
         { cause },
       );
