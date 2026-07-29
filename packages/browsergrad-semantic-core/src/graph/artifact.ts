@@ -75,7 +75,7 @@ import {
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 19;
+export const HOST_GRAPH_ARTIFACT_MINOR = 20;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
@@ -84,10 +84,11 @@ export const HOST_GRAPH_MAX_CONDITIONAL_BODY_NODES = 64;
 export const HOST_GRAPH_MAX_REPEAT_ITERATIONS = 1_024;
 export const HOST_GRAPH_MAX_RUNTIME_CONTROLS = 64;
 export const HOST_GRAPH_MIN_RECTANGULAR_DYNAMIC_RANK = 2;
-export const HOST_GRAPH_MAX_RECTANGULAR_DYNAMIC_RANK = 6;
+export const HOST_GRAPH_MAX_RECTANGULAR_DYNAMIC_RANK = 7;
 const HOST_GRAPH_MAX_LEGACY_RECTANGULAR_DYNAMIC_RANK = 3;
 const HOST_GRAPH_MAX_RANK_FOUR_RECTANGULAR_DYNAMIC_RANK = 4;
 const HOST_GRAPH_MAX_RANK_FIVE_RECTANGULAR_DYNAMIC_RANK = 5;
+const HOST_GRAPH_MAX_RANK_SIX_RECTANGULAR_DYNAMIC_RANK = 6;
 export const HOST_GRAPH_MAX_RESOURCE_CONDITIONALS = 1;
 export const HOST_GRAPH_MAX_RESOURCE_FEEDBACK_NODES = 1;
 export const HOST_GRAPH_MAX_EXPANDED_NODES = 16_384;
@@ -393,34 +394,20 @@ function parseProgram(
   );
   if (
     version.major !== 1 ||
-    (version.minor !== 0 &&
-      version.minor !== 1 &&
-      version.minor !== 2 &&
-      version.minor !== 3 &&
-      version.minor !== 4 &&
-      version.minor !== 5 &&
-      version.minor !== 6 &&
-      version.minor !== 7 &&
-      version.minor !== 8 &&
-      version.minor !== 9 &&
-      version.minor !== 10 &&
-      version.minor !== 11 &&
-      version.minor !== 12 &&
-      version.minor !== 13 &&
-      version.minor !== 14 &&
-      version.minor !== 15 &&
-      version.minor !== 16 &&
-      version.minor !== 17 &&
-      version.minor !== 18 &&
-      version.minor !== 19)
+    typeof version.minor !== "number" ||
+    !Number.isInteger(version.minor) ||
+    version.minor < 0 ||
+    version.minor > HOST_GRAPH_ARTIFACT_MINOR
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 through 1.19 only",
+      "host graph program reader supports versions 1.0 through 1.20 only",
     );
   }
-  if (version.minor !== envelopeMinor) {
+  const programMinor =
+    version.minor as HostGraphProgram["version"]["minor"];
+  if (programMinor !== envelopeMinor) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.invalidArtifact,
       "$.payload.program.version",
@@ -450,11 +437,11 @@ function parseProgram(
   );
   const nodes = parseNodes(
     field(object, "nodes", "$.payload.program"),
-    version.minor,
+    programMinor,
   );
   return {
     kind: "host-graph",
-    version: { major: 1, minor: version.minor },
+    version: { major: 1, minor: programMinor },
     failureModel: HOST_GRAPH_FAILURE_MODEL,
     rankCount,
     resources,
@@ -725,7 +712,7 @@ function parseNode(
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, version-1.10 resource repeat, version-1.11 resource dynamic dispatch, version-1.12 runtime rectangular dynamic dispatch, version-1.13 resource rectangular dynamic dispatch, version-1.14 request-time rank-4 rectangular dispatch, version-1.15 produced-resource rank-4 rectangular dispatch, version-1.16 request-time rank-5 rectangular dispatch, version-1.17 produced-resource rank-5 rectangular dispatch, version-1.18 request-time rank-6 rectangular dispatch, and version-1.19 produced-resource rank-6 rectangular dispatch nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, version-1.10 resource repeat, version-1.11 resource dynamic dispatch, version-1.12 runtime rectangular dynamic dispatch, version-1.13 resource rectangular dynamic dispatch, version-1.14 request-time rank-4 rectangular dispatch, version-1.15 produced-resource rank-4 rectangular dispatch, version-1.16 request-time rank-5 rectangular dispatch, version-1.17 produced-resource rank-5 rectangular dispatch, version-1.18 request-time rank-6 rectangular dispatch, version-1.19 produced-resource rank-6 rectangular dispatch, and version-1.20 request-time rank-7 rectangular dispatch nodes",
   );
 }
 
@@ -1303,7 +1290,7 @@ function parseDynamicDispatchNode(
       field(object, "maxExtents", path),
       `${path}.maxExtents`,
       programMinor >= 19
-        ? HOST_GRAPH_MAX_RECTANGULAR_DYNAMIC_RANK
+        ? HOST_GRAPH_MAX_RANK_SIX_RECTANGULAR_DYNAMIC_RANK
         : programMinor >= 17
           ? HOST_GRAPH_MAX_RANK_FIVE_RECTANGULAR_DYNAMIC_RANK
           : programMinor >= 15
@@ -1349,13 +1336,15 @@ function parseDynamicDispatchNode(
     const maxExtents = parseRectangularDynamicMaximum(
       field(object, "maxExtents", path),
       `${path}.maxExtents`,
-      programMinor >= 18
+      programMinor >= 20
         ? HOST_GRAPH_MAX_RECTANGULAR_DYNAMIC_RANK
-        : programMinor >= 16
-          ? HOST_GRAPH_MAX_RANK_FIVE_RECTANGULAR_DYNAMIC_RANK
-          : programMinor >= 14
-            ? HOST_GRAPH_MAX_RANK_FOUR_RECTANGULAR_DYNAMIC_RANK
-            : HOST_GRAPH_MAX_LEGACY_RECTANGULAR_DYNAMIC_RANK,
+        : programMinor >= 18
+          ? HOST_GRAPH_MAX_RANK_SIX_RECTANGULAR_DYNAMIC_RANK
+          : programMinor >= 16
+            ? HOST_GRAPH_MAX_RANK_FIVE_RECTANGULAR_DYNAMIC_RANK
+            : programMinor >= 14
+              ? HOST_GRAPH_MAX_RANK_FOUR_RECTANGULAR_DYNAMIC_RANK
+              : HOST_GRAPH_MAX_LEGACY_RECTANGULAR_DYNAMIC_RANK,
     );
     return {
       ...parseDispatchFields(object, path),
