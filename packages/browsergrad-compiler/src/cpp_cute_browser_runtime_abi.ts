@@ -21,14 +21,14 @@ import {
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_SCHEMA =
   "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_MAJOR = 1;
-export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 17;
+export const CPP_CUTE_BROWSER_RUNTIME_ABI_MINOR = 18;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_BYTE_LIMIT = 64 * 1024;
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_MANIFEST_ID =
-  "bg.cpp.browser-runtime-abi.sha256.73131ff8285e0e66e4c7d74786b85c5cc565c937acb6923c1b1a91df5ae4137a";
+  "bg.cpp.browser-runtime-abi.sha256.0f96a1bac13d17d049d0794fc0e0075e2d5da6965100b2bd9ea2edc23c23a148";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_RESOURCE_SHA256 =
-  "7370bace059b3790f868a9802197a6b2baed6a9b99c76b4f4f09ecb72b14591a";
+  "551a4c727fcaa616780f50f20bf17cd96b4e49749da80a56be1768ac180a0160";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_CONTRACT_SHA256 =
-  "51e9efe618e5d12eef184d9e749a9a9c0221ec9d609e31e7eb27f119a61dd436";
+  "d5039b6a02e70ce56fe537003ad1c4a3d5a01ec4b5b3355aeb28db1f8383835a";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_GENERATED_IMPORT_ALLOWLIST_SHA256 =
   "20214c6cd9f968c1a298f5f3749a3fc0fcceb7a364d201f96f9d3d546864949d";
 export const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_SUPPORT_FUNCTION_ALLOWLIST_SHA256 =
@@ -382,20 +382,21 @@ function validateBodyInvariants(value: JsonObject): void {
       );
     }
     const structural = body.wasm.structuralPolicy;
-    if (structural.status !== "independently-reviewed-hash-pinned" ||
+    if (structural.status !== "independently-reviewed-bounded-policy" ||
         structural.releaseConformance !==
-          "allowed-only-for-exact-reviewed-structural-projection") {
-      invalid("$.body.wasm.structuralPolicy", "Wasm structural projection must equal the reviewed closed policy");
+          "allowed-only-for-bounded-reviewed-structural-policy") {
+      invalid("$.body.wasm.structuralPolicy", "Wasm structure must satisfy the reviewed bounded policy");
     }
     if (structural.tables.maximumCount !== 1 ||
+        structural.tables.minimumElementsFloor !== 1 ||
         structural.tables.imported !== "forbidden" ||
         structural.tables.declaredMaximumRequired !== true ||
         structural.tables.maximumElementsCeiling !== 65_536 ||
-        structural.tables.exactReviewedProjection.length !== 1 ||
-        structural.tables.exactReviewedProjection[0]?.elementType !== "funcref" ||
-        structural.tables.exactReviewedProjection[0].minimum !== 15_301 ||
-        structural.tables.exactReviewedProjection[0].maximum !== 15_301) {
-      invalid("$.body.wasm.structuralPolicy.tables", "table policy differs from the exact reviewed v1 projection");
+        structural.tables.reviewedBaselineProjection.length !== 1 ||
+        structural.tables.reviewedBaselineProjection[0]?.elementType !== "funcref" ||
+        structural.tables.reviewedBaselineProjection[0].minimum !== 15_301 ||
+        structural.tables.reviewedBaselineProjection[0].maximum !== 15_301) {
+      invalid("$.body.wasm.structuralPolicy.tables", "table policy differs from the reviewed bounded v1 policy");
     }
     assertExactStrings(
       structural.tables.allowedElementTypes,

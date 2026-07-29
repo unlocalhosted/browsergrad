@@ -1034,7 +1034,11 @@ function compareAgainstAbi(projection: CppCuteBrowserWasmInspectionProjection, r
   if (projection.startFunctionIndex !== null) mismatches.push("start section is forbidden");
   if (projection.tagCount !== body.wasm.structuralPolicy.tags.exactCount) mismatches.push("tag count differs from runtime ABI");
 
-  compareJsonProjection(projection.tables, body.wasm.structuralPolicy.tables.exactReviewedProjection, "table projection", mismatches);
+  inspectTableProjection(
+    projection,
+    body.wasm.structuralPolicy.tables,
+    mismatches,
+  );
   const exportedGlobals = projection.exports.filter((entry) => entry.kind === "global").map((entry) => ({
     name: entry.name,
     index: entry.index,
@@ -1071,7 +1075,14 @@ interface RuntimeAbiBody {
       readonly exactTableAllowlist: ReadonlyArray<{ readonly name: string }>;
     };
     readonly structuralPolicy: {
-      readonly tables: { readonly maximumCount: number; readonly exactReviewedProjection: readonly unknown[] };
+      readonly tables: {
+        readonly maximumCount: number;
+        readonly minimumElementsFloor: number;
+        readonly allowedElementTypes: readonly string[];
+        readonly imported: "forbidden";
+        readonly declaredMaximumRequired: boolean;
+        readonly maximumElementsCeiling: number;
+      };
       readonly globals: { readonly maximumCount: number; readonly exactReviewedExports: readonly unknown[] };
       readonly tags: { readonly exactCount: number };
       readonly customSections: {
@@ -1097,6 +1108,34 @@ interface RuntimeAbiBody {
       readonly exactFunctions: ReadonlyArray<{ readonly moduleName: string; readonly fieldName: string; readonly wasmParameters: readonly ValueType[]; readonly wasmResults: readonly ValueType[] }>;
     };
   };
+}
+
+function inspectTableProjection(
+  projection: CppCuteBrowserWasmInspectionProjection,
+  policy: RuntimeAbiBody["wasm"]["structuralPolicy"]["tables"],
+  mismatches: string[],
+): void {
+  if (projection.imports.some((entry) => entry.kind === "table")) {
+    mismatches.push("imported table is forbidden");
+  }
+  if (projection.tables.length > policy.maximumCount) {
+    mismatches.push("defined table count exceeds the runtime ABI ceiling");
+  }
+  for (const table of projection.tables) {
+    if (!policy.allowedElementTypes.includes(table.elementType)) {
+      mismatches.push(`table element type ${table.elementType} is outside the runtime ABI allowlist`);
+    }
+    if (table.minimum < policy.minimumElementsFloor ||
+        table.minimum > policy.maximumElementsCeiling) {
+      mismatches.push("table minimum is outside the runtime ABI bounds");
+    }
+    if (policy.declaredMaximumRequired &&
+        (table.maximum === null ||
+          table.maximum > policy.maximumElementsCeiling ||
+          table.maximum < table.minimum)) {
+      mismatches.push("table maximum is missing or outside the runtime ABI bounds");
+    }
+  }
 }
 
 interface ExpectedFunction {

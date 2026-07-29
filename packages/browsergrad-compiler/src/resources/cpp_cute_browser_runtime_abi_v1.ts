@@ -43,8 +43,8 @@ function supportExport(
  */
 const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-runtime-abi-manifest",
-  version: { major: 1, minor: 17 },
-  manifestId: "bg.cpp.browser-runtime-abi.sha256.73131ff8285e0e66e4c7d74786b85c5cc565c937acb6923c1b1a91df5ae4137a",
+  version: { major: 1, minor: 18 },
+  manifestId: "bg.cpp.browser-runtime-abi.sha256.0f96a1bac13d17d049d0794fc0e0075e2d5da6965100b2bd9ea2edc23c23a148",
   body: {
     runtimeAbiId: "browsergrad.compiler.cpp-cute.clang-wasm-runtime@1",
     authority: {
@@ -164,15 +164,16 @@ const CPP_CUTE_BROWSER_RUNTIME_ABI_V1_VALUE = {
         releaseConformance: "allowed-only-for-exact-reviewed-support-exports",
       },
       structuralPolicy: {
-        status: "independently-reviewed-hash-pinned",
-        releaseConformance: "allowed-only-for-exact-reviewed-structural-projection",
+        status: "independently-reviewed-bounded-policy",
+        releaseConformance: "allowed-only-for-bounded-reviewed-structural-policy",
         tables: {
           maximumCount: 1,
+          minimumElementsFloor: 1,
           allowedElementTypes: ["funcref"],
           imported: "forbidden",
           declaredMaximumRequired: true,
           maximumElementsCeiling: 65_536,
-          exactReviewedProjection: [
+          reviewedBaselineProjection: [
             { elementType: "funcref", minimum: 15_301, maximum: 15_301 },
           ],
         },

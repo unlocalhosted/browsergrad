@@ -485,6 +485,7 @@ describe("bounded raw-Wasm inspection", () => {
     expect(report.mismatches).toContain("table export inventory differs from the exact runtime ABI allowlist");
     expect(report.mismatches).toContain("global export inventory differs from the exact runtime ABI allowlist");
     expect(report.mismatches).toContain("global export projection differs from independently reviewed ABI projection");
+    expect(report.mismatches).not.toContain("table projection differs from independently reviewed ABI projection");
     expect(report.exactInterfaceConformance).toBe(false);
   });
 
