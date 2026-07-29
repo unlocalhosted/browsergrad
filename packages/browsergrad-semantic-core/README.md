@@ -37,8 +37,8 @@ preservation. Static definitions contain no support state or evidence outcome.
 `/kernel` currently contains one concrete `browsergrad.kernel@1` operation: a
 verified, materializing view copy over a verified `browsergrad.layout@1`
 artifact. The portable execution profiles admit same-dtype f32, i32, or u32
-rank 1 through rank 8 global-memory views plus exact bool/i8/u8 and
-i16/u16/f16/bf16 and f64/i64/u64 storage copies at ranks 1 through 7, with explicit
+rank 1 through rank 8 global-memory views plus exact bool/i8/u8,
+i16/u16/f16/bf16, and f64/i64/u64 storage copies at ranks 1 through 8, with explicit
 source-read and destination-write effects and disjoint alias sets. The f32 word
 profile admits reject or exact-bit fill behavior for invalid source
 coordinates; integer and non-word32 profiles require rejection. Generic
@@ -73,6 +73,8 @@ Separate positive and signed rank-6 identities extend the same contracts
 without widening any lower-rank profile.
 Separate positive and signed rank-7 identities extend the same contracts
 without widening any lower-rank profile.
+Separate positive and signed rank-8 identities extend the same contracts
+without widening any lower-rank or word32 profile.
 These profiles do not claim boolean canonicalization, arithmetic, conversion,
 `shader-f16`, or native shader f64 support.
 
