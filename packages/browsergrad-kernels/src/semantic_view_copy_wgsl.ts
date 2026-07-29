@@ -556,10 +556,10 @@ function emitCoordinates(shape: readonly bigint[]): readonly string[] {
       `  let coordinate_3: i32 = i32(inner_remainder % ${fourth}u);`,
     ];
   }
-  if (shape.length >= 5 && shape.length <= 7) {
+  if (shape.length >= 5 && shape.length <= 8) {
     return emitLinearCoordinates(shape);
   }
-  return unsupported("$.shape", "WGSL view-copy supports ranks in [1, 7] only");
+  return unsupported("$.shape", "WGSL view-copy supports ranks in [1, 8] only");
 }
 
 function emitRectangularCoordinates(

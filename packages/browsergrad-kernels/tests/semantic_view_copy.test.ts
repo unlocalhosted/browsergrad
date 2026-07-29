@@ -467,7 +467,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.packed16@1",
       );
-      expect(prepared.backendVersion).toBe("3.5.0");
+      expect(prepared.backendVersion).toBe("3.6.0");
       expect(prepared.launch.dispatchCount).toEqual([5, 1, 1]);
       expect(prepared.program.wgsl).toContain(
         "fn copy_packed_element(linear_index: u32)",
@@ -545,7 +545,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.packed8@1",
       );
-      expect(prepared.backendVersion).toBe("3.5.0");
+      expect(prepared.backendVersion).toBe("3.6.0");
       expect(prepared.launch.dispatchCount).toEqual([3, 1, 1]);
       expect(prepared.program.wgsl).toContain(
         "let first_element_index: u32 = global_id.x * 4u;",
@@ -586,7 +586,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.word64@1",
       );
-      expect(prepared.backendVersion).toBe("3.5.0");
+      expect(prepared.backendVersion).toBe("3.6.0");
       expect(prepared.launch.dispatchCount).toEqual([6, 1, 1]);
       expect(prepared.program.wgsl).toContain(
         "destination_words[destination_word] = source_words[source_word];",
@@ -692,7 +692,7 @@ describe("semantic view-copy WGSL lowering", () => {
           dtype: testCase.dtype,
         });
         expect(prepared.backendProfile).toBe(testCase.backendProfile);
-        expect(prepared.backendVersion).toBe("3.5.0");
+        expect(prepared.backendVersion).toBe("3.6.0");
         expect(prepared.sourceLocationRange).toEqual(
           signed
             ? { minimum: -2n, maximum: 0n }
@@ -788,7 +788,7 @@ describe("semantic view-copy WGSL lowering", () => {
           dtype: testCase.dtype,
         });
         expect(prepared.backendProfile).toBe(testCase.backendProfile);
-        expect(prepared.backendVersion).toBe("3.5.0");
+        expect(prepared.backendVersion).toBe("3.6.0");
         expect(prepared.sourceLocationRange).toEqual(
           signed
             ? { minimum: -15n, maximum: 0n }
@@ -887,7 +887,7 @@ describe("semantic view-copy WGSL lowering", () => {
           dtype: testCase.dtype,
         });
         expect(prepared.backendProfile).toBe(testCase.backendProfile);
-        expect(prepared.backendVersion).toBe("3.5.0");
+        expect(prepared.backendVersion).toBe("3.6.0");
         expect(prepared.sourceLocationRange).toEqual(
           signed
             ? { minimum: -31n, maximum: 0n }
@@ -989,7 +989,7 @@ describe("semantic view-copy WGSL lowering", () => {
           dtype: testCase.dtype,
         });
         expect(prepared.backendProfile).toBe(testCase.backendProfile);
-        expect(prepared.backendVersion).toBe("3.5.0");
+        expect(prepared.backendVersion).toBe("3.6.0");
         expect(prepared.sourceLocationRange).toEqual(
           signed
             ? { minimum: -63n, maximum: 0n }
@@ -1094,7 +1094,7 @@ describe("semantic view-copy WGSL lowering", () => {
           dtype: testCase.dtype,
         });
         expect(prepared.backendProfile).toBe(testCase.backendProfile);
-        expect(prepared.backendVersion).toBe("3.5.0");
+        expect(prepared.backendVersion).toBe("3.6.0");
         expect(prepared.sourceLocationRange).toEqual(
           signed
             ? { minimum: -127n, maximum: 0n }
@@ -1169,7 +1169,7 @@ describe("semantic view-copy WGSL lowering", () => {
         dtype: testCase.dtype,
       });
       expect(prepared.backendProfile).toBe(testCase.backendProfile);
-      expect(prepared.backendVersion).toBe("3.5.0");
+      expect(prepared.backendVersion).toBe("3.6.0");
       expect(prepared.sourceLocationRange).toEqual({
         minimum: -5n,
         maximum: 0n,
@@ -1445,7 +1445,7 @@ describe("semantic view-copy WGSL lowering", () => {
     expect(bytePrepared.program.wgsl).toContain("/ 4i");
   });
 
-  it("lowers exact rank-1 and rank-4 through rank-7 coordinates without changing rank-2/rank-3 WGSL", async () => {
+  it("lowers exact rank-1 and rank-4 through rank-8 coordinates without changing rank-2/rank-3 WGSL", async () => {
     const rank1Shape = [constant("4")] as const;
     const rank1 = await verifiedLayout({
       shape: rank1Shape,
@@ -1590,6 +1590,43 @@ describe("semantic view-copy WGSL lowering", () => {
       "let coordinate_6: i32 = i32(rank7_remainder_4 % 2u);",
     );
     expect(rank7Prepared.launch.dispatchCount).toEqual([128, 1, 1]);
+
+    const rank8Shape = [
+      constant("2"),
+      constant("2"),
+      constant("2"),
+      constant("2"),
+      constant("2"),
+      constant("2"),
+      constant("2"),
+      constant("2"),
+    ] as const;
+    const rank8 = await verifiedLayout({
+      shape: rank8Shape,
+      sourceLocation: add(
+        coordinate(0),
+        multiply(coordinate(1), constant("2")),
+        multiply(coordinate(2), constant("4")),
+        multiply(coordinate(3), constant("8")),
+        multiply(coordinate(4), constant("16")),
+        multiply(coordinate(5), constant("32")),
+        multiply(coordinate(6), constant("64")),
+        multiply(coordinate(7), constant("128")),
+      ),
+      sourceBytes: constant("1024"),
+      destinationBytes: constant("1024"),
+    });
+    const rank8Prepared = await prepare(rank8, await verifiedKernel(rank8));
+    expect(rank8Prepared.semantic.portableProfile).toMatchObject({
+      profileId:
+        "browsergrad.view-copy.positive-affine-rank8-word32@1",
+      rank: 8,
+      dtype: "f32",
+    });
+    expect(rank8Prepared.program.wgsl).toContain(
+      "let coordinate_7: i32 = i32(rank8_remainder_5 % 2u);",
+    );
+    expect(rank8Prepared.launch.dispatchCount).toEqual([256, 1, 1]);
   });
 
   it("derives binding-sensitive modules and rejects i32 or source-size overflow", async () => {

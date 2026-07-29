@@ -62,6 +62,7 @@ const PLANNED_CASE_IDS = Object.freeze([
   "rank5-permutation",
   "rank6-permutation",
   "rank7-permutation",
+  "rank8-permutation",
   "rank1-u32-negative-stride",
   "rank2-negative-stride",
   "rank3-u32-negative-stride",
@@ -69,6 +70,7 @@ const PLANNED_CASE_IDS = Object.freeze([
   "rank5-i32-negative-stride",
   "rank6-u32-negative-stride",
   "rank7-u32-negative-stride",
+  "rank8-u32-negative-stride",
   "rank2-negative-predicate-padding",
   "positive-strided-slice",
   "read-only-broadcast",
@@ -522,6 +524,27 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     sequenceWords(128, 0x42800000),
   );
 
+  const rank8Permutation = await makeCase(
+    "rank8-permutation",
+    {
+      shape: dims("2", "2", "2", "2", "2", "2", "2", "2"),
+      sourceLocation: add(
+        coordinate(0),
+        multiply(coordinate(1), indexConstant("2")),
+        multiply(coordinate(2), indexConstant("4")),
+        multiply(coordinate(3), indexConstant("8")),
+        multiply(coordinate(4), indexConstant("16")),
+        multiply(coordinate(5), indexConstant("32")),
+        multiply(coordinate(6), indexConstant("64")),
+        multiply(coordinate(7), indexConstant("128")),
+      ),
+      sourceBytes: dimConstant("1024"),
+      destinationBytes: dimConstant("1024"),
+    },
+    { kind: "reject" },
+    sequenceWords(256, 0x43000000),
+  );
+
   const rank1U32NegativeStride = await makeCase(
     "rank1-u32-negative-stride",
     {
@@ -649,6 +672,29 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     },
     { kind: "reject" },
     sequenceWords(128, 0x80000000),
+  );
+
+  const rank8U32NegativeStride = await makeCase(
+    "rank8-u32-negative-stride",
+    {
+      shape: dims("2", "2", "2", "2", "2", "2", "2", "2"),
+      sourceLocation: add(
+        multiply(coordinate(0), indexConstant("-128")),
+        multiply(coordinate(1), indexConstant("-64")),
+        multiply(coordinate(2), indexConstant("-32")),
+        multiply(coordinate(3), indexConstant("-16")),
+        multiply(coordinate(4), indexConstant("-8")),
+        multiply(coordinate(5), indexConstant("-4")),
+        multiply(coordinate(6), indexConstant("-2")),
+        multiply(coordinate(7), indexConstant("-1")),
+      ),
+      sourceByteOffset: dimConstant("1020"),
+      sourceBytes: dimConstant("1024"),
+      destinationBytes: dimConstant("1024"),
+      dtype: "u32",
+    },
+    { kind: "reject" },
+    sequenceWords(256, 0x80000000),
   );
 
   const rank2NegativePredicatePadding = await makeCase(
@@ -1679,6 +1725,7 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     rank5Permutation,
     rank6Permutation,
     rank7Permutation,
+    rank8Permutation,
     rank1U32NegativeStride,
     rank2NegativeStride,
     rank3U32NegativeStride,
@@ -1686,6 +1733,7 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     rank5I32NegativeStride,
     rank6U32NegativeStride,
     rank7U32NegativeStride,
+    rank8U32NegativeStride,
     rank2NegativePredicatePadding,
     stridedSlice,
     broadcast,

@@ -511,8 +511,8 @@ describe("verified materializing view-copy", () => {
     }
   });
 
-  it("executes rank-5 through rank-7 positive-affine views under distinct portable profiles", async () => {
-    for (const rank of [5, 6, 7] as const) {
+  it("executes rank-5 through rank-8 positive-affine views under distinct portable profiles", async () => {
+    for (const rank of [5, 6, 7, 8] as const) {
       const shape = Array.from({ length: rank }, () => "2");
       const elementCount = 2 ** rank;
       const layout = await verifiedLayout({
@@ -1452,9 +1452,10 @@ describe("verified materializing view-copy", () => {
     });
     expect((await diagnostic(() => verifiedKernel(aliasedLayout))).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.aliasConflict);
 
-    const rankEight = await verifiedLayout({
-      shape: ["1", "1", "1", "1", "1", "1", "1", "1"],
+    const rankNine = await verifiedLayout({
+      shape: ["1", "1", "1", "1", "1", "1", "1", "1", "1"],
       sourceLocation: rowMajorLocation([
+        "1",
         "1",
         "1",
         "1",
@@ -1468,7 +1469,7 @@ describe("verified materializing view-copy", () => {
       destinationBytes: "4",
     });
     expect((await diagnostic(async () =>
-      prepare(rankEight, await verifiedKernel(rankEight))
+      prepare(rankNine, await verifiedKernel(rankNine))
     )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
 
     const hostSource = await verifiedLayout({
@@ -1604,6 +1605,23 @@ describe("verified materializing view-copy", () => {
         rank: 7,
         profileId:
           "browsergrad.view-copy.signed-affine-rank7-word32@1",
+      },
+      {
+        shape: ["2", "2", "2", "2", "2", "2", "2", "2"] as const,
+        sourceLocation: add(
+          mul(c(0), k("-128")),
+          mul(c(1), k("-64")),
+          mul(c(2), k("-32")),
+          mul(c(3), k("-16")),
+          mul(c(4), k("-8")),
+          mul(c(5), k("-4")),
+          mul(c(6), k("-2")),
+          mul(c(7), k("-1")),
+        ),
+        elementCount: 256,
+        rank: 8,
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank8-word32@1",
       },
     ];
     for (const testCase of highRankCases) {

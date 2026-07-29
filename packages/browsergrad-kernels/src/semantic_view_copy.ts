@@ -56,7 +56,7 @@ export const SEMANTIC_VIEW_COPY_PACKED16_WEBGPU_PROFILE =
   "browsergrad.webgpu.view-copy.packed16@1";
 export const SEMANTIC_VIEW_COPY_WORD64_WEBGPU_PROFILE =
   "browsergrad.webgpu.view-copy.word64@1";
-export const SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION = "3.5.0";
+export const SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION = "3.6.0";
 export type SemanticViewCopyWebGpuProfile =
   | typeof SEMANTIC_VIEW_COPY_WEBGPU_PROFILE
   | typeof SEMANTIC_VIEW_COPY_PACKED8_WEBGPU_PROFILE

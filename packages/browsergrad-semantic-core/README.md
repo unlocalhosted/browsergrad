@@ -37,7 +37,7 @@ preservation. Static definitions contain no support state or evidence outcome.
 `/kernel` currently contains one concrete `browsergrad.kernel@1` operation: a
 verified, materializing view copy over a verified `browsergrad.layout@1`
 artifact. The portable execution profiles admit same-dtype f32, i32, or u32
-rank 1 through rank 7 global-memory views plus exact bool/i8/u8 and
+rank 1 through rank 8 global-memory views plus exact bool/i8/u8 and
 i16/u16/f16/bf16 and f64/i64/u64 storage copies at ranks 1 through 7, with explicit
 source-read and destination-write effects and disjoint alias sets. The f32 word
 profile admits reject or exact-bit fill behavior for invalid source
@@ -45,14 +45,14 @@ coordinates; integer and non-word32 profiles require rejection. Generic
 operation verification is separate from these lowering profiles. Rank 5 uses the distinct
 `browsergrad.view-copy.positive-affine-rank5-word32@1` profile so the existing
 rank-1-through-rank-4 identities retain their exact meaning; ranks 6 and 7
-have their own additive identities. The separate
+have their own additive identities, as does rank 8. The separate
 `browsergrad.view-copy.signed-affine-rank2-rank3-word32@1` profile admits
 negative coordinate scales only in rank-2/rank-3 source maps and predicates;
 the distinct
 `browsergrad.view-copy.signed-affine-rank4-rank5-word32@1` profile provides
 the same source capability at ranks 4 and 5, and
 `browsergrad.view-copy.signed-affine-rank1-word32@1` covers rank 1. The
-rank-6 and rank-7 identities extend that source rule without widening older
+rank-6, rank-7, and rank-8 identities extend that source rule without widening older
 profiles. The destination remains positive-affine, dense, and exactly proved.
 The separate
 `browsergrad.view-copy.positive-affine-rank2-rank3-packed8@1` and

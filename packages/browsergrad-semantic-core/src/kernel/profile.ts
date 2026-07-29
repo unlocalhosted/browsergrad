@@ -17,6 +17,8 @@ export const PORTABLE_RANK6_WORD32_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.positive-affine-rank6-word32@1";
 export const PORTABLE_RANK7_WORD32_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.positive-affine-rank7-word32@1";
+export const PORTABLE_RANK8_WORD32_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.positive-affine-rank8-word32@1";
 export const PORTABLE_PACKED8_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.positive-affine-rank2-rank3-packed8@1";
 export const PORTABLE_PACKED16_VIEW_COPY_PROFILE =
@@ -99,6 +101,8 @@ export const PORTABLE_SIGNED_AFFINE_RANK6_WORD32_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.signed-affine-rank6-word32@1";
 export const PORTABLE_SIGNED_AFFINE_RANK7_WORD32_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.signed-affine-rank7-word32@1";
+export const PORTABLE_SIGNED_AFFINE_RANK8_WORD32_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.signed-affine-rank8-word32@1";
 
 export type PortableViewCopyDType =
   | "bool"
@@ -123,6 +127,7 @@ export interface PortableViewCopyProfile {
     | typeof PORTABLE_RANK5_WORD32_VIEW_COPY_PROFILE
     | typeof PORTABLE_RANK6_WORD32_VIEW_COPY_PROFILE
     | typeof PORTABLE_RANK7_WORD32_VIEW_COPY_PROFILE
+    | typeof PORTABLE_RANK8_WORD32_VIEW_COPY_PROFILE
     | typeof PORTABLE_PACKED8_VIEW_COPY_PROFILE
     | typeof PORTABLE_PACKED16_VIEW_COPY_PROFILE
     | typeof PORTABLE_WORD64_VIEW_COPY_PROFILE
@@ -163,8 +168,9 @@ export interface PortableViewCopyProfile {
     | typeof PORTABLE_SIGNED_AFFINE_WORD32_VIEW_COPY_PROFILE
     | typeof PORTABLE_SIGNED_AFFINE_HIGH_RANK_WORD32_VIEW_COPY_PROFILE
     | typeof PORTABLE_SIGNED_AFFINE_RANK6_WORD32_VIEW_COPY_PROFILE
-    | typeof PORTABLE_SIGNED_AFFINE_RANK7_WORD32_VIEW_COPY_PROFILE;
-  readonly rank: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+    | typeof PORTABLE_SIGNED_AFFINE_RANK7_WORD32_VIEW_COPY_PROFILE
+    | typeof PORTABLE_SIGNED_AFFINE_RANK8_WORD32_VIEW_COPY_PROFILE;
+  readonly rank: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
   readonly dtype: PortableViewCopyDType;
 }
 
@@ -194,13 +200,13 @@ export function verifyPortableViewCopyProfile(
     );
   }
   const rank = source.logicalShape.length;
-  if ((rank < 1 || rank > 7) ||
+  if ((rank < 1 || rank > (nonWord32 ? 7 : 8)) ||
       destination.logicalShape.length !== rank) {
     unsupported(
       "$.operation",
       nonWord32
         ? "portable non-word32 view-copy requires equal source and destination ranks in [1, 7]"
-        : "portable word32 view-copy requires equal source and destination ranks in [1, 7]",
+        : "portable word32 view-copy requires equal source and destination ranks in [1, 8]",
     );
   }
   if (source.memorySpace.kind !== "global" || destination.memorySpace.kind !== "global") {
@@ -299,7 +305,7 @@ function selectPortableViewCopyProfile(
     dtype: PortableViewCopyDType;
     storageClass: PortableViewCopyStorageClass;
   }>,
-  rank: 1 | 2 | 3 | 4 | 5 | 6 | 7,
+  rank: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8,
   signedCoordinateScale: boolean,
 ): PortableViewCopyProfile["profileId"] {
   if (dtypeProfile.storageClass === "packed8") {
@@ -397,11 +403,13 @@ function selectPortableViewCopyProfile(
     if (rank === 2 || rank === 3) return PORTABLE_SIGNED_AFFINE_WORD32_VIEW_COPY_PROFILE;
     if (rank === 6) return PORTABLE_SIGNED_AFFINE_RANK6_WORD32_VIEW_COPY_PROFILE;
     if (rank === 7) return PORTABLE_SIGNED_AFFINE_RANK7_WORD32_VIEW_COPY_PROFILE;
+    if (rank === 8) return PORTABLE_SIGNED_AFFINE_RANK8_WORD32_VIEW_COPY_PROFILE;
     return PORTABLE_SIGNED_AFFINE_HIGH_RANK_WORD32_VIEW_COPY_PROFILE;
   }
   if (rank === 5) return PORTABLE_RANK5_WORD32_VIEW_COPY_PROFILE;
   if (rank === 6) return PORTABLE_RANK6_WORD32_VIEW_COPY_PROFILE;
   if (rank === 7) return PORTABLE_RANK7_WORD32_VIEW_COPY_PROFILE;
+  if (rank === 8) return PORTABLE_RANK8_WORD32_VIEW_COPY_PROFILE;
   if (rank === 1 || rank === 4) return PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE;
   return dtypeProfile.dtype === "f32"
     ? PORTABLE_F32_VIEW_COPY_PROFILE
