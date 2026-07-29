@@ -57,6 +57,7 @@
     "test:aot-docker-shell:run": "tsc -p tsconfig.docker-shell.json && oxlint scripts/cpp_cute_aot_docker_*.mjs scripts/cpp_cute_aot_docker_*.test.ts && vitest run --config vitest.docker-shell.config.ts",
     "test:browser-clang-wasm-build-plan": "pnpm run build && pnpm run test:browser-clang-wasm-build-plan:run",
     "test:browser-clang-wasm-build-plan:fast": "tsc -p tsconfig.browser-build-plan.json && oxlint scripts/cpp_cute_browser_build && vitest run --config scripts/cpp_cute_browser_build/vitest.fast.config.ts",
+    "test:browser-clang-wasm-build-plan:evidence-input": "tsc -p tsconfig.browser-build-plan.json && oxlint scripts/cpp_cute_browser_build && vitest run --config scripts/cpp_cute_browser_build/vitest.evidence-input.config.ts",
     "test:browser-clang-wasm-build-plan:check": "tsc -p tsconfig.browser-build-plan.json && oxlint scripts/cpp_cute_browser_build",
     "test:browser-clang-wasm-build-plan:surface": "vitest run --config scripts/cpp_cute_browser_build/vitest.surface.config.ts",
     "test:browser-clang-wasm-build-plan:native": "vitest run --config scripts/cpp_cute_browser_build/vitest.native.config.ts",

@@ -151,7 +151,12 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("if-no-files-found: error");
     expect(workflow).toContain("retention-days: 3");
     expect(workflow).toContain("test:browser-clang-wasm-build-plan:fast");
-    expect(workflow).toContain("test:browser-clang-wasm-build-plan:run");
+    expect(workflow).toContain(
+      "test:browser-clang-wasm-build-plan:evidence-input",
+    );
+    expect(workflow).not.toContain(
+      "test:browser-clang-wasm-build-plan:run",
+    );
     expect(workflow.match(/restore-keys:/gu)).toHaveLength(1);
     expect(workflow).toContain(
       "linux-amd64-${{ steps.toolchain-cache-key.outputs.compatible-legacy-cache-key }}",
@@ -165,7 +170,11 @@ describe("Clang-Wasm evidence workflow", () => {
       "name: Verify the JavaScript boundary outside the compiler critical path",
     );
     expect(workflow.match(/test:browser-clang-wasm-build-plan:fast/gu)).toHaveLength(1);
-    expect(workflow.match(/test:browser-clang-wasm-build-plan:run/gu)).toHaveLength(1);
+    expect(
+      workflow.match(
+        /test:browser-clang-wasm-build-plan:evidence-input/gu,
+      ),
+    ).toHaveLength(1);
 
     const buildStart = workflow.indexOf("\n  build:\n");
     const reproducibilityStart = workflow.indexOf("\n  reproducibility:\n");

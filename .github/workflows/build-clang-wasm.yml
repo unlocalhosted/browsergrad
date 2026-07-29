@@ -46,7 +46,7 @@ jobs:
           if [[ "${{ inputs.mode }}" == 'fast-validation' ]]; then
             pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:fast
           else
-            pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:run
+            pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:evidence-input
           fi
 
   build:
