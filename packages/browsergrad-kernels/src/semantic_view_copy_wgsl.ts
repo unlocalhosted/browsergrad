@@ -10,6 +10,14 @@ import { wireIntegerToBigInt } from "@unlocalhosted/browsergrad-semantic-core/sc
 const I32_MIN = -2_147_483_648n;
 const I32_MAX = 2_147_483_647n;
 
+export const SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM =
+  "bg_dynamic_prefix" as const;
+export const SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_BINDING = 2;
+
+export type SemanticViewCopyElementCountMode =
+  | "static"
+  | "runtime-prefix";
+
 export interface EmittedSemanticViewCopyWgsl {
   readonly source: string;
   readonly sourceLocationRange: IntegerRange;
@@ -35,6 +43,7 @@ export function emitSemanticViewCopyWgsl(
   layout: LayoutArtifactPayloadV1,
   prepared: PreparedViewCopySpecialization,
   workgroupSize: number,
+  elementCountMode: SemanticViewCopyElementCountMode = "static",
 ): EmittedSemanticViewCopyWgsl {
   const sourceMap = requiredIndexMap(layout, prepared.source.indexMapId, "source");
   const destinationMap = requiredIndexMap(layout, prepared.destination.indexMapId, "destination");
@@ -86,14 +95,26 @@ export function emitSemanticViewCopyWgsl(
         `  let source_word: u32 = ${sourceWord.code};`,
         "  let copied_bits: u32 = source_words[source_word];",
       ];
+  const dynamicPrefixDeclarations = elementCountMode === "runtime-prefix"
+    ? [
+        "struct BrowserGradDynamicPrefix {",
+        "  element_count: u32,",
+        "}",
+        `@group(0) @binding(${SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_BINDING}) var<uniform> ${SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM}: BrowserGradDynamicPrefix;`,
+      ]
+    : [];
+  const elementCountGuard = elementCountMode === "runtime-prefix"
+    ? `  if (linear_index >= ${elementCount}u || linear_index >= ${SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM}.element_count) {`
+    : `  if (linear_index >= ${elementCount}u) {`;
   const source = [
     "@group(0) @binding(0) var<storage, read> source_words: array<u32>;",
     "@group(0) @binding(1) var<storage, read_write> destination_words: array<u32>;",
+    ...dynamicPrefixDeclarations,
     "",
     `@compute @workgroup_size(${workgroupSize}, 1, 1)`,
     "fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {",
     "  let linear_index: u32 = global_id.x;",
-    `  if (linear_index >= ${elementCount}u) {`,
+    elementCountGuard,
     "    return;",
     "  }",
     ...coordinates,

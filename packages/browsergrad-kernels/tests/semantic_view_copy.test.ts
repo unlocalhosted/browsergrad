@@ -25,6 +25,9 @@ import {
   runSemanticViewCopyWebGpu,
   type PrepareSemanticViewCopyWgslRequest,
 } from "../src/semantic_view_copy";
+import {
+  prepareSemanticViewCopyDynamicPrefixWgsl,
+} from "../src/semantic_view_copy_internal";
 import type { KernelDevice } from "../src/types";
 
 const TRUE: PredicateExpr = { kind: "bool", value: true };
@@ -182,6 +185,44 @@ describe("semantic view-copy WGSL lowering", () => {
     expect(Object.isFrozen(wgsl.program.bindings[0])).toBe(true);
     expect(Object.isFrozen(wgsl.program.workgroupSize)).toBe(true);
     expect(Object.isFrozen(wgsl.launch.dispatchCount)).toBe(true);
+  });
+
+  it("lowers one runtime-prefix guard without changing semantic authority", async () => {
+    const shape = [constant("65")] as const;
+    const layout = await verifiedLayout({
+      shape,
+      sourceLocation: coordinate(0),
+      sourceBytes: constant("260"),
+      destinationBytes: constant("260"),
+    });
+    const kernel = await verifiedKernel(layout);
+    const operation = kernelArtifactPayload(kernel).operations[0];
+    if (operation === undefined) throw new Error("fixture operation missing");
+    const dynamic = await prepareSemanticViewCopyDynamicPrefixWgsl(
+      layout,
+      kernel,
+      {
+        operationId: operation.operationId,
+        workgroupSize: 64,
+      },
+    );
+    const ordinary = await prepare(layout, kernel, {
+      workgroupSize: 64,
+    });
+
+    expect(dynamic.semantic.specializationHash)
+      .toBe(ordinary.semantic.specializationHash);
+    expect(dynamic.wgslModuleHash).not.toBe(ordinary.wgslModuleHash);
+    expect(dynamic.program.bindings).toContainEqual({
+      kind: "uniform",
+      name: dynamic.dynamicPrefixUniformName,
+      byteLength: 4,
+      binding: 2,
+    });
+    expect(dynamic.program.wgsl).toContain(
+      "linear_index >= bg_dynamic_prefix.element_count",
+    );
+    expect(dynamic.launch.dispatchCount).toEqual([65, 1, 1]);
   });
 
   it("lowers i32 and u32 through the same bit-exact word backend", async () => {

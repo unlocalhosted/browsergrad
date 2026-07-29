@@ -83,6 +83,7 @@ export function webGpuSemanticDeviceLimits(device: GPUDevice): EvidenceJsonObjec
     maxComputeWorkgroupStorageSize: device.limits.maxComputeWorkgroupStorageSize,
     maxBindingsPerBindGroup: device.limits.maxBindingsPerBindGroup,
     maxStorageBuffersPerShaderStage: device.limits.maxStorageBuffersPerShaderStage,
+    maxUniformBuffersPerShaderStage: device.limits.maxUniformBuffersPerShaderStage,
   });
 }
 

@@ -31,11 +31,18 @@ import {
   type DirectDispatchResult,
 } from "./runner.js";
 import { issueWithWebGpuErrorScopes } from "./webgpu_error_scope.js";
-import { registerPreparedSemanticViewCopyResidentIssuer } from "./semantic_view_copy_internal.js";
+import {
+  registerPreparedSemanticViewCopyResidentIssuer,
+  registerSemanticViewCopyDynamicPrefixPreparer,
+  type PreparedSemanticViewCopyDynamicPrefixWgsl,
+} from "./semantic_view_copy_internal.js";
 import {
   emitSemanticViewCopyWgsl,
+  SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_BINDING,
+  SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM,
   SemanticViewCopyWgslLoweringError,
   type IntegerRange,
+  type SemanticViewCopyElementCountMode,
 } from "./semantic_view_copy_wgsl.js";
 
 export const SEMANTIC_VIEW_COPY_WEBGPU_PROFILE =
@@ -173,6 +180,40 @@ export async function prepareSemanticViewCopyWgsl(
   kernelArtifact: VerifiedKernelArtifact,
   request: PrepareSemanticViewCopyWgslRequest,
 ): Promise<PreparedSemanticViewCopyWgsl> {
+  const prepared = await prepareSemanticViewCopyWgslWithElementCountMode(
+    layoutArtifact,
+    kernelArtifact,
+    request,
+    "static",
+  );
+  PREPARED_VIEW_COPIES.add(prepared);
+  return prepared;
+}
+
+async function prepareSemanticViewCopyDynamicPrefixWgsl(
+  layoutArtifact: VerifiedLayoutArtifact,
+  kernelArtifact: VerifiedKernelArtifact,
+  request: PrepareSemanticViewCopyWgslRequest,
+): Promise<PreparedSemanticViewCopyDynamicPrefixWgsl> {
+  const prepared = await prepareSemanticViewCopyWgslWithElementCountMode(
+    layoutArtifact,
+    kernelArtifact,
+    request,
+    "runtime-prefix",
+  );
+  return Object.freeze({
+    ...prepared,
+    dynamicPrefixUniformName:
+      SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM,
+  });
+}
+
+async function prepareSemanticViewCopyWgslWithElementCountMode(
+  layoutArtifact: VerifiedLayoutArtifact,
+  kernelArtifact: VerifiedKernelArtifact,
+  request: PrepareSemanticViewCopyWgslRequest,
+  elementCountMode: SemanticViewCopyElementCountMode,
+): Promise<PreparedSemanticViewCopyWgsl> {
   const workgroupSize = resolvePositiveInteger(
     request.workgroupSize,
     DEFAULT_WORKGROUP_SIZE,
@@ -206,7 +247,12 @@ export async function prepareSemanticViewCopyWgsl(
   }
   let emitted;
   try {
-    emitted = emitSemanticViewCopyWgsl(layoutArtifactPayload(layoutArtifact), semantic, workgroupSize);
+    emitted = emitSemanticViewCopyWgsl(
+      layoutArtifactPayload(layoutArtifact),
+      semantic,
+      workgroupSize,
+      elementCountMode,
+    );
   } catch (error) {
     if (error instanceof SemanticViewCopyWgslLoweringError) {
       throw new SemanticViewCopyWebGpuError(error.code, error.path, error.message, { cause: error });
@@ -222,15 +268,37 @@ export async function prepareSemanticViewCopyWgsl(
     backendVersion: SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION,
     semanticSpecialization: semantic.specializationHash,
     workgroupSize,
+    elementCountMode,
     source: emitted.source,
   });
+  const bindings = [
+    {
+      kind: "storage" as const,
+      name: "source_words",
+      valueType: "u32" as const,
+      access: "read" as const,
+      binding: 0,
+    },
+    {
+      kind: "storage" as const,
+      name: "destination_words",
+      valueType: "u32" as const,
+      access: "read_write" as const,
+      binding: 1,
+    },
+    ...(elementCountMode === "runtime-prefix"
+      ? [{
+          kind: "uniform" as const,
+          name: SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM,
+          byteLength: 4,
+          binding: SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_BINDING,
+        }]
+      : []),
+  ];
   const program = freezeProgram(defineWgslKernelProgram({
     name: `bg_semantic_view_copy_${wgslModuleHash}`,
     wgsl: emitted.source,
-    bindings: [
-      { kind: "storage", name: "source_words", valueType: "u32", access: "read", binding: 0 },
-      { kind: "storage", name: "destination_words", valueType: "u32", access: "read_write", binding: 1 },
-    ],
+    bindings,
     workgroupSize: [workgroupSize, 1, 1],
   }));
   const prepared = Object.freeze({
@@ -248,9 +316,12 @@ export async function prepareSemanticViewCopyWgsl(
     sourceLocationRange: emitted.sourceLocationRange,
     destinationLocationRange: emitted.destinationLocationRange,
   });
-  PREPARED_VIEW_COPIES.add(prepared);
   return prepared;
 }
+
+registerSemanticViewCopyDynamicPrefixPreparer(
+  prepareSemanticViewCopyDynamicPrefixWgsl,
+);
 
 /**
  * Dispatch an authorized semantic view-copy over a resident source allocation.

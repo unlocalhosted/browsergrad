@@ -44,6 +44,10 @@ import {
   SemanticViewCopyWebGpuError,
   type PreparedSemanticViewCopyWgsl,
 } from "./semantic_view_copy.js";
+import {
+  prepareSemanticViewCopyDynamicPrefixWgsl,
+  type PreparedSemanticViewCopyDynamicPrefixWgsl,
+} from "./semantic_view_copy_internal.js";
 import type { KernelDevice } from "./types.js";
 import {
   clearWgslPipelineCache,
@@ -74,7 +78,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.13.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.14.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -92,6 +96,8 @@ const DEFAULT_MAX_PREPARATION_MS = 30_000;
 const DEFAULT_MAX_EXECUTION_MS = 30_000;
 const MAX_VIEW_COPY_ELEMENTS = 16_777_216;
 const MAX_U32 = 0xffff_ffffn;
+const DYNAMIC_PREFIX_UNIFORM_GPU_BYTES = 16n;
+const DYNAMIC_PREFIX_UNIFORM_HOST_BYTES = 4n;
 const NUMERICAL_STATUS_STORAGE = "bg_graph_numerical_status";
 const PREPARED = new WeakMap<object, PreparedState>();
 const PREPARED_PIPELINES =
@@ -230,6 +236,7 @@ export interface SemanticHostGraphWebGpuDeviceFacts {
     maxComputeWorkgroupSizeX: number;
     maxBindingsPerBindGroup: number;
     maxStorageBuffersPerShaderStage: number;
+    maxUniformBuffersPerShaderStage: number;
   }>;
 }
 
@@ -435,6 +442,7 @@ interface PreparedDynamicDispatchPlan {
   readonly maxElementCount: number;
   readonly startStepIndex: number;
   readonly stepCount: number;
+  readonly dynamicPrefixUniformName: string;
 }
 
 interface PreparedConditionalBranch {
@@ -802,12 +810,23 @@ export async function prepareSemanticHostGraphWebGpu(
       resourceDynamicDispatch === undefined
       ? 0n
       : 4n;
+  const dynamicPrefixUniformCount = BigInt(
+    dynamicDispatches.reduce(
+      (total, dispatch) => total + dispatch.stepCount,
+      0,
+    ),
+  );
+  const dynamicPrefixUniformGpuBytes =
+    dynamicPrefixUniformCount * DYNAMIC_PREFIX_UNIFORM_GPU_BYTES;
+  const dynamicPrefixUniformHostBytes =
+    dynamicPrefixUniformCount * DYNAMIC_PREFIX_UNIFORM_HOST_BYTES;
   const plannedTransientGpuBytes =
     boundResourceBytes + boundOutputBytes + (statusBytes * 2n) +
-    feedbackBytes;
+    feedbackBytes + dynamicPrefixUniformGpuBytes;
   const plannedTransientHostBytes =
     inputBytes + boundResourceBytes + boundOutputBytes +
-    outputBytes + statusBytes + feedbackBytes;
+    outputBytes + statusBytes + feedbackBytes +
+    dynamicPrefixUniformHostBytes;
   const plannedTransientWorkingSetBytes =
     plannedTransientGpuBytes + plannedTransientHostBytes;
   if (
@@ -1848,11 +1867,6 @@ function selectConditionalExecution(
         "admitted dynamic dispatch control is outside its verified bound",
       );
     }
-    const dispatchCount = exactDynamicDispatchCount(
-      elementCount,
-      state.workgroupSize,
-      `$.nodes.${dispatch.nodeId}.launchControl`,
-    );
     for (
       let pipelineIndex = dispatch.startStepIndex;
       pipelineIndex < dispatch.startStepIndex + dispatch.stepCount;
@@ -1871,10 +1885,11 @@ function selectConditionalExecution(
           "dynamic dispatch step disappeared during runtime selection",
         );
       }
-      selectedSteps[selectedIndex] = Object.freeze({
-        ...step,
-        launch: frozenLaunch(dispatchCount),
-      });
+      selectedSteps[selectedIndex] = dynamicPrefixStep(
+        step,
+        dispatch.dynamicPrefixUniformName,
+        elementCount,
+      );
     }
     dynamicCompletions.set(dispatch.nodeId, Object.freeze({
       nodeId: dispatch.nodeId,
@@ -1974,7 +1989,7 @@ async function appendDispatchSteps(
   storageMetadata: Record<string, WgslStorageBufferMetadata>,
   moduleHashes: string[],
   launchElementCount?: number,
-): Promise<void> {
+): Promise<string | undefined> {
   const semantic = catalog.get(node.semanticArtifactHash);
   if (semantic === undefined) {
     fail(
@@ -2009,28 +2024,37 @@ async function appendDispatchSteps(
     operation.destination.viewId,
     node.nodeId,
   );
-  let prepared: PreparedSemanticViewCopyWgsl;
+  let prepared:
+    | PreparedSemanticViewCopyWgsl
+    | PreparedSemanticViewCopyDynamicPrefixWgsl;
   try {
-    prepared = await prepareSemanticViewCopyWgsl(
-      semantic.layout,
-      semantic.kernel,
-      {
-        operationId: node.entrypointId,
-        bindings: node.dimensionBindings,
-        workgroupSize: options.workgroupSize,
-        maxWgslBytes: options.maxWgslBytes,
-        maxElements: MAX_VIEW_COPY_ELEMENTS,
-        maxPreparationMs: Math.min(
-          60_000,
-          remainingPreparationMs(startedAt, options),
-        ),
-        maxTransientWorkingSetBytes:
-          options.maxTransientWorkingSetBytes,
-        ...(options.signal === undefined
-          ? {}
-          : { signal: options.signal }),
-      },
-    );
+    const request = {
+      operationId: node.entrypointId,
+      bindings: node.dimensionBindings,
+      workgroupSize: options.workgroupSize,
+      maxWgslBytes: options.maxWgslBytes,
+      maxElements: MAX_VIEW_COPY_ELEMENTS,
+      maxPreparationMs: Math.min(
+        60_000,
+        remainingPreparationMs(startedAt, options),
+      ),
+      maxTransientWorkingSetBytes:
+        options.maxTransientWorkingSetBytes,
+      ...(options.signal === undefined
+        ? {}
+        : { signal: options.signal }),
+    };
+    prepared = node.kind === "dynamic-dispatch"
+      ? await prepareSemanticViewCopyDynamicPrefixWgsl(
+          semantic.layout,
+          semantic.kernel,
+          request,
+        )
+      : await prepareSemanticViewCopyWgsl(
+          semantic.layout,
+          semantic.kernel,
+          request,
+        );
   } catch (cause) {
     translatePreparationFailure(
       cause,
@@ -2038,7 +2062,7 @@ async function appendDispatchSteps(
       "view-copy WebGPU preparation failed",
     );
   }
-  if (prepared.semantic.elementCount === 0n) return;
+  if (prepared.semantic.elementCount === 0n) return undefined;
   const selectedElementCount = launchElementCount ??
     safeNumber(
       prepared.semantic.elementCount,
@@ -2056,13 +2080,17 @@ async function appendDispatchSteps(
   }
   const launch = launchElementCount === undefined
     ? prepared.launch
-    : frozenLaunch(
-      exactDynamicDispatchCount(
+    : frozenLaunch(selectedElementCount);
+  const dynamicPrefixUniformName =
+    node.kind === "dynamic-dispatch"
+      ? preparedDynamicPrefixUniformName(prepared, node.nodeId)
+      : undefined;
+  const dynamicPrefixUniform = dynamicPrefixUniformName === undefined
+    ? undefined
+    : dynamicPrefixUniformBinding(
+        dynamicPrefixUniformName,
         selectedElementCount,
-        options.workgroupSize,
-        `$.nodes.${node.nodeId}.launch`,
-      ),
-    );
+      );
   for (let rank = 0; rank < rankCount; rank += 1) {
     const sourceName = source.storageNames[rank] as string;
     const destinationName = destination.storageNames[rank] as string;
@@ -2073,6 +2101,9 @@ async function appendDispatchSteps(
         source_words: sourceName,
         destination_words: destinationName,
       }),
+      ...(dynamicPrefixUniform === undefined
+        ? {}
+        : { uniforms: dynamicPrefixUniform }),
     }));
     addResourceMetadata(
       source,
@@ -2089,6 +2120,7 @@ async function appendDispatchSteps(
     counts.dispatch += 1;
   }
   moduleHashes.push(prepared.wgslModuleHash);
+  return dynamicPrefixUniformName;
 }
 
 async function appendDynamicDispatchSteps(
@@ -2109,15 +2141,8 @@ async function appendDynamicDispatchSteps(
     wireIntegerToBigInt(node.maxElementCount),
     `$.nodes.${node.nodeId}.maxElementCount`,
   );
-  if (maxElementCount % options.workgroupSize !== 0) {
-    fail(
-      "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
-      `$.nodes.${node.nodeId}.mode`,
-      "dynamic dispatch artifact maximum must align to the prepared workgroup size",
-    );
-  }
   const startStepIndex = steps.length;
-  await appendDispatchSteps(
+  const dynamicPrefixUniformName = await appendDispatchSteps(
     node,
     rankCount,
     catalog,
@@ -2139,6 +2164,13 @@ async function appendDynamicDispatchSteps(
       "dynamic dispatch did not lower to one exact step per rank",
     );
   }
+  if (dynamicPrefixUniformName === undefined) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${node.nodeId}`,
+      "dynamic dispatch did not lower a runtime prefix uniform",
+    );
+  }
   dynamicDispatches.push(Object.freeze({
     nodeId: node.nodeId,
     selector: node.mode === "runtime-u32-prefix-elements"
@@ -2157,6 +2189,7 @@ async function appendDynamicDispatchSteps(
     maxElementCount,
     startStepIndex,
     stepCount,
+    dynamicPrefixUniformName,
   }));
 }
 
@@ -2415,19 +2448,47 @@ function frozenLaunch(
   });
 }
 
-function exactDynamicDispatchCount(
-  elementCount: number,
-  workgroupSize: number,
-  path: string,
-): number {
-  if (elementCount <= 0 || elementCount % workgroupSize !== 0) {
+function preparedDynamicPrefixUniformName(
+  prepared:
+    | PreparedSemanticViewCopyWgsl
+    | PreparedSemanticViewCopyDynamicPrefixWgsl,
+  nodeId: string,
+): string {
+  if (!("dynamicPrefixUniformName" in prepared)) {
     fail(
-      "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
-      path,
-      `dynamic dispatch element count ${elementCount} must be a positive multiple of prepared workgroup size ${workgroupSize}`,
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${nodeId}`,
+      "dynamic dispatch received a static view-copy program",
     );
   }
-  return elementCount;
+  return prepared.dynamicPrefixUniformName;
+}
+
+function dynamicPrefixStep(
+  step: WgslKernelSequenceStep,
+  uniformName: string,
+  elementCount: number,
+): WgslKernelSequenceStep {
+  return Object.freeze({
+    ...step,
+    launch: frozenLaunch(elementCount),
+    uniforms: dynamicPrefixUniformBinding(
+      uniformName,
+      elementCount,
+      step.uniforms,
+    ),
+  });
+}
+
+function dynamicPrefixUniformBinding(
+  uniformName: string,
+  elementCount: number,
+  existing: WgslKernelSequenceStep["uniforms"] = {},
+): Readonly<Record<string, ArrayBuffer | ArrayBufferView>> {
+  return Object.freeze({
+    ...existing,
+    [uniformName]: new Uint32Array([elementCount]),
+  });
 }
 
 async function buildSemanticCatalog(
@@ -2825,11 +2886,6 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
         `produced resource dynamic dispatch count ${elementCount} must be between one and its artifact bound ${dispatch.maxElementCount}`,
       );
     }
-    const dispatchCount = exactDynamicDispatchCount(
-      elementCount,
-      state.workgroupSize,
-      `$.nodes.${dispatch.nodeId}.launchSource`,
-    );
     const steps = [...selectedExecution.steps];
     for (
       let offset = 0;
@@ -2850,10 +2906,11 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
           "resource dynamic dispatch rank step disappeared during feedback staging",
         );
       }
-      steps[selectedIndex] = Object.freeze({
-        ...step,
-        launch: frozenLaunch(dispatchCount),
-      });
+      steps[selectedIndex] = dynamicPrefixStep(
+        step,
+        dispatch.dynamicPrefixUniformName,
+        elementCount,
+      );
     }
     const completion = Object.freeze({
       nodeId: dispatch.nodeId,
@@ -3721,6 +3778,8 @@ function readAndVerifyDeviceFacts(
       maxBindingsPerBindGroup: gpu.limits.maxBindingsPerBindGroup,
       maxStorageBuffersPerShaderStage:
         gpu.limits.maxStorageBuffersPerShaderStage,
+      maxUniformBuffersPerShaderStage:
+        gpu.limits.maxUniformBuffersPerShaderStage,
     });
     features = Object.freeze([...gpu.features].map(String).sort());
   } catch (cause) {
@@ -3762,15 +3821,46 @@ function readAndVerifyDeviceFacts(
       `workgroup size ${state.workgroupSize} exceeds device limits`,
     );
   }
-  const requiredBindings = state.usesNumericalStatus ? 3 : 2;
+  const requiredBindings = Math.max(
+    0,
+    ...state.deviceAdmissionSteps.map((step) =>
+      step.program.bindings.length),
+  );
+  const requiredStorageBindings = Math.max(
+    0,
+    ...state.deviceAdmissionSteps.map((step) =>
+      step.program.bindings.filter((binding) =>
+        binding.kind === "storage").length),
+  );
+  const requiredUniformBindings = Math.max(
+    0,
+    ...state.deviceAdmissionSteps.map((step) =>
+      step.program.bindings.filter((binding) =>
+        binding.kind === "uniform").length),
+  );
+  if (limits.maxBindingsPerBindGroup < requiredBindings) {
+    fail(
+      "BG-WEBGPU-GRAPH-DEVICE-LIMIT",
+      "$.device.limits.maxBindingsPerBindGroup",
+      `device cannot bind the required ${requiredBindings} graph resources`,
+    );
+  }
   if (
-    limits.maxBindingsPerBindGroup < requiredBindings ||
-    limits.maxStorageBuffersPerShaderStage < requiredBindings
+    limits.maxStorageBuffersPerShaderStage < requiredStorageBindings
   ) {
     fail(
       "BG-WEBGPU-GRAPH-DEVICE-LIMIT",
-      "$.device.limits",
-      `device cannot bind the required ${requiredBindings} storage buffers`,
+      "$.device.limits.maxStorageBuffersPerShaderStage",
+      `device cannot bind the required ${requiredStorageBindings} storage buffers`,
+    );
+  }
+  if (
+    limits.maxUniformBuffersPerShaderStage < requiredUniformBindings
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-DEVICE-LIMIT",
+      "$.device.limits.maxUniformBuffersPerShaderStage",
+      `device cannot bind the required ${requiredUniformBindings} uniform buffers`,
     );
   }
   for (const [index, step] of state.deviceAdmissionSteps.entries()) {

@@ -9,6 +9,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- WebGPU host-graph backend 1.14 supports every positive bounded
+  one-dimensional prefix count for the existing version-1.9 and version-1.11
+  dynamic-dispatch semantics. The canonical view-copy lowerer emits one
+  prewarmed runtime-prefix uniform guard; execution changes only the validated
+  logical dispatch count and four-byte uniform. Tail invocations return before
+  coordinate, address, or resource evaluation, so wider workgroups cannot
+  write beyond an unaligned prefix. Uniform storage is included in transient
+  budgets and device binding limits. Required real-device evidence covers
+  1/2-, 64/128-, and 65/127-element request-time and produced-resource
+  prefixes at workgroup size 64 through the same pipeline identities.
 - WebGPU host-graph backend 1.13 widens the existing version-1.9 and
   version-1.11 dynamic-dispatch profiles to exact workgroup-aligned prefixes.
   The artifact maximum and selected request-time or produced-resource element

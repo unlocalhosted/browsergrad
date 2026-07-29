@@ -864,16 +864,9 @@ describe("semantic host-graph WebGPU preparation", () => {
       dynamicPipelineProgram(artifacts),
       artifacts,
     );
-    await expect(prepareSemanticHostGraphWebGpu(
-      graph,
-      artifactOptions(artifacts),
-    )).rejects.toMatchObject({
-      code: "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
-      path: "$.nodes.first.mode",
-    });
     const prepared = await prepareSemanticHostGraphWebGpu(
       graph,
-      { ...artifactOptions(artifacts), workgroupSize: 1 },
+      artifactOptions(artifacts),
     );
 
     expect(prepared).toMatchObject({
@@ -883,6 +876,19 @@ describe("semantic host-graph WebGPU preparation", () => {
       dispatchStepCount: 4,
       materializationCount: 1,
       dynamicDispatchCount: 1,
+      runtimeControlIds: ["prefix-elements"],
+      plannedTransientGpuBytes: "96",
+      plannedTransientHostBytes: "104",
+      plannedTransientWorkingSetBytes: "200",
+    });
+    const oneLane = await prepareSemanticHostGraphWebGpu(
+      graph,
+      { ...artifactOptions(artifacts), workgroupSize: 1 },
+    );
+    expect(oneLane).toMatchObject({
+      dynamicDispatchCount: 1,
+      expandedStepCount: 4,
+      dispatchStepCount: 4,
       runtimeControlIds: ["prefix-elements"],
     });
     const aligned = await prepareSemanticHostGraphWebGpu(
@@ -905,7 +911,7 @@ describe("semantic host-graph WebGPU preparation", () => {
     );
     const prepared = await prepareSemanticHostGraphWebGpu(
       graph,
-      { ...artifactOptions(artifacts), workgroupSize: 1 },
+      artifactOptions(artifacts),
     );
 
     expect(prepared).toMatchObject({
@@ -1311,6 +1317,7 @@ describe("semantic host-graph WebGPU execution admission", () => {
         maxComputeWorkgroupSizeX: 256,
         maxBindingsPerBindGroup: 8,
         maxStorageBuffersPerShaderStage: 8,
+        maxUniformBuffersPerShaderStage: 8,
       },
       lost: new Promise<GPUDeviceLostInfo>(() => undefined),
     } as unknown as GPUDevice;
@@ -1334,6 +1341,57 @@ describe("semantic host-graph WebGPU execution admission", () => {
     )).rejects.toMatchObject({
       code: "BG-WEBGPU-GRAPH-DEVICE-LIMIT",
       path: "$.device.limits.maxBufferSize",
+    });
+  });
+
+  it("rejects missing dynamic-prefix uniform capacity before GPU work", async () => {
+    const artifacts = await identityArtifacts();
+    const graph = await verified(
+      dynamicPipelineProgram(artifacts),
+      artifacts,
+    );
+    const prepared = await prepareSemanticHostGraphWebGpu(
+      graph,
+      artifactOptions(artifacts),
+    );
+    const gpu = {
+      features: new Set<string>(),
+      limits: {
+        maxBufferSize: 1024,
+        maxStorageBufferBindingSize: 1024,
+        maxComputeWorkgroupsPerDimension: 65_535,
+        maxComputeInvocationsPerWorkgroup: 256,
+        maxComputeWorkgroupSizeX: 256,
+        maxBindingsPerBindGroup: 8,
+        maxStorageBuffersPerShaderStage: 8,
+        maxUniformBuffersPerShaderStage: 0,
+      },
+      lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+    } as unknown as GPUDevice;
+    const device = {
+      gpu,
+      clearCache() {},
+      getStats() {
+        throw new Error("device stats must not be observed");
+      },
+    } as KernelDevice;
+
+    await expect(runSemanticHostGraphWebGpu(
+      device,
+      prepared,
+      {
+        inputs: [
+          input(0, new Uint8Array(8)),
+          input(1, new Uint8Array(8)),
+        ],
+        controls: [{
+          controlId: "prefix-elements",
+          value: wire("1"),
+        }],
+      },
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-DEVICE-LIMIT",
+      path: "$.device.limits.maxUniformBuffersPerShaderStage",
     });
   });
 
