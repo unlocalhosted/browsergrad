@@ -499,6 +499,7 @@ Their `verified` labels apply only to synthetic optional-lane contracts.
 | D-195 | 2026-07-29 | accepted | Extend the native C++/CuTe extractor and its canonical wire writer to preserve signed static layout strides and signed `cosize` results through checked signed arithmetic. Keep allocation capacity outside extracted layout facts, preserve the single semantic candidate and authorization path, and add the unchanged rank-2 mixed-sign CuTe source to the closed real-browser compile case registry. | Negative strides are layout meaning, not a source spelling or a request to infer storage. Emitting the exact signed facts lets the existing affine-bound runtime admission establish safe rebasing and capacity without a second parser, source-shaped kernel, or reinterpretation of `cosize` as allocation length. |
 | D-196 | 2026-07-29 | accepted | Define the browser compiler Wasm table contract structurally and with reviewed bounds instead of pinning one exact linker-produced table minimum. Require exactly one non-imported `funcref` table with a declared maximum, a minimum of at least one, and a maximum no greater than 65,536; continue to pin imports, exports, memory, globals, tags, start policy, custom sections, and all other runtime ABI facts exactly. Retain the previous table minimum only as a reviewed baseline observation. | Adding one valid signed-layout source branch changed the linker table minimum from 15,301 to 15,302 without changing the Worker-visible interface. Exact cardinality made a private linker allocation detail a false ABI break and forced unnecessary rebuild cycles. The bounded structural policy remains fail-closed while allowing semantically irrelevant linker placement drift. |
 | D-197 | 2026-07-29 | accepted | Give clean-validation and reproducibility workflow modes a dedicated JavaScript evidence-input gate covering build planning, locked inputs, source projection, execution, cache isolation, raw-Wasm review, and two-build comparison machinery. Keep the broad fast/release gates responsible for package-pinned strict-compile, complete-distribution, convergence, external-exchange, and release-output resources after those outputs are regenerated. | A compiler input change necessarily makes its previously pinned output observations stale. Running output consumers before the replacement artifact exists made a valid clean build red for the expected evidence rotation and could skip two-build comparison after both expensive builds succeeded. Separating input integrity from downstream output promotion removes that false dependency without weakening either gate. |
+| D-198 | 2026-07-29 | accepted | Implement signed layout contribution multiplication with one shared safe predicate shape across Clang extraction, Artifact V3 writing, and view-copy artifact preparation: for a nonnegative extent delta and negative stride, divide `INT64_MIN` only by the positive extent delta and compare the stride before multiplying. Exercise the valid stride `-1` path in both Clang and complete-session native tests, and keep overflow fail-closed. | Dividing `INT64_MIN` by the negative stride made `-1`, the most ordinary reversed-layout stride, execute the undefined `INT64_MIN / -1` operation while checking for overflow. Rewriting the guard around a positive divisor removes undefined behavior without widening the accepted integer domain or weakening exact signed layout preservation. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -7991,6 +7992,25 @@ whether any files may be left partially changed.
 - This changes harness dependency direction only. It does not treat a clean
   build as reproducibility, production provenance, legal approval, browser
   execution, backend convergence, or release authority.
+
+### 2026-07-29 — Signed unit-stride overflow safety
+
+- The signed-layout audit found that all three native contribution guards
+  checked a negative stride by evaluating `INT64_MIN / stride`. A valid
+  stride of `-1` therefore reached the undefined signed-division overflow
+  case before the intended multiplication.
+- Clang extraction, Artifact V3 writing, and view-copy artifact preparation
+  now divide `INT64_MIN` only by the positive extent delta and reject a
+  negative stride below that safe quotient before multiplication.
+- The Clang-pass and complete-session native fixtures now exercise stride
+  `-1` directly while retaining a six-element signed affine span. The focused
+  native lane passes three tests with one platform skip in 46.27 seconds;
+  browser-build-plan typecheck, lint, package build, build-lock authoring
+  check, and the 14-file/161-test evidence-input gate pass.
+- Commit `d9aafe92` rotates the exact extractor source-set and build-lock
+  identities. Its compiler Wasm and every downstream browser/distribution
+  observation must be rebuilt; no stale pre-fix artifact is eligible for
+  promotion.
 
 ### 2026-07-28 — Compiler verifier native-load isolation
 
