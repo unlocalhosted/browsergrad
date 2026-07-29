@@ -501,6 +501,7 @@ Their `verified` labels apply only to synthetic optional-lane contracts.
 | D-197 | 2026-07-29 | accepted | Give clean-validation and reproducibility workflow modes a dedicated JavaScript evidence-input gate covering build planning, locked inputs, source projection, execution, cache isolation, raw-Wasm review, and two-build comparison machinery. Keep the broad fast/release gates responsible for package-pinned strict-compile, complete-distribution, convergence, external-exchange, and release-output resources after those outputs are regenerated. | A compiler input change necessarily makes its previously pinned output observations stale. Running output consumers before the replacement artifact exists made a valid clean build red for the expected evidence rotation and could skip two-build comparison after both expensive builds succeeded. Separating input integrity from downstream output promotion removes that false dependency without weakening either gate. |
 | D-198 | 2026-07-29 | accepted | Implement signed layout contribution multiplication with one shared safe predicate shape across Clang extraction, Artifact V3 writing, and view-copy artifact preparation: for a nonnegative extent delta and negative stride, divide `INT64_MIN` only by the positive extent delta and compare the stride before multiplying. Exercise the valid stride `-1` path in both Clang and complete-session native tests, and keep overflow fail-closed. | Dividing `INT64_MIN` by the negative stride made `-1`, the most ordinary reversed-layout stride, execute the undefined `INT64_MIN / -1` operation while checking for overflow. Rewriting the guard around a positive divisor removes undefined behavior without widening the accepted integer domain or weakening exact signed layout preservation. |
 | D-199 | 2026-07-29 | accepted | Make the manual cached fast-build workflow consume the same dedicated evidence-input JavaScript gate as clean-validation and reproducibility. Keep the comprehensive fast package gate and release verification as explicit downstream output-consumer gates after generated observations are current. | The cached compiler build itself succeeded in 4 minutes 46 seconds, but its parallel JavaScript job made the workflow red solely because strict-compile, full-distribution, convergence, and asset observations described the previous compiler. A build-producing workflow must report whether its locked inputs and artifact are valid, not whether outputs that artifact exists to replace have already been promoted. |
+| D-200 | 2026-07-29 | accepted | Add a closed reproducibility-resource authoring boundary that accepts only canonical bounded non-symlink v3 verifier output bound to the current build lock, exact two-build parity, one explicit workflow run ID, and one exact source revision. Deterministically render the package resource and leaf identity, provide drift-check mode, and include the verified Wasm beside the compact reproducibility artifact in future workflow runs. | Reproducibility evidence generation was rigorous, but promotion still required hand-editing two TypeScript modules and downloading a much larger per-build artifact tree to obtain the Wasm. A typed authoring projection and compact verified payload remove those manual, error-prone steps without letting the authoring tool manufacture build evidence, producer trust, distribution approval, or release authority. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -8028,6 +8029,26 @@ whether any files may be left partially changed.
   compiler build run green or red on the build it performs without weakening
   later package-pinned output, external trust, legal approval, convergence,
   or release checks.
+
+### 2026-07-29 — Reproducibility promotion authoring boundary
+
+- The two-clean-build verifier already emits one canonical path-independent
+  v3 observation, but package promotion still depended on manually
+  transcribing that JSON, its canonical digest/length, workflow coordinates,
+  and Wasm identity into two TypeScript modules.
+- A new closed authoring command admits only bounded canonical non-symlink
+  input bound to the current lock and source set, exact two-build identity
+  parity, the fixed false authority claims, a positive workflow run ID, and a
+  lowercase exact source revision. It renders both modules deterministically
+  and has a fail-closed drift-check mode.
+- Future reproducibility workflows upload a compact payload containing the
+  compared Wasm, v3 observation, and exact Runtime ABI review. Promotion no
+  longer needs the larger raw build tree solely to recover the verified
+  compiler binary.
+- Browser-build-plan typecheck and lint pass. The authoring/workflow slice
+  passes 20 tests, and the expanded evidence-input lane passes 15 files and
+  164 tests. The authoring projection grants no build, producer, legal,
+  browser-execution, backend, or release authority.
 
 ### 2026-07-28 — Compiler verifier native-load isolation
 

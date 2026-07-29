@@ -108,6 +108,15 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("--first-root=\"${BG_CLANG_REPRO_ROOT}/first\"");
     expect(workflow).toContain("--second-root=\"${BG_CLANG_REPRO_ROOT}/second\"");
     expect(workflow).toContain("clang-wasm-runtime-abi-review.v1.json");
+    expect(workflow).toContain(
+      "name: Upload compact reproducible compiler binary",
+    );
+    expect(workflow).toContain(
+      "name: clang-wasm-reproducible-binary-${{ github.run_id }}",
+    );
+    expect(workflow).toContain(
+      "${{ env.BG_CLANG_REPRO_ROOT }}/first/output/browsergrad-cpp-cute/clang-extractor.wasm",
+    );
   });
 
   it("keeps cached feedback content-addressed and non-authoritative", () => {

@@ -377,6 +377,19 @@ jobs:
             --require-exact-interface
           sha256sum "${BG_CLANG_REPRO_ROOT}/clang-wasm-runtime-abi-review.v1.json"
 
+      - name: Upload compact reproducible compiler binary
+        if: ${{ success() && env.BG_CLANG_REPRO_ROOT != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: clang-wasm-reproducible-binary-${{ github.run_id }}
+          path: |
+            ${{ env.BG_CLANG_REPRO_ROOT }}/first/output/browsergrad-cpp-cute/clang-extractor.wasm
+            ${{ env.BG_CLANG_REPRO_ROOT }}/clang-wasm-reproducibility.v3.json
+            ${{ env.BG_CLANG_REPRO_ROOT }}/clang-wasm-runtime-abi-review.v1.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
+
       - name: Upload reproducibility and raw-Wasm review evidence
         if: ${{ success() && env.BG_CLANG_REPRO_ROOT != '' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
