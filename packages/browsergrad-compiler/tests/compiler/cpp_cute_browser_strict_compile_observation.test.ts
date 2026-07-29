@@ -66,13 +66,13 @@ describe("package-pinned strict browser compile observation", () => {
       requireVerifiedCppCuteBrowserStrictCompileObservation(authority)
     ).not.toThrow();
     expect(CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256)
-      .toBe("9c9591e725fca512d10a366bdec38b0067366f3d8ebdef50c29a5ebb0134def5");
+      .toBe("55de864a1962290ce2c75949b3d9673360b764a1323d0d9bed55f08e87b2298d");
     expect(CPP_CUTE_BROWSER_STRICT_COMPILE_VERIFIER_WORKER_BUNDLE_SHA256)
-      .toBe("06ffb66e4e808e9df030cc3fe2981fa3adddf13d03780680abb091cbcbd4b9eb");
+      .toBe("3f41d964119c0dc56e1e01ff0aca20886e93c96e7343e4d49fc646b2dc90279c");
     expect(CPP_CUTE_BROWSER_STRICT_COMPILE_SOURCE_REVISION)
-      .toBe("8d7f27eb9a249d8277def3b401377c42e961b6c7");
+      .toBe("ce7206a4010ade4d5c064d9054bb518c612690ba");
     expect(CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_SHA256)
-      .toBe("38fcfae4d0b9c11314ec90a50f3bbb17b34c46a2c407ca475b9f8b44311833e1");
+      .toBe("bc0d150c6f198fc4134ad9feabf9abcce338c49111015a3f305f5269b7c69174");
     expect(() =>
       requireVerifiedCppCuteBrowserStrictCompileObservation({} as never)
     ).toThrowError(/STRICT-COMPILE-EVIDENCE-UNVERIFIED/u);
