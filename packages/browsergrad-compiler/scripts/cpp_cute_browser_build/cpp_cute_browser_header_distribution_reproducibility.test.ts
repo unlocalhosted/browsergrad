@@ -23,6 +23,17 @@ describe("exact header distribution reproducibility", () => {
     expect(parsed.first.archives).toHaveLength(8);
     expect(parsed.first.sourceOutputRoot).toBe("/private/tmp/repro/source-a");
     expect(parsed.second.packOutputRoot).toBe("/private/tmp/repro/packs-b");
+    expect(parsed.first).not.toHaveProperty("allowUnpinnedDiagnosticBsdtar");
+    expect(() => parseCppCuteBrowserHeaderDistributionReproducibilityArguments([
+      ...archiveArguments(),
+      "--bsdtar=/usr/bin/bsdtar",
+      "--cuda-redistribution-index=/private/tmp/redistrib_12.6.3.json",
+      "--first-source-output-root=/private/tmp/repro/source-a",
+      "--first-pack-output-root=/private/tmp/repro/packs-a",
+      "--second-source-output-root=/private/tmp/repro/source-b",
+      "--second-pack-output-root=/private/tmp/repro/packs-b",
+      "--allow-unpinned-diagnostic-bsdtar",
+    ])).toThrow(/forbids the unpinned diagnostic archive tool/u);
     expect(() => parseCppCuteBrowserHeaderDistributionReproducibilityArguments([
       ...archiveArguments(),
       "--bsdtar=/usr/bin/bsdtar",

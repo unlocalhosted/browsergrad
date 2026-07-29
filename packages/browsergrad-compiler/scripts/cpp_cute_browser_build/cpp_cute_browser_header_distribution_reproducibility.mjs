@@ -181,15 +181,15 @@ export function parseCppCuteBrowserHeaderDistributionReproducibilityArguments(ar
   for (const field of rootArguments.values()) {
     if (!roots.has(field)) invalid("$arguments", `missing ${field}`);
   }
-  let first;
-  let second;
+  let firstParsed;
+  let secondParsed;
   try {
-    first = parseCppCuteBrowserHeaderPackPipelineArguments([
+    firstParsed = parseCppCuteBrowserHeaderPackPipelineArguments([
       ...common,
       `--output-root=${roots.get("firstSourceOutputRoot")}`,
       `--pack-output-root=${roots.get("firstPackOutputRoot")}`,
     ]);
-    second = parseCppCuteBrowserHeaderPackPipelineArguments([
+    secondParsed = parseCppCuteBrowserHeaderPackPipelineArguments([
       ...common,
       `--output-root=${roots.get("secondSourceOutputRoot")}`,
       `--pack-output-root=${roots.get("secondPackOutputRoot")}`,
@@ -197,6 +197,21 @@ export function parseCppCuteBrowserHeaderDistributionReproducibilityArguments(ar
   } catch (cause) {
     invalid("$arguments", "invalid two-root header-distribution arguments", { cause });
   }
+  if (firstParsed.allowUnpinnedDiagnosticBsdtar ||
+      secondParsed.allowUnpinnedDiagnosticBsdtar) {
+    invalid(
+      "$arguments",
+      "exact reproducibility forbids the unpinned diagnostic archive tool",
+    );
+  }
+  const {
+    allowUnpinnedDiagnosticBsdtar: _firstDiagnostic,
+    ...first
+  } = firstParsed;
+  const {
+    allowUnpinnedDiagnosticBsdtar: _secondDiagnostic,
+    ...second
+  } = secondParsed;
   assertDistinctPipelineInputs(first, second);
   const input = Object.freeze({ first, second });
   REPRODUCIBILITY_INPUTS.add(input);
