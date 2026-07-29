@@ -44,6 +44,9 @@ interface LayoutInput {
   readonly destinationBytes: DimExpr;
   readonly symbols?: readonly { readonly id: string; readonly domain: { readonly min: string; readonly max: string } }[];
   readonly dtype?:
+    | "bool"
+    | "i8"
+    | "u8"
     | "i16"
     | "u16"
     | "f16"
@@ -56,7 +59,11 @@ interface LayoutInput {
 async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifact> {
   const dtype = input.dtype ?? "f32";
   const requiredAlignmentBytes =
-    dtype === "i16" ||
+    dtype === "bool" ||
+    dtype === "i8" ||
+    dtype === "u8"
+      ? 1
+      : dtype === "i16" ||
     dtype === "u16" ||
     dtype === "f16" ||
     dtype === "bf16"
@@ -453,16 +460,16 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.packed16@1",
       );
-      expect(prepared.backendVersion).toBe("2.7.0");
+      expect(prepared.backendVersion).toBe("2.8.0");
       expect(prepared.launch.dispatchCount).toEqual([5, 1, 1]);
       expect(prepared.program.wgsl).toContain(
-        "fn copy_packed16_element(linear_index: u32)",
+        "fn copy_packed_element(linear_index: u32)",
       );
       expect(prepared.program.wgsl).toContain(
         "let destination_mask: u32 = 0xffffu << destination_shift;",
       );
       expect(prepared.program.wgsl).toContain(
-        "copy_packed16_element(first_element_index + 1u);",
+        "copy_packed_element(first_element_index + 1u);",
       );
       expect(prepared.program.wgsl).not.toContain("enable f16;");
       modules.set(dtype, prepared.program.wgsl);
@@ -504,6 +511,47 @@ describe("semantic view-copy WGSL lowering", () => {
       code: "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
       path: "$.launchMode",
     });
+  });
+
+  it("packs exact bool, i8, and u8 storage four elements per word", async () => {
+    const modules = new Map<string, string>();
+    for (const dtype of ["bool", "i8", "u8"] as const) {
+      const shape = [constant("3"), constant("3")] as const;
+      const layout = await verifiedLayout({
+        shape,
+        sourceLocation: add(
+          multiply(coordinate(1), constant("3")),
+          coordinate(0),
+        ),
+        sourceBytes: constant("12"),
+        destinationBytes: constant("12"),
+        dtype,
+      });
+      const prepared = await prepare(layout, await verifiedKernel(layout));
+
+      expect(prepared.semantic.portableProfile).toMatchObject({
+        profileId:
+          "browsergrad.view-copy.positive-affine-rank2-rank3-packed8@1",
+        rank: 2,
+        dtype,
+      });
+      expect(prepared.backendProfile).toBe(
+        "browsergrad.webgpu.view-copy.packed8@1",
+      );
+      expect(prepared.backendVersion).toBe("2.8.0");
+      expect(prepared.launch.dispatchCount).toEqual([3, 1, 1]);
+      expect(prepared.program.wgsl).toContain(
+        "let first_element_index: u32 = global_id.x * 4u;",
+      );
+      expect(prepared.program.wgsl).toContain(
+        "let destination_mask: u32 = 0xffu << destination_shift;",
+      );
+      expect(prepared.program.wgsl).toContain(
+        "copy_packed_element(first_element_index + 3u);",
+      );
+      modules.set(dtype, prepared.program.wgsl);
+    }
+    expect(new Set(modules.values()).size).toBe(1);
   });
 
   it("keeps signed padding arithmetic and exact fill bits inside a structured guard", async () => {

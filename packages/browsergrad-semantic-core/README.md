@@ -37,11 +37,11 @@ preservation. Static definitions contain no support state or evidence outcome.
 `/kernel` currently contains one concrete `browsergrad.kernel@1` operation: a
 verified, materializing view copy over a verified `browsergrad.layout@1`
 artifact. The portable execution profiles admit same-dtype f32, i32, or u32
-rank 1 through rank 7 global-memory views plus exact i16, u16, f16, or bf16
-storage copies at ranks 2 and 3, with explicit source-read and
+rank 1 through rank 7 global-memory views plus exact bool/i8/u8 and
+i16/u16/f16/bf16 storage copies at ranks 2 and 3, with explicit source-read and
 destination-write effects and disjoint alias sets. The f32 word profile admits
 reject or exact-bit fill behavior for invalid source coordinates; integer and
-packed-16 profiles require rejection. Generic operation verification is
+packed-subword profiles require rejection. Generic operation verification is
 separate from these lowering profiles. Rank 5 uses the distinct
 `browsergrad.view-copy.positive-affine-rank5-word32@1` profile so the existing
 rank-1-through-rank-4 identities retain their exact meaning; ranks 6 and 7
@@ -55,9 +55,11 @@ the same source capability at ranks 4 and 5, and
 rank-6 and rank-7 identities extend that source rule without widening older
 profiles. The destination remains positive-affine, dense, and exactly proved.
 The separate
+`browsergrad.view-copy.positive-affine-rank2-rank3-packed8@1` and
 `browsergrad.view-copy.positive-affine-rank2-rank3-packed16@1` profile
-preserves raw i16/u16/f16/bf16 storage bits; it does not claim floating-point
-arithmetic, conversion, or a `shader-f16` requirement.
+identities preserve raw bool/i8/u8 and i16/u16/f16/bf16 storage bits. They do
+not claim boolean canonicalization, arithmetic, conversion, or a `shader-f16`
+requirement.
 
 `/kernel` also defines one frontend-neutral logical GEMM tile with exact dense
 f32 operand/view roles, boundary policy, increasing-K accumulation order, and

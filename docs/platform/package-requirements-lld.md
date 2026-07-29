@@ -25,7 +25,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | --- | --- | --- |
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
-| 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. Additive exact-storage profiles cover f32/i32/u32 word32 ranks 1–7 and i16/u16/f16/bf16 packed16 ranks 2–3 without conflating storage copy with arithmetic support. |
+| 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. Additive exact-storage profiles cover f32/i32/u32 word32 ranks 1–7 plus bool/i8/u8 packed8 and i16/u16/f16/bf16 packed16 ranks 2–3 without conflating storage copy with value semantics or arithmetic support. |
 | 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict nine-case Worker matrix including unchanged signed-rank-2 CuTe source, signed-source-aware authorized Artifact V3 lowering, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-clobber producer/reviewer exchange, and unified in-process backend/final-release composition are package-pinned. The declared portable implementation exit now passes; externally rooted producer and distribution-review evidence plus actual production issuance remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
@@ -134,9 +134,9 @@ allocations, nonzero offsets, broadcast, guarded float fill, and:
 - distinct signed-affine rank-1, rank-2/rank-3, rank-4/rank-5, rank-6, and rank-7 source
   profiles with a positive-affine dense destination.
 
-The rank-2/rank-3 packed16 profile preserves exact i16/u16/f16/bf16 storage bits through a race-free static raw-u32 schedule. It
-grants no f16/bf16 arithmetic, conversion, or `shader-f16` claim. Required
-Apple Metal 3 backend-2.7 evidence passes 28 complete CPU/WebGPU cases; exact
+The rank-2/rank-3 packed profiles preserve exact bool/i8/u8 and i16/u16/f16/bf16 storage bits through a race-free static raw-u32 schedule. They
+grant no boolean canonicalization, arithmetic, conversion, or `shader-f16`
+claim. Apple Metal 3 backend-2.8 evidence passes 31 complete CPU/WebGPU cases; exact
 profile guards and evidence identities stay in the ledger.
 The authorized C++/CuTe transition carries signed source strides at ranks 1
 through 4 into canonical artifacts and derives exact affine element extrema,
@@ -148,7 +148,7 @@ signed-rank-2 CuTe source, authorizes the resulting exact distributed payload,
 and proves bit-exact CPU/required-WebGPU convergence on Apple Metal. This
 proves the declared portable source-to-backend implementation slice, not
 externally rooted producer trust, legal approval, or production release.
-Rank 8+, signed destinations, signed or dynamic packed16 maps, 8-bit/f64 view
+Rank 8+, signed destinations, signed or dynamic packed maps, 64-bit view
 storage, packed arithmetic/conversion, overlap, and other undeclared layouts
 remain explicit refusals.
 
@@ -712,17 +712,19 @@ division/modulo, f64, overlap, and non-global
 memory remain outside the declared portable profiles.
 
 The additive
-`browsergrad.view-copy.positive-affine-rank2-rank3-packed16@1` profile admits
-same-dtype i16, u16, f16, and bf16 exact storage copies at ranks 2 and 3.
-Source and destination maps remain positive affine, the destination remains
+`browsergrad.view-copy.positive-affine-rank2-rank3-packed8@1` and
+`browsergrad.view-copy.positive-affine-rank2-rank3-packed16@1` profiles admit
+same-dtype bool/i8/u8 and i16/u16/f16/bf16 exact storage copies at ranks 2 and
+3. Source and destination maps remain positive affine, the destination remains
 dense and injective, and invalid source coordinates reject. The current WebGPU
-backend additionally requires static launch, root allocation byte lengths that
+backends additionally require static launch, root allocation byte lengths that
 are multiples of four, and a destination view beginning on a four-byte
-boundary. Its schedule assigns each adjacent destination halfword pair to one
-invocation, so no two invocations race on the same physical u32 word. An odd
-final element uses a masked read-modify-write that preserves the unrelated
-upper half. The profile does not admit signed source maps, padding fill,
-f16/bf16 arithmetic, conversion, or a `shader-f16` requirement.
+boundary. Their schedule assigns each destination byte quartet or halfword pair
+to one invocation, so no two invocations race on the same physical u32 word.
+A partial final word uses masked read-modify-writes that preserve every
+unrelated byte. The profiles do not admit signed source maps, padding fill,
+boolean canonicalization, arithmetic, conversion, or a `shader-f16`
+requirement.
 
 CPU reference and WGSL lowering consume the same verified normalized
 expressions or a specialization accompanied by a differential proof against
@@ -767,6 +769,10 @@ Backend 2.7.0 adds the distinct packed16 backend profile. It extracts and
 inserts exact halfword bits through raw `array<u32>` storage, assigns one
 destination word to one invocation, preserves an odd destination tail, and
 retains the existing word32 programs and profile identities unchanged.
+Backend 2.8.0 generalizes that same word-owned schedule and address lowerer to
+the distinct packed8 profile. It copies four raw bytes per invocation,
+preserves one-to-three unrelated final-word bytes, and retains every older
+profile identity unchanged.
 
 ### Logical tiles versus physical schedules
 
@@ -2136,6 +2142,15 @@ across TypeScript and Python.
   `446917404b1a243d01d07f9358f144a63df19ca7ce46ddb4631b636bf76e1386`,
   and device profile
   `9589abc8fafb412d83194febaf210f7f89da7a580bf20d3272e1eef9dcda2f66`.
+- Add a distinct positive-affine rank-2/rank-3 packed8 profile for exact
+  bool/i8/u8 storage only. Keep boolean canonicalization, arithmetic,
+  conversion, signed maps, padding fill, and dynamic launch out of scope. The
+  required 31-case Apple Metal 3 lane records correctness artifact
+  `191a1f65b4c2005315f6f2a7d342e898d536cf2a37dee6fd25f218659ac070dc`,
+  case set
+  `0bc4c04adde40864644d60cf525a76fca730e68394f732edf8623ca5f0a54917`,
+  and device profile
+  `9589abc8fafb412d83194febaf210f7f89da7a580bf20d3272e1eef9dcda2f66`.
 
 **Exit:** two frontend paths and two execution tiers consume the same view/index
 fixtures; reference and WebGPU do not reconstruct offsets independently;
@@ -2147,8 +2162,9 @@ signed-affine profiles prove exact negative source strides at ranks 2 through
 5 without widening another identity or admitting signed destinations. The
 rank-1 signed profile completes that source capability across ranks 1 through
 5. Later additive rank-6/rank-7 word32 profiles retain the same rule. The
-packed16 profile separately proves raw 16-bit storage preservation without
-claiming arithmetic support or widening a word32 identity.
+packed8 and packed16 profiles separately prove raw subword storage preservation
+without claiming value semantics, arithmetic support, or widening a word32
+identity.
 
 ### Gate 3 — Real C++/CuTe frontend slice
 
@@ -2524,7 +2540,7 @@ one-feedback lifecycle, and
 separately proves non-finite f32 and lost-device refusal.
 The required lane completes 52 CPU/WebGPU parity cases under backend 1.24.0;
 terminal correctness artifact
-`6a169f1f257fbeb9b91988b2ac622e24b13720a9b403e09a3cfb0c3b60930b1b`
+`318fef4a4f06095c0371607ebf50135f0779dc3fa4134c3022e82d6d8af9564b`
 binds device profile
 `a72951410740a4adee212bba13ee44da16fdb9d6644d3b58ec38e0623f2c7b48`.
 

@@ -34,14 +34,28 @@ interface LayoutCase {
   readonly destinationAlias?: string;
   readonly sourceSpace?: Record<string, unknown>;
   readonly destinationSpace?: Record<string, unknown>;
-  readonly dtype?: "i16" | "u16" | "f16" | "bf16" | "f32" | "i32" | "u32";
+  readonly dtype?:
+    | "bool"
+    | "i8"
+    | "u8"
+    | "i16"
+    | "u16"
+    | "f16"
+    | "bf16"
+    | "f32"
+    | "i32"
+    | "u32";
 }
 
 async function verifiedLayout(input: LayoutCase): Promise<VerifiedLayoutArtifact> {
   const shape = input.shape.map(dim);
   const dtype = input.dtype ?? "f32";
   const requiredAlignmentBytes =
-    dtype === "i16" ||
+    dtype === "bool" ||
+    dtype === "i8" ||
+    dtype === "u8"
+      ? 1
+      : dtype === "i16" ||
     dtype === "u16" ||
     dtype === "f16" ||
     dtype === "bf16"
@@ -576,6 +590,53 @@ describe("verified materializing view-copy", () => {
     expect((await diagnostic(async () =>
       prepare(signedSource, await verifiedKernel(signedSource))
     )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
+  });
+
+  it("executes exact bool, i8, and u8 storage through one packed profile", async () => {
+    const input = [0x00, 0x01, 0x7f, 0x80, 0xff, 0x5a];
+    for (const dtype of ["bool", "i8", "u8"] as const) {
+      const layout = await verifiedLayout({
+        shape: ["2", "3"],
+        sourceLocation: add(mul(c(1), k("2")), c(0)),
+        sourceBytes: "6",
+        destinationBytes: "6",
+        dtype,
+      });
+      const kernel = await verifiedKernel(layout);
+      const plan = await prepare(layout, kernel);
+      const specialization = await prepareViewCopySpecialization(
+        layout,
+        kernel,
+        { operationId: plan.operationId },
+      );
+      const destination = new Uint8Array(6);
+      const trace = plan.execute({
+        source: Uint8Array.from(input),
+        destination,
+      });
+
+      expect(specialization.portableProfile).toMatchObject({
+        profileId:
+          "browsergrad.view-copy.positive-affine-rank2-rank3-packed8@1",
+        rank: 2,
+        dtype,
+      });
+      expect(Array.from(destination)).toEqual([
+        input[0],
+        input[2],
+        input[4],
+        input[1],
+        input[3],
+        input[5],
+      ]);
+      expect(trace).toMatchObject({
+        elementCount: "6",
+        readElements: "6",
+        filledElements: "0",
+        bytesRead: "6",
+        bytesWritten: "6",
+      });
+    }
   });
 
   it("guards padded reads and preserves exact f32 fill bits", async () => {

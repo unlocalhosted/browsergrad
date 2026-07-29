@@ -78,6 +78,9 @@ const PLANNED_CASE_IDS = Object.freeze([
   "dynamic-rank2-specialization",
   "i32-rank2-transpose",
   "u32-read-only-broadcast",
+  "bool-rank2-odd-transpose",
+  "i8-rank2-transpose",
+  "u8-read-only-broadcast",
   "i16-rank2-transpose",
   "u16-read-only-broadcast",
   "f16-rank2-odd-transpose",
@@ -111,6 +114,9 @@ interface LayoutInput {
   readonly destinationBytes: DimExpr;
   readonly symbols?: readonly { readonly id: string; readonly domain: { readonly min: string; readonly max: string } }[];
   readonly dtype?:
+    | "bool"
+    | "i8"
+    | "u8"
     | "i16"
     | "u16"
     | "f16"
@@ -752,6 +758,66 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     words(0, 0x80000000, 0xffffffff),
   );
 
+  const boolOddTranspose = await makeCase(
+    "bool-rank2-odd-transpose",
+    {
+      shape: dims("3", "3"),
+      sourceLocation: add(
+        multiply(coordinate(1), indexConstant("3")),
+        coordinate(0),
+      ),
+      sourceBytes: dimConstant("12"),
+      destinationBytes: dimConstant("12"),
+      dtype: "bool",
+    },
+    { kind: "reject" },
+    packed8Words(
+      0x00,
+      0x01,
+      0x7f,
+      0x80,
+      0xff,
+      0x55,
+      0xaa,
+      0x02,
+      0xfe,
+      0xa5,
+      0x5a,
+      0xc3,
+    ),
+  );
+
+  const i8Transpose = await makeCase(
+    "i8-rank2-transpose",
+    {
+      shape: dims("2", "3"),
+      sourceLocation: add(
+        multiply(coordinate(1), indexConstant("2")),
+        coordinate(0),
+      ),
+      sourceByteOffset: dimConstant("1"),
+      destinationByteOffset: dimConstant("4"),
+      sourceBytes: dimConstant("8"),
+      destinationBytes: dimConstant("12"),
+      dtype: "i8",
+    },
+    { kind: "reject" },
+    packed8Words(0xa5, 0x80, 0xff, 0x00, 0x01, 0x7f, 0x5a, 0xc3),
+  );
+
+  const u8Broadcast = await makeCase(
+    "u8-read-only-broadcast",
+    {
+      shape: dims("2", "3"),
+      sourceLocation: coordinate(1),
+      sourceBytes: dimConstant("4"),
+      destinationBytes: dimConstant("8"),
+      dtype: "u8",
+    },
+    { kind: "reject" },
+    packed8Words(0x00, 0x80, 0xff, 0xa5),
+  );
+
   const i16Transpose = await makeCase(
     "i16-rank2-transpose",
     {
@@ -891,6 +957,9 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     dynamic,
     i32Transpose,
     u32Broadcast,
+    boolOddTranspose,
+    i8Transpose,
+    u8Broadcast,
     i16Transpose,
     u16Broadcast,
     f16OddTranspose,
@@ -935,7 +1004,11 @@ async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifac
   const destinationLocation = input.destinationLocation ?? rowMajor(input.shape);
   const dtype = input.dtype ?? "f32";
   const requiredAlignmentBytes =
-    dtype === "i16" ||
+    dtype === "bool" ||
+    dtype === "i8" ||
+    dtype === "u8"
+      ? 1
+      : dtype === "i16" ||
     dtype === "u16" ||
     dtype === "f16" ||
     dtype === "bf16"
@@ -1051,6 +1124,22 @@ function packed16Words(...values: readonly number[]): Uint32Array {
       (_, index) =>
         ((values[index * 2] as number) & 0xffff) |
         (((values[(index * 2) + 1] as number) & 0xffff) << 16),
+    ),
+  );
+}
+
+function packed8Words(...values: readonly number[]): Uint32Array {
+  if (values.length % 4 !== 0) {
+    throw new Error("packed8Words requires complete u32 words");
+  }
+  return Uint32Array.from(
+    Array.from(
+      { length: values.length / 4 },
+      (_, index) =>
+        ((values[index * 4] as number) & 0xff) |
+        (((values[(index * 4) + 1] as number) & 0xff) << 8) |
+        (((values[(index * 4) + 2] as number) & 0xff) << 16) |
+        (((values[(index * 4) + 3] as number) & 0xff) << 24),
     ),
   );
 }
