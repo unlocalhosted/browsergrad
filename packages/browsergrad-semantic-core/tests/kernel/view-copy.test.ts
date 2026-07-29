@@ -285,7 +285,7 @@ describe("verified materializing view-copy", () => {
     }
   });
 
-  it("executes exact rank-2 through rank-6 rectangular prefixes", async () => {
+  it("executes exact rank-2 through rank-7 rectangular prefixes", async () => {
     const cases = [
       {
         shape: ["3", "4"] as const,
@@ -311,6 +311,11 @@ describe("verified materializing view-copy", () => {
         shape: ["2", "2", "2", "2", "2", "2"] as const,
         extents: [1n, 2n, 1n, 2n, 1n, 2n] as const,
         expectedIndexes: [0, 1, 4, 5, 16, 17, 20, 21],
+      },
+      {
+        shape: ["2", "2", "2", "2", "2", "2", "2"] as const,
+        extents: [1n, 2n, 1n, 2n, 1n, 2n, 1n] as const,
+        expectedIndexes: [0, 2, 8, 10, 32, 34, 40, 42],
       },
     ];
     for (const testCase of cases) {
@@ -434,8 +439,8 @@ describe("verified materializing view-copy", () => {
     }
   });
 
-  it("executes rank-5 and rank-6 positive-affine views under distinct portable profiles", async () => {
-    for (const rank of [5, 6] as const) {
+  it("executes rank-5 through rank-7 positive-affine views under distinct portable profiles", async () => {
+    for (const rank of [5, 6, 7] as const) {
       const shape = Array.from({ length: rank }, () => "2");
       const elementCount = 2 ** rank;
       const layout = await verifiedLayout({
@@ -591,9 +596,10 @@ describe("verified materializing view-copy", () => {
     });
     expect((await diagnostic(() => verifiedKernel(aliasedLayout))).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.aliasConflict);
 
-    const rankSeven = await verifiedLayout({
-      shape: ["1", "1", "1", "1", "1", "1", "1"],
+    const rankEight = await verifiedLayout({
+      shape: ["1", "1", "1", "1", "1", "1", "1", "1"],
       sourceLocation: rowMajorLocation([
+        "1",
         "1",
         "1",
         "1",
@@ -606,7 +612,7 @@ describe("verified materializing view-copy", () => {
       destinationBytes: "4",
     });
     expect((await diagnostic(async () =>
-      prepare(rankSeven, await verifiedKernel(rankSeven))
+      prepare(rankEight, await verifiedKernel(rankEight))
     )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
 
     const hostSource = await verifiedLayout({
@@ -726,6 +732,22 @@ describe("verified materializing view-copy", () => {
         rank: 6,
         profileId:
           "browsergrad.view-copy.signed-affine-rank6-word32@1",
+      },
+      {
+        shape: ["2", "2", "2", "2", "2", "2", "2"] as const,
+        sourceLocation: add(
+          mul(c(0), k("-64")),
+          mul(c(1), k("-32")),
+          mul(c(2), k("-16")),
+          mul(c(3), k("-8")),
+          mul(c(4), k("-4")),
+          mul(c(5), k("-2")),
+          mul(c(6), k("-1")),
+        ),
+        elementCount: 128,
+        rank: 7,
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank7-word32@1",
       },
     ];
     for (const testCase of highRankCases) {

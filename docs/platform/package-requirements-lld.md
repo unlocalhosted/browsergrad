@@ -130,11 +130,11 @@ then execute through CPU or kernels WebGPU without a source-spelling path.
 Portable profiles support exact same-dtype f32/i32/u32 words, disjoint global
 allocations, nonzero offsets, broadcast, guarded float fill, and:
 
-- positive-affine equal-rank layouts from rank 1 through rank 6; and
-- distinct signed-affine rank-1, rank-2/rank-3, rank-4/rank-5, and rank-6 source
+- positive-affine equal-rank layouts from rank 1 through rank 7; and
+- distinct signed-affine rank-1, rank-2/rank-3, rank-4/rank-5, rank-6, and rank-7 source
   profiles with a positive-affine dense destination.
 
-Required Apple Metal 3 backend-2.5 evidence passes 22 complete-destination,
+Required Apple Metal 3 backend-2.6 evidence passes 24 complete-destination,
 bit-exact CPU/WebGPU cases covering those profiles, dynamic specialization,
 and zero-extent no-submit behavior. Exact identities stay in the ledger.
 The authorized C++/CuTe transition carries signed source strides at ranks 1
@@ -147,7 +147,7 @@ signed-rank-2 CuTe source, authorizes the resulting exact distributed payload,
 and proves bit-exact CPU/required-WebGPU convergence on Apple Metal. This
 proves the declared portable source-to-backend implementation slice, not
 externally rooted producer trust, legal approval, or production release.
-Rank 7+, signed destinations, packed/16-bit/bf16/f64 storage, overlap, and
+Rank 8+, signed destinations, packed/16-bit/bf16/f64 storage, overlap, and
 other undeclared layouts remain explicit refusals.
 
 ### Tiled kernels and framework convergence
@@ -681,16 +681,17 @@ L1 or L2 model.
 
 Follow-on portable profiles preserve that operation meaning while admitting
 same-dtype `i32` and `u32` exact-word copies plus equal source/destination ranks
-1 through 6. Rank-2/rank-3 f32 retains
+1 through 7. Rank-2/rank-3 f32 retains
 `browsergrad.view-copy.positive-affine-f32@1`; rank-2/rank-3 integer storage
 uses `browsergrad.view-copy.positive-affine-word32@1`; rank-1/rank-4 32-bit
 storage uses
 `browsergrad.view-copy.positive-affine-rank1-rank4-word32@1`; rank-5 storage
 uses the distinct
-`browsergrad.view-copy.positive-affine-rank5-word32@1`; rank-6 storage uses
-`browsergrad.view-copy.positive-affine-rank6-word32@1`. Integer profiles
+`browsergrad.view-copy.positive-affine-rank5-word32@1`; rank-6 and rank-7
+storage use separate `browsergrad.view-copy.positive-affine-rank6-word32@1`
+and `browsergrad.view-copy.positive-affine-rank7-word32@1` profiles. Integer profiles
 require `reject` for an invalid source coordinate, while f32 may use an exact
-fill bit pattern. These positive-affine profiles do not admit rank 7 or a
+fill bit pattern. These positive-affine profiles do not admit rank 8 or a
 negative coordinate scale.
 
 The distinct
@@ -700,12 +701,13 @@ location or source predicate. The distinct
 `browsergrad.view-copy.signed-affine-rank4-rank5-word32@1` profile applies the
 same source rule at ranks 4 and 5 without widening the lower-rank identity.
 `browsergrad.view-copy.signed-affine-rank1-word32@1` provides the rank-1
-profile, and `browsergrad.view-copy.signed-affine-rank6-word32@1` provides the
-rank-6 profile. A nonnegative view byte offset rebases every proved guarded source
+profile, `browsergrad.view-copy.signed-affine-rank6-word32@1` provides rank 6,
+and `browsergrad.view-copy.signed-affine-rank7-word32@1` provides rank 7. A
+nonnegative view byte offset rebases every proved guarded source
 word into its root allocation. The destination remains positive-affine,
 dense, and injective, and the same CPU coordinate proof checks every guarded
 source access and complete destination write. Existing positive-affine profile
-identities retain their exact meaning. Rank 7+, signed destinations, integer
+identities retain their exact meaning. Rank 8+, signed destinations, integer
 division/modulo, 16-bit packed storage, bf16, f64, overlap, and non-global
 memory remain outside the declared portable profiles.
 
@@ -746,6 +748,8 @@ profile and reuses the canonical mixed-radix coordinate reconstruction.
 Backend 2.4.0 applies the same path to the separately named rank-1 profile.
 Backend 2.5.0 applies the same path to the separately named positive and signed
 rank-6 profiles with six-axis mixed-radix coordinate reconstruction.
+Backend 2.6.0 applies it to the corresponding rank-7 profiles with seven-axis
+mixed-radix coordinate reconstruction.
 
 ### Logical tiles versus physical schedules
 

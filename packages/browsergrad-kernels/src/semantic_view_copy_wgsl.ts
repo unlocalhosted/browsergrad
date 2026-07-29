@@ -136,16 +136,10 @@ function emitLaunchPrelude(
   readonly body: readonly string[];
 }> {
   if (mode === "runtime-rectangular-prefix") {
-    if (
-      shape.length !== 2 &&
-      shape.length !== 3 &&
-      shape.length !== 4 &&
-      shape.length !== 5 &&
-      shape.length !== 6
-    ) {
+    if (shape.length < 2 || shape.length > 7) {
       return unsupported(
         "$.shape",
-        "rectangular dynamic WGSL launch supports semantic ranks 2 through 6 only",
+        "rectangular dynamic WGSL launch supports semantic ranks 2 through 7 only",
       );
     }
     const staticExtents = shape.map((extent, axis) =>
@@ -160,73 +154,10 @@ function emitLaunchPrelude(
       "}",
       `@group(0) @binding(${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_BINDING}) var<uniform> ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}: BrowserGradDynamicRegion;`,
     ]);
-    if (shape.length === 6) {
-      const leadingStaticProduct = asU32(
-        shape[0]! * shape[1]! * shape[2]! * shape[3]!,
-        "$.shape[0:4]",
-      );
-      const dynamicStride0 =
-        `(${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_1 * ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_2 * ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_3)`;
-      const dynamicStride1 =
-        `(${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_2 * ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_3)`;
+    if (shape.length >= 4) {
       return Object.freeze({
         declarations,
-        body: Object.freeze([
-          `  if (global_id.x >= ${staticExtents[5]}u || global_id.x >= ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_5 || global_id.y >= ${staticExtents[4]}u || global_id.y >= ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_4 || global_id.z >= ${leadingStaticProduct}u || global_id.z >= (${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_0 * ${dynamicStride0})) {`,
-          "    return;",
-          "  }",
-          `  let rank6_dynamic_stride_0: u32 = ${dynamicStride0};`,
-          `  let rank6_dynamic_stride_1: u32 = ${dynamicStride1};`,
-          "  let coordinate_0: i32 = i32(global_id.z / rank6_dynamic_stride_0);",
-          "  let rank6_dynamic_remainder_0: u32 = global_id.z % rank6_dynamic_stride_0;",
-          "  let coordinate_1: i32 = i32(rank6_dynamic_remainder_0 / rank6_dynamic_stride_1);",
-          "  let rank6_dynamic_remainder_1: u32 = rank6_dynamic_remainder_0 % rank6_dynamic_stride_1;",
-          `  let coordinate_2: i32 = i32(rank6_dynamic_remainder_1 / ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_3);`,
-          `  let coordinate_3: i32 = i32(rank6_dynamic_remainder_1 % ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_3);`,
-          "  let coordinate_4: i32 = i32(global_id.y);",
-          "  let coordinate_5: i32 = i32(global_id.x);",
-        ]),
-      });
-    }
-    if (shape.length === 5) {
-      const leadingStaticProduct = asU32(
-        shape[0]! * shape[1]! * shape[2]!,
-        "$.shape[0:3]",
-      );
-      const dynamicStride0 =
-        `(${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_1 * ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_2)`;
-      return Object.freeze({
-        declarations,
-        body: Object.freeze([
-          `  if (global_id.x >= ${staticExtents[4]}u || global_id.x >= ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_4 || global_id.y >= ${staticExtents[3]}u || global_id.y >= ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_3 || global_id.z >= ${leadingStaticProduct}u || global_id.z >= (${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_0 * ${dynamicStride0})) {`,
-          "    return;",
-          "  }",
-          `  let rank5_dynamic_stride_0: u32 = ${dynamicStride0};`,
-          "  let coordinate_0: i32 = i32(global_id.z / rank5_dynamic_stride_0);",
-          "  let rank5_dynamic_remainder_0: u32 = global_id.z % rank5_dynamic_stride_0;",
-          `  let coordinate_1: i32 = i32(rank5_dynamic_remainder_0 / ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_2);`,
-          `  let coordinate_2: i32 = i32(rank5_dynamic_remainder_0 % ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_2);`,
-          "  let coordinate_3: i32 = i32(global_id.y);",
-          "  let coordinate_4: i32 = i32(global_id.x);",
-        ]),
-      });
-    }
-    if (shape.length === 4) {
-      const leadingStaticProduct = asU32(
-        shape[0]! * shape[1]!,
-        "$.shape[0:2]",
-      );
-      return Object.freeze({
-        declarations,
-        body: Object.freeze([
-          `  if (global_id.x >= ${staticExtents[3]}u || global_id.x >= ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_3 || global_id.y >= ${staticExtents[2]}u || global_id.y >= ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_2 || global_id.z >= ${leadingStaticProduct}u || global_id.z >= (${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_0 * ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_1)) {`,
-          "    return;",
-          "  }",
-          `  let coordinate_0: i32 = i32(global_id.z / ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_1);`,
-          `  let coordinate_1: i32 = i32(global_id.z % ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_1);`,
-          "  let coordinate_2: i32 = i32(global_id.y);",
-          "  let coordinate_3: i32 = i32(global_id.x);",
-        ]),
+        body: emitRectangularCoordinates(shape, staticExtents),
       });
     }
     const globalAxes = shape.length === 2
@@ -419,70 +350,89 @@ function emitCoordinates(shape: readonly bigint[]): readonly string[] {
       `  let coordinate_3: i32 = i32(inner_remainder % ${fourth}u);`,
     ];
   }
-  if (shape.length === 5) {
-    const second = asU32(shape[1] as bigint, "$.shape[1]");
-    const third = asU32(shape[2] as bigint, "$.shape[2]");
-    const fourth = asU32(shape[3] as bigint, "$.shape[3]");
-    const fifth = asU32(shape[4] as bigint, "$.shape[4]");
-    const stride2 = asU32(
-      BigInt(fourth) * BigInt(fifth),
-      "$.shape[3:5]",
-    );
-    const stride1 = asU32(
-      BigInt(third) * BigInt(stride2),
-      "$.shape[2:5]",
-    );
-    const stride0 = asU32(
-      BigInt(second) * BigInt(stride1),
-      "$.shape[1:5]",
-    );
-    return [
-      `  let coordinate_0: i32 = i32(linear_index / ${stride0}u);`,
-      `  let rank5_remainder_0: u32 = linear_index % ${stride0}u;`,
-      `  let coordinate_1: i32 = i32(rank5_remainder_0 / ${stride1}u);`,
-      `  let rank5_remainder_1: u32 = rank5_remainder_0 % ${stride1}u;`,
-      `  let coordinate_2: i32 = i32(rank5_remainder_1 / ${stride2}u);`,
-      `  let rank5_remainder_2: u32 = rank5_remainder_1 % ${stride2}u;`,
-      `  let coordinate_3: i32 = i32(rank5_remainder_2 / ${fifth}u);`,
-      `  let coordinate_4: i32 = i32(rank5_remainder_2 % ${fifth}u);`,
-    ];
+  if (shape.length >= 5 && shape.length <= 7) {
+    return emitLinearCoordinates(shape);
   }
-  if (shape.length === 6) {
-    const second = asU32(shape[1] as bigint, "$.shape[1]");
-    const third = asU32(shape[2] as bigint, "$.shape[2]");
-    const fourth = asU32(shape[3] as bigint, "$.shape[3]");
-    const fifth = asU32(shape[4] as bigint, "$.shape[4]");
-    const sixth = asU32(shape[5] as bigint, "$.shape[5]");
-    const stride3 = asU32(
-      BigInt(fifth) * BigInt(sixth),
-      "$.shape[4:6]",
+  return unsupported("$.shape", "WGSL view-copy supports ranks in [1, 7] only");
+}
+
+function emitRectangularCoordinates(
+  shape: readonly bigint[],
+  staticExtents: readonly number[],
+): readonly string[] {
+  const rank = shape.length;
+  const leadingRank = rank - 2;
+  const lastAxis = rank - 1;
+  const penultimateAxis = rank - 2;
+  const leadingStaticProduct = asU32(
+    shape
+      .slice(0, leadingRank)
+      .reduce((product, extent) => product * extent, 1n),
+    `$.shape[0:${leadingRank}]`,
+  );
+  const dynamicLeadingProduct = dynamicExtentProduct(0, leadingRank);
+  const body = [
+    `  if (global_id.x >= ${staticExtents[lastAxis]}u || global_id.x >= ${dynamicExtent(lastAxis)} || global_id.y >= ${staticExtents[penultimateAxis]}u || global_id.y >= ${dynamicExtent(penultimateAxis)} || global_id.z >= ${leadingStaticProduct}u || global_id.z >= ${dynamicLeadingProduct}) {`,
+    "    return;",
+    "  }",
+  ];
+  let dividend = "global_id.z";
+  for (let axis = 0; axis < leadingRank - 2; axis += 1) {
+    const stride = `rank${rank}_dynamic_stride_${axis}`;
+    const remainder = `rank${rank}_dynamic_remainder_${axis}`;
+    body.push(
+      `  let ${stride}: u32 = ${dynamicExtentProduct(axis + 1, leadingRank)};`,
+      `  let coordinate_${axis}: i32 = i32(${dividend} / ${stride});`,
+      `  let ${remainder}: u32 = ${dividend} % ${stride};`,
     );
-    const stride2 = asU32(
-      BigInt(fourth) * BigInt(stride3),
-      "$.shape[3:6]",
-    );
-    const stride1 = asU32(
-      BigInt(third) * BigInt(stride2),
-      "$.shape[2:6]",
-    );
-    const stride0 = asU32(
-      BigInt(second) * BigInt(stride1),
-      "$.shape[1:6]",
-    );
-    return [
-      `  let coordinate_0: i32 = i32(linear_index / ${stride0}u);`,
-      `  let rank6_remainder_0: u32 = linear_index % ${stride0}u;`,
-      `  let coordinate_1: i32 = i32(rank6_remainder_0 / ${stride1}u);`,
-      `  let rank6_remainder_1: u32 = rank6_remainder_0 % ${stride1}u;`,
-      `  let coordinate_2: i32 = i32(rank6_remainder_1 / ${stride2}u);`,
-      `  let rank6_remainder_2: u32 = rank6_remainder_1 % ${stride2}u;`,
-      `  let coordinate_3: i32 = i32(rank6_remainder_2 / ${stride3}u);`,
-      `  let rank6_remainder_3: u32 = rank6_remainder_2 % ${stride3}u;`,
-      `  let coordinate_4: i32 = i32(rank6_remainder_3 / ${sixth}u);`,
-      `  let coordinate_5: i32 = i32(rank6_remainder_3 % ${sixth}u);`,
-    ];
+    dividend = remainder;
   }
-  return unsupported("$.shape", "WGSL view-copy supports ranks in [1, 6] only");
+  const finalLeadingExtent = dynamicExtent(leadingRank - 1);
+  body.push(
+    `  let coordinate_${leadingRank - 2}: i32 = i32(${dividend} / ${finalLeadingExtent});`,
+    `  let coordinate_${leadingRank - 1}: i32 = i32(${dividend} % ${finalLeadingExtent});`,
+    `  let coordinate_${penultimateAxis}: i32 = i32(global_id.y);`,
+    `  let coordinate_${lastAxis}: i32 = i32(global_id.x);`,
+  );
+  return Object.freeze(body);
+}
+
+function emitLinearCoordinates(shape: readonly bigint[]): readonly string[] {
+  const rank = shape.length;
+  const strides = shape.slice(1, -1).map((_, index) =>
+    asU32(
+      shape
+        .slice(index + 1)
+        .reduce((product, extent) => product * extent, 1n),
+      `$.shape[${index + 1}:${rank}]`,
+    ));
+  const body: string[] = [];
+  let dividend = "linear_index";
+  for (const [axis, stride] of strides.entries()) {
+    const remainder = `rank${rank}_remainder_${axis}`;
+    body.push(
+      `  let coordinate_${axis}: i32 = i32(${dividend} / ${stride}u);`,
+      `  let ${remainder}: u32 = ${dividend} % ${stride}u;`,
+    );
+    dividend = remainder;
+  }
+  const inner = asU32(shape.at(-1) as bigint, `$.shape[${rank - 1}]`);
+  body.push(
+    `  let coordinate_${rank - 2}: i32 = i32(${dividend} / ${inner}u);`,
+    `  let coordinate_${rank - 1}: i32 = i32(${dividend} % ${inner}u);`,
+  );
+  return Object.freeze(body);
+}
+
+function dynamicExtent(axis: number): string {
+  return `${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_${axis}`;
+}
+
+function dynamicExtentProduct(startAxis: number, endAxis: number): string {
+  return `(${Array.from(
+    { length: endAxis - startAxis },
+    (_, index) => dynamicExtent(startAxis + index),
+  ).join(" * ")})`;
 }
 
 function requiredIndexMap(layout: LayoutArtifactPayloadV1, indexMapId: string, role: string): IndexMap {

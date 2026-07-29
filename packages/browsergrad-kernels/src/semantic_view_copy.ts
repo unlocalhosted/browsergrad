@@ -50,7 +50,7 @@ import {
 
 export const SEMANTIC_VIEW_COPY_WEBGPU_PROFILE =
   "browsergrad.webgpu.view-copy.word32@2";
-export const SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION = "2.5.0";
+export const SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION = "2.6.0";
 const DEFAULT_WORKGROUP_SIZE = 64;
 const MAX_CONFIGURABLE_WORKGROUP_SIZE = 256;
 const DEFAULT_MAX_WGSL_BYTES = 64 * 1024;
@@ -357,61 +357,24 @@ function semanticLaunch(
       ] as const),
     });
   }
-  if (logicalShape.length === 2) {
-    return Object.freeze({
-      dispatchCount: Object.freeze([
-        Number(logicalShape[1]),
-        Number(logicalShape[0]),
-        1,
-      ] as const),
-    });
+  if (logicalShape.length < 2 || logicalShape.length > 7) {
+    fail(
+      "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
+      "$.semantic.logicalShape",
+      "rectangular dynamic launch supports semantic ranks 2 through 7 only",
+    );
   }
-  if (logicalShape.length === 3) {
-    return Object.freeze({
-      dispatchCount: Object.freeze([
-        Number(logicalShape[2]),
-        Number(logicalShape[1]),
-        Number(logicalShape[0]),
-      ] as const),
-    });
-  }
-  if (logicalShape.length === 4) {
-    return Object.freeze({
-      dispatchCount: Object.freeze([
-        Number(logicalShape[3]),
-        Number(logicalShape[2]),
-        Number(logicalShape[0]! * logicalShape[1]!),
-      ] as const),
-    });
-  }
-  if (logicalShape.length === 5) {
-    return Object.freeze({
-      dispatchCount: Object.freeze([
-        Number(logicalShape[4]),
-        Number(logicalShape[3]),
-        Number(logicalShape[0]! * logicalShape[1]! * logicalShape[2]!),
-      ] as const),
-    });
-  }
-  if (logicalShape.length === 6) {
-    return Object.freeze({
-      dispatchCount: Object.freeze([
-        Number(logicalShape[5]),
-        Number(logicalShape[4]),
-        Number(
-          logicalShape[0]! *
-            logicalShape[1]! *
-            logicalShape[2]! *
-            logicalShape[3]!,
-        ),
-      ] as const),
-    });
-  }
-  fail(
-    "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
-    "$.semantic.logicalShape",
-    "rectangular dynamic launch supports semantic ranks 2 through 6 only",
-  );
+  const leadingPlane = logicalShape
+    .slice(0, -2)
+    .reduce((product, extent) => product * extent, 1n);
+  const lastAxis = logicalShape.length - 1;
+  return Object.freeze({
+    dispatchCount: Object.freeze([
+      Number(logicalShape[lastAxis]),
+      Number(logicalShape[lastAxis - 1]),
+      Number(leadingPlane),
+    ] as const),
+  });
 }
 
 function rectangularDynamicUniformByteLength(rank: number): 16 | 32 {
