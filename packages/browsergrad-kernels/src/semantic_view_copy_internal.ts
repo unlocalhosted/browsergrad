@@ -26,7 +26,7 @@ export interface PreparedSemanticViewCopyDynamicWgsl
   extends PreparedSemanticViewCopyWgsl {
   readonly dynamicLaunchMode: SemanticViewCopyDynamicLaunchMode;
   readonly dynamicUniformName: string;
-  readonly dynamicUniformByteLength: 4 | 16;
+  readonly dynamicUniformByteLength: 4 | 16 | 32;
 }
 
 type DynamicViewCopyPreparer = (

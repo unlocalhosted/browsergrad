@@ -26,7 +26,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   incompatible bindings, and invalid all-reduce rank/numerical contracts; and
   fixes a fail-stop, no-partial-output-commit failure model without claiming
   execution, transport, topology, retries, or backend pipelines.
-- Additive host-graph versions 1.1 through 1.15 add exact whole-allocation
+- Additive host-graph versions 1.1 through 1.16 add exact whole-allocation
   copies, terminal fail-stop materialization, dependency-ordered completion
   events, bounded fixed-count repetition, captured-input u32 conditionals, and
   runtime-control u32 conditionals, one ordered temporary-resource u32
@@ -55,13 +55,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   bound. Version 1.14 adds request-time rank-4 rectangles while preserving
   exact rank-2/rank-3 limits for versions 1.12 and 1.13. Version 1.15 extends
   produced-resource rectangles to rank 4 through the same bounded feedback
-  authority. No profile grants nested/device-side control,
-  rank-5-and-higher dynamic domains, or repeated feedback.
+  authority. Version 1.16 extends request-time rectangles to rank 5 under the
+  distinct rank-5 view-copy profile while retaining the exact version-1.15
+  produced-resource limit. No profile grants nested/device-side control,
+  produced-resource rank-5 or rank-6-and-higher dynamic domains, or repeated
+  feedback.
 - Authority-bound `browsergrad.host-graph.cpu-reference@1` preparation and
   execution for dispatches, all-reduces, copies, events, materialization,
   fixed/runtime/produced-resource repetition, bounded request-time and
-  produced-resource linear dynamic dispatch, rank-2-through-rank-4
-  request-time or produced-resource rectangular dynamic
+  produced-resource linear dynamic dispatch, rank-2-through-rank-5
+  request-time and rank-2-through-rank-4 produced-resource rectangular dynamic
   dispatch, and bounded
   input/runtime-control/resource conditionals. The
   reference snapshots rank-local inputs and exact runtime controls into private

@@ -14,6 +14,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   profile. Required real-device evidence expands to 14 complete CPU/WebGPU
   parity cases while preserving the existing rank-1-through-rank-4 profile
   identities and WGSL coordinate paths.
+- Host-graph program version 1.16 and WebGPU backend 1.19 extend request-time
+  rectangular dispatch to rank 5 while preserving the exact version-1.15
+  produced-resource rank limit. One 32-byte eight-u32 uniform carries the five
+  selected extents; x/y retain axes 4/3 while z flattens axes 0 through 2 and
+  the guarded shader reconstructs those leading coordinates by mixed radix
+  before semantic evaluation. Required real-device evidence expands to 42
+  complete CPU/WebGPU parity cases with small/full rank-5 pipeline-identity
+  stability and independent flattened-z device admission.
 - Host-graph program version 1.15 and WebGPU backend 1.18 extend the existing
   produced-resource rectangular dispatch to rank 4. Four ordered rank-local
   temporary u32 values are read through one resident-buffer feedback stage,

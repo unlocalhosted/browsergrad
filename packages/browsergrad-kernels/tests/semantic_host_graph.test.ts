@@ -168,7 +168,10 @@ function rectangularDynamicProgram(
   );
   return {
     kind: "host-graph",
-    version: { major: 1, minor: shape.length === 4 ? 14 : 12 },
+    version: {
+      major: 1,
+      minor: shape.length === 5 ? 16 : shape.length === 4 ? 14 : 12,
+    },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire("1"),
     resources: [
@@ -1001,11 +1004,12 @@ describe("semantic host-graph WebGPU preparation", () => {
     });
   });
 
-  it("prewarms bounded rank-2 through rank-4 rectangular dynamic dispatch", async () => {
+  it("prewarms bounded rank-2 through rank-5 rectangular dynamic dispatch", async () => {
     for (const shape of [
       [3, 4],
       [2, 3, 4],
       [2, 2, 3, 4],
+      [2, 2, 2, 3, 4],
     ] as const) {
       const artifacts = await rectangularIdentityArtifacts(shape);
       const graph = await verified(
@@ -1027,10 +1031,12 @@ describe("semantic host-graph WebGPU preparation", () => {
         runtimeControlIds: shape.map((_, axis) => `prefix-axis-${axis}`),
       });
       expect(Number(prepared.plannedTransientGpuBytes)).toBe(
-        shape.reduce((product, extent) => product * extent, 1) * 12 + 16,
+        shape.reduce((product, extent) => product * extent, 1) * 12 +
+          (shape.length === 5 ? 32 : 16),
       );
       expect(Number(prepared.plannedTransientHostBytes)).toBe(
-        shape.reduce((product, extent) => product * extent, 1) * 20 + 16,
+        shape.reduce((product, extent) => product * extent, 1) * 20 +
+          (shape.length === 5 ? 32 : 16),
       );
       expect(prepared.wgslModuleHashes).toHaveLength(1);
     }

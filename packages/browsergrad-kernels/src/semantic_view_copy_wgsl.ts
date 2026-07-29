@@ -139,24 +139,49 @@ function emitLaunchPrelude(
     if (
       shape.length !== 2 &&
       shape.length !== 3 &&
-      shape.length !== 4
+      shape.length !== 4 &&
+      shape.length !== 5
     ) {
       return unsupported(
         "$.shape",
-        "rectangular dynamic WGSL launch supports semantic ranks 2 through 4 only",
+        "rectangular dynamic WGSL launch supports semantic ranks 2 through 5 only",
       );
     }
     const staticExtents = shape.map((extent, axis) =>
       asU32(extent, `$.shape[${axis}]`));
+    const uniformExtentCount = shape.length <= 4 ? 4 : 8;
     const declarations = Object.freeze([
       "struct BrowserGradDynamicRegion {",
-      "  extent_0: u32,",
-      "  extent_1: u32,",
-      "  extent_2: u32,",
-      "  extent_3: u32,",
+      ...Array.from(
+        { length: uniformExtentCount },
+        (_, axis) => `  extent_${axis}: u32,`,
+      ),
       "}",
       `@group(0) @binding(${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_BINDING}) var<uniform> ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}: BrowserGradDynamicRegion;`,
     ]);
+    if (shape.length === 5) {
+      const leadingStaticProduct = asU32(
+        shape[0]! * shape[1]! * shape[2]!,
+        "$.shape[0:3]",
+      );
+      const dynamicStride0 =
+        `(${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_1 * ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_2)`;
+      return Object.freeze({
+        declarations,
+        body: Object.freeze([
+          `  if (global_id.x >= ${staticExtents[4]}u || global_id.x >= ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_4 || global_id.y >= ${staticExtents[3]}u || global_id.y >= ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_3 || global_id.z >= ${leadingStaticProduct}u || global_id.z >= (${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_0 * ${dynamicStride0})) {`,
+          "    return;",
+          "  }",
+          `  let rank5_dynamic_stride_0: u32 = ${dynamicStride0};`,
+          "  let coordinate_0: i32 = i32(global_id.z / rank5_dynamic_stride_0);",
+          "  let rank5_dynamic_remainder_0: u32 = global_id.z % rank5_dynamic_stride_0;",
+          `  let coordinate_1: i32 = i32(rank5_dynamic_remainder_0 / ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_2);`,
+          `  let coordinate_2: i32 = i32(rank5_dynamic_remainder_0 % ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_2);`,
+          "  let coordinate_3: i32 = i32(global_id.y);",
+          "  let coordinate_4: i32 = i32(global_id.x);",
+        ]),
+      });
+    }
     if (shape.length === 4) {
       const leadingStaticProduct = asU32(
         shape[0]! * shape[1]!,

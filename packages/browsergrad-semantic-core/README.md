@@ -195,7 +195,10 @@ maximum-product admission, and fail-stop contracts; versions 1.12 and 1.13
 continue to reject rank 4 exactly. Version 1.15 extends produced-resource
 rectangular dispatch to rank 4 through four distinct ordered extent sources
 under the same one-feedback-node bound. Older versions retain their exact rank
-limits.
+limits. Version 1.16 extends only request-time rectangular dispatch to rank 5
+under the distinct rank-5 view-copy profile. Five positive bounded controls,
+their canonical axes, and the maximum product preserve the existing admission
+and fail-stop contracts; produced-resource rank 5 remains refused.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -268,6 +271,9 @@ Version-1.14 executes the exact selected rank-4 dense rectangle through the
 same coordinate-domain CPU path and reports all four extents plus their
 product. Version-1.15 reads four produced extents through the same ordered
 private-resource path and executes that identical rank-4 rectangle.
+Version-1.16 executes the exact selected rank-5 dense rectangle through the
+same generic coordinate-domain CPU path and reports all five extents plus
+their product.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -288,7 +294,7 @@ for one rank-2/rank-3 produced rectangle. Version 1.15 extends that same
 single feedback lifecycle to one rank-4 produced rectangle. Neither adapter grants
 transport, topology, retries, event
 timestamps or external waits, repeated/device-side feedback,
-rank-5-and-higher dynamic domains,
+produced-resource rank-5 or rank-6-and-higher dynamic domains,
 worker-mesh, native-companion,
 performance, or release authority.
 

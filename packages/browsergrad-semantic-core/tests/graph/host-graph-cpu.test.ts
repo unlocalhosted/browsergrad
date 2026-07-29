@@ -216,7 +216,10 @@ function rectangularDynamicProgram(
   ) * 4;
   return {
     kind: "host-graph",
-    version: { major: 1, minor: shape.length === 4 ? 14 : 12 },
+    version: {
+      major: 1,
+      minor: shape.length === 5 ? 16 : shape.length === 4 ? 14 : 12,
+    },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire("1"),
     resources: [
@@ -1400,7 +1403,7 @@ describe("host graph CPU reference", () => {
     expect(readF32(result.outputs[0]!.bytes)).toEqual([1.25, 0]);
   });
 
-  it("executes and reports exact rank-2 and rank-3 rectangular prefixes", async () => {
+  it("executes and reports exact rank-2 through rank-5 rectangular prefixes", async () => {
     const cases = [
       {
         shape: [3, 4],
@@ -1413,6 +1416,10 @@ describe("host graph CPU reference", () => {
       {
         shape: [2, 2, 3, 4],
         extents: [1, 2, 2, 3],
+      },
+      {
+        shape: [2, 2, 2, 3, 4],
+        extents: [1, 2, 1, 2, 3],
       },
     ] as const;
     for (const testCase of cases) {

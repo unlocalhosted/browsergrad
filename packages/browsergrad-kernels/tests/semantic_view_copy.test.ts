@@ -224,17 +224,26 @@ describe("semantic view-copy WGSL lowering", () => {
     expect(dynamic.launch.dispatchCount).toEqual([65, 1, 1]);
   });
 
-  it("lowers rank-2 through rank-4 rectangular guards before semantic evaluation", async () => {
+  it("lowers rank-2 through rank-5 rectangular guards before semantic evaluation", async () => {
     for (const shape of [
       [constant("3"), constant("4")],
       [constant("2"), constant("3"), constant("4")],
       [constant("2"), constant("2"), constant("3"), constant("4")],
+      [
+        constant("2"),
+        constant("2"),
+        constant("2"),
+        constant("3"),
+        constant("4"),
+      ],
     ] as const) {
       const elementCount = shape.length === 2
         ? 12
         : shape.length === 3
           ? 24
-          : 48;
+          : shape.length === 4
+            ? 48
+            : 96;
       const layout = await verifiedLayout({
         shape,
         sourceLocation: rowMajor(shape),
@@ -257,7 +266,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(dynamic.program.bindings).toContainEqual({
         kind: "uniform",
         name: dynamic.dynamicUniformName,
-        byteLength: 16,
+        byteLength: shape.length === 5 ? 32 : 16,
         binding: 2,
       });
       expect(dynamic.launch.dispatchCount).toEqual(
@@ -265,7 +274,9 @@ describe("semantic view-copy WGSL lowering", () => {
           ? [4, 3, 1]
           : shape.length === 3
             ? [4, 3, 2]
-            : [4, 3, 4],
+            : shape.length === 4
+              ? [4, 3, 4]
+              : [4, 3, 8],
       );
       expect(dynamic.program.wgsl).toContain(
         "global_id.x >= bg_dynamic_region.extent_",
@@ -286,6 +297,16 @@ describe("semantic view-copy WGSL lowering", () => {
         );
         expect(dynamic.program.wgsl).toContain(
           "global_id.z % bg_dynamic_region.extent_1",
+        );
+      } else if (shape.length === 5) {
+        expect(dynamic.program.wgsl).toContain(
+          "bg_dynamic_region.extent_0 * (bg_dynamic_region.extent_1 * bg_dynamic_region.extent_2)",
+        );
+        expect(dynamic.program.wgsl).toContain(
+          "global_id.z / rank5_dynamic_stride_0",
+        );
+        expect(dynamic.program.wgsl).toContain(
+          "rank5_dynamic_remainder_0 % bg_dynamic_region.extent_2",
         );
       }
       const guardIndex = dynamic.program.wgsl.indexOf(

@@ -1,7 +1,7 @@
 # BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
 - **Status:** normative platform architecture; implementation status is not implied
-- **Last reviewed:** 2026-07-28
+- **Last reviewed:** 2026-07-29
 - **Implementation ledger:**
   [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
 - **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
@@ -30,7 +30,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch, rank-2-through-rank-4 request-time or produced-resource rectangular prefix dispatch, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, an at-most-one produced-resource feedback-node bound across conditional, repeat, and dynamic-dispatch control, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; repeated/device-side feedback, rank-5-and-higher dynamic domains, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch, rank-2-through-rank-5 request-time and rank-2-through-rank-4 produced-resource rectangular prefix dispatch, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, an at-most-one produced-resource feedback-node bound across conditional, repeat, and dynamic-dispatch control, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; repeated/device-side feedback, produced-resource rank-5, rank-6-and-higher dynamic domains, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every exit criterion for the declared gate profile is
 complete. Verification of a closed initial profile does not imply broader
@@ -767,11 +767,15 @@ illegal. Version 1.14 extends request-time rectangular dispatch to rank 4
 while versions 1.12 and 1.13 retain their exact rank-2/rank-3 limit.
 Version 1.15 extends produced-resource rectangular dispatch to rank 4 through
 four distinct ordered temporary-u32 sources under the same feedback bound.
-Repeated/device-side feedback, rank-5-and-higher dynamic domains, or nested
+Version 1.16 extends request-time rectangular dispatch to rank 5 under the
+distinct rank-5 view-copy profile while preserving the version-1.15
+produced-resource rank limit. Repeated/device-side feedback,
+produced-resource rank-5, rank-6-and-higher dynamic domains, or nested
 control require separately versioned node kinds and
 cancellation points rather than hidden emitter loops. Portable arbitrary
-positive one-dimensional prefix and rank-2-through-rank-4 request-time or
-produced-resource rectangular execution are backend-schedule capabilities
+positive one-dimensional prefix, rank-2-through-rank-5 request-time
+rectangular execution, and rank-2-through-rank-4 produced-resource rectangular
+execution are backend-schedule capabilities
 verified independently from graph semantics.
 The verifier performs resource lifetime and read/write hazard checks before
 execution.
@@ -2353,8 +2357,17 @@ Version-1.15 produced-resource rank-4 dispatch reads all four ordered
 rank-local temporary u32 extents after one resident-buffer prefix stage,
 validates the complete selection, and reuses the same flattened-z mapping,
 16-byte uniform, maximum program, and exact pipeline slots for the suffix.
-Every dynamic rank step charges one aligned 16-byte GPU uniform allocation and
-either four linear host bytes or 16 rectangular host bytes to transient
+Version-1.16 request-time rank-5 dispatch uses the distinct rank-5 view-copy
+profile and one 32-byte, eight-u32 uniform whose first five words carry the
+selected extents. Physical x/y map logical axes 4/3 while z flattens axes 0
+through 2. The guard checks that selected leading product before mixed-radix
+quotient/remainder reconstructs all three leading coordinates ahead of
+semantic evaluation. The maximum program and exact pipeline slot remain stable
+across selected rectangles; produced-resource rank 5 remains refused.
+Every dynamic rank step charges one aligned 16-byte GPU uniform allocation for
+ranks 1 through 4 or 32 bytes for rank 5, and either four linear host bytes,
+16 rank-2-through-rank-4 rectangular host bytes, or 32 rank-5 rectangular host
+bytes to transient
 budgets. Device admission derives the actual maximum total, storage, and
 uniform binding counts over every reachable program, validates x/y/z
 workgroup counts independently, and rejects insufficient limits before
@@ -2383,11 +2396,12 @@ produced-resource rank-2/rank-3 rectangles through one feedback stage, and
 small/full request-time rank-4 rectangles through stable graph/pipeline
 identity and distinct specialization, plus matching small/full
 produced-resource rank-4 rectangles through the same one-feedback lifecycle,
-and
+and small/full request-time rank-5 rectangles through stable graph/pipeline
+identity and distinct specialization, and
 separately proves non-finite f32 and lost-device refusal.
-The required lane completes 40 CPU/WebGPU parity cases under backend 1.18.0;
+The required lane completes 42 CPU/WebGPU parity cases under backend 1.19.0;
 terminal correctness artifact
-`4dde8ca9e0f6183dcf7a2ccb4d7acd7fd3f192f198c2d6c093f4cfd754d656cf`
+`8ee4167935d6bf30d7ec1ab7425e6fcfb8788b656ddf8800e56742afa112a685`
 binds device profile
 `a72951410740a4adee212bba13ee44da16fdb9d6644d3b58ec38e0623f2c7b48`.
 
@@ -2416,7 +2430,7 @@ two-rank 65,536-element f32 workload uses an untimed correctness preflight,
 eight warmups, and twelve alternating paired authority-bound execution samples
 with complete readback and queue drain after both exact pipeline authorities
 are prewarmed outside the measurement. The current Apple Metal 3 observation
-has 1.60 ms fixed-repeat and 1.70 ms unrolled medians under backend 1.18.0.
+has 1.90 ms fixed-repeat and 1.80 ms unrolled medians under backend 1.19.0.
 Raw samples, pipeline identities, and exact environment identity are retained;
 no superiority or regression threshold is asserted.
 
@@ -2426,9 +2440,10 @@ version-1.9 request-time plus version-1.11 produced-resource
 arbitrary positive one-dimensional prefix dynamic dispatch and version-1.12
 plus version-1.13 rank-2/rank-3 request-time or produced-resource rectangular
 prefix dispatch, version-1.14 request-time rank-4 dispatch, and version-1.15
-produced-resource rank-4 dispatch are implemented under an
-at-most-one-feedback-node graph bound. No repeated or device-side feedback,
-rank-5-and-higher dynamic domain, nested/device-side branching,
+produced-resource rank-4 dispatch, plus version-1.16 request-time rank-5
+dispatch are implemented under an at-most-one-feedback-node graph bound. No
+repeated or device-side feedback, produced-resource rank-5 or
+rank-6-and-higher dynamic domain, nested/device-side branching,
 transport/topology adapter, worker mesh, or native companion exists yet, so
 Gate 7 remains `in progress`. Runtime controls are request-time host inputs,
 not GPU/backend-derived loop or launch counts.

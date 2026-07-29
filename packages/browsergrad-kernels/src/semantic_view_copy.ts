@@ -214,7 +214,11 @@ async function prepareSemanticViewCopyDynamicWgsl(
     dynamicUniformName: mode === "linear-prefix"
       ? SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM
       : SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM,
-    dynamicUniformByteLength: mode === "linear-prefix" ? 4 : 16,
+    dynamicUniformByteLength: mode === "linear-prefix"
+      ? 4
+      : rectangularDynamicUniformByteLength(
+          prepared.semantic.logicalShape.length,
+        ),
   });
 }
 
@@ -281,6 +285,9 @@ async function prepareSemanticViewCopyWgslWithLaunchMode(
     launchMode,
     source: emitted.source,
   });
+  const dynamicRegionByteLength = rectangularDynamicUniformByteLength(
+    semantic.logicalShape.length,
+  );
   const bindings = [
     {
       kind: "storage" as const,
@@ -307,7 +314,7 @@ async function prepareSemanticViewCopyWgslWithLaunchMode(
         ? [{
             kind: "uniform" as const,
             name: SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM,
-            byteLength: 16,
+            byteLength: dynamicRegionByteLength,
             binding: SEMANTIC_VIEW_COPY_DYNAMIC_REGION_BINDING,
           }]
         : []),
@@ -377,11 +384,24 @@ function semanticLaunch(
       ] as const),
     });
   }
+  if (logicalShape.length === 5) {
+    return Object.freeze({
+      dispatchCount: Object.freeze([
+        Number(logicalShape[4]),
+        Number(logicalShape[3]),
+        Number(logicalShape[0]! * logicalShape[1]! * logicalShape[2]!),
+      ] as const),
+    });
+  }
   fail(
     "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
     "$.semantic.logicalShape",
-    "rectangular dynamic launch supports semantic ranks 2 through 4 only",
+    "rectangular dynamic launch supports semantic ranks 2 through 5 only",
   );
+}
+
+function rectangularDynamicUniformByteLength(rank: number): 16 | 32 {
+  return rank <= 4 ? 16 : 32;
 }
 
 registerSemanticViewCopyDynamicPreparer(

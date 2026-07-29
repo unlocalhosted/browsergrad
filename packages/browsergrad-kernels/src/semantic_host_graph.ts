@@ -78,7 +78,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.18.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.19.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -96,7 +96,6 @@ const DEFAULT_MAX_PREPARATION_MS = 30_000;
 const DEFAULT_MAX_EXECUTION_MS = 30_000;
 const MAX_VIEW_COPY_ELEMENTS = 16_777_216;
 const MAX_U32 = 0xffff_ffffn;
-const DYNAMIC_UNIFORM_GPU_BYTES = 16n;
 const NUMERICAL_STATUS_STORAGE = "bg_graph_numerical_status";
 const PREPARED = new WeakMap<object, PreparedState>();
 const PREPARED_PIPELINES =
@@ -431,7 +430,7 @@ interface PreparedDynamicDispatchPlanBase {
   readonly startStepIndex: number;
   readonly stepCount: number;
   readonly dynamicUniformName: string;
-  readonly dynamicUniformHostBytes: 4 | 16;
+  readonly dynamicUniformHostBytes: 4 | 16 | 32;
 }
 
 interface PreparedLinearDynamicDispatchPlan
@@ -865,7 +864,7 @@ export async function prepareSemanticHostGraphWebGpu(
       (total, dispatch) =>
         total +
         (BigInt(dispatch.stepCount) *
-          DYNAMIC_UNIFORM_GPU_BYTES),
+          alignedDynamicUniformGpuBytes(dispatch.dynamicUniformHostBytes)),
       0n,
     );
   const dynamicUniformHostBytes =
@@ -2649,7 +2648,12 @@ function dynamicUniformBindingFromName(
     : new Uint32Array([
         ...selection.logicalExtents,
         ...Array.from(
-          { length: 4 - selection.logicalExtents.length },
+          {
+            length:
+              rectangularDynamicUniformWordLength(
+                selection.logicalExtents.length,
+              ) - selection.logicalExtents.length,
+          },
           () => 0,
         ),
       ]);
@@ -2657,6 +2661,14 @@ function dynamicUniformBindingFromName(
     ...existing,
     [uniformName]: value,
   });
+}
+
+function rectangularDynamicUniformWordLength(rank: number): 4 | 8 {
+  return rank <= 4 ? 4 : 8;
+}
+
+function alignedDynamicUniformGpuBytes(hostBytes: 4 | 16 | 32): bigint {
+  return hostBytes <= 16 ? 16n : 32n;
 }
 
 function dynamicLaunch(
@@ -2693,10 +2705,21 @@ function dynamicLaunch(
       ] as const),
     });
   }
+  if (extents.length === 5) {
+    return Object.freeze({
+      dispatchCount: Object.freeze([
+        extents[4] as number,
+        extents[3] as number,
+        (extents[0] as number) *
+        (extents[1] as number) *
+        (extents[2] as number),
+      ] as const),
+    });
+  }
   fail(
     "BG-WEBGPU-GRAPH-INTERNAL",
     "$.dynamicDispatch.logicalExtents",
-    "rectangular dynamic launch rank must be between two and four",
+    "rectangular dynamic launch rank must be between two and five",
   );
 }
 
@@ -2710,12 +2733,13 @@ function rectangularDynamicSelection(
   if (
     extents.length !== 2 &&
     extents.length !== 3 &&
-    extents.length !== 4
+    extents.length !== 4 &&
+    extents.length !== 5
   ) {
     fail(
       "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
       path,
-      "portable rectangular dynamic launch supports ranks two through four",
+      "portable rectangular dynamic launch supports ranks two through five",
     );
   }
   let elementCount = 1n;
