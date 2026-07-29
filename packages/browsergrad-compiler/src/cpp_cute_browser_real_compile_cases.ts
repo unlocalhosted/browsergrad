@@ -1,4 +1,4 @@
-export const CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS = Object.freeze([
+export const CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS = Object.freeze([
   "rank2",
   "rank3",
   "rank1",
@@ -7,6 +7,11 @@ export const CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS = Object.freeze([
   "broadcast",
   "i32-rank2",
   "u32-broadcast",
+] as const);
+
+export const CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS = Object.freeze([
+  ...CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS,
+  "signed-rank2",
 ] as const);
 
 export type CppCuteBrowserRealCompileCaseId =
@@ -244,6 +249,32 @@ const CASES = {
       "  cute::Stride<cute::Int<2>, cute::Int<1>>>;",
       "__device__ void copy_views(" +
         "const unsigned int* source, unsigned int* destination) {",
+      "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
+      "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
+      "  cute::copy(source_tensor, destination_tensor);",
+      "}",
+    ]),
+  }),
+  "signed-rank2": defineCase({
+    caseId: "signed-rank2",
+    virtualPath: "/workspace/src/real-view-copy-signed-rank2.cu",
+    sourceSha256:
+      "241e276e011ff247f3a97e1e4343303e44f3d29fb3675ee764dfffc99de23681",
+    coordinateRank: 2,
+    dtype: "f32",
+    sourceSpanElements: 6n,
+    destinationSpanElements: 6n,
+    sourceLayout: { shape: ["2", "3"], strides: ["-3", "-1"] },
+    destinationLayout: { shape: ["2", "3"], strides: ["3", "1"] },
+    source: source([
+      "#include <cute/tensor.hpp>",
+      "using SourceLayout = cute::Layout<",
+      "  cute::Shape<cute::Int<2>, cute::Int<3>>,",
+      "  cute::Stride<cute::Int<-3>, cute::Int<-1>>>;",
+      "using DestinationLayout = cute::Layout<",
+      "  cute::Shape<cute::Int<2>, cute::Int<3>>,",
+      "  cute::Stride<cute::Int<3>, cute::Int<1>>>;",
+      "__device__ void copy_views(const float* source, float* destination) {",
       "  auto source_tensor = cute::make_tensor(source, SourceLayout{});",
       "  auto destination_tensor = cute::make_tensor(destination, DestinationLayout{});",
       "  cute::copy(source_tensor, destination_tensor);",

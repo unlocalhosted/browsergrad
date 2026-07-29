@@ -16,6 +16,9 @@ import {
   cppCuteBrowserReproducibilityResourceBytes,
   verifyCppCuteBrowserReproducibilityResource,
 } from "../../dist/cpp_cute_browser_reproducibility.js";
+import {
+  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS,
+} from "../../dist/cpp_cute_browser_real_compile_cases.js";
 
 const ERROR_CODE = "BG-COMPILER-CPP-CUTE-BROWSER-REAL-COMPILE-RUNNER";
 const EVIDENCE_MARKER = "BROWSERGRAD_CPP_CUTE_REAL_COMPILE_EVIDENCE=";
@@ -24,16 +27,9 @@ const ANSI_COLOR_PATTERN = new RegExp(
   "gu",
 );
 const MAX_CAPTURED_OUTPUT_BYTES = 8 * 1024 * 1024;
-const REAL_COMPILE_CASE_IDS = new Set([
-  "rank2",
-  "rank3",
-  "rank1",
-  "rank4",
-  "strided-slice",
-  "broadcast",
-  "i32-rank2",
-  "u32-broadcast",
-]);
+const REAL_COMPILE_CASE_IDS = new Set(
+  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS,
+);
 const PACK_FILES = Object.freeze({
   "clang-resource": "clang-resource.headers.bgvfs",
   cuda: "cuda-12.6.3.headers.bgvfs",
@@ -383,7 +379,7 @@ function exactInput(value) {
   if (typeof caseId !== "string" || !REAL_COMPILE_CASE_IDS.has(caseId)) {
     invalid(
       "$.caseId",
-      "expected rank2, rank3, rank1, rank4, strided-slice, broadcast, i32-rank2, or u32-broadcast",
+      `expected one of ${CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.join(", ")}`,
     );
   }
   return {

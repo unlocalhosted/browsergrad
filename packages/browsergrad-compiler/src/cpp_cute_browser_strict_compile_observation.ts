@@ -16,7 +16,7 @@ import {
 } from "./cpp_cute_browser_reproducibility.js";
 import {
   CPP_CUTE_BROWSER_REAL_COMPILE_CASES,
-  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS,
+  CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS,
 } from "./cpp_cute_browser_real_compile_cases.js";
 import {
   verifyCppCuteBrowserWorkerBundle,
@@ -71,7 +71,7 @@ const STRICT_OBSERVATION_HEADER_PACKS = Object.freeze([
   }),
 ]);
 const EXPECTED_CASES = Object.freeze(
-  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.map(
+  CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.map(
     (caseId) => CPP_CUTE_BROWSER_REAL_COMPILE_CASES[caseId],
   ),
 );

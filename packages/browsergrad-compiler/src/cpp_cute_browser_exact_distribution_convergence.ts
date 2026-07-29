@@ -11,7 +11,7 @@ import {
   verifyCppCuteBrowserFullDistributionReproducibilityResource,
 } from "./cpp_cute_browser_full_distribution_reproducibility.js";
 import {
-  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS,
+  CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS,
   cppCuteBrowserRealCompileCase,
 } from "./cpp_cute_browser_real_compile_cases.js";
 import {
@@ -137,8 +137,10 @@ verifyCppCuteBrowserExactDistributionConvergenceResource(
       resource.version !== 1 ||
       resource.authority !==
         "package-pinned-local-engineering-exact-payload-convergence-observation-only" ||
-      resource.caseCount !== CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.length ||
-      resource.cases.length !== CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.length ||
+      resource.caseCount !==
+        CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.length ||
+      resource.cases.length !==
+        CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.length ||
       resource.sourceRevision !==
         CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_SOURCE_REVISION ||
       !SOURCE_REVISION.test(resource.sourceRevision)) {
@@ -267,7 +269,7 @@ function requireCases(
     identityFields.map((field) => [field, new Set<string>()]),
   );
   for (const [index, caseId] of
-    CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.entries()) {
+    CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.entries()) {
     const observed = resource.cases[index];
     const expected = cppCuteBrowserRealCompileCase(caseId);
     if (observed === undefined ||
@@ -295,7 +297,8 @@ function requireCases(
     }
   }
   if ([...identities.values()].some((values) =>
-    values.size !== CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.length)) {
+    values.size !==
+      CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.length)) {
     mismatch("$.cases", "case evidence reuses an opaque lineage identity");
   }
 }

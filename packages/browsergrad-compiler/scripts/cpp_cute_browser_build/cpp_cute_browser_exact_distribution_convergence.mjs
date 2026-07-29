@@ -34,7 +34,7 @@ import {
   admitCppCuteBrowserProducerTrustPolicy,
 } from "../../dist/cpp_cute_browser_producer_trust_policy.js";
 import {
-  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS,
+  CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS,
   cppCuteBrowserRealCompileCase,
 } from "../../dist/cpp_cute_browser_real_compile_cases.js";
 import {
@@ -499,10 +499,10 @@ export function prepareCppCuteBrowserExactDistributionConvergenceMatrix(
   }
   if (!Array.isArray(observations) ||
       observations.length !==
-        CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.length) {
+        CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.length) {
     invalid("$.observations", "expected exactly eight convergence observations");
   }
-  const cases = CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.map(
+  const cases = CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.map(
     (caseId, index) => {
       const observation = observations[index];
       const compileCase = cppCuteBrowserRealCompileCase(caseId);
@@ -624,7 +624,7 @@ export async function runCppCuteBrowserExactDistributionConvergence(
   const observations = [];
   // Each Clang-Wasm Worker reserves a bounded large memory. Sequential cases
   // keep peak memory bounded while preserving case-isolated browser evidence.
-  for (const caseId of CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS) {
+  for (const caseId of CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS) {
     observations.push(await runBrowserCase(
       preflight,
       caseId,

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   CPP_CUTE_BROWSER_REAL_COMPILE_CASES,
+  CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS,
   CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS,
   cppCuteBrowserRealCompileCase,
 } from "../../src/cpp_cute_browser_real_compile_cases.js";
@@ -18,7 +19,14 @@ describe("package-owned real browser compile cases", () => {
       "broadcast",
       "i32-rank2",
       "u32-broadcast",
+      "signed-rank2",
     ]);
+    expect(CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS).toEqual(
+      CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.slice(0, -1),
+    );
+    expect(Object.isFrozen(
+      CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS,
+    )).toBe(true);
     expect(Object.isFrozen(CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS)).toBe(true);
     expect(Object.isFrozen(CPP_CUTE_BROWSER_REAL_COMPILE_CASES)).toBe(true);
 
@@ -64,5 +72,22 @@ describe("package-owned real browser compile cases", () => {
     );
     expect(cases.filter((entry) => entry.dtype === "i32")).toHaveLength(1);
     expect(cases.filter((entry) => entry.dtype === "u32")).toHaveLength(1);
+  });
+
+  it("preserves an unchanged signed-stride CuTe source case", () => {
+    const compileCase = cppCuteBrowserRealCompileCase("signed-rank2");
+    expect(compileCase.source).toContain(
+      "cute::Stride<cute::Int<-3>, cute::Int<-1>>",
+    );
+    expect(compileCase.sourceLayout).toEqual({
+      shape: ["2", "3"],
+      strides: ["-3", "-1"],
+    });
+    expect(compileCase.destinationLayout).toEqual({
+      shape: ["2", "3"],
+      strides: ["3", "1"],
+    });
+    expect(compileCase.sourceSpanElements).toBe(6n);
+    expect(compileCase.destinationSpanElements).toBe(6n);
   });
 });

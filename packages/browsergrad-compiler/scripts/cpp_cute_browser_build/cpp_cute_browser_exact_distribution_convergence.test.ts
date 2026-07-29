@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS,
+  CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS,
   cppCuteBrowserRealCompileCase,
 } from "../../src/cpp_cute_browser_real_compile_cases.js";
 import {
@@ -80,7 +80,7 @@ describe("exact distribution browser convergence harness", () => {
 
   it("closes the exact eight-case matrix without widening authority", () => {
     const observations =
-      CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.map(observation);
+      CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.map(observation);
     const matrix =
       prepareCppCuteBrowserExactDistributionConvergenceMatrix(
         observations,
@@ -119,7 +119,7 @@ describe("exact distribution browser convergence harness", () => {
 
   it("rejects widened claims and reused opaque lineage IDs", () => {
     const observations =
-      CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.map(observation);
+      CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.map(observation);
     const widened = structuredClone(observations);
     widened[0]!.claims.externalProducerTrusted = true;
     expect(() =>
@@ -149,7 +149,7 @@ describe("exact distribution browser convergence harness", () => {
 });
 
 function observation(
-  caseId: (typeof CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS)[number],
+  caseId: (typeof CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS)[number],
   index: number,
 ) {
   const compileCase = cppCuteBrowserRealCompileCase(caseId);
