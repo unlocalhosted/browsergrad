@@ -30,7 +30,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch, rank-2-through-rank-5 request-time or produced-resource rectangular prefix dispatch, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, an at-most-one produced-resource feedback-node bound across conditional, repeat, and dynamic-dispatch control, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; repeated/device-side feedback, rank-6-and-higher dynamic domains, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch, rank-2-through-rank-6 request-time and rank-2-through-rank-5 produced-resource rectangular prefix dispatch, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, an at-most-one produced-resource feedback-node bound across conditional, repeat, and dynamic-dispatch control, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; produced-resource rank 6, rank 7+, repeated/device-side feedback, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every declared exit criterion is complete. A closed
 profile does not imply broader dtype, layout, numerical, or backend coverage.
@@ -130,11 +130,11 @@ then execute through CPU or kernels WebGPU without a source-spelling path.
 Portable profiles support exact same-dtype f32/i32/u32 words, disjoint global
 allocations, nonzero offsets, broadcast, guarded float fill, and:
 
-- positive-affine equal-rank layouts from rank 1 through rank 5; and
-- distinct signed-affine rank-1, rank-2/rank-3, and rank-4/rank-5 source
+- positive-affine equal-rank layouts from rank 1 through rank 6; and
+- distinct signed-affine rank-1, rank-2/rank-3, rank-4/rank-5, and rank-6 source
   profiles with a positive-affine dense destination.
 
-Required Apple Metal 3 backend-2.4 evidence passes 20 complete-destination,
+Required Apple Metal 3 backend-2.5 evidence passes 22 complete-destination,
 bit-exact CPU/WebGPU cases covering those profiles, dynamic specialization,
 and zero-extent no-submit behavior. Exact identities stay in the ledger.
 The authorized C++/CuTe transition carries signed source strides at ranks 1
@@ -147,7 +147,7 @@ signed-rank-2 CuTe source, authorizes the resulting exact distributed payload,
 and proves bit-exact CPU/required-WebGPU convergence on Apple Metal. This
 proves the declared portable source-to-backend implementation slice, not
 externally rooted producer trust, legal approval, or production release.
-Rank 6, signed destinations, packed/16-bit/bf16/f64 storage, overlap, and
+Rank 7+, signed destinations, packed/16-bit/bf16/f64 storage, overlap, and
 other undeclared layouts remain explicit refusals.
 
 ### Tiled kernels and framework convergence
@@ -186,11 +186,11 @@ CPU/required-WebGPU convergence are no longer blockers.
    backend/final-release authority is minted in one process. Serialized
    observations and synthetic fixtures grant no production authority.
 
-Gate 7 covers the closed DAG, bounded request/resource repetition and dynamic
-dispatch through rank 5, three conditional sources including one explicit
-feedback stage, and device-bound pipelines on CPU/WebGPU. Repeated/device-side
-feedback, unbounded launches, rank 6+, transport/topology, worker meshes, and
-native systems remain open.
+Gate 7 covers the closed DAG, bounded request/resource repetition, request-time dynamic
+dispatch through rank 6 and produced-resource dispatch through rank 5,
+three conditional sources including one explicit feedback stage, and
+device-bound pipelines on CPU/WebGPU. Produced-resource rank 6, rank 7+, repeated/device-side
+feedback, unbounded launches, transport/topology, worker meshes, and native systems remain open.
 
 ## Purpose
 
@@ -681,15 +681,16 @@ L1 or L2 model.
 
 Follow-on portable profiles preserve that operation meaning while admitting
 same-dtype `i32` and `u32` exact-word copies plus equal source/destination ranks
-1 through 5. Rank-2/rank-3 f32 retains
+1 through 6. Rank-2/rank-3 f32 retains
 `browsergrad.view-copy.positive-affine-f32@1`; rank-2/rank-3 integer storage
 uses `browsergrad.view-copy.positive-affine-word32@1`; rank-1/rank-4 32-bit
 storage uses
 `browsergrad.view-copy.positive-affine-rank1-rank4-word32@1`; rank-5 storage
 uses the distinct
-`browsergrad.view-copy.positive-affine-rank5-word32@1`. Integer profiles
+`browsergrad.view-copy.positive-affine-rank5-word32@1`; rank-6 storage uses
+`browsergrad.view-copy.positive-affine-rank6-word32@1`. Integer profiles
 require `reject` for an invalid source coordinate, while f32 may use an exact
-fill bit pattern. These positive-affine profiles do not admit rank 6 or a
+fill bit pattern. These positive-affine profiles do not admit rank 7 or a
 negative coordinate scale.
 
 The distinct
@@ -699,11 +700,12 @@ location or source predicate. The distinct
 `browsergrad.view-copy.signed-affine-rank4-rank5-word32@1` profile applies the
 same source rule at ranks 4 and 5 without widening the lower-rank identity.
 `browsergrad.view-copy.signed-affine-rank1-word32@1` provides the rank-1
-profile. A nonnegative view byte offset rebases every proved guarded source
+profile, and `browsergrad.view-copy.signed-affine-rank6-word32@1` provides the
+rank-6 profile. A nonnegative view byte offset rebases every proved guarded source
 word into its root allocation. The destination remains positive-affine,
 dense, and injective, and the same CPU coordinate proof checks every guarded
 source access and complete destination write. Existing positive-affine profile
-identities retain their exact meaning. Rank 6, signed destinations, integer
+identities retain their exact meaning. Rank 7+, signed destinations, integer
 division/modulo, 16-bit packed storage, bf16, f64, overlap, and non-global
 memory remain outside the declared portable profiles.
 
@@ -742,6 +744,8 @@ kernel, address clamping, or unsigned reinterpretation.
 Backend 2.3.0 applies that same path to the separately named rank-4/rank-5
 profile and reuses the canonical mixed-radix coordinate reconstruction.
 Backend 2.4.0 applies the same path to the separately named rank-1 profile.
+Backend 2.5.0 applies the same path to the separately named positive and signed
+rank-6 profiles with six-axis mixed-radix coordinate reconstruction.
 
 ### Logical tiles versus physical schedules
 
@@ -793,13 +797,14 @@ Version 1.16 extends request-time rectangular dispatch to rank 5 under the
 distinct rank-5 view-copy profile while preserving the version-1.15
 produced-resource rank limit. Version 1.17 extends produced-resource
 rectangular dispatch to rank 5 through five ordered temporary-u32 sources under
-the same feedback bound. Repeated/device-side feedback,
-rank-6-and-higher dynamic domains, or nested
-control require separately versioned node kinds and
+the same feedback bound. Version 1.18 extends request-time rectangular dispatch
+to rank 6 while retaining the version-1.17 produced-resource rank-5 limit.
+Repeated/device-side feedback, produced-resource rank 6, rank-7-and-higher
+dynamic domains, or nested control require separately versioned node kinds and
 cancellation points rather than hidden emitter loops. Portable arbitrary
-positive one-dimensional prefix and rank-2-through-rank-5 request-time or
-produced-resource rectangular execution are backend-schedule capabilities
-verified independently from graph semantics.
+positive one-dimensional prefix, rank-2-through-rank-6 request-time rectangular,
+and rank-2-through-rank-5 produced-resource rectangular execution are
+backend-schedule capabilities verified independently from graph semantics.
 The verifier performs resource lifetime and read/write hazard checks before
 execution.
 
@@ -2419,10 +2424,13 @@ across selected rectangles. Version-1.17 produced-resource rank-5 dispatch
 reads all five ordered rank-local temporary u32 extents after one
 resident-buffer prefix stage, validates the complete selection, and reuses the
 same flattened-z mapping, 32-byte uniform, maximum program, and exact pipeline
-slots for the suffix.
+slots for the suffix. Version-1.18 request-time rank-6 dispatch uses the
+distinct rank-6 view-copy profile, keeps axes 5/4 on physical x/y, flattens
+axes 0 through 3 into z, and reconstructs all four leading coordinates behind
+the same 32-byte guard before semantic evaluation.
 Every dynamic rank step charges one aligned 16-byte GPU uniform allocation for
-ranks 1 through 4 or 32 bytes for rank 5, and either four linear host bytes,
-16 rank-2-through-rank-4 rectangular host bytes, or 32 rank-5 rectangular host
+ranks 1 through 4 or 32 bytes for ranks 5 and 6, and either four linear host bytes,
+16 rank-2-through-rank-4 rectangular host bytes, or 32 rank-5/rank-6 rectangular host
 bytes to transient
 budgets. Device admission derives the actual maximum total, storage, and
 uniform binding counts over every reachable program, validates x/y/z
@@ -2456,10 +2464,12 @@ and small/full request-time rank-5 rectangles through stable graph/pipeline
 identity and distinct specialization, and
 matching small/full produced-resource rank-5 rectangles through the same
 one-feedback lifecycle, and
+small/full request-time rank-6 rectangles through stable graph/pipeline
+identity and distinct specialization, and
 separately proves non-finite f32 and lost-device refusal.
-The required lane completes 44 CPU/WebGPU parity cases under backend 1.20.0;
+The required lane completes 46 CPU/WebGPU parity cases under backend 1.21.0;
 terminal correctness artifact
-`2bc02d766de1ec15927a1c909ae5a77ec479d823f2d62da3ff94a2def674f257`
+`39d99833cfa0e11597cb7a30f91121ed4e4fac4ad5296962c2ba05f7b2e8103a`
 binds device profile
 `a72951410740a4adee212bba13ee44da16fdb9d6644d3b58ec38e0623f2c7b48`.
 
@@ -2498,10 +2508,12 @@ version-1.9 request-time plus version-1.11 produced-resource
 arbitrary positive one-dimensional prefix dynamic dispatch and version-1.12
 plus version-1.13 rank-2/rank-3 request-time or produced-resource rectangular
 prefix dispatch, version-1.14 request-time rank-4 dispatch, and version-1.15
-produced-resource rank-4 dispatch, plus version-1.16 request-time rank-5
-dispatch and version-1.17 produced-resource rank-5 dispatch are implemented
+produced-resource rank-4 dispatch, plus version-1.16 request-time rank-5,
+version-1.17 produced-resource rank-5, and version-1.18 request-time rank-6
+dispatch are implemented
 under an at-most-one-feedback-node graph bound. No repeated or device-side
-feedback, rank-6-and-higher dynamic domain, nested/device-side branching,
+feedback, produced-resource rank-6 or rank-7-and-higher dynamic domain,
+nested/device-side branching,
 transport/topology adapter, worker mesh, or native companion exists yet, so
 Gate 7 remains `in progress`. Runtime controls are request-time host inputs,
 not GPU/backend-derived loop or launch counts.

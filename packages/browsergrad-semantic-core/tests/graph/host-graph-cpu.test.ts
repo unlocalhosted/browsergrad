@@ -218,7 +218,13 @@ function rectangularDynamicProgram(
     kind: "host-graph",
     version: {
       major: 1,
-      minor: shape.length === 5 ? 16 : shape.length === 4 ? 14 : 12,
+      minor: shape.length === 6
+        ? 18
+        : shape.length === 5
+          ? 16
+          : shape.length === 4
+            ? 14
+            : 12,
     },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire("1"),
@@ -1406,7 +1412,7 @@ describe("host graph CPU reference", () => {
     expect(readF32(result.outputs[0]!.bytes)).toEqual([1.25, 0]);
   });
 
-  it("executes and reports exact rank-2 through rank-5 rectangular prefixes", async () => {
+  it("executes and reports exact rank-2 through rank-6 rectangular prefixes", async () => {
     const cases = [
       {
         shape: [3, 4],
@@ -1423,6 +1429,10 @@ describe("host graph CPU reference", () => {
       {
         shape: [2, 2, 2, 3, 4],
         extents: [1, 2, 1, 2, 3],
+      },
+      {
+        shape: [2, 2, 2, 2, 3, 4],
+        extents: [1, 2, 1, 2, 2, 3],
       },
     ] as const;
     for (const testCase of cases) {
@@ -1475,6 +1485,34 @@ describe("host graph CPU reference", () => {
         rectangularExpected(values, testCase.shape, testCase.extents),
       );
     }
+  });
+
+  it("versions request-time rank 6 without widening produced-resource rank", async () => {
+    const shape = [2, 2, 2, 2, 3, 4] as const;
+    const artifacts = await rectangularArtifacts(shape);
+    const current = rectangularDynamicProgram(artifacts, shape);
+    const legacy = {
+      ...current,
+      version: { major: 1 as const, minor: 17 as const },
+    };
+
+    await expect(createVerifiedHostGraphArtifact(
+      legacy,
+      artifactOptions(artifacts),
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-UNSUPPORTED-PROFILE" },
+    });
+
+    const resource = {
+      ...resourceRectangularDynamicProgram(artifacts, shape),
+      version: { major: 1 as const, minor: 18 as const },
+    };
+    await expect(createVerifiedHostGraphArtifact(
+      resource,
+      artifactOptions(artifacts),
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-UNSUPPORTED-PROFILE" },
+    });
   });
 
   it("rejects rectangular extents before reading caller inputs", async () => {
