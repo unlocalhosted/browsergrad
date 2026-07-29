@@ -882,6 +882,116 @@ describe("verified materializing view-copy", () => {
     }
   });
 
+  it("executes rank-4 exact storage through distinct positive and signed profiles", async () => {
+    const cases = [
+      {
+        dtype: "i8" as const,
+        dtypeBytes: 1,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank4-packed8@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank4-packed8@1",
+      },
+      {
+        dtype: "bf16" as const,
+        dtypeBytes: 2,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank4-packed16@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank4-packed16@1",
+      },
+      {
+        dtype: "f64" as const,
+        dtypeBytes: 8,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank4-word64@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank4-word64@1",
+      },
+    ];
+    const shape = ["2", "2", "2", "2"] as const;
+    const positiveOrder = [
+      0, 8, 4, 12, 2, 10, 6, 14,
+      1, 9, 5, 13, 3, 11, 7, 15,
+    ];
+    for (const testCase of cases) {
+      const byteLength = testCase.dtypeBytes * 16;
+      const source = Uint8Array.from(
+        { length: byteLength },
+        (_, index) => index + 1,
+      );
+      const positiveLayout = await verifiedLayout({
+        shape,
+        sourceLocation: add(
+          c(0),
+          mul(c(1), k("2")),
+          mul(c(2), k("4")),
+          mul(c(3), k("8")),
+        ),
+        sourceBytes: String(byteLength),
+        destinationBytes: String(byteLength),
+        dtype: testCase.dtype,
+      });
+      const positiveKernel = await verifiedKernel(positiveLayout);
+      const positivePlan = await prepare(positiveLayout, positiveKernel);
+      const positiveSpecialization = await prepareViewCopySpecialization(
+        positiveLayout,
+        positiveKernel,
+        { operationId: positivePlan.operationId },
+      );
+      const positiveDestination = new Uint8Array(byteLength);
+      positivePlan.execute({ source, destination: positiveDestination });
+      expect(positiveSpecialization.portableProfile).toMatchObject({
+        profileId: testCase.positiveProfile,
+        rank: 4,
+        dtype: testCase.dtype,
+      });
+      expect(Array.from(positiveDestination)).toEqual(
+        positiveOrder.flatMap((elementIndex) =>
+          Array.from(source.slice(
+            elementIndex * testCase.dtypeBytes,
+            (elementIndex + 1) * testCase.dtypeBytes,
+          ))),
+      );
+
+      const signedLayout = await verifiedLayout({
+        shape,
+        sourceLocation: add(
+          mul(c(0), k("-8")),
+          mul(c(1), k("-4")),
+          mul(c(2), k("-2")),
+          mul(c(3), k("-1")),
+        ),
+        sourceByteOffset: String(byteLength - testCase.dtypeBytes),
+        sourceBytes: String(byteLength),
+        destinationBytes: String(byteLength),
+        dtype: testCase.dtype,
+      });
+      const signedKernel = await verifiedKernel(signedLayout);
+      const signedPlan = await prepare(signedLayout, signedKernel);
+      const signedSpecialization = await prepareViewCopySpecialization(
+        signedLayout,
+        signedKernel,
+        { operationId: signedPlan.operationId },
+      );
+      const signedDestination = new Uint8Array(byteLength);
+      signedPlan.execute({ source, destination: signedDestination });
+      expect(signedSpecialization.portableProfile).toMatchObject({
+        profileId: testCase.signedProfile,
+        rank: 4,
+        dtype: testCase.dtype,
+      });
+      expect(Array.from(signedDestination)).toEqual(
+        Array.from({ length: 16 }, (_, index) => 15 - index)
+          .flatMap((elementIndex) =>
+            Array.from(source.slice(
+              elementIndex * testCase.dtypeBytes,
+              (elementIndex + 1) * testCase.dtypeBytes,
+            ))),
+      );
+    }
+  });
+
   it("guards padded reads and preserves exact f32 fill bits", async () => {
     const predicate: PredicateExpr = {
       kind: "and",

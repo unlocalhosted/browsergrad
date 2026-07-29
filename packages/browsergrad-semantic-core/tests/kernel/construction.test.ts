@@ -196,8 +196,8 @@ describe("canonical view-copy construction", () => {
 
   it("keeps semantic construction general while portable-profile limits stay separate", async () => {
     const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
-      inputShape: [wire("2"), wire("3"), wire("4"), wire("5")],
-      axes: [3, 2, 1, 0],
+      inputShape: [wire("2"), wire("3"), wire("4"), wire("5"), wire("6")],
+      axes: [4, 3, 2, 1, 0],
       dtype: "f64",
     });
     expect(kernelArtifactPayload(artifacts.kernel).operations[0]?.dtype).toBe("f64");
