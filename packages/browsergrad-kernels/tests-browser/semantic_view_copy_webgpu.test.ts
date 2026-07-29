@@ -87,6 +87,8 @@ const PLANNED_CASE_IDS = Object.freeze([
   "i8-rank4-negative-stride",
   "i8-rank5-permutation",
   "i8-rank5-negative-stride",
+  "i8-rank6-permutation",
+  "i8-rank6-negative-stride",
   "u8-read-only-broadcast",
   "i16-rank2-transpose",
   "u16-read-only-broadcast",
@@ -98,6 +100,8 @@ const PLANNED_CASE_IDS = Object.freeze([
   "f16-rank4-negative-stride",
   "f16-rank5-permutation",
   "f16-rank5-negative-stride",
+  "f16-rank6-permutation",
+  "f16-rank6-negative-stride",
   "bf16-rank3-permutation",
   "f64-rank2-transpose",
   "f64-rank1-positive-stride",
@@ -107,6 +111,8 @@ const PLANNED_CASE_IDS = Object.freeze([
   "f64-rank4-negative-stride",
   "f64-rank5-permutation",
   "f64-rank5-negative-stride",
+  "f64-rank6-permutation",
+  "f64-rank6-negative-stride",
   "i64-byte-map-broadcast",
   "u64-rank3-permutation",
   "zero-extent-no-submit",
@@ -965,6 +971,47 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     sequenceWords(8, 0x55667788),
   );
 
+  const i8Rank6Permutation = await makeCase(
+    "i8-rank6-permutation",
+    {
+      shape: dims("2", "2", "2", "2", "2", "2"),
+      sourceLocation: add(
+        coordinate(0),
+        multiply(coordinate(1), indexConstant("2")),
+        multiply(coordinate(2), indexConstant("4")),
+        multiply(coordinate(3), indexConstant("8")),
+        multiply(coordinate(4), indexConstant("16")),
+        multiply(coordinate(5), indexConstant("32")),
+      ),
+      sourceBytes: dimConstant("64"),
+      destinationBytes: dimConstant("64"),
+      dtype: "i8",
+    },
+    { kind: "reject" },
+    sequenceWords(16, 0x12345678),
+  );
+
+  const i8Rank6NegativeStride = await makeCase(
+    "i8-rank6-negative-stride",
+    {
+      shape: dims("2", "2", "2", "2", "2", "2"),
+      sourceLocation: add(
+        multiply(coordinate(0), indexConstant("-32")),
+        multiply(coordinate(1), indexConstant("-16")),
+        multiply(coordinate(2), indexConstant("-8")),
+        multiply(coordinate(3), indexConstant("-4")),
+        multiply(coordinate(4), indexConstant("-2")),
+        multiply(coordinate(5), indexConstant("-1")),
+      ),
+      sourceByteOffset: dimConstant("63"),
+      sourceBytes: dimConstant("64"),
+      destinationBytes: dimConstant("64"),
+      dtype: "i8",
+    },
+    { kind: "reject" },
+    sequenceWords(16, 0x87654321),
+  );
+
   const i16Transpose = await makeCase(
     "i16-rank2-transpose",
     {
@@ -1182,6 +1229,47 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     sequenceWords(16, 0x44440000),
   );
 
+  const f16Rank6Permutation = await makeCase(
+    "f16-rank6-permutation",
+    {
+      shape: dims("2", "2", "2", "2", "2", "2"),
+      sourceLocation: add(
+        coordinate(0),
+        multiply(coordinate(1), indexConstant("2")),
+        multiply(coordinate(2), indexConstant("4")),
+        multiply(coordinate(3), indexConstant("8")),
+        multiply(coordinate(4), indexConstant("16")),
+        multiply(coordinate(5), indexConstant("32")),
+      ),
+      sourceBytes: dimConstant("128"),
+      destinationBytes: dimConstant("128"),
+      dtype: "f16",
+    },
+    { kind: "reject" },
+    sequenceWords(32, 0x55550000),
+  );
+
+  const f16Rank6NegativeStride = await makeCase(
+    "f16-rank6-negative-stride",
+    {
+      shape: dims("2", "2", "2", "2", "2", "2"),
+      sourceLocation: add(
+        multiply(coordinate(0), indexConstant("-32")),
+        multiply(coordinate(1), indexConstant("-16")),
+        multiply(coordinate(2), indexConstant("-8")),
+        multiply(coordinate(3), indexConstant("-4")),
+        multiply(coordinate(4), indexConstant("-2")),
+        multiply(coordinate(5), indexConstant("-1")),
+      ),
+      sourceByteOffset: dimConstant("126"),
+      sourceBytes: dimConstant("128"),
+      destinationBytes: dimConstant("128"),
+      dtype: "f16",
+    },
+    { kind: "reject" },
+    sequenceWords(32, 0x66660000),
+  );
+
   const f64Transpose = await makeCase(
     "f64-rank2-transpose",
     {
@@ -1363,6 +1451,47 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     sequenceWords(64, 0x73000000),
   );
 
+  const f64Rank6Permutation = await makeCase(
+    "f64-rank6-permutation",
+    {
+      shape: dims("2", "2", "2", "2", "2", "2"),
+      sourceLocation: add(
+        coordinate(0),
+        multiply(coordinate(1), indexConstant("2")),
+        multiply(coordinate(2), indexConstant("4")),
+        multiply(coordinate(3), indexConstant("8")),
+        multiply(coordinate(4), indexConstant("16")),
+        multiply(coordinate(5), indexConstant("32")),
+      ),
+      sourceBytes: dimConstant("512"),
+      destinationBytes: dimConstant("512"),
+      dtype: "f64",
+    },
+    { kind: "reject" },
+    sequenceWords(128, 0x74000000),
+  );
+
+  const f64Rank6NegativeStride = await makeCase(
+    "f64-rank6-negative-stride",
+    {
+      shape: dims("2", "2", "2", "2", "2", "2"),
+      sourceLocation: add(
+        multiply(coordinate(0), indexConstant("-32")),
+        multiply(coordinate(1), indexConstant("-16")),
+        multiply(coordinate(2), indexConstant("-8")),
+        multiply(coordinate(3), indexConstant("-4")),
+        multiply(coordinate(4), indexConstant("-2")),
+        multiply(coordinate(5), indexConstant("-1")),
+      ),
+      sourceByteOffset: dimConstant("504"),
+      sourceBytes: dimConstant("512"),
+      destinationBytes: dimConstant("512"),
+      dtype: "f64",
+    },
+    { kind: "reject" },
+    sequenceWords(128, 0x75000000),
+  );
+
   const u64Rank3Permutation = await makeCase(
     "u64-rank3-permutation",
     {
@@ -1440,6 +1569,8 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     i8Rank4NegativeStride,
     i8Rank5Permutation,
     i8Rank5NegativeStride,
+    i8Rank6Permutation,
+    i8Rank6NegativeStride,
     u8Broadcast,
     i16Transpose,
     u16Broadcast,
@@ -1451,6 +1582,8 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     f16Rank4NegativeStride,
     f16Rank5Permutation,
     f16Rank5NegativeStride,
+    f16Rank6Permutation,
+    f16Rank6NegativeStride,
     bf16Rank3Permutation,
     f64Transpose,
     f64Rank1PositiveStride,
@@ -1460,6 +1593,8 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     f64Rank4NegativeStride,
     f64Rank5Permutation,
     f64Rank5NegativeStride,
+    f64Rank6Permutation,
+    f64Rank6NegativeStride,
     i64ByteMapBroadcast,
     u64Rank3Permutation,
     zero,

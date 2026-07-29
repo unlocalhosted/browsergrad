@@ -260,6 +260,18 @@ function u32Values(bytes: Uint8Array): number[] {
   );
 }
 
+function bitReversedOrder(rank: number): number[] {
+  return Array.from({ length: 2 ** rank }, (_, index) => {
+    let remaining = index;
+    let reversed = 0;
+    for (let axis = 0; axis < rank; axis += 1) {
+      reversed = (reversed * 2) + (remaining % 2);
+      remaining = Math.floor(remaining / 2);
+    }
+    return reversed;
+  });
+}
+
 async function diagnostic(run: () => Promise<unknown> | unknown): Promise<SemanticSchemaError> {
   try {
     await run();
@@ -910,10 +922,7 @@ describe("verified materializing view-copy", () => {
       },
     ];
     const shape = ["2", "2", "2", "2"] as const;
-    const positiveOrder = [
-      0, 8, 4, 12, 2, 10, 6, 14,
-      1, 9, 5, 13, 3, 11, 7, 15,
-    ];
+    const positiveOrder = bitReversedOrder(4);
     for (const testCase of cases) {
       const byteLength = testCase.dtypeBytes * 16;
       const source = Uint8Array.from(
@@ -1020,12 +1029,7 @@ describe("verified materializing view-copy", () => {
       },
     ];
     const shape = ["2", "2", "2", "2", "2"] as const;
-    const positiveOrder = [
-      0, 16, 8, 24, 4, 20, 12, 28,
-      2, 18, 10, 26, 6, 22, 14, 30,
-      1, 17, 9, 25, 5, 21, 13, 29,
-      3, 19, 11, 27, 7, 23, 15, 31,
-    ];
+    const positiveOrder = bitReversedOrder(5);
     for (const testCase of cases) {
       const byteLength = testCase.dtypeBytes * 32;
       const source = Uint8Array.from(
@@ -1102,6 +1106,120 @@ describe("verified materializing view-copy", () => {
               elementIndex * testCase.dtypeBytes,
               (elementIndex + 1) * testCase.dtypeBytes,
             ))),
+      );
+    }
+  });
+
+  it("executes rank-6 exact storage through distinct positive and signed profiles", async () => {
+    const cases = [
+      {
+        dtype: "i8" as const,
+        dtypeBytes: 1,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank6-packed8@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank6-packed8@1",
+      },
+      {
+        dtype: "bf16" as const,
+        dtypeBytes: 2,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank6-packed16@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank6-packed16@1",
+      },
+      {
+        dtype: "f64" as const,
+        dtypeBytes: 8,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank6-word64@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank6-word64@1",
+      },
+    ];
+    const shape = ["2", "2", "2", "2", "2", "2"] as const;
+    const positiveOrder = bitReversedOrder(6);
+    for (const testCase of cases) {
+      const elementCount = 64;
+      const byteLength = testCase.dtypeBytes * elementCount;
+      const source = Uint8Array.from(
+        { length: byteLength },
+        (_, index) => (index + 1) & 0xff,
+      );
+      const positiveLayout = await verifiedLayout({
+        shape,
+        sourceLocation: add(
+          c(0),
+          mul(c(1), k("2")),
+          mul(c(2), k("4")),
+          mul(c(3), k("8")),
+          mul(c(4), k("16")),
+          mul(c(5), k("32")),
+        ),
+        sourceBytes: String(byteLength),
+        destinationBytes: String(byteLength),
+        dtype: testCase.dtype,
+      });
+      const positiveKernel = await verifiedKernel(positiveLayout);
+      const positivePlan = await prepare(positiveLayout, positiveKernel);
+      const positiveSpecialization = await prepareViewCopySpecialization(
+        positiveLayout,
+        positiveKernel,
+        { operationId: positivePlan.operationId },
+      );
+      const positiveDestination = new Uint8Array(byteLength);
+      positivePlan.execute({ source, destination: positiveDestination });
+      expect(positiveSpecialization.portableProfile).toMatchObject({
+        profileId: testCase.positiveProfile,
+        rank: 6,
+        dtype: testCase.dtype,
+      });
+      expect(Array.from(positiveDestination)).toEqual(
+        positiveOrder.flatMap((elementIndex) =>
+          Array.from(source.slice(
+            elementIndex * testCase.dtypeBytes,
+            (elementIndex + 1) * testCase.dtypeBytes,
+          ))),
+      );
+
+      const signedLayout = await verifiedLayout({
+        shape,
+        sourceLocation: add(
+          mul(c(0), k("-32")),
+          mul(c(1), k("-16")),
+          mul(c(2), k("-8")),
+          mul(c(3), k("-4")),
+          mul(c(4), k("-2")),
+          mul(c(5), k("-1")),
+        ),
+        sourceByteOffset: String(byteLength - testCase.dtypeBytes),
+        sourceBytes: String(byteLength),
+        destinationBytes: String(byteLength),
+        dtype: testCase.dtype,
+      });
+      const signedKernel = await verifiedKernel(signedLayout);
+      const signedPlan = await prepare(signedLayout, signedKernel);
+      const signedSpecialization = await prepareViewCopySpecialization(
+        signedLayout,
+        signedKernel,
+        { operationId: signedPlan.operationId },
+      );
+      const signedDestination = new Uint8Array(byteLength);
+      signedPlan.execute({ source, destination: signedDestination });
+      expect(signedSpecialization.portableProfile).toMatchObject({
+        profileId: testCase.signedProfile,
+        rank: 6,
+        dtype: testCase.dtype,
+      });
+      expect(Array.from(signedDestination)).toEqual(
+        Array.from(
+          { length: elementCount },
+          (_, index) => elementCount - index - 1,
+        ).flatMap((elementIndex) =>
+          Array.from(source.slice(
+            elementIndex * testCase.dtypeBytes,
+            (elementIndex + 1) * testCase.dtypeBytes,
+          ))),
       );
     }
   });
