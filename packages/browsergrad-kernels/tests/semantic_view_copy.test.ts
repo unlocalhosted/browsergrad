@@ -25,9 +25,7 @@ import {
   runSemanticViewCopyWebGpu,
   type PrepareSemanticViewCopyWgslRequest,
 } from "../src/semantic_view_copy";
-import {
-  prepareSemanticViewCopyDynamicPrefixWgsl,
-} from "../src/semantic_view_copy_internal";
+import { prepareSemanticViewCopyDynamicWgsl } from "../src/semantic_view_copy_internal";
 import type { KernelDevice } from "../src/types";
 
 const TRUE: PredicateExpr = { kind: "bool", value: true };
@@ -198,13 +196,14 @@ describe("semantic view-copy WGSL lowering", () => {
     const kernel = await verifiedKernel(layout);
     const operation = kernelArtifactPayload(kernel).operations[0];
     if (operation === undefined) throw new Error("fixture operation missing");
-    const dynamic = await prepareSemanticViewCopyDynamicPrefixWgsl(
+    const dynamic = await prepareSemanticViewCopyDynamicWgsl(
       layout,
       kernel,
       {
         operationId: operation.operationId,
         workgroupSize: 64,
       },
+      "linear-prefix",
     );
     const ordinary = await prepare(layout, kernel, {
       workgroupSize: 64,
@@ -215,7 +214,7 @@ describe("semantic view-copy WGSL lowering", () => {
     expect(dynamic.wgslModuleHash).not.toBe(ordinary.wgslModuleHash);
     expect(dynamic.program.bindings).toContainEqual({
       kind: "uniform",
-      name: dynamic.dynamicPrefixUniformName,
+      name: dynamic.dynamicUniformName,
       byteLength: 4,
       binding: 2,
     });
@@ -223,6 +222,87 @@ describe("semantic view-copy WGSL lowering", () => {
       "linear_index >= bg_dynamic_prefix.element_count",
     );
     expect(dynamic.launch.dispatchCount).toEqual([65, 1, 1]);
+  });
+
+  it("lowers rank-2 and rank-3 rectangular guards before semantic evaluation", async () => {
+    for (const shape of [
+      [constant("3"), constant("4")],
+      [constant("2"), constant("3"), constant("4")],
+    ] as const) {
+      const elementCount = shape.length === 2 ? 12 : 24;
+      const layout = await verifiedLayout({
+        shape,
+        sourceLocation: rowMajor(shape),
+        sourceBytes: constant(String(elementCount * 4)),
+        destinationBytes: constant(String(elementCount * 4)),
+      });
+      const kernel = await verifiedKernel(layout);
+      const operation = kernelArtifactPayload(kernel).operations[0];
+      if (operation === undefined) throw new Error("fixture operation missing");
+      const dynamic = await prepareSemanticViewCopyDynamicWgsl(
+        layout,
+        kernel,
+        {
+          operationId: operation.operationId,
+          workgroupSize: 64,
+        },
+        "rectangular-prefix",
+      );
+
+      expect(dynamic.program.bindings).toContainEqual({
+        kind: "uniform",
+        name: dynamic.dynamicUniformName,
+        byteLength: 16,
+        binding: 2,
+      });
+      expect(dynamic.launch.dispatchCount).toEqual(
+        shape.length === 2 ? [4, 3, 1] : [4, 3, 2],
+      );
+      expect(dynamic.program.wgsl).toContain(
+        "global_id.x >= bg_dynamic_region.extent_",
+      );
+      expect(dynamic.program.wgsl).toContain(
+        "global_id.y >= bg_dynamic_region.extent_",
+      );
+      if (shape.length === 3) {
+        expect(dynamic.program.wgsl).toContain(
+          "global_id.z >= bg_dynamic_region.extent_0",
+        );
+      }
+      const guardIndex = dynamic.program.wgsl.indexOf(
+        "global_id.x >= bg_dynamic_region.extent_",
+      );
+      const coordinateIndex = dynamic.program.wgsl.indexOf("let coordinate_0");
+      expect(guardIndex).toBeGreaterThanOrEqual(0);
+      expect(coordinateIndex).toBeGreaterThan(guardIndex);
+      expect(dynamic.program.wgsl).not.toContain("let linear_index");
+    }
+  });
+
+  it("rejects rectangular launch outside its admitted rank profile", async () => {
+    for (const shape of [
+      [constant("4")],
+      [constant("1"), constant("1"), constant("1"), constant("1")],
+    ] as const) {
+      const layout = await verifiedLayout({
+        shape,
+        sourceLocation: rowMajor(shape),
+        sourceBytes: constant("16"),
+        destinationBytes: constant("16"),
+      });
+      const kernel = await verifiedKernel(layout);
+      const operation = kernelArtifactPayload(kernel).operations[0];
+      if (operation === undefined) throw new Error("fixture operation missing");
+
+      await expect(prepareSemanticViewCopyDynamicWgsl(
+        layout,
+        kernel,
+        { operationId: operation.operationId },
+        "rectangular-prefix",
+      )).rejects.toMatchObject({
+        code: "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
+      });
+    }
   });
 
   it("lowers i32 and u32 through the same bit-exact word backend", async () => {

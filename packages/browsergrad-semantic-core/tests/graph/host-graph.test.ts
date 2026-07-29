@@ -404,6 +404,46 @@ function dynamicDispatchProgram(
   };
 }
 
+function rectangularDynamicDispatchProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  const base = dynamicDispatchProgram(artifacts);
+  return {
+    ...base,
+    version: { major: 1, minor: 12 },
+    nodes: base.nodes.map((node) => {
+      if (
+        node.kind !== "dynamic-dispatch" ||
+        node.mode !== "runtime-u32-prefix-elements"
+      ) {
+        return node;
+      }
+      const {
+        launchControl: _launchControl,
+        maxElementCount: _maxElementCount,
+        ...common
+      } = node;
+      return {
+        ...common,
+        launchControls: [
+          {
+            axis: 1,
+            controlId: "prefix-columns",
+            mode: "u32-prefix-extent" as const,
+          },
+          {
+            axis: 0,
+            controlId: "prefix-rows",
+            mode: "u32-prefix-extent" as const,
+          },
+        ],
+        maxExtents: [wire("2"), wire("2")],
+        mode: "runtime-u32-rectangular-prefix" as const,
+      };
+    }),
+  };
+}
+
 function resourceDynamicDispatchProgram(
   artifacts: VerifiedViewCopyArtifacts,
 ): HostGraphProgram {
@@ -1342,6 +1382,153 @@ describe("host graph artifact", () => {
     ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
   });
 
+  it("normalizes bounded rank-2 rectangular dynamic dispatch in version 1.12", async () => {
+    const artifacts = await semantic();
+    const constructed = await createVerifiedHostGraphArtifact(
+      rectangularDynamicDispatchProgram(artifacts),
+      {
+        kernelArtifacts: [artifacts.kernel],
+        layoutArtifacts: [artifacts.layout],
+      },
+    );
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+
+    expect(payload.program.version).toEqual({ major: 1, minor: 12 });
+    expect(payload.program.nodes.find((node) =>
+      node.kind === "dynamic-dispatch")).toMatchObject({
+        nodeId: "transform",
+        launchControls: [
+          {
+            axis: 0,
+            controlId: "prefix-rows",
+            mode: "u32-prefix-extent",
+          },
+          {
+            axis: 1,
+            controlId: "prefix-columns",
+            mode: "u32-prefix-extent",
+          },
+        ],
+        maxExtents: ["2", "2"],
+        mode: "runtime-u32-rectangular-prefix",
+      });
+    expect(prepared).toMatchObject({
+      dynamicDispatchCount: 1,
+      resourceDynamicDispatchCount: 0,
+      runtimeControlIds: ["prefix-columns", "prefix-rows"],
+    });
+  });
+
+  it("rejects malformed, excessive, and pre-version rectangular dispatch", async () => {
+    const artifacts = await semantic();
+    const options = {
+      kernelArtifacts: [artifacts.kernel],
+      layoutArtifacts: [artifacts.layout],
+    };
+    const oldVersion = clone(rectangularDynamicDispatchProgram(artifacts));
+    oldVersion.version.minor = 11;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      oldVersion,
+      options,
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const excessive = clone(rectangularDynamicDispatchProgram(artifacts));
+    const excessiveNode = excessive.nodes.find((node) =>
+      node.kind === "dynamic-dispatch");
+    if (
+      excessiveNode?.kind !== "dynamic-dispatch" ||
+      excessiveNode.mode !== "runtime-u32-rectangular-prefix"
+    ) {
+      throw new Error("missing rectangular dynamic dispatch");
+    }
+    excessiveNode.maxExtents = [wire("4"), wire("2")];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      excessive,
+      options,
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+
+    const rankDrift = clone(rectangularDynamicDispatchProgram(artifacts));
+    const rankNode = rankDrift.nodes.find((node) =>
+      node.kind === "dynamic-dispatch");
+    if (
+      rankNode?.kind !== "dynamic-dispatch" ||
+      rankNode.mode !== "runtime-u32-rectangular-prefix"
+    ) {
+      throw new Error("missing rectangular dynamic dispatch");
+    }
+    rankNode.maxExtents = [wire("2"), wire("2"), wire("1")];
+    rankNode.launchControls = [
+      ...rankNode.launchControls,
+      {
+        axis: 2,
+        controlId: "prefix-depth",
+        mode: "u32-prefix-extent",
+      },
+    ];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      rankDrift,
+      options,
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.invalidBinding);
+
+    const duplicateAxis = clone(rectangularDynamicDispatchProgram(artifacts));
+    const duplicateAxisNode = duplicateAxis.nodes.find((node) =>
+      node.kind === "dynamic-dispatch");
+    if (
+      duplicateAxisNode?.kind !== "dynamic-dispatch" ||
+      duplicateAxisNode.mode !== "runtime-u32-rectangular-prefix"
+    ) {
+      throw new Error("missing rectangular dynamic dispatch");
+    }
+    duplicateAxisNode.launchControls[0]!.axis = 0;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      duplicateAxis,
+      options,
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.duplicateId);
+
+    const duplicateControl = clone(
+      rectangularDynamicDispatchProgram(artifacts),
+    );
+    const duplicateControlNode = duplicateControl.nodes.find((node) =>
+      node.kind === "dynamic-dispatch");
+    if (
+      duplicateControlNode?.kind !== "dynamic-dispatch" ||
+      duplicateControlNode.mode !== "runtime-u32-rectangular-prefix"
+    ) {
+      throw new Error("missing rectangular dynamic dispatch");
+    }
+    duplicateControlNode.launchControls[1]!.controlId =
+      duplicateControlNode.launchControls[0]!.controlId;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      duplicateControl,
+      options,
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.duplicateId);
+
+    for (const maxExtents of [
+      [wire("2")],
+      [wire("1"), wire("1"), wire("1"), wire("1")],
+    ]) {
+      const unsupportedRank = clone(
+        rectangularDynamicDispatchProgram(artifacts),
+      );
+      const unsupportedNode = unsupportedRank.nodes.find((node) =>
+        node.kind === "dynamic-dispatch");
+      if (
+        unsupportedNode?.kind !== "dynamic-dispatch" ||
+        unsupportedNode.mode !== "runtime-u32-rectangular-prefix"
+      ) {
+        throw new Error("missing rectangular dynamic dispatch");
+      }
+      unsupportedNode.maxExtents = maxExtents;
+      expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+        unsupportedRank,
+        options,
+      ))).diagnostic.code).toBe(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      );
+    }
+  });
+
   it("normalizes one bounded produced-resource dynamic dispatch in version 1.11", async () => {
     const artifacts = await semantic();
     const constructed = await createVerifiedHostGraphArtifact(
@@ -1785,7 +1972,7 @@ describe("host graph artifact", () => {
 
   it("rejects copy version, mode, resource, dtype, and hazard drift", async () => {
     const future = clone(copyProgram());
-    future.version.minor = 12 as unknown as typeof future.version.minor;
+    future.version.minor = 13 as unknown as typeof future.version.minor;
     expect((await diagnostic(() => createVerifiedHostGraphArtifact(
       future,
       { kernelArtifacts: [], layoutArtifacts: [] },

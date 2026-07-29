@@ -38,6 +38,16 @@ async function identityArtifacts(
   });
 }
 
+async function rectangularIdentityArtifacts(
+  shape: readonly number[],
+): Promise<VerifiedViewCopyArtifacts> {
+  return createVerifiedDensePermutationViewCopyArtifacts({
+    inputShape: shape.map((extent) => parseWireI64(String(extent))),
+    axes: shape.map((_, axis) => axis),
+    dtype: "f32",
+  });
+}
+
 function artifactOptions(artifacts: VerifiedViewCopyArtifacts) {
   return {
     kernelArtifacts: [artifacts.kernel],
@@ -142,6 +152,45 @@ function dynamicPipelineProgram(
         nodeId: "materialize-output",
         kind: "materialize",
         dependsOn: ["second"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
+function rectangularDynamicProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+  shape: readonly number[],
+): HostGraphProgram {
+  const byteLength = String(
+    shape.reduce((product, extent) => product * extent, 1) * 4,
+  );
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 12 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire("1"),
+    resources: [
+      resource("input", "input", "f32", byteLength),
+      resource("output", "output", "f32", byteLength),
+    ],
+    nodes: [
+      {
+        ...dispatch(artifacts, "copy-region", "input", "output", []),
+        kind: "dynamic-dispatch",
+        launchControls: shape.map((_, axis) => ({
+          axis,
+          controlId: `prefix-axis-${axis}`,
+          mode: "u32-prefix-extent" as const,
+        })),
+        maxExtents: shape.map((extent) => wire(String(extent))),
+        mode: "runtime-u32-rectangular-prefix",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["copy-region"],
         resourceId: "output",
         mode: "host-readback-after-graph-success",
       },
@@ -901,6 +950,128 @@ describe("semantic host-graph WebGPU preparation", () => {
       dispatchStepCount: 4,
       runtimeControlIds: ["prefix-elements"],
     });
+  });
+
+  it("prewarms bounded rank-2 and rank-3 rectangular dynamic dispatch", async () => {
+    for (const shape of [[3, 4], [2, 3, 4]] as const) {
+      const artifacts = await rectangularIdentityArtifacts(shape);
+      const graph = await verified(
+        rectangularDynamicProgram(artifacts, shape),
+        artifacts,
+      );
+      const prepared = await prepareSemanticHostGraphWebGpu(
+        graph,
+        { ...artifactOptions(artifacts), workgroupSize: 64 },
+      );
+
+      expect(prepared).toMatchObject({
+        backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+        nodeCount: 2,
+        expandedStepCount: 1,
+        dispatchStepCount: 1,
+        materializationCount: 1,
+        dynamicDispatchCount: 1,
+        runtimeControlIds: shape.map((_, axis) => `prefix-axis-${axis}`),
+      });
+      expect(Number(prepared.plannedTransientGpuBytes)).toBe(
+        shape.reduce((product, extent) => product * extent, 1) * 12 + 16,
+      );
+      expect(Number(prepared.plannedTransientHostBytes)).toBe(
+        shape.reduce((product, extent) => product * extent, 1) * 20 + 16,
+      );
+      expect(prepared.wgslModuleHashes).toHaveLength(1);
+    }
+  });
+
+  it("admits every rectangular workgroup dimension before GPU allocation", async () => {
+    const shape = [3, 4] as const;
+    const artifacts = await rectangularIdentityArtifacts(shape);
+    const graph = await verified(
+      rectangularDynamicProgram(artifacts, shape),
+      artifacts,
+    );
+    const prepared = await prepareSemanticHostGraphWebGpu(
+      graph,
+      { ...artifactOptions(artifacts), workgroupSize: 64 },
+    );
+    const gpu = {
+      features: new Set<string>(),
+      limits: {
+        maxBufferSize: 1024,
+        maxStorageBufferBindingSize: 1024,
+        maxComputeWorkgroupsPerDimension: 2,
+        maxComputeInvocationsPerWorkgroup: 256,
+        maxComputeWorkgroupSizeX: 256,
+        maxBindingsPerBindGroup: 8,
+        maxStorageBuffersPerShaderStage: 8,
+        maxUniformBuffersPerShaderStage: 8,
+      },
+      lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+    } as unknown as GPUDevice;
+    const device = {
+      gpu,
+      clearCache() {},
+      getStats() {
+        throw new Error("device stats must not be observed");
+      },
+    } as KernelDevice;
+
+    await expect(runSemanticHostGraphWebGpu(
+      device,
+      prepared,
+      {
+        inputs: [input(0, new Uint8Array(48))],
+        controls: [
+          { controlId: "prefix-axis-0", value: wire("3") },
+          { controlId: "prefix-axis-1", value: wire("4") },
+        ],
+      },
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-DEVICE-LIMIT",
+      path: "$.steps[0].launch[1]",
+    });
+  });
+
+  it("rejects rectangular extents before observing input bytes", async () => {
+    const shape = [3, 4] as const;
+    const artifacts = await rectangularIdentityArtifacts(shape);
+    const graph = await verified(
+      rectangularDynamicProgram(artifacts, shape),
+      artifacts,
+    );
+    const prepared = await prepareSemanticHostGraphWebGpu(
+      graph,
+      artifactOptions(artifacts),
+    );
+    let inputReads = 0;
+    const unreadInput = {
+      rank: wire("0"),
+      resourceId: "input",
+    } as SemanticHostGraphWebGpuInputBinding;
+    Object.defineProperty(unreadInput, "bytes", {
+      enumerable: true,
+      get() {
+        inputReads += 1;
+        return new Uint8Array(48);
+      },
+    });
+
+    for (const extents of [[0, 4], [3, 5]] as const) {
+      await expect(runSemanticHostGraphWebGpu(
+        NO_DEVICE,
+        prepared,
+        {
+          inputs: [unreadInput],
+          controls: extents.map((value, axis) => ({
+            controlId: `prefix-axis-${axis}`,
+            value: wire(String(value)),
+          })),
+        },
+      )).rejects.toMatchObject({
+        code: "BG-WEBGPU-GRAPH-INVALID-BINDING",
+      });
+    }
+    expect(inputReads).toBe(0);
   });
 
   it("prewarms one bounded version-1.11 produced-resource dynamic dispatch", async () => {

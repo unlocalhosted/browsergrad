@@ -174,6 +174,13 @@ positive artifact maximum execute the exact logical prefix, and zero or larger
 values fail closed. The dispatch cannot bind its launch source as data, maximum
 work enters preparation budgets, and the graph-wide at-most-one produced-
 resource feedback bound now spans conditional, repeat, and dynamic dispatch.
+Version 1.12 adds `runtime-u32-rectangular-prefix` dynamic dispatch for rank-2
+and rank-3 semantic view-copy domains. One required request-time
+`u32-prefix-extent` control binds each axis, each positive artifact maximum
+must fit the corresponding verified logical shape extent, and the product of
+the maxima enters preparation work budgets. Zero, above-maximum, missing,
+duplicate-axis, duplicate-control, rank-mismatched, and pre-version forms fail
+before input copying.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -232,6 +239,12 @@ Version-1.11 dynamic dispatch likewise reads its positive prefix count only
 after the ordered producer, rejects zero and above-maximum values without
 output publication, executes the exact canonical prefix for every rank, and
 reports actual completion/work only with whole-graph success.
+Version-1.12 dynamic dispatch captures every axis extent with the request,
+executes exactly the selected dense rectangle against the full semantic
+row-major coordinate domain, and reports both logical extents and their
+product only after whole-graph success. Rank-2 and rank-3 CPU cases cover
+partial and full rectangles plus hostile extent admission without input
+observation.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -250,7 +263,8 @@ predicate; versions 1.10 and 1.11 reuse that authority for one bounded
 GPU-produced loop count or dynamic-launch prefix. Neither adapter grants
 transport, topology, retries, event
 timestamps or external waits, repeated/device-side feedback,
-broader dynamic schedules, worker-mesh, native-companion,
+GPU-produced multidimensional launch, rank-4-or-higher dynamic domains,
+worker-mesh, native-companion,
 performance, or release authority.
 
 Frontends construct the operation through one `/kernel` sink rather than

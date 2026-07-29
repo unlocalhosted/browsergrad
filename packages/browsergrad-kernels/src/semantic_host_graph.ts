@@ -45,8 +45,8 @@ import {
   type PreparedSemanticViewCopyWgsl,
 } from "./semantic_view_copy.js";
 import {
-  prepareSemanticViewCopyDynamicPrefixWgsl,
-  type PreparedSemanticViewCopyDynamicPrefixWgsl,
+  prepareSemanticViewCopyDynamicWgsl,
+  type PreparedSemanticViewCopyDynamicWgsl,
 } from "./semantic_view_copy_internal.js";
 import type { KernelDevice } from "./types.js";
 import {
@@ -78,7 +78,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.14.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.15.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -96,8 +96,7 @@ const DEFAULT_MAX_PREPARATION_MS = 30_000;
 const DEFAULT_MAX_EXECUTION_MS = 30_000;
 const MAX_VIEW_COPY_ELEMENTS = 16_777_216;
 const MAX_U32 = 0xffff_ffffn;
-const DYNAMIC_PREFIX_UNIFORM_GPU_BYTES = 16n;
-const DYNAMIC_PREFIX_UNIFORM_HOST_BYTES = 4n;
+const DYNAMIC_UNIFORM_GPU_BYTES = 16n;
 const NUMERICAL_STATUS_STORAGE = "bg_graph_numerical_status";
 const PREPARED = new WeakMap<object, PreparedState>();
 const PREPARED_PIPELINES =
@@ -364,7 +363,7 @@ interface PreparedState {
   readonly resourceRepeat?: PreparedResourceRepeatPlan;
   readonly runtimeRepeatLimits: ReadonlyMap<string, number>;
   readonly dynamicDispatches: readonly PreparedDynamicDispatchPlan[];
-  readonly resourceDynamicDispatch?: PreparedDynamicDispatchPlan;
+  readonly resourceDynamicDispatch?: PreparedLinearDynamicDispatchPlan;
   readonly dynamicDispatchLimits: ReadonlyMap<string, number>;
   readonly runtimeControlIds: readonly string[];
   readonly maximumCounts: Readonly<MutablePreparationCounts>;
@@ -427,8 +426,17 @@ interface PreparedResourceRepeatPlan {
   readonly bodyNodeIds: readonly string[];
 }
 
-interface PreparedDynamicDispatchPlan {
+interface PreparedDynamicDispatchPlanBase {
   readonly nodeId: string;
+  readonly startStepIndex: number;
+  readonly stepCount: number;
+  readonly dynamicUniformName: string;
+  readonly dynamicUniformHostBytes: 4 | 16;
+}
+
+interface PreparedLinearDynamicDispatchPlan
+  extends PreparedDynamicDispatchPlanBase {
+  readonly kind: "linear-prefix";
   readonly selector:
     | Readonly<{
         readonly kind: "runtime-control";
@@ -440,10 +448,34 @@ interface PreparedDynamicDispatchPlan {
         readonly rank: number;
       }>;
   readonly maxElementCount: number;
-  readonly startStepIndex: number;
-  readonly stepCount: number;
-  readonly dynamicPrefixUniformName: string;
 }
+
+interface PreparedRectangularDynamicDispatchPlan
+  extends PreparedDynamicDispatchPlanBase {
+  readonly kind: "rectangular-prefix";
+  readonly controls: readonly Readonly<{
+    readonly axis: number;
+    readonly controlId: string;
+    readonly maxExtent: number;
+  }>[];
+  readonly maxExtents: readonly number[];
+  readonly maxElementCount: number;
+}
+
+type PreparedDynamicDispatchPlan =
+  | PreparedLinearDynamicDispatchPlan
+  | PreparedRectangularDynamicDispatchPlan;
+
+type DynamicLaunchSelection =
+  | Readonly<{
+      readonly kind: "linear-prefix";
+      readonly elementCount: number;
+    }>
+  | Readonly<{
+      readonly kind: "rectangular-prefix";
+      readonly logicalExtents: readonly number[];
+      readonly elementCount: number;
+    }>;
 
 interface PreparedConditionalBranch {
   readonly steps: readonly WgslKernelSequenceStep[];
@@ -487,7 +519,7 @@ interface SelectedExecution {
   readonly completedConditionals: readonly HostGraphConditionalCompletion[];
   readonly resourceConditional?: PreparedConditionalPlan;
   readonly resourceRepeat?: PreparedResourceRepeatPlan;
-  readonly resourceDynamicDispatch?: PreparedDynamicDispatchPlan;
+  readonly resourceDynamicDispatch?: PreparedLinearDynamicDispatchPlan;
 }
 
 interface ExecutedGraph {
@@ -778,7 +810,10 @@ export async function prepareSemanticHostGraphWebGpu(
     );
   }
   const resourceRepeat = resourceRepeats[0];
-  const resourceDynamicDispatches = dynamicDispatches.filter((dispatch) =>
+  const resourceDynamicDispatches = dynamicDispatches.filter((
+    dispatch,
+  ): dispatch is PreparedLinearDynamicDispatchPlan =>
+    dispatch.kind === "linear-prefix" &&
     dispatch.selector.kind === "resource");
   if (
     resourceDynamicDispatches.length !==
@@ -810,23 +845,29 @@ export async function prepareSemanticHostGraphWebGpu(
       resourceDynamicDispatch === undefined
       ? 0n
       : 4n;
-  const dynamicPrefixUniformCount = BigInt(
+  const dynamicUniformGpuBytes =
     dynamicDispatches.reduce(
-      (total, dispatch) => total + dispatch.stepCount,
-      0,
-    ),
-  );
-  const dynamicPrefixUniformGpuBytes =
-    dynamicPrefixUniformCount * DYNAMIC_PREFIX_UNIFORM_GPU_BYTES;
-  const dynamicPrefixUniformHostBytes =
-    dynamicPrefixUniformCount * DYNAMIC_PREFIX_UNIFORM_HOST_BYTES;
+      (total, dispatch) =>
+        total +
+        (BigInt(dispatch.stepCount) *
+          DYNAMIC_UNIFORM_GPU_BYTES),
+      0n,
+    );
+  const dynamicUniformHostBytes =
+    dynamicDispatches.reduce(
+      (total, dispatch) =>
+        total +
+        (BigInt(dispatch.stepCount) *
+          BigInt(dispatch.dynamicUniformHostBytes)),
+      0n,
+    );
   const plannedTransientGpuBytes =
     boundResourceBytes + boundOutputBytes + (statusBytes * 2n) +
-    feedbackBytes + dynamicPrefixUniformGpuBytes;
+    feedbackBytes + dynamicUniformGpuBytes;
   const plannedTransientHostBytes =
     inputBytes + boundResourceBytes + boundOutputBytes +
     outputBytes + statusBytes + feedbackBytes +
-    dynamicPrefixUniformHostBytes;
+    dynamicUniformHostBytes;
   const plannedTransientWorkingSetBytes =
     plannedTransientGpuBytes + plannedTransientHostBytes;
   if (
@@ -1854,19 +1895,11 @@ function selectConditionalExecution(
     HostGraphDynamicDispatchCompletion
   >();
   for (const dispatch of state.dynamicDispatches) {
-    if (dispatch.selector.kind === "resource") continue;
-    const elementCount = controlMap.get(dispatch.selector.controlId);
     if (
-      elementCount === undefined ||
-      elementCount <= 0 ||
-      elementCount > dispatch.maxElementCount
-    ) {
-      fail(
-        "BG-WEBGPU-GRAPH-INTERNAL",
-        `$.nodes.${dispatch.nodeId}.launchControl`,
-        "admitted dynamic dispatch control is outside its verified bound",
-      );
-    }
+      dispatch.kind === "linear-prefix" &&
+      dispatch.selector.kind === "resource"
+    ) continue;
+    const selection = selectRuntimeDynamicLaunch(dispatch, controlMap);
     for (
       let pipelineIndex = dispatch.startStepIndex;
       pipelineIndex < dispatch.startStepIndex + dispatch.stepCount;
@@ -1885,16 +1918,16 @@ function selectConditionalExecution(
           "dynamic dispatch step disappeared during runtime selection",
         );
       }
-      selectedSteps[selectedIndex] = dynamicPrefixStep(
+      selectedSteps[selectedIndex] = dynamicDispatchStep(
         step,
-        dispatch.dynamicPrefixUniformName,
-        elementCount,
+        dispatch,
+        selection,
       );
     }
-    dynamicCompletions.set(dispatch.nodeId, Object.freeze({
-      nodeId: dispatch.nodeId,
-      elementCount: encodeWireU64(BigInt(elementCount)),
-    }));
+    dynamicCompletions.set(
+      dispatch.nodeId,
+      dynamicDispatchCompletion(dispatch.nodeId, selection),
+    );
   }
   const completedRepeats = Object.freeze(
     state.topologicalNodeIds.flatMap((nodeId) => {
@@ -1988,8 +2021,8 @@ async function appendDispatchSteps(
   boundStorageNames: Set<string>,
   storageMetadata: Record<string, WgslStorageBufferMetadata>,
   moduleHashes: string[],
-  launchElementCount?: number,
-): Promise<string | undefined> {
+  dynamicSelection?: DynamicLaunchSelection,
+): Promise<PreparedSemanticViewCopyDynamicWgsl | undefined> {
   const semantic = catalog.get(node.semanticArtifactHash);
   if (semantic === undefined) {
     fail(
@@ -2026,7 +2059,7 @@ async function appendDispatchSteps(
   );
   let prepared:
     | PreparedSemanticViewCopyWgsl
-    | PreparedSemanticViewCopyDynamicPrefixWgsl;
+    | PreparedSemanticViewCopyDynamicWgsl;
   try {
     const request = {
       operationId: node.entrypointId,
@@ -2045,10 +2078,13 @@ async function appendDispatchSteps(
         : { signal: options.signal }),
     };
     prepared = node.kind === "dynamic-dispatch"
-      ? await prepareSemanticViewCopyDynamicPrefixWgsl(
+      ? await prepareSemanticViewCopyDynamicWgsl(
           semantic.layout,
           semantic.kernel,
           request,
+          node.mode === "runtime-u32-rectangular-prefix"
+            ? "rectangular-prefix"
+            : "linear-prefix",
         )
       : await prepareSemanticViewCopyWgsl(
           semantic.layout,
@@ -2063,7 +2099,7 @@ async function appendDispatchSteps(
     );
   }
   if (prepared.semantic.elementCount === 0n) return undefined;
-  const selectedElementCount = launchElementCount ??
+  const selectedElementCount = dynamicSelection?.elementCount ??
     safeNumber(
       prepared.semantic.elementCount,
       `$.nodes.${node.nodeId}.launch`,
@@ -2078,18 +2114,22 @@ async function appendDispatchSteps(
       "verified dispatch launch is outside its prepared semantic domain",
     );
   }
-  const launch = launchElementCount === undefined
+  const launch = dynamicSelection === undefined
     ? prepared.launch
-    : frozenLaunch(selectedElementCount);
-  const dynamicPrefixUniformName =
-    node.kind === "dynamic-dispatch"
-      ? preparedDynamicPrefixUniformName(prepared, node.nodeId)
-      : undefined;
-  const dynamicPrefixUniform = dynamicPrefixUniformName === undefined
+    : dynamicLaunch(dynamicSelection);
+  const dynamicPrepared = node.kind === "dynamic-dispatch"
+    ? preparedDynamicViewCopy(prepared, node.nodeId)
+    : undefined;
+  const dynamicUniform = dynamicPrepared === undefined
     ? undefined
-    : dynamicPrefixUniformBinding(
-        dynamicPrefixUniformName,
-        selectedElementCount,
+    : dynamicUniformBinding(
+        dynamicPrepared,
+        dynamicSelection ??
+          fail(
+            "BG-WEBGPU-GRAPH-INTERNAL",
+            `$.nodes.${node.nodeId}.launch`,
+            "dynamic dispatch launch selection disappeared",
+          ),
       );
   for (let rank = 0; rank < rankCount; rank += 1) {
     const sourceName = source.storageNames[rank] as string;
@@ -2101,9 +2141,9 @@ async function appendDispatchSteps(
         source_words: sourceName,
         destination_words: destinationName,
       }),
-      ...(dynamicPrefixUniform === undefined
+      ...(dynamicUniform === undefined
         ? {}
-        : { uniforms: dynamicPrefixUniform }),
+        : { uniforms: dynamicUniform }),
     }));
     addResourceMetadata(
       source,
@@ -2120,7 +2160,7 @@ async function appendDispatchSteps(
     counts.dispatch += 1;
   }
   moduleHashes.push(prepared.wgslModuleHash);
-  return dynamicPrefixUniformName;
+  return dynamicPrepared;
 }
 
 async function appendDynamicDispatchSteps(
@@ -2137,12 +2177,25 @@ async function appendDynamicDispatchSteps(
   moduleHashes: string[],
   dynamicDispatches: PreparedDynamicDispatchPlan[],
 ): Promise<void> {
-  const maxElementCount = safeNumber(
-    wireIntegerToBigInt(node.maxElementCount),
-    `$.nodes.${node.nodeId}.maxElementCount`,
-  );
+  const maxSelection: DynamicLaunchSelection =
+    node.mode === "runtime-u32-rectangular-prefix"
+      ? rectangularDynamicSelection(
+          node.maxExtents.map((extent, axis) =>
+            safeNumber(
+              wireIntegerToBigInt(extent),
+              `$.nodes.${node.nodeId}.maxExtents[${axis}]`,
+            )),
+          `$.nodes.${node.nodeId}.maxExtents`,
+        )
+      : Object.freeze({
+          kind: "linear-prefix" as const,
+          elementCount: safeNumber(
+            wireIntegerToBigInt(node.maxElementCount),
+            `$.nodes.${node.nodeId}.maxElementCount`,
+          ),
+        });
   const startStepIndex = steps.length;
-  const dynamicPrefixUniformName = await appendDispatchSteps(
+  const dynamicPrepared = await appendDispatchSteps(
     node,
     rankCount,
     catalog,
@@ -2154,7 +2207,7 @@ async function appendDynamicDispatchSteps(
     boundStorageNames,
     storageMetadata,
     moduleHashes,
-    maxElementCount,
+    maxSelection,
   );
   const stepCount = steps.length - startStepIndex;
   if (stepCount !== rankCount) {
@@ -2164,15 +2217,58 @@ async function appendDynamicDispatchSteps(
       "dynamic dispatch did not lower to one exact step per rank",
     );
   }
-  if (dynamicPrefixUniformName === undefined) {
+  if (dynamicPrepared === undefined) {
     fail(
       "BG-WEBGPU-GRAPH-INTERNAL",
       `$.nodes.${node.nodeId}`,
-      "dynamic dispatch did not lower a runtime prefix uniform",
+      "dynamic dispatch did not lower a runtime launch uniform",
+    );
+  }
+  const common = {
+    nodeId: node.nodeId,
+    startStepIndex,
+    stepCount,
+    dynamicUniformName: dynamicPrepared.dynamicUniformName,
+    dynamicUniformHostBytes: dynamicPrepared.dynamicUniformByteLength,
+  };
+  if (node.mode === "runtime-u32-rectangular-prefix") {
+    if (
+      dynamicPrepared.dynamicLaunchMode !== "rectangular-prefix" ||
+      maxSelection.kind !== "rectangular-prefix"
+    ) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        `$.nodes.${node.nodeId}`,
+        "rectangular dynamic dispatch received a linear prepared program",
+      );
+    }
+    dynamicDispatches.push(Object.freeze({
+      ...common,
+      kind: "rectangular-prefix",
+      controls: Object.freeze(node.launchControls.map((control) =>
+        Object.freeze({
+          axis: control.axis,
+          controlId: control.controlId,
+          maxExtent: maxSelection.logicalExtents[control.axis] as number,
+        }))),
+      maxExtents: maxSelection.logicalExtents,
+      maxElementCount: maxSelection.elementCount,
+    }));
+    return;
+  }
+  if (
+    dynamicPrepared.dynamicLaunchMode !== "linear-prefix" ||
+    maxSelection.kind !== "linear-prefix"
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${node.nodeId}`,
+      "linear dynamic dispatch received a rectangular prepared program",
     );
   }
   dynamicDispatches.push(Object.freeze({
-    nodeId: node.nodeId,
+    ...common,
+    kind: "linear-prefix",
     selector: node.mode === "runtime-u32-prefix-elements"
       ? Object.freeze({
           kind: "runtime-control" as const,
@@ -2186,10 +2282,7 @@ async function appendDynamicDispatchSteps(
             `$.nodes.${node.nodeId}.launchSource.rank`,
           ),
         }),
-    maxElementCount,
-    startStepIndex,
-    stepCount,
-    dynamicPrefixUniformName,
+    maxElementCount: maxSelection.elementCount,
   }));
 }
 
@@ -2448,46 +2541,224 @@ function frozenLaunch(
   });
 }
 
-function preparedDynamicPrefixUniformName(
+function preparedDynamicViewCopy(
   prepared:
     | PreparedSemanticViewCopyWgsl
-    | PreparedSemanticViewCopyDynamicPrefixWgsl,
+    | PreparedSemanticViewCopyDynamicWgsl,
   nodeId: string,
-): string {
-  if (!("dynamicPrefixUniformName" in prepared)) {
+): PreparedSemanticViewCopyDynamicWgsl {
+  if (!("dynamicLaunchMode" in prepared)) {
     fail(
       "BG-WEBGPU-GRAPH-INTERNAL",
       `$.nodes.${nodeId}`,
       "dynamic dispatch received a static view-copy program",
     );
   }
-  return prepared.dynamicPrefixUniformName;
+  return prepared;
 }
 
-function dynamicPrefixStep(
+function dynamicDispatchStep(
   step: WgslKernelSequenceStep,
-  uniformName: string,
-  elementCount: number,
+  plan: PreparedDynamicDispatchPlan,
+  selection: DynamicLaunchSelection,
 ): WgslKernelSequenceStep {
+  if (
+    (plan.kind === "linear-prefix") !==
+      (selection.kind === "linear-prefix")
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${plan.nodeId}.launch`,
+      "dynamic dispatch launch kind diverged from its prepared program",
+    );
+  }
   return Object.freeze({
     ...step,
-    launch: frozenLaunch(elementCount),
-    uniforms: dynamicPrefixUniformBinding(
-      uniformName,
-      elementCount,
+    launch: dynamicLaunch(selection),
+    uniforms: dynamicUniformBindingFromName(
+      plan.dynamicUniformName,
+      selection,
       step.uniforms,
     ),
   });
 }
 
-function dynamicPrefixUniformBinding(
+function dynamicUniformBinding(
+  prepared: PreparedSemanticViewCopyDynamicWgsl,
+  selection: DynamicLaunchSelection,
+): Readonly<Record<string, ArrayBuffer | ArrayBufferView>> {
+  if (
+    (prepared.dynamicLaunchMode === "linear-prefix") !==
+      (selection.kind === "linear-prefix")
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      "$.dynamicDispatch.launch",
+      "dynamic launch selection does not match its prepared WGSL mode",
+    );
+  }
+  return dynamicUniformBindingFromName(
+    prepared.dynamicUniformName,
+    selection,
+  );
+}
+
+function dynamicUniformBindingFromName(
   uniformName: string,
-  elementCount: number,
+  selection: DynamicLaunchSelection,
   existing: WgslKernelSequenceStep["uniforms"] = {},
 ): Readonly<Record<string, ArrayBuffer | ArrayBufferView>> {
+  const value = selection.kind === "linear-prefix"
+    ? new Uint32Array([selection.elementCount])
+    : new Uint32Array([
+        ...selection.logicalExtents,
+        ...Array.from(
+          { length: 4 - selection.logicalExtents.length },
+          () => 0,
+        ),
+      ]);
   return Object.freeze({
     ...existing,
-    [uniformName]: new Uint32Array([elementCount]),
+    [uniformName]: value,
+  });
+}
+
+function dynamicLaunch(
+  selection: DynamicLaunchSelection,
+): Readonly<{ readonly dispatchCount: readonly [number, number, number] }> {
+  if (selection.kind === "linear-prefix") {
+    return frozenLaunch(selection.elementCount);
+  }
+  const extents = selection.logicalExtents;
+  if (extents.length === 2) {
+    return Object.freeze({
+      dispatchCount: Object.freeze([
+        extents[1] as number,
+        extents[0] as number,
+        1,
+      ] as const),
+    });
+  }
+  if (extents.length === 3) {
+    return Object.freeze({
+      dispatchCount: Object.freeze([
+        extents[2] as number,
+        extents[1] as number,
+        extents[0] as number,
+      ] as const),
+    });
+  }
+  fail(
+    "BG-WEBGPU-GRAPH-INTERNAL",
+    "$.dynamicDispatch.logicalExtents",
+    "rectangular dynamic launch rank must be two or three",
+  );
+}
+
+function rectangularDynamicSelection(
+  extents: readonly number[],
+  path: string,
+): Extract<
+  DynamicLaunchSelection,
+  { readonly kind: "rectangular-prefix" }
+> {
+  if (extents.length !== 2 && extents.length !== 3) {
+    fail(
+      "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
+      path,
+      "portable rectangular dynamic launch supports ranks two and three",
+    );
+  }
+  let elementCount = 1n;
+  for (const [axis, extent] of extents.entries()) {
+    if (!Number.isSafeInteger(extent) || extent <= 0) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        `${path}[${axis}]`,
+        "rectangular dynamic extent must be a positive exact integer",
+      );
+    }
+    elementCount *= BigInt(extent);
+  }
+  if (elementCount > BigInt(MAX_VIEW_COPY_ELEMENTS)) {
+    fail(
+      "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
+      path,
+      `rectangular dynamic launch requires ${elementCount} elements; portable limit is ${MAX_VIEW_COPY_ELEMENTS}`,
+    );
+  }
+  return Object.freeze({
+    kind: "rectangular-prefix",
+    logicalExtents: Object.freeze([...extents]),
+    elementCount: Number(elementCount),
+  });
+}
+
+function selectRuntimeDynamicLaunch(
+  dispatch: PreparedDynamicDispatchPlan,
+  controls: ReadonlyMap<string, number>,
+): DynamicLaunchSelection {
+  if (dispatch.kind === "linear-prefix") {
+    if (dispatch.selector.kind !== "runtime-control") {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        `$.nodes.${dispatch.nodeId}.launchSource`,
+        "resource dynamic dispatch entered request-time selection",
+      );
+    }
+    const elementCount = controls.get(dispatch.selector.controlId);
+    if (
+      elementCount === undefined ||
+      elementCount <= 0 ||
+      elementCount > dispatch.maxElementCount
+    ) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        `$.nodes.${dispatch.nodeId}.launchControl`,
+        "admitted dynamic dispatch control is outside its verified bound",
+      );
+    }
+    return Object.freeze({
+      kind: "linear-prefix",
+      elementCount,
+    });
+  }
+  const extents = dispatch.controls.map((control) => {
+    const extent = controls.get(control.controlId);
+    if (
+      extent === undefined ||
+      extent <= 0 ||
+      extent > control.maxExtent
+    ) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        `$.nodes.${dispatch.nodeId}.launchControls[${control.axis}]`,
+        "admitted rectangular dispatch extent is outside its verified bound",
+      );
+    }
+    return extent;
+  });
+  return rectangularDynamicSelection(
+    extents,
+    `$.nodes.${dispatch.nodeId}.launchControls`,
+  );
+}
+
+function dynamicDispatchCompletion(
+  nodeId: string,
+  selection: DynamicLaunchSelection,
+): HostGraphDynamicDispatchCompletion {
+  return Object.freeze({
+    nodeId,
+    ...(selection.kind === "rectangular-prefix"
+      ? {
+          logicalExtents: Object.freeze(
+            selection.logicalExtents.map((extent) =>
+              encodeWireU64(BigInt(extent))),
+          ),
+        }
+      : {}),
+    elementCount: encodeWireU64(BigInt(selection.elementCount)),
   });
 }
 
@@ -2906,16 +3177,22 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
           "resource dynamic dispatch rank step disappeared during feedback staging",
         );
       }
-      steps[selectedIndex] = dynamicPrefixStep(
+      steps[selectedIndex] = dynamicDispatchStep(
         step,
-        dispatch.dynamicPrefixUniformName,
-        elementCount,
+        dispatch,
+        Object.freeze({
+          kind: "linear-prefix",
+          elementCount,
+        }),
       );
     }
-    const completion = Object.freeze({
-      nodeId: dispatch.nodeId,
-      elementCount: encodeWireU64(BigInt(elementCount)),
-    });
+    const completion = dynamicDispatchCompletion(
+      dispatch.nodeId,
+      Object.freeze({
+        kind: "linear-prefix",
+        elementCount,
+      }),
+    );
     const completionsByNodeId = new Map(
       selectedExecution.completedDynamicDispatches.map((item) => [
         item.nodeId,
@@ -3532,14 +3809,26 @@ function dynamicDispatchControlLimits(
 ): ReadonlyMap<string, number> {
   const limits = new Map<string, number>();
   for (const dispatch of dispatches) {
-    if (dispatch.selector.kind !== "runtime-control") continue;
-    const existing = limits.get(dispatch.selector.controlId);
-    limits.set(
-      dispatch.selector.controlId,
-      existing === undefined
-        ? dispatch.maxElementCount
-        : Math.min(existing, dispatch.maxElementCount),
-    );
+    const controls = dispatch.kind === "rectangular-prefix"
+      ? dispatch.controls.map((control) => ({
+          controlId: control.controlId,
+          limit: control.maxExtent,
+        }))
+      : dispatch.selector.kind === "runtime-control"
+        ? [{
+            controlId: dispatch.selector.controlId,
+            limit: dispatch.maxElementCount,
+          }]
+        : [];
+    for (const control of controls) {
+      const existing = limits.get(control.controlId);
+      limits.set(
+        control.controlId,
+        existing === undefined
+          ? control.limit
+          : Math.min(existing, control.limit),
+      );
+    }
   }
   return limits;
 }
@@ -3864,18 +4153,20 @@ function readAndVerifyDeviceFacts(
     );
   }
   for (const [index, step] of state.deviceAdmissionSteps.entries()) {
-    const workgroups = divideRoundUp(
-      BigInt(step.launch.dispatchCount[0]),
-      BigInt(step.program.workgroupSize[0]),
-    );
-    if (workgroups > BigInt(limits.maxComputeWorkgroupsPerDimension)) {
-      fail(
-        "BG-WEBGPU-GRAPH-DEVICE-LIMIT",
-        `$.steps[${index}].launch`,
-        `dispatch requires ${workgroups} workgroups; limit is ${
-          limits.maxComputeWorkgroupsPerDimension
-        }`,
+    for (const axis of [0, 1, 2] as const) {
+      const workgroups = divideRoundUp(
+        BigInt(step.launch.dispatchCount[axis]),
+        BigInt(step.program.workgroupSize[axis]),
       );
+      if (workgroups > BigInt(limits.maxComputeWorkgroupsPerDimension)) {
+        fail(
+          "BG-WEBGPU-GRAPH-DEVICE-LIMIT",
+          `$.steps[${index}].launch[${axis}]`,
+          `dispatch axis ${axis} requires ${workgroups} workgroups; limit is ${
+            limits.maxComputeWorkgroupsPerDimension
+          }`,
+        );
+      }
     }
   }
   return Object.freeze({ features, limits });

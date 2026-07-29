@@ -9,6 +9,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Host-graph program version 1.12 and WebGPU backend 1.15 add rank-2/rank-3
+  request-time rectangular prefix dispatch. The graph binds one positive
+  artifact-capped u32 extent per semantic axis. CPU executes the exact dense
+  rectangle; WebGPU reuses one maximum-prewarmed view-copy program and exact
+  pipeline slot while changing only true 2D/3D launch geometry and one 16-byte
+  uniform. Axis and physical tail guards run before coordinate, address, or
+  resource evaluation. Device admission checks all three workgroup dimensions
+  before allocation. Required real-device evidence adds small/full rank-2 and
+  rank-3 complete-output parity through stable graph/pipeline identities.
 - WebGPU host-graph backend 1.14 supports every positive bounded
   one-dimensional prefix count for the existing version-1.9 and version-1.11
   dynamic-dispatch semantics. The canonical view-copy lowerer emits one

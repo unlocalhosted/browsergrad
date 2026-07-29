@@ -224,25 +224,38 @@ interface DynamicDispatchPlanBase {
   readonly sourceResourceId: string;
   readonly destinationResourceId: string;
   readonly prepared: PreparedViewCopyCpu;
-  readonly maxElementCount: number;
   readonly rankCount: number;
   readonly elementOperations: bigint;
 }
 
 interface RuntimeDynamicDispatchPlan extends DynamicDispatchPlanBase {
-  readonly mode: "runtime-control";
+  readonly mode: "runtime-linear";
   readonly controlId: string;
+  readonly maxElementCount: number;
 }
 
 interface ResourceDynamicDispatchPlan extends DynamicDispatchPlanBase {
-  readonly mode: "resource";
+  readonly mode: "resource-linear";
   readonly resourceId: string;
   readonly rank: number;
+  readonly maxElementCount: number;
+}
+
+interface RuntimeRectangularDynamicDispatchPlan
+  extends DynamicDispatchPlanBase {
+  readonly mode: "runtime-rectangular";
+  readonly controls: readonly Readonly<{
+    readonly axis: number;
+    readonly controlId: string;
+    readonly maxExtent: number;
+  }>[];
+  readonly maxExtents: readonly number[];
 }
 
 type DynamicDispatchPlan =
   | RuntimeDynamicDispatchPlan
-  | ResourceDynamicDispatchPlan;
+  | ResourceDynamicDispatchPlan
+  | RuntimeRectangularDynamicDispatchPlan;
 
 interface CollectivePlan {
   readonly kind: "all-reduce";
@@ -965,6 +978,42 @@ async function prepareDynamicDispatchPlan(
     options,
     startedAt,
   );
+  if (node.mode === "runtime-u32-rectangular-prefix") {
+    const maxExtents = Object.freeze(node.maxExtents.map((extent, axis) =>
+      safeNumber(
+        wireIntegerToBigInt(extent),
+        `$.nodes.${node.nodeId}.maxExtents[${axis}]`,
+      )));
+    if (
+      maxExtents.length !== base.prepared.logicalShape.length ||
+      maxExtents.some((extent, axis) =>
+        BigInt(extent) > base.prepared.logicalShape[axis]!)
+    ) {
+      fail(
+        "BG-GRAPH-CPU-INTERNAL",
+        `$.nodes.${node.nodeId}.maxExtents`,
+        "verified rectangular dispatch maximum diverged from its prepared semantic domain",
+      );
+    }
+    const maxElementCount = maxExtents.reduce(
+      (product, extent) => product * BigInt(extent),
+      1n,
+    );
+    return Object.freeze({
+      ...base,
+      kind: "dynamic-dispatch",
+      mode: "runtime-rectangular",
+      controls: Object.freeze(node.launchControls.map((control) =>
+        Object.freeze({
+          axis: control.axis,
+          controlId: control.controlId,
+          maxExtent: maxExtents[control.axis] as number,
+        }))),
+      maxExtents,
+      rankCount,
+      elementOperations: maxElementCount * BigInt(rankCount),
+    });
+  }
   const maxElementCount = safeNumber(
     wireIntegerToBigInt(node.maxElementCount),
     `$.nodes.${node.nodeId}.maxElementCount`,
@@ -981,11 +1030,11 @@ async function prepareDynamicDispatchPlan(
     kind: "dynamic-dispatch",
     ...(node.mode === "runtime-u32-prefix-elements"
       ? {
-          mode: "runtime-control" as const,
+          mode: "runtime-linear" as const,
           controlId: node.launchControl.controlId,
         }
       : {
-          mode: "resource" as const,
+          mode: "resource-linear" as const,
           resourceId: node.launchSource.resourceId,
           rank: safeNumber(
             wireIntegerToBigInt(node.launchSource.rank),
@@ -1339,37 +1388,72 @@ function executeDynamicDispatch(
   maxExecutionMs: number,
   signal: AbortSignal | undefined,
 ): HostGraphDynamicDispatchCompletion {
-  const elementCount = plan.mode === "resource"
+  const logicalExtents = plan.mode === "runtime-rectangular"
+    ? Object.freeze(plan.controls.map((axisControl) => {
+        const extent = controls.find((control) =>
+          control.controlId === axisControl.controlId)?.value;
+        if (
+          extent === undefined ||
+          extent <= 0 ||
+          extent > axisControl.maxExtent
+        ) {
+          fail(
+            "BG-GRAPH-CPU-INTERNAL",
+            `$.nodes.${plan.nodeId}.launchControls[${axisControl.axis}]`,
+            "admitted rectangular dispatch extent is outside its verified bound",
+          );
+        }
+        return extent;
+      }))
+    : undefined;
+  const linearElementCount = plan.mode === "resource-linear"
     ? readProducedU32(
-      plan.nodeId,
-      plan.resourceId,
-      plan.rank,
-      rankResources,
-      "launchSource",
-      "dynamic dispatch source",
-    )
-    : controls.find((control) =>
-      control.controlId === plan.controlId)?.value;
-  if (elementCount === undefined) {
+        plan.nodeId,
+        plan.resourceId,
+        plan.rank,
+        rankResources,
+        "launchSource",
+        "dynamic dispatch source",
+      )
+    : plan.mode === "runtime-linear"
+      ? controls.find((control) =>
+          control.controlId === plan.controlId)?.value
+      : undefined;
+  if (
+    plan.mode !== "runtime-rectangular" &&
+    linearElementCount === undefined
+  ) {
     fail(
       "BG-GRAPH-CPU-INTERNAL",
       `$.nodes.${plan.nodeId}.launchControl`,
       "verified dynamic dispatch control disappeared",
     );
   }
-  if (elementCount <= 0 || elementCount > plan.maxElementCount) {
+  if (
+    plan.mode !== "runtime-rectangular" &&
+    (
+      linearElementCount! <= 0 ||
+      linearElementCount! > plan.maxElementCount
+    )
+  ) {
     fail(
-      plan.mode === "resource"
+      plan.mode === "resource-linear"
         ? "BG-GRAPH-CPU-RESOURCE-LIMIT"
         : "BG-GRAPH-CPU-INTERNAL",
-      plan.mode === "resource"
+      plan.mode === "resource-linear"
         ? `$.nodes.${plan.nodeId}.launchSource`
         : `$.nodes.${plan.nodeId}.launchControl`,
-      plan.mode === "resource"
+      plan.mode === "resource-linear"
         ? "produced resource dynamic dispatch count must be between one and its verified bound"
         : "admitted dynamic dispatch control is outside its verified bound",
     );
   }
+  const elementCount = logicalExtents === undefined
+    ? BigInt(linearElementCount!)
+    : logicalExtents.reduce(
+        (product, extent) => product * BigInt(extent),
+        1n,
+      );
   for (const [rank, resources] of rankResources.entries()) {
     ensureExecutionActive(startedAt, maxExecutionMs, signal);
     const source = resources.get(plan.sourceResourceId);
@@ -1382,10 +1466,17 @@ function executeDynamicDispatch(
       );
     }
     try {
-      plan.prepared.executePrefix(
-        { source, destination },
-        BigInt(elementCount),
-      );
+      if (logicalExtents === undefined) {
+        plan.prepared.executePrefix(
+          { source, destination },
+          elementCount,
+        );
+      } else {
+        plan.prepared.executeRectangularPrefix(
+          { source, destination },
+          logicalExtents.map((extent) => BigInt(extent)),
+        );
+      }
     } catch (cause) {
       translateSemanticFailure(
         cause,
@@ -1397,7 +1488,13 @@ function executeDynamicDispatch(
   ensureExecutionActive(startedAt, maxExecutionMs, signal);
   return Object.freeze({
     nodeId: plan.nodeId,
-    elementCount: encodeWireU64(BigInt(elementCount)),
+    ...(logicalExtents === undefined
+      ? {}
+      : {
+          logicalExtents: Object.freeze(logicalExtents.map((extent) =>
+            encodeWireU64(BigInt(extent)))),
+        }),
+    elementCount: encodeWireU64(elementCount),
   });
 }
 
@@ -1799,19 +1896,24 @@ function dynamicDispatchControlLimits(
 ): ReadonlyMap<string, number> {
   const limits = new Map<string, number>();
   for (const plan of plans) {
-    if (
-      plan.kind !== "dynamic-dispatch" ||
-      plan.mode !== "runtime-control"
-    ) {
-      continue;
+    if (plan.kind !== "dynamic-dispatch") continue;
+    const controls = plan.mode === "runtime-linear"
+      ? [{ controlId: plan.controlId, limit: plan.maxElementCount }]
+      : plan.mode === "runtime-rectangular"
+        ? plan.controls.map((control) => ({
+            controlId: control.controlId,
+            limit: control.maxExtent,
+          }))
+        : [];
+    for (const control of controls) {
+      const existing = limits.get(control.controlId);
+      limits.set(
+        control.controlId,
+        existing === undefined
+          ? control.limit
+          : Math.min(existing, control.limit),
+      );
     }
-    const existing = limits.get(plan.controlId);
-    limits.set(
-      plan.controlId,
-      existing === undefined
-        ? plan.maxElementCount
-        : Math.min(existing, plan.maxElementCount),
-    );
   }
   return limits;
 }

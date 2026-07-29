@@ -31,6 +31,16 @@ async function identityArtifacts(
   });
 }
 
+async function rectangularArtifacts(
+  shape: readonly number[],
+): Promise<VerifiedViewCopyArtifacts> {
+  return createVerifiedDensePermutationViewCopyArtifacts({
+    inputShape: shape.map((extent) => parseWireI64(String(extent))),
+    axes: shape.map((_, axis) => axis),
+    dtype: "f32",
+  });
+}
+
 function artifactOptions(artifacts: VerifiedViewCopyArtifacts) {
   return {
     kernelArtifacts: [artifacts.kernel],
@@ -192,6 +202,76 @@ function resourceDynamicPipelineProgram(
           mode: "resource-u32-prefix-elements" as const,
         };
       }),
+    ],
+  };
+}
+
+function rectangularDynamicProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+  shape: readonly number[],
+): HostGraphProgram {
+  const byteLength = shape.reduce(
+    (product, extent) => product * extent,
+    1,
+  ) * 4;
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 12 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire("1"),
+    resources: [
+      {
+        resourceId: "input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "f32",
+        byteLength: wire(String(byteLength)),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "output",
+        role: "output",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "f32",
+        byteLength: wire(String(byteLength)),
+        alignmentBytes: 4,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "copy-region",
+        kind: "dynamic-dispatch",
+        dependsOn: [],
+        semanticArtifactHash: artifacts.kernelSemanticHash,
+        entrypointId: artifacts.operationId,
+        dimensionBindings: {},
+        bindings: [
+          {
+            semanticResourceId: artifacts.source.viewId,
+            graphResourceId: "input",
+          },
+          {
+            semanticResourceId: artifacts.destination.viewId,
+            graphResourceId: "output",
+          },
+        ],
+        launchControls: shape.map((_, axis) => ({
+          axis,
+          controlId: `prefix-axis-${axis}`,
+          mode: "u32-prefix-extent" as const,
+        })),
+        maxExtents: shape.map((extent) => wire(String(extent))),
+        mode: "runtime-u32-rectangular-prefix",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["copy-region"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
     ],
   };
 }
@@ -643,6 +723,23 @@ function readF32(bytes: Uint8Array): number[] {
     { length: bytes.byteLength / 4 },
     (_, index) => view.getFloat32(index * 4, true),
   );
+}
+
+function rectangularExpected(
+  values: readonly number[],
+  shape: readonly number[],
+  extents: readonly number[],
+): number[] {
+  return values.map((value, linearIndex) => {
+    let remainder = linearIndex;
+    for (let axis = shape.length - 1; axis >= 0; axis -= 1) {
+      const shapeExtent = shape[axis] as number;
+      const coordinate = remainder % shapeExtent;
+      remainder = Math.floor(remainder / shapeExtent);
+      if (coordinate >= (extents[axis] as number)) return 0;
+    }
+    return value;
+  });
 }
 
 function readI32(bytes: Uint8Array): number[] {
@@ -1236,6 +1333,113 @@ describe("host graph CPU reference", () => {
       elementOperations: "3",
     });
     expect(readF32(result.outputs[0]!.bytes)).toEqual([1.25, 0]);
+  });
+
+  it("executes and reports exact rank-2 and rank-3 rectangular prefixes", async () => {
+    const cases = [
+      {
+        shape: [3, 4],
+        extents: [2, 3],
+      },
+      {
+        shape: [2, 3, 4],
+        extents: [2, 2, 3],
+      },
+    ] as const;
+    for (const testCase of cases) {
+      const artifacts = await rectangularArtifacts(testCase.shape);
+      const graph = await verified(
+        rectangularDynamicProgram(artifacts, testCase.shape),
+        artifacts,
+      );
+      const prepared = await prepareHostGraphCpu(
+        graph,
+        artifactOptions(artifacts),
+      );
+      const elementCount = testCase.shape.reduce(
+        (product, extent) => product * extent,
+        1,
+      );
+      const selectedElementCount = testCase.extents.reduce(
+        (product, extent) => product * extent,
+        1,
+      );
+      const values = Array.from(
+        { length: elementCount },
+        (_, index) => index + 0.25,
+      );
+      const result = await prepared.execute({
+        inputs: [input(0, f32Bytes(values))],
+        controls: testCase.extents.map((extent, axis) => ({
+          controlId: `prefix-axis-${axis}`,
+          value: wire(String(extent)),
+        })),
+      });
+
+      expect(prepared).toMatchObject({
+        dynamicDispatchCount: 1,
+        runtimeControlIds: testCase.shape.map(
+          (_, axis) => `prefix-axis-${axis}`,
+        ),
+        elementOperations: BigInt(elementCount),
+      });
+      expect(result).toMatchObject({
+        executedNodeIds: ["copy-region", "materialize-output"],
+        completedDynamicDispatches: [{
+          nodeId: "copy-region",
+          logicalExtents: testCase.extents.map(String),
+          elementCount: String(selectedElementCount),
+        }],
+        elementOperations: String(selectedElementCount),
+      });
+      expect(readF32(result.outputs[0]!.bytes)).toEqual(
+        rectangularExpected(values, testCase.shape, testCase.extents),
+      );
+    }
+  });
+
+  it("rejects rectangular extents before reading caller inputs", async () => {
+    const shape = [3, 4] as const;
+    const artifacts = await rectangularArtifacts(shape);
+    const graph = await verified(
+      rectangularDynamicProgram(artifacts, shape),
+      artifacts,
+    );
+    const prepared = await prepareHostGraphCpu(
+      graph,
+      artifactOptions(artifacts),
+    );
+    let inputReads = 0;
+    const unreadInput = {
+      rank: wire("0"),
+      resourceId: "input",
+    } as HostGraphCpuInputBinding;
+    Object.defineProperty(unreadInput, "bytes", {
+      enumerable: true,
+      get() {
+        inputReads += 1;
+        return f32Bytes(Array.from({ length: 12 }, (_, index) => index));
+      },
+    });
+
+    for (const [axis, value] of [[0, "0"], [1, "5"]] as const) {
+      const controls = [
+        { controlId: "prefix-axis-0", value: wire("2") },
+        { controlId: "prefix-axis-1", value: wire("3") },
+      ];
+      controls[axis] = {
+        controlId: `prefix-axis-${axis}`,
+        value: wire(value),
+      };
+      await expect(prepared.execute({
+        inputs: [unreadInput],
+        controls,
+      })).rejects.toMatchObject({
+        code: "BG-GRAPH-CPU-INVALID-BINDING",
+        path: `$.request.controls[${axis}].value`,
+      });
+    }
+    expect(inputReads).toBe(0);
   });
 
   it("executes one produced-resource dynamic dispatch prefix within its artifact bound", async () => {

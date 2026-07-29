@@ -50,6 +50,7 @@ import {
   type HostGraphConditionalNode,
   type HostGraphCopyNode,
   type HostGraphDynamicDispatchControl,
+  type HostGraphDynamicExtentControl,
   type HostGraphDynamicDispatchNode,
   type HostGraphDispatchNode,
   type HostGraphDispatchResourceBinding,
@@ -73,7 +74,7 @@ import {
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 11;
+export const HOST_GRAPH_ARTIFACT_MINOR = 12;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
@@ -81,6 +82,8 @@ export const HOST_GRAPH_MAX_REPEAT_BODY_NODES = 64;
 export const HOST_GRAPH_MAX_CONDITIONAL_BODY_NODES = 64;
 export const HOST_GRAPH_MAX_REPEAT_ITERATIONS = 1_024;
 export const HOST_GRAPH_MAX_RUNTIME_CONTROLS = 64;
+export const HOST_GRAPH_MIN_RECTANGULAR_DYNAMIC_RANK = 2;
+export const HOST_GRAPH_MAX_RECTANGULAR_DYNAMIC_RANK = 3;
 export const HOST_GRAPH_MAX_RESOURCE_CONDITIONALS = 1;
 export const HOST_GRAPH_MAX_RESOURCE_FEEDBACK_NODES = 1;
 export const HOST_GRAPH_MAX_EXPANDED_NODES = 16_384;
@@ -204,6 +207,7 @@ interface DispatchOperationBinding {
 }
 
 interface ResolvedDispatchGeometry {
+  readonly logicalShape: readonly bigint[];
   readonly elementCount: bigint;
   readonly sourceByteLength: WireU64;
   readonly destinationByteLength: WireU64;
@@ -396,12 +400,13 @@ function parseProgram(
       version.minor !== 8 &&
       version.minor !== 9 &&
       version.minor !== 10 &&
-      version.minor !== 11)
+      version.minor !== 11 &&
+      version.minor !== 12)
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 through 1.11 only",
+      "host graph program reader supports versions 1.0 through 1.12 only",
     );
   }
   if (version.minor !== envelopeMinor) {
@@ -709,7 +714,7 @@ function parseNode(
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, version-1.10 resource repeat, and version-1.11 resource dynamic dispatch nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, version-1.10 resource repeat, version-1.11 resource dynamic dispatch, and version-1.12 rectangular dynamic dispatch nodes",
   );
 }
 
@@ -1259,6 +1264,46 @@ function parseDynamicDispatchNode(
   programMinor: HostGraphProgram["version"]["minor"],
 ): HostGraphDynamicDispatchNode {
   const mode = stringValue(field(value, "mode", path), `${path}.mode`);
+  if (mode === "runtime-u32-rectangular-prefix") {
+    if (programMinor < 12) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.mode`,
+        "rectangular dynamic dispatch requires host graph program version 1.12",
+      );
+    }
+    const object = closedObject(
+      value,
+      [
+        "nodeId",
+        "kind",
+        "dependsOn",
+        "semanticArtifactHash",
+        "entrypointId",
+        "dimensionBindings",
+        "bindings",
+        "launchControls",
+        "maxExtents",
+        "mode",
+      ],
+      path,
+    );
+    const maxExtents = parseRectangularDynamicMaximum(
+      field(object, "maxExtents", path),
+      `${path}.maxExtents`,
+    );
+    return {
+      ...parseDispatchFields(object, path),
+      kind: "dynamic-dispatch",
+      launchControls: parseRectangularDynamicControls(
+        field(object, "launchControls", path),
+        `${path}.launchControls`,
+        maxExtents.length,
+      ),
+      maxExtents,
+      mode: "runtime-u32-rectangular-prefix",
+    };
+  }
   if (mode === "resource-u32-prefix-elements") {
     if (programMinor < 11) {
       invalid(
@@ -1314,7 +1359,7 @@ function parseDynamicDispatchNode(
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       `${path}.mode`,
-      "dynamic dispatch mode must be runtime-u32-prefix-elements or resource-u32-prefix-elements",
+      "dynamic dispatch mode must be runtime-u32-prefix-elements, resource-u32-prefix-elements, or runtime-u32-rectangular-prefix",
     );
   }
   return {
@@ -1327,6 +1372,109 @@ function parseDynamicDispatchNode(
     maxElementCount: parseDynamicDispatchMaximum(object, path),
     mode: "runtime-u32-prefix-elements",
   };
+}
+
+function parseRectangularDynamicMaximum(
+  value: JsonValue,
+  path: string,
+): readonly WireU64[] {
+  const values = arrayValue(value, path);
+  if (
+    values.length < HOST_GRAPH_MIN_RECTANGULAR_DYNAMIC_RANK ||
+    values.length > HOST_GRAPH_MAX_RECTANGULAR_DYNAMIC_RANK
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+      path,
+      `rectangular dynamic dispatch rank must be between ${HOST_GRAPH_MIN_RECTANGULAR_DYNAMIC_RANK} and ${HOST_GRAPH_MAX_RECTANGULAR_DYNAMIC_RANK}`,
+    );
+  }
+  return Object.freeze(values.map((extent, axis) => {
+    const parsed = positiveWire(extent, `${path}[${axis}]`);
+    if (wireIntegerToBigInt(parsed) > 0xffff_ffffn) {
+      resource(
+        `${path}[${axis}]`,
+        "rectangular dynamic dispatch extent exceeds the u32 control domain",
+      );
+    }
+    return parsed;
+  }));
+}
+
+function parseRectangularDynamicControls(
+  value: JsonValue,
+  path: string,
+  rank: number,
+): readonly HostGraphDynamicExtentControl[] {
+  const values = arrayValue(value, path);
+  if (values.length !== rank) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidArtifact,
+      path,
+      `rectangular dynamic dispatch requires exactly ${rank} axis controls`,
+    );
+  }
+  const controls = values.map((candidate, index) => {
+    const controlPath = `${path}[${index}]`;
+    const object = closedObject(
+      candidate,
+      ["axis", "controlId", "mode"],
+      controlPath,
+    );
+    if (object.mode !== "u32-prefix-extent") {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${controlPath}.mode`,
+        "rectangular dynamic dispatch controls must use u32-prefix-extent",
+      );
+    }
+    const axis = rectangularDynamicAxis(
+      field(object, "axis", controlPath),
+      `${controlPath}.axis`,
+      rank,
+    );
+    return {
+      axis,
+      controlId: identifier(
+        field(object, "controlId", controlPath),
+        `${controlPath}.controlId`,
+      ),
+      mode: "u32-prefix-extent" as const,
+    };
+  }).sort((left, right) => left.axis - right.axis);
+  if (controls.some((control, axis) => control.axis !== axis)) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.duplicateId,
+      path,
+      "rectangular dynamic dispatch must bind every axis exactly once",
+    );
+  }
+  unique(
+    controls.map((control) => control.controlId),
+    path,
+    "rectangular dynamic dispatch control",
+  );
+  return Object.freeze(controls.map((control) => Object.freeze(control)));
+}
+
+function rectangularDynamicAxis(
+  value: JsonValue,
+  path: string,
+  rank: number,
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    value >= rank
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidArtifact,
+      path,
+      `rectangular dynamic dispatch axis must be an integer in [0, ${rank})`,
+    );
+  }
+  return value;
 }
 
 function parseDynamicDispatchMaximum(
@@ -1719,11 +1867,18 @@ function analyzeProgram(
       );
       if (node.kind === "dynamic-dispatch") {
         dynamicDispatchCount += 1;
-        if (node.mode === "runtime-u32-prefix-elements") {
-          runtimeControlIds.add(node.launchControl.controlId);
+        if (node.mode !== "resource-u32-prefix-elements") {
+          const controlIds = node.mode === "runtime-u32-prefix-elements"
+            ? [node.launchControl.controlId]
+            : node.launchControls.map((control) => control.controlId);
+          for (const controlId of controlIds) {
+            runtimeControlIds.add(controlId);
+          }
           if (runtimeControlIds.size > HOST_GRAPH_MAX_RUNTIME_CONTROLS) {
             resource(
-              `${path}.launchControl.controlId`,
+              node.mode === "runtime-u32-prefix-elements"
+                ? `${path}.launchControl.controlId`
+                : `${path}.launchControls`,
               `runtime control count exceeds ${HOST_GRAPH_MAX_RUNTIME_CONTROLS}`,
             );
           }
@@ -2087,6 +2242,7 @@ function verifyExecutableNodeBinding(
   }
   if (
     node.kind === "dynamic-dispatch" &&
+    node.mode !== "runtime-u32-rectangular-prefix" &&
     wireIntegerToBigInt(node.maxElementCount) > geometry.elementCount
   ) {
     invalid(
@@ -2094,6 +2250,12 @@ function verifyExecutableNodeBinding(
       `${path}.maxElementCount`,
       `dynamic dispatch maximum exceeds semantic element count ${geometry.elementCount}`,
     );
+  }
+  if (
+    node.kind === "dynamic-dispatch" &&
+    node.mode === "runtime-u32-rectangular-prefix"
+  ) {
+    verifyRectangularDynamicGeometry(node, geometry, path);
   }
   const sourceResource = resources.get(sourceResourceId);
   const destinationResource = resources.get(destinationResourceId);
@@ -2656,6 +2818,7 @@ function resolveDispatchGeometry(
       );
     }
     return Object.freeze({
+      logicalShape: Object.freeze([...destination.logicalShape]),
       elementCount: destination.logicalShape.reduce(
         (total, extent) => total * extent,
         1n,
@@ -2694,6 +2857,37 @@ function resolveDispatchGeometry(
         error instanceof Error ? error.message : "unknown semantic error"
       }`,
     );
+  }
+}
+
+function verifyRectangularDynamicGeometry(
+  node: Extract<
+    HostGraphDynamicDispatchNode,
+    { readonly mode: "runtime-u32-rectangular-prefix" }
+  >,
+  geometry: ResolvedDispatchGeometry,
+  path: string,
+): void {
+  if (
+    node.maxExtents.length !== geometry.logicalShape.length ||
+    node.launchControls.length !== geometry.logicalShape.length
+  ) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+      `${path}.maxExtents`,
+      `rectangular dynamic rank ${node.maxExtents.length} does not match semantic rank ${geometry.logicalShape.length}`,
+    );
+  }
+  for (const [axis, extent] of node.maxExtents.entries()) {
+    const maximum = wireIntegerToBigInt(extent);
+    const semanticExtent = geometry.logicalShape[axis];
+    if (semanticExtent === undefined || maximum > semanticExtent) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+        `${path}.maxExtents[${axis}]`,
+        `rectangular dynamic extent ${maximum} exceeds semantic extent ${semanticExtent ?? "missing"}`,
+      );
+    }
   }
 }
 

@@ -285,6 +285,91 @@ describe("verified materializing view-copy", () => {
     }
   });
 
+  it("executes exact rank-2 and rank-3 rectangular prefixes", async () => {
+    const cases = [
+      {
+        shape: ["3", "4"] as const,
+        extents: [2n, 3n] as const,
+        expectedIndexes: [0, 1, 2, 4, 5, 6],
+      },
+      {
+        shape: ["2", "3", "4"] as const,
+        extents: [2n, 2n, 3n] as const,
+        expectedIndexes: [0, 1, 2, 4, 5, 6, 12, 13, 14, 16, 17, 18],
+      },
+    ];
+    for (const testCase of cases) {
+      const elementCount = testCase.shape.reduce(
+        (product, extent) => product * Number(extent),
+        1,
+      );
+      const layout = await verifiedLayout({
+        shape: testCase.shape,
+        sourceLocation: rowMajorLocation(testCase.shape),
+        sourceBytes: String(elementCount * 4),
+        destinationBytes: String(elementCount * 4),
+      });
+      const plan = await prepare(layout, await verifiedKernel(layout));
+      const sourceValues = Array.from(
+        { length: elementCount },
+        (_, index) => index + 1,
+      );
+      const destination = new Uint8Array(elementCount * 4);
+      const trace = plan.executeRectangularPrefix(
+        { source: f32Bytes(sourceValues), destination },
+        [...testCase.extents],
+      );
+      const expected = Array.from({ length: elementCount }, (_, index) =>
+        testCase.expectedIndexes.includes(index)
+          ? sourceValues[index] as number
+          : 0);
+
+      expect(f32Values(destination)).toEqual(expected);
+      expect(trace).toMatchObject({
+        elementCount: String(testCase.expectedIndexes.length),
+        readElements: String(testCase.expectedIndexes.length),
+        bytesWritten: String(testCase.expectedIndexes.length * 4),
+      });
+    }
+  });
+
+  it("rejects hostile rectangular extents before destination mutation", async () => {
+    const layout = await verifiedLayout({
+      shape: ["3", "4"],
+      sourceLocation: rowMajorLocation(["3", "4"]),
+      sourceBytes: "48",
+      destinationBytes: "48",
+    });
+    const plan = await prepare(layout, await verifiedKernel(layout));
+    const source = f32Bytes(Array.from({ length: 12 }, (_, index) => index));
+    const destination = new Uint8Array(48);
+    destination.fill(0x5a);
+    const before = new Uint8Array(destination);
+
+    for (const extents of [[0n, 3n], [4n, 3n], [2n]] as const) {
+      expect((await diagnostic(() => plan.executeRectangularPrefix(
+        { source, destination },
+        [...extents],
+      ))).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.invalidBinding);
+      expect(destination).toEqual(before);
+    }
+    let getterReads = 0;
+    const accessorExtents = [2n, 3n];
+    Object.defineProperty(accessorExtents, "0", {
+      enumerable: true,
+      get() {
+        getterReads += 1;
+        return 2n;
+      },
+    });
+    expect((await diagnostic(() => plan.executeRectangularPrefix(
+      { source, destination },
+      accessorExtents,
+    ))).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.invalidBinding);
+    expect(getterReads).toBe(0);
+    expect(destination).toEqual(before);
+  });
+
   it("executes rank-1 and rank-4 positive-affine views under the edge-rank profile", async () => {
     const cases = [
       {

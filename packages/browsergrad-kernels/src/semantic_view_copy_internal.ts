@@ -18,18 +18,25 @@ type ResidentIssuer = (
 
 let residentIssuer: ResidentIssuer | undefined;
 
-export interface PreparedSemanticViewCopyDynamicPrefixWgsl
+export type SemanticViewCopyDynamicLaunchMode =
+  | "linear-prefix"
+  | "rectangular-prefix";
+
+export interface PreparedSemanticViewCopyDynamicWgsl
   extends PreparedSemanticViewCopyWgsl {
-  readonly dynamicPrefixUniformName: string;
+  readonly dynamicLaunchMode: SemanticViewCopyDynamicLaunchMode;
+  readonly dynamicUniformName: string;
+  readonly dynamicUniformByteLength: 4 | 16;
 }
 
-type DynamicPrefixPreparer = (
+type DynamicViewCopyPreparer = (
   layoutArtifact: VerifiedLayoutArtifact,
   kernelArtifact: VerifiedKernelArtifact,
   request: PrepareSemanticViewCopyWgslRequest,
-) => Promise<PreparedSemanticViewCopyDynamicPrefixWgsl>;
+  mode: SemanticViewCopyDynamicLaunchMode,
+) => Promise<PreparedSemanticViewCopyDynamicWgsl>;
 
-let dynamicPrefixPreparer: DynamicPrefixPreparer | undefined;
+let dynamicViewCopyPreparer: DynamicViewCopyPreparer | undefined;
 
 /** @internal Registers the module-authorized synchronous issue capability once. */
 export function registerPreparedSemanticViewCopyResidentIssuer(
@@ -41,33 +48,39 @@ export function registerPreparedSemanticViewCopyResidentIssuer(
   residentIssuer = issuer;
 }
 
-/** @internal Registers the canonical runtime-prefix WGSL lowerer once. */
-export function registerSemanticViewCopyDynamicPrefixPreparer(
-  preparer: DynamicPrefixPreparer,
+/** @internal Registers the canonical dynamic-domain WGSL lowerer once. */
+export function registerSemanticViewCopyDynamicPreparer(
+  preparer: DynamicViewCopyPreparer,
 ): void {
   if (
-    dynamicPrefixPreparer !== undefined &&
-    dynamicPrefixPreparer !== preparer
+    dynamicViewCopyPreparer !== undefined &&
+    dynamicViewCopyPreparer !== preparer
   ) {
     throw new Error(
-      "semantic view-copy dynamic-prefix preparer was registered twice",
+      "semantic view-copy dynamic preparer was registered twice",
     );
   }
-  dynamicPrefixPreparer = preparer;
+  dynamicViewCopyPreparer = preparer;
 }
 
-/** @internal Prepares one canonical view-copy with a runtime prefix guard. */
-export function prepareSemanticViewCopyDynamicPrefixWgsl(
+/** @internal Prepares one canonical view-copy with a runtime launch guard. */
+export function prepareSemanticViewCopyDynamicWgsl(
   layoutArtifact: VerifiedLayoutArtifact,
   kernelArtifact: VerifiedKernelArtifact,
   request: PrepareSemanticViewCopyWgslRequest,
-): Promise<PreparedSemanticViewCopyDynamicPrefixWgsl> {
-  if (dynamicPrefixPreparer === undefined) {
+  mode: SemanticViewCopyDynamicLaunchMode,
+): Promise<PreparedSemanticViewCopyDynamicWgsl> {
+  if (dynamicViewCopyPreparer === undefined) {
     throw new Error(
-      "semantic view-copy dynamic-prefix preparer is not initialized",
+      "semantic view-copy dynamic preparer is not initialized",
     );
   }
-  return dynamicPrefixPreparer(layoutArtifact, kernelArtifact, request);
+  return dynamicViewCopyPreparer(
+    layoutArtifact,
+    kernelArtifact,
+    request,
+    mode,
+  );
 }
 
 /**

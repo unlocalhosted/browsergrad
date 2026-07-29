@@ -13,10 +13,14 @@ const I32_MAX = 2_147_483_647n;
 export const SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM =
   "bg_dynamic_prefix" as const;
 export const SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_BINDING = 2;
+export const SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM =
+  "bg_dynamic_region" as const;
+export const SEMANTIC_VIEW_COPY_DYNAMIC_REGION_BINDING = 2;
 
-export type SemanticViewCopyElementCountMode =
+export type SemanticViewCopyLaunchMode =
   | "static"
-  | "runtime-prefix";
+  | "runtime-linear-prefix"
+  | "runtime-rectangular-prefix";
 
 export interface EmittedSemanticViewCopyWgsl {
   readonly source: string;
@@ -43,7 +47,7 @@ export function emitSemanticViewCopyWgsl(
   layout: LayoutArtifactPayloadV1,
   prepared: PreparedViewCopySpecialization,
   workgroupSize: number,
-  elementCountMode: SemanticViewCopyElementCountMode = "static",
+  launchMode: SemanticViewCopyLaunchMode = "static",
 ): EmittedSemanticViewCopyWgsl {
   const sourceMap = requiredIndexMap(layout, prepared.source.indexMapId, "source");
   const destinationMap = requiredIndexMap(layout, prepared.destination.indexMapId, "destination");
@@ -76,7 +80,11 @@ export function emitSemanticViewCopyWgsl(
     "$.destination",
   );
   const elementCount = asU32(prepared.elementCount, "$.elementCount");
-  const coordinates = emitCoordinates(prepared.logicalShape);
+  const launch = emitLaunchPrelude(
+    prepared.logicalShape,
+    elementCount,
+    launchMode,
+  );
   const fillBits = prepared.operation.source.invalidSource.kind === "fill"
     ? `0x${prepared.operation.source.invalidSource.value.bits}u`
     : "0u";
@@ -95,29 +103,14 @@ export function emitSemanticViewCopyWgsl(
         `  let source_word: u32 = ${sourceWord.code};`,
         "  let copied_bits: u32 = source_words[source_word];",
       ];
-  const dynamicPrefixDeclarations = elementCountMode === "runtime-prefix"
-    ? [
-        "struct BrowserGradDynamicPrefix {",
-        "  element_count: u32,",
-        "}",
-        `@group(0) @binding(${SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_BINDING}) var<uniform> ${SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM}: BrowserGradDynamicPrefix;`,
-      ]
-    : [];
-  const elementCountGuard = elementCountMode === "runtime-prefix"
-    ? `  if (linear_index >= ${elementCount}u || linear_index >= ${SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM}.element_count) {`
-    : `  if (linear_index >= ${elementCount}u) {`;
   const source = [
     "@group(0) @binding(0) var<storage, read> source_words: array<u32>;",
     "@group(0) @binding(1) var<storage, read_write> destination_words: array<u32>;",
-    ...dynamicPrefixDeclarations,
+    ...launch.declarations,
     "",
     `@compute @workgroup_size(${workgroupSize}, 1, 1)`,
     "fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {",
-    "  let linear_index: u32 = global_id.x;",
-    elementCountGuard,
-    "    return;",
-    "  }",
-    ...coordinates,
+    ...launch.body,
     `  if (!(${destinationPredicate})) {`,
     "    return;",
     "  }",
@@ -131,6 +124,72 @@ export function emitSemanticViewCopyWgsl(
     source,
     sourceLocationRange: Object.freeze({ minimum: sourceLocation.minimum, maximum: sourceLocation.maximum }),
     destinationLocationRange: Object.freeze({ minimum: destinationLocation.minimum, maximum: destinationLocation.maximum }),
+  });
+}
+
+function emitLaunchPrelude(
+  shape: readonly bigint[],
+  elementCount: number,
+  mode: SemanticViewCopyLaunchMode,
+): Readonly<{
+  readonly declarations: readonly string[];
+  readonly body: readonly string[];
+}> {
+  if (mode === "runtime-rectangular-prefix") {
+    if (shape.length !== 2 && shape.length !== 3) {
+      return unsupported(
+        "$.shape",
+        "rectangular dynamic WGSL launch supports semantic ranks 2 and 3 only",
+      );
+    }
+    const staticExtents = shape.map((extent, axis) =>
+      asU32(extent, `$.shape[${axis}]`));
+    const globalAxes = shape.length === 2
+      ? ["y", "x"] as const
+      : ["z", "y", "x"] as const;
+    const bounds = globalAxes.flatMap((globalAxis, axis) => [
+      `global_id.${globalAxis} >= ${staticExtents[axis]}u`,
+      `global_id.${globalAxis} >= ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_${axis}`,
+    ]);
+    return Object.freeze({
+      declarations: Object.freeze([
+        "struct BrowserGradDynamicRegion {",
+        "  extent_0: u32,",
+        "  extent_1: u32,",
+        "  extent_2: u32,",
+        "  extent_3: u32,",
+        "}",
+        `@group(0) @binding(${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_BINDING}) var<uniform> ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}: BrowserGradDynamicRegion;`,
+      ]),
+      body: Object.freeze([
+        `  if (${bounds.join(" || ")}) {`,
+        "    return;",
+        "  }",
+        ...globalAxes.map((globalAxis, axis) =>
+          `  let coordinate_${axis}: i32 = i32(global_id.${globalAxis});`),
+      ]),
+    });
+  }
+  const declarations = mode === "runtime-linear-prefix"
+    ? [
+        "struct BrowserGradDynamicPrefix {",
+        "  element_count: u32,",
+        "}",
+        `@group(0) @binding(${SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_BINDING}) var<uniform> ${SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM}: BrowserGradDynamicPrefix;`,
+      ]
+    : [];
+  const elementCountGuard = mode === "runtime-linear-prefix"
+    ? `  if (linear_index >= ${elementCount}u || linear_index >= ${SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM}.element_count) {`
+    : `  if (linear_index >= ${elementCount}u) {`;
+  return Object.freeze({
+    declarations: Object.freeze(declarations),
+    body: Object.freeze([
+      "  let linear_index: u32 = global_id.x;",
+      elementCountGuard,
+      "    return;",
+      "  }",
+      ...emitCoordinates(shape),
+    ]),
   });
 }
 

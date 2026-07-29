@@ -43,6 +43,10 @@ export interface PreparedViewCopyCpu {
     buffers: ViewCopyCpuBuffers,
     elementCount: bigint,
   ) => ViewCopyCpuTrace;
+  readonly executeRectangularPrefix: (
+    buffers: ViewCopyCpuBuffers,
+    logicalExtents: readonly bigint[],
+  ) => ViewCopyCpuTrace;
 }
 
 export async function prepareViewCopyCpu(
@@ -61,9 +65,10 @@ export async function prepareViewCopyCpu(
     ? floatBitsToLittleEndianBytes(prepared.operation.source.invalidSource.value.bits)
     : undefined;
 
-  const executePrefix = (
+  const executeSelection = (
     buffers: ViewCopyCpuBuffers,
     elementCount: bigint,
+    logicalExtents?: readonly bigint[],
   ): ViewCopyCpuTrace => {
     validateBuffers(buffers, prepared.source, prepared.destination);
     if (
@@ -80,7 +85,18 @@ export async function prepareViewCopyCpu(
     const prefixLength = Number(elementCount);
     let readElements = 0n;
     let filledElements = 0n;
-    for (let linearIndex = 0; linearIndex < prefixLength; linearIndex += 1) {
+    for (
+      let selectedLinearIndex = 0;
+      selectedLinearIndex < prefixLength;
+      selectedLinearIndex += 1
+    ) {
+      const linearIndex = logicalExtents === undefined
+        ? selectedLinearIndex
+        : rectangularLinearIndex(
+            selectedLinearIndex,
+            logicalExtents,
+            prepared.logicalShape,
+          );
       const sourceStart = sourceByteOffsets[linearIndex] as number;
       const destinationStart = safeBufferIndex(
         prepared.destination.viewByteOffset + (BigInt(linearIndex) * BigInt(prepared.destination.dtypeBytes)),
@@ -112,6 +128,24 @@ export async function prepareViewCopyCpu(
       bytesWritten: encodeWireU64(elementCount * BigInt(prepared.destination.dtypeBytes)),
     });
   };
+  const executePrefix = (
+    buffers: ViewCopyCpuBuffers,
+    elementCount: bigint,
+  ): ViewCopyCpuTrace => executeSelection(buffers, elementCount);
+  const executeRectangularPrefix = (
+    buffers: ViewCopyCpuBuffers,
+    logicalExtents: readonly bigint[],
+  ): ViewCopyCpuTrace => {
+    const extents = snapshotRectangularExtents(
+      logicalExtents,
+      prepared.logicalShape,
+    );
+    const selectedElementCount = extents.reduce(
+      (product, extent) => product * extent,
+      1n,
+    );
+    return executeSelection(buffers, selectedElementCount, extents);
+  };
   const execute = (buffers: ViewCopyCpuBuffers): ViewCopyCpuTrace =>
     executePrefix(buffers, prepared.elementCount);
 
@@ -124,7 +158,97 @@ export async function prepareViewCopyCpu(
     elementCount: prepared.elementCount,
     execute,
     executePrefix,
+    executeRectangularPrefix,
   });
+}
+
+function snapshotRectangularExtents(
+  value: readonly bigint[],
+  logicalShape: readonly bigint[],
+): readonly bigint[] {
+  let descriptors: Record<PropertyKey, PropertyDescriptor>;
+  try {
+    if (
+      !Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== Array.prototype
+    ) {
+      invalid(
+        KERNEL_DIAGNOSTIC_CODES.invalidBinding,
+        "$.logicalExtents",
+        "CPU rectangular prefix extents must be a direct array",
+      );
+    }
+    descriptors = Object.getOwnPropertyDescriptors(value) as unknown as
+      Record<PropertyKey, PropertyDescriptor>;
+  } catch {
+    invalid(
+      KERNEL_DIAGNOSTIC_CODES.invalidBinding,
+      "$.logicalExtents",
+      "CPU rectangular prefix extent reflection failed",
+    );
+  }
+  const lengthDescriptor = descriptors.length;
+  if (
+    lengthDescriptor === undefined ||
+    lengthDescriptor.get !== undefined ||
+    lengthDescriptor.set !== undefined ||
+    lengthDescriptor.value !== logicalShape.length
+  ) {
+    invalid(
+      KERNEL_DIAGNOSTIC_CODES.invalidBinding,
+      "$.logicalExtents",
+      `CPU rectangular prefix requires exactly ${logicalShape.length} extents`,
+    );
+  }
+  const allowedKeys = new Set([
+    "length",
+    ...logicalShape.map((_, axis) => String(axis)),
+  ]);
+  if (Reflect.ownKeys(descriptors).some((key) =>
+    typeof key !== "string" || !allowedKeys.has(key))) {
+    invalid(
+      KERNEL_DIAGNOSTIC_CODES.invalidBinding,
+      "$.logicalExtents",
+      "CPU rectangular prefix extents must be a dense data-only array",
+    );
+  }
+  return Object.freeze(logicalShape.map((maximum, axis) => {
+    const descriptor = descriptors[String(axis)];
+    const extent = descriptor?.value;
+    if (
+      descriptor === undefined ||
+      descriptor.get !== undefined ||
+      descriptor.set !== undefined ||
+      typeof extent !== "bigint" ||
+      extent <= 0n ||
+      extent > maximum
+    ) {
+      invalid(
+        KERNEL_DIAGNOSTIC_CODES.invalidBinding,
+        `$.logicalExtents[${axis}]`,
+        `CPU rectangular prefix extent must be between 1 and ${maximum}`,
+      );
+    }
+    return extent;
+  }));
+}
+
+function rectangularLinearIndex(
+  selectedLinearIndex: number,
+  selectedExtents: readonly bigint[],
+  logicalShape: readonly bigint[],
+): number {
+  let remainder = BigInt(selectedLinearIndex);
+  let semanticLinearIndex = 0n;
+  let semanticStride = 1n;
+  for (let axis = selectedExtents.length - 1; axis >= 0; axis -= 1) {
+    const selectedExtent = selectedExtents[axis] as bigint;
+    const coordinate = remainder % selectedExtent;
+    remainder /= selectedExtent;
+    semanticLinearIndex += coordinate * semanticStride;
+    semanticStride *= logicalShape[axis] as bigint;
+  }
+  return Number(semanticLinearIndex);
 }
 
 function verifyCpuAddressProfile(source: PreparedViewAccessor, destination: PreparedViewAccessor): void {

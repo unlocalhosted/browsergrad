@@ -33,16 +33,19 @@ import {
 import { issueWithWebGpuErrorScopes } from "./webgpu_error_scope.js";
 import {
   registerPreparedSemanticViewCopyResidentIssuer,
-  registerSemanticViewCopyDynamicPrefixPreparer,
-  type PreparedSemanticViewCopyDynamicPrefixWgsl,
+  registerSemanticViewCopyDynamicPreparer,
+  type PreparedSemanticViewCopyDynamicWgsl,
+  type SemanticViewCopyDynamicLaunchMode,
 } from "./semantic_view_copy_internal.js";
 import {
   emitSemanticViewCopyWgsl,
   SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_BINDING,
   SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM,
+  SEMANTIC_VIEW_COPY_DYNAMIC_REGION_BINDING,
+  SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM,
   SemanticViewCopyWgslLoweringError,
   type IntegerRange,
-  type SemanticViewCopyElementCountMode,
+  type SemanticViewCopyLaunchMode,
 } from "./semantic_view_copy_wgsl.js";
 
 export const SEMANTIC_VIEW_COPY_WEBGPU_PROFILE =
@@ -180,7 +183,7 @@ export async function prepareSemanticViewCopyWgsl(
   kernelArtifact: VerifiedKernelArtifact,
   request: PrepareSemanticViewCopyWgslRequest,
 ): Promise<PreparedSemanticViewCopyWgsl> {
-  const prepared = await prepareSemanticViewCopyWgslWithElementCountMode(
+  const prepared = await prepareSemanticViewCopyWgslWithLaunchMode(
     layoutArtifact,
     kernelArtifact,
     request,
@@ -190,29 +193,36 @@ export async function prepareSemanticViewCopyWgsl(
   return prepared;
 }
 
-async function prepareSemanticViewCopyDynamicPrefixWgsl(
+async function prepareSemanticViewCopyDynamicWgsl(
   layoutArtifact: VerifiedLayoutArtifact,
   kernelArtifact: VerifiedKernelArtifact,
   request: PrepareSemanticViewCopyWgslRequest,
-): Promise<PreparedSemanticViewCopyDynamicPrefixWgsl> {
-  const prepared = await prepareSemanticViewCopyWgslWithElementCountMode(
+  mode: SemanticViewCopyDynamicLaunchMode,
+): Promise<PreparedSemanticViewCopyDynamicWgsl> {
+  const launchMode = mode === "linear-prefix"
+    ? "runtime-linear-prefix" as const
+    : "runtime-rectangular-prefix" as const;
+  const prepared = await prepareSemanticViewCopyWgslWithLaunchMode(
     layoutArtifact,
     kernelArtifact,
     request,
-    "runtime-prefix",
+    launchMode,
   );
   return Object.freeze({
     ...prepared,
-    dynamicPrefixUniformName:
-      SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM,
+    dynamicLaunchMode: mode,
+    dynamicUniformName: mode === "linear-prefix"
+      ? SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM
+      : SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM,
+    dynamicUniformByteLength: mode === "linear-prefix" ? 4 : 16,
   });
 }
 
-async function prepareSemanticViewCopyWgslWithElementCountMode(
+async function prepareSemanticViewCopyWgslWithLaunchMode(
   layoutArtifact: VerifiedLayoutArtifact,
   kernelArtifact: VerifiedKernelArtifact,
   request: PrepareSemanticViewCopyWgslRequest,
-  elementCountMode: SemanticViewCopyElementCountMode,
+  launchMode: SemanticViewCopyLaunchMode,
 ): Promise<PreparedSemanticViewCopyWgsl> {
   const workgroupSize = resolvePositiveInteger(
     request.workgroupSize,
@@ -251,7 +261,7 @@ async function prepareSemanticViewCopyWgslWithElementCountMode(
       layoutArtifactPayload(layoutArtifact),
       semantic,
       workgroupSize,
-      elementCountMode,
+      launchMode,
     );
   } catch (error) {
     if (error instanceof SemanticViewCopyWgslLoweringError) {
@@ -268,7 +278,7 @@ async function prepareSemanticViewCopyWgslWithElementCountMode(
     backendVersion: SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION,
     semanticSpecialization: semantic.specializationHash,
     workgroupSize,
-    elementCountMode,
+    launchMode,
     source: emitted.source,
   });
   const bindings = [
@@ -286,14 +296,21 @@ async function prepareSemanticViewCopyWgslWithElementCountMode(
       access: "read_write" as const,
       binding: 1,
     },
-    ...(elementCountMode === "runtime-prefix"
+    ...(launchMode === "runtime-linear-prefix"
       ? [{
           kind: "uniform" as const,
           name: SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_UNIFORM,
           byteLength: 4,
           binding: SEMANTIC_VIEW_COPY_DYNAMIC_PREFIX_BINDING,
         }]
-      : []),
+      : launchMode === "runtime-rectangular-prefix"
+        ? [{
+            kind: "uniform" as const,
+            name: SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM,
+            byteLength: 16,
+            binding: SEMANTIC_VIEW_COPY_DYNAMIC_REGION_BINDING,
+          }]
+        : []),
   ];
   const program = freezeProgram(defineWgslKernelProgram({
     name: `bg_semantic_view_copy_${wgslModuleHash}`,
@@ -312,15 +329,54 @@ async function prepareSemanticViewCopyWgslWithElementCountMode(
     plannedTransientWorkingSetBytes: encodeWireU64(plannedTransientWorkingSetBytes),
     maxTransientWorkingSetBytes: encodeWireU64(BigInt(maxTransientWorkingSetBytes)),
     program,
-    launch: Object.freeze({ dispatchCount: Object.freeze([Number(semantic.elementCount), 1, 1] as const) }),
+    launch: semanticLaunch(semantic.logicalShape, semantic.elementCount, launchMode),
     sourceLocationRange: emitted.sourceLocationRange,
     destinationLocationRange: emitted.destinationLocationRange,
   });
   return prepared;
 }
 
-registerSemanticViewCopyDynamicPrefixPreparer(
-  prepareSemanticViewCopyDynamicPrefixWgsl,
+function semanticLaunch(
+  logicalShape: readonly bigint[],
+  elementCount: bigint,
+  launchMode: SemanticViewCopyLaunchMode,
+): WgslKernelLaunch {
+  if (launchMode !== "runtime-rectangular-prefix") {
+    return Object.freeze({
+      dispatchCount: Object.freeze([
+        Number(elementCount),
+        1,
+        1,
+      ] as const),
+    });
+  }
+  if (logicalShape.length === 2) {
+    return Object.freeze({
+      dispatchCount: Object.freeze([
+        Number(logicalShape[1]),
+        Number(logicalShape[0]),
+        1,
+      ] as const),
+    });
+  }
+  if (logicalShape.length === 3) {
+    return Object.freeze({
+      dispatchCount: Object.freeze([
+        Number(logicalShape[2]),
+        Number(logicalShape[1]),
+        Number(logicalShape[0]),
+      ] as const),
+    });
+  }
+  fail(
+    "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
+    "$.semantic.logicalShape",
+    "rectangular dynamic launch supports semantic ranks 2 and 3 only",
+  );
+}
+
+registerSemanticViewCopyDynamicPreparer(
+  prepareSemanticViewCopyDynamicWgsl,
 );
 
 /**

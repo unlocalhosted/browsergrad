@@ -74,6 +74,10 @@ const CASE_IDS = Object.freeze([
   "f32-unaligned-dynamic-dispatch-127",
   "f32-unaligned-resource-dynamic-dispatch-65",
   "f32-unaligned-resource-dynamic-dispatch-127",
+  "f32-rectangular-dynamic-rank2-small",
+  "f32-rectangular-dynamic-rank2-large",
+  "f32-rectangular-dynamic-rank3-small",
+  "f32-rectangular-dynamic-rank3-large",
   "u8-input-conditional-then",
   "u8-input-conditional-else",
   "u8-runtime-conditional-then",
@@ -259,6 +263,26 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         "f32-unaligned-resource-dynamic-dispatch-127",
         127,
         true,
+      ),
+      prepareRectangularDynamicDispatchCase(
+        "f32-rectangular-dynamic-rank2-small",
+        [3, 4],
+        [2, 3],
+      ),
+      prepareRectangularDynamicDispatchCase(
+        "f32-rectangular-dynamic-rank2-large",
+        [3, 4],
+        [3, 4],
+      ),
+      prepareRectangularDynamicDispatchCase(
+        "f32-rectangular-dynamic-rank3-small",
+        [2, 3, 4],
+        [1, 2, 3],
+      ),
+      prepareRectangularDynamicDispatchCase(
+        "f32-rectangular-dynamic-rank3-large",
+        [2, 3, 4],
+        [2, 3, 4],
       ),
       prepareConditionalRawCopyCase(
         "u8-input-conditional-then",
@@ -579,6 +603,19 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
     expect(unalignedResourceDynamic127?.expandedStepCount).toBe(4);
     expect(unalignedResourceDynamic65?.midGraphFeedbackCount).toBe(1);
     expect(unalignedResourceDynamic127?.midGraphFeedbackCount).toBe(1);
+    for (const rank of [2, 3] as const) {
+      const small = completedCases.find(({ caseId }) =>
+        caseId === `f32-rectangular-dynamic-rank${rank}-small`);
+      const large = completedCases.find(({ caseId }) =>
+        caseId === `f32-rectangular-dynamic-rank${rank}-large`);
+      expect(small?.pipelineIdentityHash).toBe(large?.pipelineIdentityHash);
+      expect(small?.backendSpecializationHash)
+        .not.toBe(large?.backendSpecializationHash);
+      expect(small?.expandedStepCount).toBe(2);
+      expect(large?.expandedStepCount).toBe(2);
+      expect(small?.completedDynamicDispatches).toHaveLength(1);
+      expect(large?.completedDynamicDispatches).toHaveLength(1);
+    }
 
     stage = "resource-repeat-bound-refusal";
     const resourceRepeatCase = cases.find(({ caseId }) =>
@@ -1080,6 +1117,66 @@ async function prepareWideDynamicDispatchCase(
   });
 }
 
+async function prepareRectangularDynamicDispatchCase(
+  caseId:
+    | "f32-rectangular-dynamic-rank2-small"
+    | "f32-rectangular-dynamic-rank2-large"
+    | "f32-rectangular-dynamic-rank3-small"
+    | "f32-rectangular-dynamic-rank3-large",
+  shape: readonly [number, number] | readonly [number, number, number],
+  logicalExtents:
+    readonly [number, number] | readonly [number, number, number],
+): Promise<PreparedCase> {
+  const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
+    inputShape: shape.map((extent) => parseWireI64(String(extent))),
+    axes: shape.map((_, axis) => axis),
+    dtype: "f32",
+  });
+  const elementCount = shape.reduce(
+    (product, extent) => product * extent,
+    1,
+  );
+  const values = [
+    f32Bytes(Array.from(
+      { length: elementCount },
+      (_, index) => index + 0.25,
+    )),
+    f32Bytes(Array.from(
+      { length: elementCount },
+      (_, index) => -index - 0.5,
+    )),
+  ];
+  const graph = (await createVerifiedHostGraphArtifact(
+    rectangularDynamicDispatchProgram(artifacts, shape),
+    artifactOptions(artifacts),
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(
+    graph,
+    { ...artifactOptions(artifacts), workgroupSize: 64 },
+  );
+  const inputs = Object.freeze(values.map((bytes, rank) =>
+    input(rank, bytes)));
+  const controls = Object.freeze(logicalExtents.map((extent, axis) => ({
+    controlId: `prefix-axis-${axis}`,
+    value: wire(extent),
+  })));
+  return Object.freeze({
+    caseId,
+    artifacts,
+    graph,
+    prepared,
+    inputs,
+    controls,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: values.map((bytes) => Array.from(bytes)),
+      controls,
+    }),
+  });
+}
+
 async function prepareConditionalRawCopyCase(
   caseId: "u8-input-conditional-then" | "u8-input-conditional-else",
   predicate: 0 | 1,
@@ -1260,6 +1357,47 @@ function dynamicDispatchProgram(
         },
         maxElementCount: wire(maxElementCount),
         mode: "runtime-u32-prefix-elements",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["copy"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
+function rectangularDynamicDispatchProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+  shape: readonly [number, number] | readonly [number, number, number],
+): HostGraphProgram {
+  const staticDispatch = dispatch(artifacts);
+  const elementCount = shape.reduce(
+    (product, extent) => product * extent,
+    1,
+  );
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 12 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire(2),
+    resources: [
+      resource("input", "input", "f32", elementCount * 4),
+      resource("output", "output", "f32", elementCount * 4),
+    ],
+    nodes: [
+      {
+        ...staticDispatch,
+        kind: "dynamic-dispatch",
+        launchControls: shape.map((_, axis) => ({
+          axis,
+          controlId: `prefix-axis-${axis}`,
+          mode: "u32-prefix-extent" as const,
+        })),
+        maxExtents: shape.map((extent) => wire(extent)),
+        mode: "runtime-u32-rectangular-prefix",
       },
       {
         nodeId: "materialize-output",
