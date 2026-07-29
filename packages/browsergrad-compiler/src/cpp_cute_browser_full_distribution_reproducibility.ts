@@ -40,16 +40,19 @@ import {
   type CppCuteBrowserFullDistributionReproducibilityOutputV1,
 } from
   "./resources/cpp_cute_browser_full_distribution_reproducibility_v1.js";
+import {
+  CPP_CUTE_BROWSER_FULL_DISTRIBUTION_REPRODUCIBILITY_OBSERVATION_SOURCE_REVISION,
+  CPP_CUTE_BROWSER_FULL_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_FULL_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_SHA256,
+} from
+  "./resources/cpp_cute_browser_full_distribution_reproducibility_identity_v1.js";
 
-export const
-  CPP_CUTE_BROWSER_FULL_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_SHA256 =
-    "285a73cc67ec4196104389f127f6728e531aa41c44fba8a79d61e89533f2b76e";
-export const
-  CPP_CUTE_BROWSER_FULL_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_BYTE_LENGTH =
-    8_951;
-export const
-  CPP_CUTE_BROWSER_FULL_DISTRIBUTION_REPRODUCIBILITY_OBSERVATION_SOURCE_REVISION =
-    "8d7f27eb9a249d8277def3b401377c42e961b6c7";
+export {
+  CPP_CUTE_BROWSER_FULL_DISTRIBUTION_REPRODUCIBILITY_OBSERVATION_SOURCE_REVISION,
+  CPP_CUTE_BROWSER_FULL_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_FULL_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_SHA256,
+} from
+  "./resources/cpp_cute_browser_full_distribution_reproducibility_identity_v1.js";
 
 const REPRODUCIBILITY_HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.browser-full-distribution-reproducibility.v1";
@@ -101,8 +104,8 @@ export interface VerifiedCppCuteBrowserFullDistributionReproducibility {
   readonly outputCount: 25;
   readonly deterministicSubjectCount: 24;
   readonly detachedEvidenceCount: 1;
-  readonly firstByteLength: "103637695";
-  readonly secondByteLength: "103637695";
+  readonly firstByteLength: string;
+  readonly secondByteLength: string;
   readonly twoDistinctPrivateOutputRootsVerified: true;
   readonly exactBuildLockOutputPlanMatched: true;
   readonly exactOutputsRehashedInBothRoots: true;
@@ -304,7 +307,7 @@ verifyCppCuteBrowserFullDistributionReproducibilityResource(
     firstByteLength: resource.totals.firstByteLength,
     secondByteLength: resource.totals.secondByteLength,
     ...resource.claims,
-  }) as VerifiedCppCuteBrowserFullDistributionReproducibility;
+  }) as unknown as VerifiedCppCuteBrowserFullDistributionReproducibility;
   VERIFIED_RESOURCES.add(authority);
   return authority;
 }

@@ -199,20 +199,27 @@ function requireCurrentDistribution(
 ): void {
   const observed = resource.distribution;
   const metadata = current.deterministicMetadata;
-  if (observed.reproducibilityId !== current.reproducibilityId ||
-      observed.resourceSha256 !== current.resourceSha256 ||
-      observed.buildInputLockId !== current.buildInputLockId ||
-      observed.buildInputLockResourceSha256 !==
-        current.buildInputLockResourceSha256 ||
-      observed.profileHash !== metadata.profileHash ||
-      observed.profileSha256 !== metadata.profileSha256 ||
-      observed.profileByteLength !== metadata.profileByteLength ||
-      observed.assetManifestId !== metadata.assetManifestId ||
-      observed.assetManifestSha256 !== metadata.assetManifestSha256 ||
-      observed.assetSetSha256 !== metadata.assetSetSha256 ||
-      observed.buildSubjectId !== metadata.buildSubjectId ||
-      observed.buildSubjectSha256 !== metadata.buildSubjectSha256 ||
-      observed.workerBundleSha256 !== metadata.workerBundleSha256 ||
+  if (String(observed.reproducibilityId) !==
+        String(current.reproducibilityId) ||
+      String(observed.resourceSha256) !== String(current.resourceSha256) ||
+      String(observed.buildInputLockId) !==
+        String(current.buildInputLockId) ||
+      String(observed.buildInputLockResourceSha256) !==
+        String(current.buildInputLockResourceSha256) ||
+      String(observed.profileHash) !== String(metadata.profileHash) ||
+      String(observed.profileSha256) !== String(metadata.profileSha256) ||
+      String(observed.profileByteLength) !==
+        String(metadata.profileByteLength) ||
+      String(observed.assetManifestId) !==
+        String(metadata.assetManifestId) ||
+      String(observed.assetManifestSha256) !==
+        String(metadata.assetManifestSha256) ||
+      String(observed.assetSetSha256) !== String(metadata.assetSetSha256) ||
+      String(observed.buildSubjectId) !== String(metadata.buildSubjectId) ||
+      String(observed.buildSubjectSha256) !==
+        String(metadata.buildSubjectSha256) ||
+      String(observed.workerBundleSha256) !==
+        String(metadata.workerBundleSha256) ||
       observed.exactOutputCount !== current.outputCount ||
       observed.exactOutputByteLength !== current.firstByteLength ||
       current.firstByteLength !== current.secondByteLength) {

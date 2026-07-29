@@ -17,6 +17,7 @@ export default defineConfig({
       "scripts/cpp_cute_browser_build/cpp_cute_browser_build_workflow.test.ts",
       "scripts/cpp_cute_browser_build/cpp_cute_browser_configured_target_review.test.ts",
       "scripts/cpp_cute_browser_build/cpp_cute_browser_extractor_source.test.ts",
+      "scripts/cpp_cute_browser_build/cpp_cute_browser_full_distribution_reproducibility_authoring.test.ts",
       "scripts/cpp_cute_browser_build/cpp_cute_browser_header_distribution_reproducibility_authoring.test.ts",
       "scripts/cpp_cute_browser_build/cpp_cute_browser_reproducibility_authoring.test.ts",
       "scripts/cpp_cute_browser_build/cpp_cute_browser_toolchain_cache.test.ts",

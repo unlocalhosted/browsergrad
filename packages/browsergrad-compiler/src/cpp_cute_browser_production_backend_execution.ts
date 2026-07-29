@@ -348,17 +348,23 @@ function requireExactBuildBinding(
     );
   }
   const observed = convergence.distribution;
-  if (observed.reproducibilityId !== fullDistribution.reproducibilityId ||
-      observed.resourceSha256 !== fullDistribution.resourceSha256 ||
-      observed.buildInputLockId !== fullDistribution.buildInputLockId ||
-      observed.buildInputLockResourceSha256 !==
-        fullDistribution.buildInputLockResourceSha256 ||
-      observed.profileHash !== metadata.profileHash ||
-      observed.assetManifestId !== metadata.assetManifestId ||
-      observed.assetSetSha256 !== metadata.assetSetSha256 ||
-      observed.buildSubjectId !== metadata.buildSubjectId ||
-      observed.buildSubjectSha256 !== metadata.buildSubjectSha256 ||
-      observed.workerBundleSha256 !== metadata.workerBundleSha256 ||
+  if (String(observed.reproducibilityId) !==
+        String(fullDistribution.reproducibilityId) ||
+      String(observed.resourceSha256) !==
+        String(fullDistribution.resourceSha256) ||
+      String(observed.buildInputLockId) !==
+        String(fullDistribution.buildInputLockId) ||
+      String(observed.buildInputLockResourceSha256) !==
+        String(fullDistribution.buildInputLockResourceSha256) ||
+      String(observed.profileHash) !== String(metadata.profileHash) ||
+      String(observed.assetManifestId) !==
+        String(metadata.assetManifestId) ||
+      String(observed.assetSetSha256) !== String(metadata.assetSetSha256) ||
+      String(observed.buildSubjectId) !== String(metadata.buildSubjectId) ||
+      String(observed.buildSubjectSha256) !==
+        String(metadata.buildSubjectSha256) ||
+      String(observed.workerBundleSha256) !==
+        String(metadata.workerBundleSha256) ||
       observed.exactOutputCount !== fullDistribution.outputCount ||
       observed.exactOutputByteLength !== fullDistribution.firstByteLength) {
     binding(

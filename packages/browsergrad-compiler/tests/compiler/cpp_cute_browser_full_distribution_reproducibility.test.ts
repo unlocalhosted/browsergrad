@@ -37,27 +37,27 @@ describe("package-pinned full-distribution reproducibility", () => {
         CPP_CUTE_BROWSER_FULL_DISTRIBUTION_REPRODUCIBILITY_OBSERVATION_SOURCE_REVISION,
       producerPolicyScope: "local-engineering-reproducibility-only",
       buildInputLockId:
-        "bg.cpp.browser-build-input-lock.sha256.fa21cfe45dec6b4869662cd613a7a300848657518f375c04f7f2193f3a874ad4",
+        "bg.cpp.browser-build-input-lock.sha256.08ddf15cbd0e5600fd1ae9f935cc7e3552e0140b665138ccdcf6d0f837bcdc34",
       buildInputLockResourceSha256:
-        "fd0f4f978399c6e52ebdb0489f35ce6b0a88e289dce8cfdfa112e52d6217cf3c",
+        "b0021295d4b9295abc3d8ef90a84883f3deae430d97446e5166444d0d82f025d",
       reproducibilityId:
-        "bg.cpp.browser-full-distribution-reproducibility.sha256.64cc7401523b6026aba9430e2f081d708bc62cfcbe6fc343bf58ec0798aeec7b",
+        "bg.cpp.browser-full-distribution-reproducibility.sha256.434db589ba241435567cbba85c04bd89c390bc9231627036b38e9df2e72874ef",
       deterministicMetadata: {
         profileHash:
-          "4f4b7416ec509ea97b612cc5b6c6c01596624ef63b8badc4f2a21ffd6b2e1003",
+          "522b48056fc8ab48c9e917da55ccdcc2cb9ae6d9b5dc368316ad120a3caf813d",
         profileSha256:
-          "16d47a72abe1851ce51810898cfd7d4223eae8e114c1f7ea300858486b30c6a8",
+          "a99115578dc80c7f31d038e4742854785cdd41050b6a3cd838f317d0dfb48170",
         profileByteLength: "7148",
         assetManifestId:
-          "bg.cpp.browser-assets.sha256.9db5c28897a9d9fd512056a767ade5446e0c188e3dc3f12946929f6d59d01c25",
+          "bg.cpp.browser-assets.sha256.50209cbe94e14477bbb58f7c7ab73ae0617831662e1bd835dff1918c1b4177c5",
         buildSubjectId:
-          "bg.cpp.browser-build-subject.sha256.ed6344d3d2ffef5745f92e0ee53d4839e6c6ed7e193a56ca700c61853eb2da98",
+          "bg.cpp.browser-build-subject.sha256.32b8ba90490cc919b5489854ad6aa47c629bfe3c820d43f2ab6ed22bce4f4502",
       },
       outputCount: 25,
       deterministicSubjectCount: 24,
       detachedEvidenceCount: 1,
-      firstByteLength: "103637695",
-      secondByteLength: "103637695",
+      firstByteLength: "103638762",
+      secondByteLength: "103638762",
       twoDistinctPrivateOutputRootsVerified: true,
       exactBuildLockOutputPlanMatched: true,
       exactOutputsRehashedInBothRoots: true,
