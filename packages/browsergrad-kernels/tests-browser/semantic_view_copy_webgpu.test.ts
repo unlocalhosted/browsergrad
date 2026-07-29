@@ -52,7 +52,8 @@ const ENVIRONMENT_SCHEMA = EXECUTION_ENVIRONMENT_SCHEMA;
 const SUITE_ID = "browsergrad.kernels.view-copy.webgpu-conformance@2";
 const CAPABILITY_ID = "browsergrad.kernel.view-copy";
 const BACKEND_ID = "browsergrad.backend.webgpu.core";
-const COMPARISON_POLICY_ID = "browsergrad.comparison.bit-exact-u32-complete-destination.v1";
+const COMPARISON_POLICY_ID =
+  "browsergrad.comparison.bit-exact-complete-destination-words.v2";
 const PLANNED_CASE_IDS = Object.freeze([
   "rank2-transpose",
   "rank3-permutation",
@@ -77,6 +78,10 @@ const PLANNED_CASE_IDS = Object.freeze([
   "dynamic-rank2-specialization",
   "i32-rank2-transpose",
   "u32-read-only-broadcast",
+  "i16-rank2-transpose",
+  "u16-read-only-broadcast",
+  "f16-rank2-odd-transpose",
+  "bf16-rank3-permutation",
   "zero-extent-no-submit",
 ]);
 const PRODUCER_VERSIONS = Object.freeze({
@@ -105,7 +110,14 @@ interface LayoutInput {
   readonly sourceBytes: DimExpr;
   readonly destinationBytes: DimExpr;
   readonly symbols?: readonly { readonly id: string; readonly domain: { readonly min: string; readonly max: string } }[];
-  readonly dtype?: "f32" | "i32" | "u32";
+  readonly dtype?:
+    | "i16"
+    | "u16"
+    | "f16"
+    | "bf16"
+    | "f32"
+    | "i32"
+    | "u32";
 }
 
 interface EvidenceCase {
@@ -740,6 +752,103 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     words(0, 0x80000000, 0xffffffff),
   );
 
+  const i16Transpose = await makeCase(
+    "i16-rank2-transpose",
+    {
+      shape: dims("2", "3"),
+      sourceLocation: add(
+        multiply(coordinate(1), indexConstant("2")),
+        coordinate(0),
+      ),
+      sourceByteOffset: dimConstant("2"),
+      destinationByteOffset: dimConstant("4"),
+      sourceBytes: dimConstant("16"),
+      destinationBytes: dimConstant("20"),
+      dtype: "i16",
+    },
+    { kind: "reject" },
+    packed16Words(
+      0xa55a,
+      0x8000,
+      0xffff,
+      0,
+      1,
+      0x7fff,
+      0x1234,
+      0x5aa5,
+    ),
+  );
+
+  const u16Broadcast = await makeCase(
+    "u16-read-only-broadcast",
+    {
+      shape: dims("2", "3"),
+      sourceLocation: coordinate(1),
+      sourceBytes: dimConstant("8"),
+      destinationBytes: dimConstant("12"),
+      dtype: "u16",
+    },
+    { kind: "reject" },
+    packed16Words(0, 0x8000, 0xffff, 0xa55a),
+  );
+
+  const f16OddTranspose = await makeCase(
+    "f16-rank2-odd-transpose",
+    {
+      shape: dims("3", "3"),
+      sourceLocation: add(
+        multiply(coordinate(1), indexConstant("3")),
+        coordinate(0),
+      ),
+      sourceBytes: dimConstant("20"),
+      destinationBytes: dimConstant("20"),
+      dtype: "f16",
+    },
+    { kind: "reject" },
+    packed16Words(
+      0x0000,
+      0x8000,
+      0x3c00,
+      0x7c00,
+      0xfc00,
+      0x7e01,
+      0x0001,
+      0x03ff,
+      0x7bff,
+      0xa55a,
+    ),
+  );
+
+  const bf16Rank3Permutation = await makeCase(
+    "bf16-rank3-permutation",
+    {
+      shape: dims("2", "2", "3"),
+      sourceLocation: add(
+        multiply(coordinate(2), indexConstant("4")),
+        multiply(coordinate(0), indexConstant("2")),
+        coordinate(1),
+      ),
+      sourceBytes: dimConstant("24"),
+      destinationBytes: dimConstant("24"),
+      dtype: "bf16",
+    },
+    { kind: "reject" },
+    packed16Words(
+      0x0000,
+      0x8000,
+      0x3f80,
+      0x7f80,
+      0xff80,
+      0x7fc1,
+      0x0001,
+      0x007f,
+      0x0080,
+      0x7f7f,
+      0x1234,
+      0xffff,
+    ),
+  );
+
   const zero = await makeCase(
     "zero-extent-no-submit",
     {
@@ -782,6 +891,10 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     dynamic,
     i32Transpose,
     u32Broadcast,
+    i16Transpose,
+    u16Broadcast,
+    f16OddTranspose,
+    bf16Rank3Permutation,
     zero,
   ]);
 }
@@ -820,6 +933,14 @@ async function makeCase(
 
 async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifact> {
   const destinationLocation = input.destinationLocation ?? rowMajor(input.shape);
+  const dtype = input.dtype ?? "f32";
+  const requiredAlignmentBytes =
+    dtype === "i16" ||
+    dtype === "u16" ||
+    dtype === "f16" ||
+    dtype === "bf16"
+      ? 2
+      : 4;
   return verifyLayoutArtifact(JSON.parse(JSON.stringify({
     schema: "browsergrad.layout",
     version: { major: 1, minor: 0 },
@@ -838,8 +959,8 @@ async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifac
         { indexMapId: "destinationMap", coordinateRank: input.shape.length, locationUnit: input.destinationLocationUnit ?? "element", location: destinationLocation, inBounds: TRUE },
       ],
       views: [
-        { viewId: "sourceView", allocationId: "source", dtype: input.dtype ?? "f32", byteOffset: input.sourceByteOffset ?? dimConstant("0"), shape: input.shape, indexMapId: "sourceMap", requiredAlignmentBytes: 4 },
-        { viewId: "destinationView", allocationId: "destination", dtype: input.dtype ?? "f32", byteOffset: input.destinationByteOffset ?? dimConstant("0"), shape: input.shape, indexMapId: "destinationMap", requiredAlignmentBytes: 4 },
+        { viewId: "sourceView", allocationId: "source", dtype, byteOffset: input.sourceByteOffset ?? dimConstant("0"), shape: input.shape, indexMapId: "sourceMap", requiredAlignmentBytes },
+        { viewId: "destinationView", allocationId: "destination", dtype, byteOffset: input.destinationByteOffset ?? dimConstant("0"), shape: input.shape, indexMapId: "destinationMap", requiredAlignmentBytes },
       ],
     },
   })));
@@ -918,6 +1039,20 @@ function rowMajor(shape: readonly DimExpr[]): IndexExpr {
 
 function words(...values: readonly number[]): Uint32Array {
   return new Uint32Array(values);
+}
+
+function packed16Words(...values: readonly number[]): Uint32Array {
+  if (values.length % 2 !== 0) {
+    throw new Error("packed16Words requires complete u32 words");
+  }
+  return Uint32Array.from(
+    Array.from(
+      { length: values.length / 2 },
+      (_, index) =>
+        ((values[index * 2] as number) & 0xffff) |
+        (((values[(index * 2) + 1] as number) & 0xffff) << 16),
+    ),
+  );
 }
 
 function sequenceWords(length: number, start: number): Uint32Array {

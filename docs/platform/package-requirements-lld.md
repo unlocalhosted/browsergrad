@@ -25,7 +25,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | --- | --- | --- |
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
-| 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. |
+| 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. Additive exact-storage profiles cover f32/i32/u32 word32 ranks 1–7 and i16/u16/f16/bf16 packed16 ranks 2–3 without conflating storage copy with arithmetic support. |
 | 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict nine-case Worker matrix including unchanged signed-rank-2 CuTe source, signed-source-aware authorized Artifact V3 lowering, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-clobber producer/reviewer exchange, and unified in-process backend/final-release composition are package-pinned. The declared portable implementation exit now passes; externally rooted producer and distribution-review evidence plus actual production issuance remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
@@ -134,9 +134,10 @@ allocations, nonzero offsets, broadcast, guarded float fill, and:
 - distinct signed-affine rank-1, rank-2/rank-3, rank-4/rank-5, rank-6, and rank-7 source
   profiles with a positive-affine dense destination.
 
-Required Apple Metal 3 backend-2.6 evidence passes 24 complete-destination,
-bit-exact CPU/WebGPU cases covering those profiles, dynamic specialization,
-and zero-extent no-submit behavior. Exact identities stay in the ledger.
+The rank-2/rank-3 packed16 profile preserves exact i16/u16/f16/bf16 storage bits through a race-free static raw-u32 schedule. It
+grants no f16/bf16 arithmetic, conversion, or `shader-f16` claim. Required
+Apple Metal 3 backend-2.7 evidence passes 28 complete CPU/WebGPU cases; exact
+profile guards and evidence identities stay in the ledger.
 The authorized C++/CuTe transition carries signed source strides at ranks 1
 through 4 into canonical artifacts and derives exact affine element extrema,
 then requires the host-supplied nonnegative view offset and allocation length
@@ -147,8 +148,9 @@ signed-rank-2 CuTe source, authorizes the resulting exact distributed payload,
 and proves bit-exact CPU/required-WebGPU convergence on Apple Metal. This
 proves the declared portable source-to-backend implementation slice, not
 externally rooted producer trust, legal approval, or production release.
-Rank 8+, signed destinations, packed/16-bit/bf16/f64 storage, overlap, and
-other undeclared layouts remain explicit refusals.
+Rank 8+, signed destinations, signed or dynamic packed16 maps, 8-bit/f64 view
+storage, packed arithmetic/conversion, overlap, and other undeclared layouts
+remain explicit refusals.
 
 ### Tiled kernels and framework convergence
 
@@ -173,9 +175,8 @@ operation uses an opaque callback.
 
 ### Remaining production blockers
 
-Gate 3 cannot become verified until the following are independently satisfied.
-The portable browser-local implementation exit and exact-payload
-CPU/required-WebGPU convergence are no longer blockers.
+Gate 3 still requires the following independent external authority; its
+portable implementation and exact-payload convergence exits already pass.
 
 1. A package-controlled production policy admits an externally controlled key
    and an externally issued exact-build statement for the exact build subject.
@@ -186,11 +187,10 @@ CPU/required-WebGPU convergence are no longer blockers.
    backend/final-release authority is minted in one process. Serialized
    observations and synthetic fixtures grant no production authority.
 
-Gate 7 covers the closed DAG, bounded request/resource repetition, request-time
-or produced-resource dispatch through rank 7, three
-conditional sources including one explicit feedback stage, and device-bound
-CPU/WebGPU pipelines. Rank 8+, repeated/device-side
-feedback, unbounded launches, transport/topology, worker meshes, and native systems remain open.
+Gate 7 covers bounded DAG request/resource repetition, dispatch through rank 7,
+one feedback stage, and device-bound CPU/WebGPU pipelines. Rank 8+,
+repeated/device-side feedback, unbounded launches, transport/topology, worker
+meshes, and native systems remain open.
 
 ## Purpose
 
@@ -708,8 +708,21 @@ word into its root allocation. The destination remains positive-affine,
 dense, and injective, and the same CPU coordinate proof checks every guarded
 source access and complete destination write. Existing positive-affine profile
 identities retain their exact meaning. Rank 8+, signed destinations, integer
-division/modulo, 16-bit packed storage, bf16, f64, overlap, and non-global
+division/modulo, f64, overlap, and non-global
 memory remain outside the declared portable profiles.
+
+The additive
+`browsergrad.view-copy.positive-affine-rank2-rank3-packed16@1` profile admits
+same-dtype i16, u16, f16, and bf16 exact storage copies at ranks 2 and 3.
+Source and destination maps remain positive affine, the destination remains
+dense and injective, and invalid source coordinates reject. The current WebGPU
+backend additionally requires static launch, root allocation byte lengths that
+are multiples of four, and a destination view beginning on a four-byte
+boundary. Its schedule assigns each adjacent destination halfword pair to one
+invocation, so no two invocations race on the same physical u32 word. An odd
+final element uses a masked read-modify-write that preserves the unrelated
+upper half. The profile does not admit signed source maps, padding fill,
+f16/bf16 arithmetic, conversion, or a `shader-f16` requirement.
 
 CPU reference and WGSL lowering consume the same verified normalized
 expressions or a specialization accompanied by a differential proof against
@@ -750,6 +763,10 @@ Backend 2.5.0 applies the same path to the separately named positive and signed
 rank-6 profiles with six-axis mixed-radix coordinate reconstruction.
 Backend 2.6.0 applies it to the corresponding rank-7 profiles with seven-axis
 mixed-radix coordinate reconstruction.
+Backend 2.7.0 adds the distinct packed16 backend profile. It extracts and
+inserts exact halfword bits through raw `array<u32>` storage, assigns one
+destination word to one invocation, preserves an odd destination tail, and
+retains the existing word32 programs and profile identities unchanged.
 
 ### Logical tiles versus physical schedules
 
@@ -2110,6 +2127,15 @@ across TypeScript and Python.
   `2082651176bced642137045555353528972e4a5b6ca3bef81cf273ed1dd3b7ed`,
   and device profile
   `9589abc8fafb412d83194febaf210f7f89da7a580bf20d3272e1eef9dcda2f66`.
+- Add a distinct positive-affine rank-2/rank-3 packed16 profile for exact
+  i16/u16/f16/bf16 storage only. Keep arithmetic, conversion, signed maps,
+  padding fill, and dynamic launch out of scope. The required 28-case Apple
+  Metal 3 lane records correctness artifact
+  `f31114095be11d85f2045113452079108daf3968c5890c438dbf87fa4395c5c5`,
+  case set
+  `446917404b1a243d01d07f9358f144a63df19ca7ce46ddb4631b636bf76e1386`,
+  and device profile
+  `9589abc8fafb412d83194febaf210f7f89da7a580bf20d3272e1eef9dcda2f66`.
 
 **Exit:** two frontend paths and two execution tiers consume the same view/index
 fixtures; reference and WebGPU do not reconstruct offsets independently;
@@ -2120,7 +2146,9 @@ parity without reinterpreting an older profile. The separately named
 signed-affine profiles prove exact negative source strides at ranks 2 through
 5 without widening another identity or admitting signed destinations. The
 rank-1 signed profile completes that source capability across ranks 1 through
-5.
+5. Later additive rank-6/rank-7 word32 profiles retain the same rule. The
+packed16 profile separately proves raw 16-bit storage preservation without
+claiming arithmetic support or widening a word32 identity.
 
 ### Gate 3 — Real C++/CuTe frontend slice
 
@@ -2496,7 +2524,7 @@ one-feedback lifecycle, and
 separately proves non-finite f32 and lost-device refusal.
 The required lane completes 52 CPU/WebGPU parity cases under backend 1.24.0;
 terminal correctness artifact
-`1a44aedfda7b53bddee3d526299e2f255dfff410a1efe0123f448dd5aaade157`
+`6a169f1f257fbeb9b91988b2ac622e24b13720a9b403e09a3cfb0c3b60930b1b`
 binds device profile
 `a72951410740a4adee212bba13ee44da16fdb9d6644d3b58ec38e0623f2c7b48`.
 

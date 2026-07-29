@@ -34,10 +34,19 @@ interface LayoutCase {
   readonly destinationAlias?: string;
   readonly sourceSpace?: Record<string, unknown>;
   readonly destinationSpace?: Record<string, unknown>;
+  readonly dtype?: "i16" | "u16" | "f16" | "bf16" | "f32" | "i32" | "u32";
 }
 
 async function verifiedLayout(input: LayoutCase): Promise<VerifiedLayoutArtifact> {
   const shape = input.shape.map(dim);
+  const dtype = input.dtype ?? "f32";
+  const requiredAlignmentBytes =
+    dtype === "i16" ||
+    dtype === "u16" ||
+    dtype === "f16" ||
+    dtype === "bf16"
+      ? 2
+      : 4;
   const envelope = {
     schema: "browsergrad.layout",
     version: { major: 1, minor: 0 },
@@ -86,20 +95,20 @@ async function verifiedLayout(input: LayoutCase): Promise<VerifiedLayoutArtifact
         {
           viewId: "sourceView",
           allocationId: "sourceAllocation",
-          dtype: "f32",
+          dtype,
           byteOffset: dim(input.sourceByteOffset ?? "0"),
           shape,
           indexMapId: "sourceMap",
-          requiredAlignmentBytes: 4,
+          requiredAlignmentBytes,
         },
         {
           viewId: "destinationView",
           allocationId: "destinationAllocation",
-          dtype: "f32",
+          dtype,
           byteOffset: dim(input.destinationByteOffset ?? "0"),
           shape,
           indexMapId: "destinationMap",
-          requiredAlignmentBytes: 4,
+          requiredAlignmentBytes,
         },
       ],
     },
@@ -128,7 +137,7 @@ async function verifiedKernel(
         operationId,
         kind: "view-copy",
         version: { major: 1, minor: 0 },
-        dtype: "f32",
+        dtype: sourceView.dtype,
         source: { viewId: sourceView.viewId, access: "read", invalidSource: policy },
         destination: { viewId: destinationView.viewId, access: "write" },
         overlap: { kind: "forbid" },
@@ -198,6 +207,21 @@ function f32Bytes(values: readonly number[], leadingBytes = 0): Uint8Array {
 function f32Values(bytes: Uint8Array): number[] {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return Array.from({ length: bytes.byteLength / 4 }, (_, index) => view.getFloat32(index * 4, true));
+}
+
+function u16Bytes(values: readonly number[]): Uint8Array {
+  const bytes = new Uint8Array(values.length * 2);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  values.forEach((value, index) => view.setUint16(index * 2, value, true));
+  return bytes;
+}
+
+function u16Values(bytes: Uint8Array): number[] {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return Array.from(
+    { length: bytes.byteLength / 2 },
+    (_, index) => view.getUint16(index * 2, true),
+  );
 }
 
 async function diagnostic(run: () => Promise<unknown> | unknown): Promise<SemanticSchemaError> {
@@ -482,6 +506,76 @@ describe("verified materializing view-copy", () => {
         }),
       );
     }
+  });
+
+  it("executes exact i16, u16, f16, and bf16 storage through one packed profile", async () => {
+    const input = [0x0000, 0x8000, 0x7c00, 0x7e01, 0xffff, 0x1234];
+    for (const dtype of ["i16", "u16", "f16", "bf16"] as const) {
+      const layout = await verifiedLayout({
+        shape: ["2", "3"],
+        sourceLocation: add(mul(c(1), k("2")), c(0)),
+        sourceBytes: "12",
+        destinationBytes: "12",
+        dtype,
+      });
+      const kernel = await verifiedKernel(layout);
+      const plan = await prepare(layout, kernel);
+      const specialization = await prepareViewCopySpecialization(
+        layout,
+        kernel,
+        { operationId: plan.operationId },
+      );
+      const destination = new Uint8Array(12);
+      const trace = plan.execute({
+        source: u16Bytes(input),
+        destination,
+      });
+
+      expect(specialization.portableProfile).toMatchObject({
+        profileId:
+          "browsergrad.view-copy.positive-affine-rank2-rank3-packed16@1",
+        rank: 2,
+        dtype,
+      });
+      expect(u16Values(destination)).toEqual([
+        input[0],
+        input[2],
+        input[4],
+        input[1],
+        input[3],
+        input[5],
+      ]);
+      expect(trace).toMatchObject({
+        elementCount: "6",
+        readElements: "6",
+        filledElements: "0",
+        bytesRead: "12",
+        bytesWritten: "12",
+      });
+    }
+
+    const rankOne = await verifiedLayout({
+      shape: ["2"],
+      sourceLocation: c(0),
+      sourceBytes: "4",
+      destinationBytes: "4",
+      dtype: "f16",
+    });
+    expect((await diagnostic(async () =>
+      prepare(rankOne, await verifiedKernel(rankOne))
+    )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const signedSource = await verifiedLayout({
+      shape: ["2", "2"],
+      sourceLocation: add(mul(c(0), k("-2")), mul(c(1), k("-1"))),
+      sourceByteOffset: "6",
+      sourceBytes: "8",
+      destinationBytes: "8",
+      dtype: "bf16",
+    });
+    expect((await diagnostic(async () =>
+      prepare(signedSource, await verifiedKernel(signedSource))
+    )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
   });
 
   it("guards padded reads and preserves exact f32 fill bits", async () => {

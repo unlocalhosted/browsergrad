@@ -43,10 +43,25 @@ interface LayoutInput {
   readonly sourceBytes: DimExpr;
   readonly destinationBytes: DimExpr;
   readonly symbols?: readonly { readonly id: string; readonly domain: { readonly min: string; readonly max: string } }[];
-  readonly dtype?: "f32" | "i32" | "u32";
+  readonly dtype?:
+    | "i16"
+    | "u16"
+    | "f16"
+    | "bf16"
+    | "f32"
+    | "i32"
+    | "u32";
 }
 
 async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifact> {
+  const dtype = input.dtype ?? "f32";
+  const requiredAlignmentBytes =
+    dtype === "i16" ||
+    dtype === "u16" ||
+    dtype === "f16" ||
+    dtype === "bf16"
+      ? 2
+      : 4;
   return verifyLayoutArtifact(JSON.parse(JSON.stringify({
     schema: "browsergrad.layout",
     version: { major: 1, minor: 0 },
@@ -92,20 +107,20 @@ async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifac
         {
           viewId: "sourceView",
           allocationId: "sourceAllocation",
-          dtype: input.dtype ?? "f32",
+          dtype,
           byteOffset: input.sourceByteOffset ?? constant("0"),
           shape: input.shape,
           indexMapId: "sourceMap",
-          requiredAlignmentBytes: 4,
+          requiredAlignmentBytes,
         },
         {
           viewId: "destinationView",
           allocationId: "destinationAllocation",
-          dtype: input.dtype ?? "f32",
+          dtype,
           byteOffset: input.destinationByteOffset ?? constant("0"),
           shape: input.shape,
           indexMapId: "destinationMap",
-          requiredAlignmentBytes: 4,
+          requiredAlignmentBytes,
         },
       ],
     },
@@ -411,6 +426,84 @@ describe("semantic view-copy WGSL lowering", () => {
       modules.set(dtype, prepared.program.wgsl);
     }
     expect(modules.get("i32")).toBe(modules.get("u32"));
+  });
+
+  it("packs exact i16, u16, f16, and bf16 storage without shader-f16", async () => {
+    const modules = new Map<string, string>();
+    for (const dtype of ["i16", "u16", "f16", "bf16"] as const) {
+      const shape = [constant("3"), constant("3")] as const;
+      const layout = await verifiedLayout({
+        shape,
+        sourceLocation: add(
+          multiply(coordinate(1), constant("3")),
+          coordinate(0),
+        ),
+        sourceBytes: constant("20"),
+        destinationBytes: constant("20"),
+        dtype,
+      });
+      const prepared = await prepare(layout, await verifiedKernel(layout));
+
+      expect(prepared.semantic.portableProfile).toMatchObject({
+        profileId:
+          "browsergrad.view-copy.positive-affine-rank2-rank3-packed16@1",
+        rank: 2,
+        dtype,
+      });
+      expect(prepared.backendProfile).toBe(
+        "browsergrad.webgpu.view-copy.packed16@1",
+      );
+      expect(prepared.backendVersion).toBe("2.7.0");
+      expect(prepared.launch.dispatchCount).toEqual([5, 1, 1]);
+      expect(prepared.program.wgsl).toContain(
+        "fn copy_packed16_element(linear_index: u32)",
+      );
+      expect(prepared.program.wgsl).toContain(
+        "let destination_mask: u32 = 0xffffu << destination_shift;",
+      );
+      expect(prepared.program.wgsl).toContain(
+        "copy_packed16_element(first_element_index + 1u);",
+      );
+      expect(prepared.program.wgsl).not.toContain("enable f16;");
+      modules.set(dtype, prepared.program.wgsl);
+    }
+    expect(new Set(modules.values()).size).toBe(1);
+
+    const misalignedDestination = await verifiedLayout({
+      shape: [constant("2"), constant("2")],
+      sourceLocation: rowMajor([constant("2"), constant("2")]),
+      sourceBytes: constant("8"),
+      destinationByteOffset: constant("2"),
+      destinationBytes: constant("12"),
+      dtype: "f16",
+    });
+    await expect(prepare(
+      misalignedDestination,
+      await verifiedKernel(misalignedDestination),
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
+      path: "$.destination.viewByteOffset",
+    });
+
+    const dynamicLayout = await verifiedLayout({
+      shape: [constant("2"), constant("2")],
+      sourceLocation: rowMajor([constant("2"), constant("2")]),
+      sourceBytes: constant("8"),
+      destinationBytes: constant("8"),
+      dtype: "bf16",
+    });
+    const dynamicKernel = await verifiedKernel(dynamicLayout);
+    const operation = kernelArtifactPayload(dynamicKernel).operations[0];
+    if (operation === undefined) throw new Error("fixture operation missing");
+    await expect(prepareSemanticViewCopyDynamicWgsl(
+      dynamicLayout,
+      dynamicKernel,
+      { operationId: operation.operationId },
+      "linear-prefix",
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
+      path: "$.launchMode",
+    });
   });
 
   it("keeps signed padding arithmetic and exact fill bits inside a structured guard", async () => {
@@ -959,6 +1052,7 @@ describe("semantic view-copy WGSL lowering", () => {
       sourceWords: new Uint32Array(4),
       destinationWords: new Uint32Array(4),
     })).rejects.toMatchObject({ code: "BG-WEBGPU-VIEW-COPY-DEVICE-LIMIT" });
+
   });
 
   it("uses typed backend errors", () => {

@@ -176,6 +176,7 @@ export {
 } from "./tensor_plan_semantics.js";
 
 export {
+  SEMANTIC_VIEW_COPY_PACKED16_WEBGPU_PROFILE,
   SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION,
   SEMANTIC_VIEW_COPY_WEBGPU_PROFILE,
   SemanticViewCopyWebGpuError,
@@ -186,6 +187,7 @@ export {
   type PrepareSemanticViewCopyWgslRequest,
   type SemanticViewCopyResidentRunOptions,
   type SemanticViewCopyResidentSource,
+  type SemanticViewCopyWebGpuProfile,
   type SemanticViewCopyWebGpuBuffers,
   type SemanticViewCopyWebGpuDeviceFacts,
   type SemanticViewCopyWebGpuErrorCode,

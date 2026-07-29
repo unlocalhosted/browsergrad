@@ -50,7 +50,12 @@ import {
 
 export const SEMANTIC_VIEW_COPY_WEBGPU_PROFILE =
   "browsergrad.webgpu.view-copy.word32@2";
-export const SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION = "2.6.0";
+export const SEMANTIC_VIEW_COPY_PACKED16_WEBGPU_PROFILE =
+  "browsergrad.webgpu.view-copy.packed16@1";
+export const SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION = "2.7.0";
+export type SemanticViewCopyWebGpuProfile =
+  | typeof SEMANTIC_VIEW_COPY_WEBGPU_PROFILE
+  | typeof SEMANTIC_VIEW_COPY_PACKED16_WEBGPU_PROFILE;
 const DEFAULT_WORKGROUP_SIZE = 64;
 const MAX_CONFIGURABLE_WORKGROUP_SIZE = 256;
 const DEFAULT_MAX_WGSL_BYTES = 64 * 1024;
@@ -76,7 +81,7 @@ export interface PrepareSemanticViewCopyWgslRequest extends Omit<
 
 export interface PreparedSemanticViewCopyWgsl {
   readonly semantic: PreparedViewCopySpecialization;
-  readonly backendProfile: typeof SEMANTIC_VIEW_COPY_WEBGPU_PROFILE;
+  readonly backendProfile: SemanticViewCopyWebGpuProfile;
   readonly backendVersion: typeof SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION;
   readonly wgslModuleHash: string;
   readonly workgroupSize: number;
@@ -132,7 +137,7 @@ export interface SemanticViewCopyWebGpuTrace {
   readonly layoutSemanticHash: string;
   readonly kernelSemanticHash: string;
   readonly wgslModuleHash: string;
-  readonly backendProfile: typeof SEMANTIC_VIEW_COPY_WEBGPU_PROFILE;
+  readonly backendProfile: SemanticViewCopyWebGpuProfile;
   readonly backendVersion: typeof SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION;
   readonly logicalShape: readonly WireU64[];
   readonly elementCount: WireU64;
@@ -247,7 +252,10 @@ async function prepareSemanticViewCopyWgslWithLaunchMode(
     "$.maxTransientWorkingSetBytes",
   );
   const semantic = await prepareViewCopySpecialization(layoutArtifact, kernelArtifact, request);
-  verifyStaticWebGpuProfile(semantic);
+  verifyWebGpuProfile(semantic, launchMode);
+  const backendProfile = semantic.source.dtypeBytes === 2
+    ? SEMANTIC_VIEW_COPY_PACKED16_WEBGPU_PROFILE
+    : SEMANTIC_VIEW_COPY_WEBGPU_PROFILE;
   const plannedTransientGpuBytes = semantic.source.allocationByteLength
     + (semantic.destination.allocationByteLength * 2n);
   const plannedTransientHostBytes = semantic.destination.allocationByteLength;
@@ -278,7 +286,7 @@ async function prepareSemanticViewCopyWgslWithLaunchMode(
     fail("BG-WEBGPU-VIEW-COPY-RESOURCE-LIMIT", "$.maxWgslBytes", `generated WGSL requires ${wgslBytes} bytes; limit is ${maxWgslBytes}`);
   }
   const wgslModuleHash = await hashNamedComponents({
-    profile: SEMANTIC_VIEW_COPY_WEBGPU_PROFILE,
+    profile: backendProfile,
     backendVersion: SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION,
     semanticSpecialization: semantic.specializationHash,
     workgroupSize,
@@ -327,7 +335,7 @@ async function prepareSemanticViewCopyWgslWithLaunchMode(
   }));
   const prepared = Object.freeze({
     semantic,
-    backendProfile: SEMANTIC_VIEW_COPY_WEBGPU_PROFILE,
+    backendProfile,
     backendVersion: SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION,
     wgslModuleHash,
     workgroupSize,
@@ -336,7 +344,12 @@ async function prepareSemanticViewCopyWgslWithLaunchMode(
     plannedTransientWorkingSetBytes: encodeWireU64(plannedTransientWorkingSetBytes),
     maxTransientWorkingSetBytes: encodeWireU64(BigInt(maxTransientWorkingSetBytes)),
     program,
-    launch: semanticLaunch(semantic.logicalShape, semantic.elementCount, launchMode),
+    launch: semanticLaunch(
+      semantic.logicalShape,
+      semantic.elementCount,
+      semantic.source.dtypeBytes,
+      launchMode,
+    ),
     sourceLocationRange: emitted.sourceLocationRange,
     destinationLocationRange: emitted.destinationLocationRange,
   });
@@ -346,12 +359,16 @@ async function prepareSemanticViewCopyWgslWithLaunchMode(
 function semanticLaunch(
   logicalShape: readonly bigint[],
   elementCount: bigint,
+  dtypeBytes: number,
   launchMode: SemanticViewCopyLaunchMode,
 ): WgslKernelLaunch {
   if (launchMode !== "runtime-rectangular-prefix") {
+    const invocationCount = dtypeBytes === 2
+      ? divideRoundUp(elementCount, 2n)
+      : elementCount;
     return Object.freeze({
       dispatchCount: Object.freeze([
-        Number(elementCount),
+        Number(invocationCount),
         1,
         1,
       ] as const),
@@ -517,7 +534,7 @@ export async function runSemanticViewCopyWebGpu(
   let execution: Promise<WgslKernelRunResult> | undefined;
   try {
     if (!HOST_IS_LITTLE_ENDIAN) {
-      fail("BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE", "$.environment.byteOrder", "bit-exact u32 view-copy bindings require a little-endian JavaScript host");
+      fail("BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE", "$.environment.byteOrder", "bit-exact storage view-copy bindings require a little-endian JavaScript host");
     }
     const sourceSlots = validateWords(
       buffers.sourceWords,
@@ -573,10 +590,45 @@ export async function runSemanticViewCopyWebGpu(
   }
 }
 
-function verifyStaticWebGpuProfile(prepared: PreparedViewCopySpecialization): void {
+function verifyWebGpuProfile(
+  prepared: PreparedViewCopySpecialization,
+  launchMode: SemanticViewCopyLaunchMode,
+): void {
+  if (prepared.source.dtypeBytes !== 2 && prepared.source.dtypeBytes !== 4) {
+    fail(
+      "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
+      "$.operation.dtype",
+      "WebGPU view-copy supports exact 16-bit or 32-bit storage only",
+    );
+  }
+  if (
+    prepared.source.dtypeBytes !== prepared.destination.dtypeBytes
+  ) {
+    fail(
+      "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
+      "$.operation.dtype",
+      "WebGPU view-copy requires matching source and destination storage widths",
+    );
+  }
+  if (prepared.source.dtypeBytes === 2) {
+    if (launchMode !== "static") {
+      fail(
+        "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
+        "$.launchMode",
+        "packed-16 WebGPU view-copy currently supports static launch only",
+      );
+    }
+    if (prepared.destination.viewByteOffset % 4n !== 0n) {
+      fail(
+        "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
+        "$.destination.viewByteOffset",
+        "packed-16 WebGPU destination must begin on a 32-bit word boundary",
+      );
+    }
+  }
   for (const [role, accessor] of [["source", prepared.source], ["destination", prepared.destination]] as const) {
     if (accessor.allocationByteLength % 4n !== 0n) {
-      fail("BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE", `$.${role}.allocationByteLength`, "32-bit scalar root allocation length must be a multiple of four bytes");
+      fail("BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE", `$.${role}.allocationByteLength`, "WebGPU storage root allocation length must be a multiple of four bytes");
     }
     if (prepared.elementCount > 0n && accessor.allocationByteLength === 0n) {
       fail("BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE", `$.${role}.allocationByteLength`, "nonempty WebGPU view-copy requires nonempty root allocations");
@@ -684,7 +736,10 @@ function readAndVerifyDeviceFacts(
   if (limits.maxBindingsPerBindGroup < 2 || limits.maxStorageBuffersPerShaderStage < 2) {
     fail("BG-WEBGPU-VIEW-COPY-DEVICE-LIMIT", "$.device.limits", "device cannot bind the two required storage allocations");
   }
-  const workgroupCount = divideRoundUp(prepared.semantic.elementCount, BigInt(prepared.workgroupSize));
+  const workgroupCount = divideRoundUp(
+    BigInt(prepared.launch.dispatchCount[0]),
+    BigInt(prepared.workgroupSize),
+  );
   if (workgroupCount > BigInt(limits.maxComputeWorkgroupsPerDimension)) {
     fail("BG-WEBGPU-VIEW-COPY-DEVICE-LIMIT", "$.launch", `dispatch requires ${workgroupCount} workgroups; device limit is ${limits.maxComputeWorkgroupsPerDimension}`);
   }
@@ -853,8 +908,14 @@ function createTrace(
     backendVersion: prepared.backendVersion,
     logicalShape: Object.freeze(prepared.semantic.logicalShape.map((extent) => encodeWireU64(extent))),
     elementCount: encodeWireU64(prepared.semantic.elementCount),
-    bytesRead: encodeWireU64(prepared.semantic.readElements * 4n),
-    bytesWritten: encodeWireU64(prepared.semantic.elementCount * 4n),
+    bytesRead: encodeWireU64(
+      prepared.semantic.readElements *
+      BigInt(prepared.semantic.source.dtypeBytes),
+    ),
+    bytesWritten: encodeWireU64(
+      prepared.semantic.elementCount *
+      BigInt(prepared.semantic.destination.dtypeBytes),
+    ),
     plannedTransientGpuBytes: prepared.plannedTransientGpuBytes,
     plannedTransientHostBytes: prepared.plannedTransientHostBytes,
     plannedTransientWorkingSetBytes: prepared.plannedTransientWorkingSetBytes,

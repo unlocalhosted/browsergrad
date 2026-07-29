@@ -37,12 +37,16 @@ interface LoweredInteger extends IntegerRange {
   readonly code: string;
 }
 
+interface LoweredPacked16Address extends IntegerRange {
+  readonly byteCode: string;
+}
+
 interface LoweringContext {
   readonly prepared: PreparedViewCopySpecialization;
   readonly path: string;
 }
 
-/** Lowers only an already verified and specialized exact 32-bit word profile. */
+/** Lowers only an already verified and specialized exact 16-bit or 32-bit storage profile. */
 export function emitSemanticViewCopyWgsl(
   layout: LayoutArtifactPayloadV1,
   prepared: PreparedViewCopySpecialization,
@@ -67,6 +71,97 @@ export function emitSemanticViewCopyWgsl(
     prepared,
     path: "$.destination.indexMap.inBounds",
   });
+  if (prepared.source.dtypeBytes === 2) {
+    if (prepared.destination.dtypeBytes !== 2) {
+      return unsupported(
+        "$.operation.dtype",
+        "packed-16 lowering requires matching source and destination storage widths",
+      );
+    }
+    if (launchMode !== "static") {
+      return unsupported(
+        "$.launchMode",
+        "packed-16 lowering currently supports static launch only",
+      );
+    }
+    if (prepared.operation.source.invalidSource.kind !== "reject") {
+      return unsupported(
+        "$.operation.source.invalidSource",
+        "packed-16 lowering requires reject-on-invalid-source",
+      );
+    }
+    const sourceAddress = lowerPacked16Address(
+      sourceLocation,
+      sourceMap.locationUnit,
+      prepared.source.viewByteOffset,
+      "$.source",
+    );
+    const destinationAddress = lowerPacked16Address(
+      destinationLocation,
+      destinationMap.locationUnit,
+      prepared.destination.viewByteOffset,
+      "$.destination",
+    );
+    const elementCount = asU32(prepared.elementCount, "$.elementCount");
+    const source = [
+      "@group(0) @binding(0) var<storage, read> source_words: array<u32>;",
+      "@group(0) @binding(1) var<storage, read_write> destination_words: array<u32>;",
+      "",
+      "fn copy_packed16_element(linear_index: u32) {",
+      `  if (linear_index >= ${elementCount}u) {`,
+      "    return;",
+      "  }",
+      ...emitCoordinates(prepared.logicalShape),
+      `  if (!(${destinationPredicate})) {`,
+      "    return;",
+      "  }",
+      `  if (!(${sourcePredicate})) {`,
+      "    return;",
+      "  }",
+      `  let source_byte_address: i32 = ${sourceAddress.byteCode};`,
+      "  let source_word: u32 = u32(source_byte_address / 4i);",
+      "  let source_shift: u32 = u32((source_byte_address % 4i) * 8i);",
+      "  let copied_bits: u32 = (source_words[source_word] >> source_shift) & 0xffffu;",
+      `  let destination_byte_address: i32 = ${destinationAddress.byteCode};`,
+      "  let destination_word: u32 = u32(destination_byte_address / 4i);",
+      "  let destination_shift: u32 = u32((destination_byte_address % 4i) * 8i);",
+      "  let destination_mask: u32 = 0xffffu << destination_shift;",
+      "  let destination_bits: u32 = destination_words[destination_word];",
+      "  destination_words[destination_word] = (destination_bits & ~destination_mask) | (copied_bits << destination_shift);",
+      "}",
+      "",
+      `@compute @workgroup_size(${workgroupSize}, 1, 1)`,
+      "fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {",
+      "  let first_element_index: u32 = global_id.x * 2u;",
+      `  if (first_element_index >= ${elementCount}u) {`,
+      "    return;",
+      "  }",
+      "  copy_packed16_element(first_element_index);",
+      "  copy_packed16_element(first_element_index + 1u);",
+      "}",
+      "",
+    ].join("\n");
+    return Object.freeze({
+      source,
+      sourceLocationRange: Object.freeze({
+        minimum: sourceLocation.minimum,
+        maximum: sourceLocation.maximum,
+      }),
+      destinationLocationRange: Object.freeze({
+        minimum: destinationLocation.minimum,
+        maximum: destinationLocation.maximum,
+      }),
+    });
+  }
+  if (
+    prepared.source.dtypeBytes !== 4 ||
+    prepared.destination.dtypeBytes !== 4
+  ) {
+    return unsupported(
+      "$.operation.dtype",
+      "WGSL view-copy supports exact 16-bit or 32-bit storage only",
+    );
+  }
   const sourceWord = lowerWordAddress(
     sourceLocation,
     sourceMap.locationUnit,
@@ -301,6 +396,35 @@ function lowerWordAddress(
     code: `u32(${byteCode} / 4i)`,
     minimum: divideExactly(byteMinimum, 4n, `${path}.wordAddress`),
     maximum: divideExactly(byteMaximum, 4n, `${path}.wordAddress`),
+  };
+}
+
+function lowerPacked16Address(
+  location: LoweredInteger,
+  unit: "element" | "byte",
+  viewByteOffset: bigint,
+  path: string,
+): LoweredPacked16Address {
+  if (viewByteOffset % 2n !== 0n) {
+    unsupported(
+      `${path}.viewByteOffset`,
+      "packed-16 view byte offset must be halfword aligned",
+    );
+  }
+  const byteScale = unit === "element" ? 2n : 1n;
+  const scaledMinimum = location.minimum * byteScale;
+  const scaledMaximum = location.maximum * byteScale;
+  checkedRange(scaledMinimum, scaledMaximum, `${path}.scaledLocation`);
+  const byteMinimum = viewByteOffset + scaledMinimum;
+  const byteMaximum = viewByteOffset + scaledMaximum;
+  checkedRange(byteMinimum, byteMaximum, `${path}.byteAddress`);
+  const scaleCode = unit === "element"
+    ? `(${location.code} * 2i)`
+    : location.code;
+  return {
+    byteCode: `(${wgslI32(viewByteOffset)} + ${scaleCode})`,
+    minimum: byteMinimum,
+    maximum: byteMaximum,
   };
 }
 
