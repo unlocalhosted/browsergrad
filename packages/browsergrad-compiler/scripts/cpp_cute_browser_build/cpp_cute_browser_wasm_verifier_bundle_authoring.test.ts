@@ -19,8 +19,8 @@ describe("C++/CuTe package Wasm verifier Worker bundle authoring", () => {
       authority: "package-wasm-verifier-bundle-authoring-projection-only",
       entryPath: "src/cpp_cute_browser_wasm_verifier_module.ts",
       outputFileName: "browsergrad-cpp-cute-wasm-verifier.mjs",
-      sha256: "06ffb66e4e808e9df030cc3fe2981fa3adddf13d03780680abb091cbcbd4b9eb",
-      byteLength: 158_314,
+      sha256: "3f41d964119c0dc56e1e01ff0aca20886e93c96e7343e4d49fc646b2dc90279c",
+      byteLength: 159_032,
       staticImportCount: 0,
       dynamicImportCount: 0,
     });

@@ -237,11 +237,12 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
       resource.cases.length !== EXPECTED_CASES.length) {
     mismatch("$", "strict matrix envelope is inconsistent");
   }
-  if (resource.packageBinding.compilerWorkerSha256 !== worker.sha256 ||
-      resource.packageBinding.compilerWorkerSha256 !==
-        CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256 ||
-      resource.packageBinding.verifierWorkerSha256 !==
-        CPP_CUTE_BROWSER_STRICT_COMPILE_VERIFIER_WORKER_BUNDLE_SHA256 ||
+  if (String(resource.packageBinding.compilerWorkerSha256) !==
+        String(worker.sha256) ||
+      String(resource.packageBinding.compilerWorkerSha256) !==
+        String(CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256) ||
+      String(resource.packageBinding.verifierWorkerSha256) !==
+        String(CPP_CUTE_BROWSER_STRICT_COMPILE_VERIFIER_WORKER_BUNDLE_SHA256) ||
       resource.packageBinding.matrixSourceRevision !==
         CPP_CUTE_BROWSER_STRICT_COMPILE_SOURCE_REVISION ||
       resource.packageBinding.workerBundleAuthority !==
