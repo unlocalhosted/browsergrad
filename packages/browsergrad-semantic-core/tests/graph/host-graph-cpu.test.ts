@@ -216,7 +216,7 @@ function rectangularDynamicProgram(
   ) * 4;
   return {
     kind: "host-graph",
-    version: { major: 1, minor: 12 },
+    version: { major: 1, minor: shape.length === 4 ? 14 : 12 },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire("1"),
     resources: [
@@ -1409,6 +1409,10 @@ describe("host graph CPU reference", () => {
       {
         shape: [2, 3, 4],
         extents: [2, 2, 3],
+      },
+      {
+        shape: [2, 2, 3, 4],
+        extents: [1, 2, 2, 3],
       },
     ] as const;
     for (const testCase of cases) {

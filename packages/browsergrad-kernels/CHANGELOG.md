@@ -9,6 +9,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Host-graph program version 1.14 and WebGPU backend 1.17 add request-time
+  rank-4 rectangular prefix dispatch without widening the version-1.12 or
+  produced-resource version-1.13 rank limits. The canonical 16-byte uniform
+  carries all four extents; x/y retain the trailing axes while z flattens the
+  two leading selected axes, whose coordinates are reconstructed behind the
+  extent guard before semantic evaluation. Required real-device evidence
+  expands to 38 complete CPU/WebGPU parity cases with small/full rank-4
+  pipeline-identity stability and independent flattened-z device admission.
 - Host-graph program version 1.13 and WebGPU backend 1.16 add one
   produced-resource rank-2/rank-3 rectangular prefix dispatch under the
   existing one-feedback-node bound. One ordered rank-local four-byte temporary

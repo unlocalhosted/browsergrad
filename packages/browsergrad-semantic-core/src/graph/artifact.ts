@@ -75,7 +75,7 @@ import {
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 13;
+export const HOST_GRAPH_ARTIFACT_MINOR = 14;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
@@ -84,7 +84,8 @@ export const HOST_GRAPH_MAX_CONDITIONAL_BODY_NODES = 64;
 export const HOST_GRAPH_MAX_REPEAT_ITERATIONS = 1_024;
 export const HOST_GRAPH_MAX_RUNTIME_CONTROLS = 64;
 export const HOST_GRAPH_MIN_RECTANGULAR_DYNAMIC_RANK = 2;
-export const HOST_GRAPH_MAX_RECTANGULAR_DYNAMIC_RANK = 3;
+export const HOST_GRAPH_MAX_RECTANGULAR_DYNAMIC_RANK = 4;
+const HOST_GRAPH_MAX_PRODUCED_RECTANGULAR_DYNAMIC_RANK = 3;
 export const HOST_GRAPH_MAX_RESOURCE_CONDITIONALS = 1;
 export const HOST_GRAPH_MAX_RESOURCE_FEEDBACK_NODES = 1;
 export const HOST_GRAPH_MAX_EXPANDED_NODES = 16_384;
@@ -403,12 +404,13 @@ function parseProgram(
       version.minor !== 10 &&
       version.minor !== 11 &&
       version.minor !== 12 &&
-      version.minor !== 13)
+      version.minor !== 13 &&
+      version.minor !== 14)
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 through 1.13 only",
+      "host graph program reader supports versions 1.0 through 1.14 only",
     );
   }
   if (version.minor !== envelopeMinor) {
@@ -716,7 +718,7 @@ function parseNode(
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, version-1.10 resource repeat, version-1.11 resource dynamic dispatch, version-1.12 runtime rectangular dynamic dispatch, and version-1.13 resource rectangular dynamic dispatch nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, version-1.10 resource repeat, version-1.11 resource dynamic dispatch, version-1.12 runtime rectangular dynamic dispatch, version-1.13 resource rectangular dynamic dispatch, and version-1.14 request-time rank-4 rectangular dispatch nodes",
   );
 }
 
@@ -1293,6 +1295,7 @@ function parseDynamicDispatchNode(
     const maxExtents = parseRectangularDynamicMaximum(
       field(object, "maxExtents", path),
       `${path}.maxExtents`,
+      HOST_GRAPH_MAX_PRODUCED_RECTANGULAR_DYNAMIC_RANK,
     );
     return {
       ...parseDispatchFields(object, path),
@@ -1333,6 +1336,9 @@ function parseDynamicDispatchNode(
     const maxExtents = parseRectangularDynamicMaximum(
       field(object, "maxExtents", path),
       `${path}.maxExtents`,
+      programMinor >= 14
+        ? HOST_GRAPH_MAX_RECTANGULAR_DYNAMIC_RANK
+        : HOST_GRAPH_MAX_PRODUCED_RECTANGULAR_DYNAMIC_RANK,
     );
     return {
       ...parseDispatchFields(object, path),
@@ -1419,16 +1425,17 @@ function parseDynamicDispatchNode(
 function parseRectangularDynamicMaximum(
   value: JsonValue,
   path: string,
+  maxRank: number,
 ): readonly WireU64[] {
   const values = arrayValue(value, path);
   if (
     values.length < HOST_GRAPH_MIN_RECTANGULAR_DYNAMIC_RANK ||
-    values.length > HOST_GRAPH_MAX_RECTANGULAR_DYNAMIC_RANK
+    values.length > maxRank
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       path,
-      `rectangular dynamic dispatch rank must be between ${HOST_GRAPH_MIN_RECTANGULAR_DYNAMIC_RANK} and ${HOST_GRAPH_MAX_RECTANGULAR_DYNAMIC_RANK}`,
+      `rectangular dynamic dispatch rank must be between ${HOST_GRAPH_MIN_RECTANGULAR_DYNAMIC_RANK} and ${maxRank}`,
     );
   }
   return Object.freeze(values.map((extent, axis) => {

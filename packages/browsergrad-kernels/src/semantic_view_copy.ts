@@ -368,10 +368,19 @@ function semanticLaunch(
       ] as const),
     });
   }
+  if (logicalShape.length === 4) {
+    return Object.freeze({
+      dispatchCount: Object.freeze([
+        Number(logicalShape[3]),
+        Number(logicalShape[2]),
+        Number(logicalShape[0]! * logicalShape[1]!),
+      ] as const),
+    });
+  }
   fail(
     "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
     "$.semantic.logicalShape",
-    "rectangular dynamic launch supports semantic ranks 2 and 3 only",
+    "rectangular dynamic launch supports semantic ranks 2 through 4 only",
   );
 }
 

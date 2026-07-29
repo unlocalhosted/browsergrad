@@ -187,6 +187,10 @@ ordered, rank-local four-byte temporary u32 per axis. Each source writer must
 dominate the dispatch; the dispatch cannot also bind a source as data. Zero,
 above-maximum, duplicate-axis/resource, unordered, malformed, and pre-version
 forms fail closed.
+Version 1.14 extends only request-time rectangular dispatch to rank 4. The
+four positive bounded controls and maxima retain the same canonical axis,
+maximum-product admission, and fail-stop contracts; versions 1.12 and 1.13
+continue to reject rank 4 exactly.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -255,6 +259,9 @@ Version-1.13 reads every rectangular extent from private rank-local storage
 only after all ordered producers execute, applies the same per-axis bounds and
 maximum-product admission, and publishes the same logical-extent/product
 completion only after whole-graph success.
+Version-1.14 executes the exact selected rank-4 dense rectangle through the
+same coordinate-domain CPU path and reports all four extents plus their
+product. Produced-resource rank-4 launch remains outside this version.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -274,7 +281,7 @@ GPU-produced loop count or dynamic-launch prefix, and version 1.13 reuses it
 for one rank-2/rank-3 produced rectangle. Neither adapter grants
 transport, topology, retries, event
 timestamps or external waits, repeated/device-side feedback,
-rank-4-or-higher dynamic domains,
+produced-resource rank-4 or rank-5-and-higher dynamic domains,
 worker-mesh, native-companion,
 performance, or release authority.
 

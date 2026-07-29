@@ -20,7 +20,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   incompatible bindings, and invalid all-reduce rank/numerical contracts; and
   fixes a fail-stop, no-partial-output-commit failure model without claiming
   execution, transport, topology, retries, or backend pipelines.
-- Additive host-graph versions 1.1 through 1.13 add exact whole-allocation
+- Additive host-graph versions 1.1 through 1.14 add exact whole-allocation
   copies, terminal fail-stop materialization, dependency-ordered completion
   events, bounded fixed-count repetition, captured-input u32 conditionals, and
   runtime-control u32 conditionals, one ordered temporary-resource u32
@@ -46,13 +46,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   product admission, and logical-extent completion records. Version 1.13 adds
   one produced-resource rank-2/rank-3 rectangle through distinct ordered
   rank-local temporary-u32 extent sources under the existing one-feedback-node
-  bound. No profile grants nested/device-side control, rank-4-or-
-  higher dynamic domains, or repeated feedback.
+  bound. Version 1.14 adds request-time rank-4 rectangles while preserving
+  exact rank-2/rank-3 limits for versions 1.12 and 1.13. No profile grants
+  nested/device-side control, produced-resource rank-4 or rank-5-and-higher
+  dynamic domains, or repeated feedback.
 - Authority-bound `browsergrad.host-graph.cpu-reference@1` preparation and
   execution for dispatches, all-reduces, copies, events, materialization,
   fixed/runtime/produced-resource repetition, bounded request-time and
-  produced-resource linear dynamic dispatch, rank-2/rank-3 request-time
-  or produced-resource rectangular dynamic dispatch, and bounded
+  produced-resource linear dynamic dispatch, rank-2-through-rank-4
+  request-time or rank-2/rank-3 produced-resource rectangular dynamic
+  dispatch, and bounded
   input/runtime-control/resource conditionals. The
   reference snapshots rank-local inputs and exact runtime controls into private
   state, bounds memory, element operations, preparation/execution time, and

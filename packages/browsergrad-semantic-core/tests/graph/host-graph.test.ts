@@ -1706,6 +1706,31 @@ describe("host graph artifact", () => {
       duplicateResource,
       options,
     ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.duplicateId);
+
+    const unsupportedRank = clone(
+      resourceRectangularDynamicDispatchProgram(artifacts),
+    );
+    unsupportedRank.version.minor = 14;
+    const unsupportedRankNode = unsupportedRank.nodes.find((node) =>
+      node.kind === "dynamic-dispatch");
+    if (
+      unsupportedRankNode?.kind !== "dynamic-dispatch" ||
+      unsupportedRankNode.mode !== "resource-u32-rectangular-prefix"
+    ) {
+      throw new Error("missing resource rectangular dynamic dispatch");
+    }
+    unsupportedRankNode.maxExtents = [
+      wire("2"),
+      wire("2"),
+      wire("1"),
+      wire("1"),
+    ];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      unsupportedRank,
+      options,
+    ))).diagnostic.code).toBe(
+      GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+    );
   });
 
   it("normalizes one bounded produced-resource dynamic dispatch in version 1.11", async () => {
@@ -2151,7 +2176,7 @@ describe("host graph artifact", () => {
 
   it("rejects copy version, mode, resource, dtype, and hazard drift", async () => {
     const future = clone(copyProgram());
-    future.version.minor = 14 as unknown as typeof future.version.minor;
+    future.version.minor = 15 as unknown as typeof future.version.minor;
     expect((await diagnostic(() => createVerifiedHostGraphArtifact(
       future,
       { kernelArtifacts: [], layoutArtifacts: [] },

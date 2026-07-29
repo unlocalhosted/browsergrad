@@ -285,7 +285,7 @@ describe("verified materializing view-copy", () => {
     }
   });
 
-  it("executes exact rank-2 and rank-3 rectangular prefixes", async () => {
+  it("executes exact rank-2 through rank-4 rectangular prefixes", async () => {
     const cases = [
       {
         shape: ["3", "4"] as const,
@@ -295,6 +295,11 @@ describe("verified materializing view-copy", () => {
       {
         shape: ["2", "3", "4"] as const,
         extents: [2n, 2n, 3n] as const,
+        expectedIndexes: [0, 1, 2, 4, 5, 6, 12, 13, 14, 16, 17, 18],
+      },
+      {
+        shape: ["2", "2", "3", "4"] as const,
+        extents: [1n, 2n, 2n, 3n] as const,
         expectedIndexes: [0, 1, 2, 4, 5, 6, 12, 13, 14, 16, 17, 18],
       },
     ];

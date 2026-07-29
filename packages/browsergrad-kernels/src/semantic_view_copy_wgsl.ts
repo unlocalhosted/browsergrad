@@ -136,14 +136,45 @@ function emitLaunchPrelude(
   readonly body: readonly string[];
 }> {
   if (mode === "runtime-rectangular-prefix") {
-    if (shape.length !== 2 && shape.length !== 3) {
+    if (
+      shape.length !== 2 &&
+      shape.length !== 3 &&
+      shape.length !== 4
+    ) {
       return unsupported(
         "$.shape",
-        "rectangular dynamic WGSL launch supports semantic ranks 2 and 3 only",
+        "rectangular dynamic WGSL launch supports semantic ranks 2 through 4 only",
       );
     }
     const staticExtents = shape.map((extent, axis) =>
       asU32(extent, `$.shape[${axis}]`));
+    const declarations = Object.freeze([
+      "struct BrowserGradDynamicRegion {",
+      "  extent_0: u32,",
+      "  extent_1: u32,",
+      "  extent_2: u32,",
+      "  extent_3: u32,",
+      "}",
+      `@group(0) @binding(${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_BINDING}) var<uniform> ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}: BrowserGradDynamicRegion;`,
+    ]);
+    if (shape.length === 4) {
+      const leadingStaticProduct = asU32(
+        shape[0]! * shape[1]!,
+        "$.shape[0:2]",
+      );
+      return Object.freeze({
+        declarations,
+        body: Object.freeze([
+          `  if (global_id.x >= ${staticExtents[3]}u || global_id.x >= ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_3 || global_id.y >= ${staticExtents[2]}u || global_id.y >= ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_2 || global_id.z >= ${leadingStaticProduct}u || global_id.z >= (${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_0 * ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_1)) {`,
+          "    return;",
+          "  }",
+          `  let coordinate_0: i32 = i32(global_id.z / ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_1);`,
+          `  let coordinate_1: i32 = i32(global_id.z % ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_1);`,
+          "  let coordinate_2: i32 = i32(global_id.y);",
+          "  let coordinate_3: i32 = i32(global_id.x);",
+        ]),
+      });
+    }
     const globalAxes = shape.length === 2
       ? ["y", "x"] as const
       : ["z", "y", "x"] as const;
@@ -152,15 +183,7 @@ function emitLaunchPrelude(
       `global_id.${globalAxis} >= ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_${axis}`,
     ]);
     return Object.freeze({
-      declarations: Object.freeze([
-        "struct BrowserGradDynamicRegion {",
-        "  extent_0: u32,",
-        "  extent_1: u32,",
-        "  extent_2: u32,",
-        "  extent_3: u32,",
-        "}",
-        `@group(0) @binding(${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_BINDING}) var<uniform> ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}: BrowserGradDynamicRegion;`,
-      ]),
+      declarations,
       body: Object.freeze([
         `  if (${bounds.join(" || ")}) {`,
         "    return;",

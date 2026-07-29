@@ -78,6 +78,8 @@ const CASE_IDS = Object.freeze([
   "f32-rectangular-dynamic-rank2-large",
   "f32-rectangular-dynamic-rank3-small",
   "f32-rectangular-dynamic-rank3-large",
+  "f32-rectangular-dynamic-rank4-small",
+  "f32-rectangular-dynamic-rank4-large",
   "f32-resource-rectangular-dynamic-rank2-small",
   "f32-resource-rectangular-dynamic-rank2-large",
   "f32-resource-rectangular-dynamic-rank3-small",
@@ -287,6 +289,16 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         "f32-rectangular-dynamic-rank3-large",
         [2, 3, 4],
         [2, 3, 4],
+      ),
+      prepareRectangularDynamicDispatchCase(
+        "f32-rectangular-dynamic-rank4-small",
+        [2, 2, 3, 4],
+        [1, 2, 2, 3],
+      ),
+      prepareRectangularDynamicDispatchCase(
+        "f32-rectangular-dynamic-rank4-large",
+        [2, 2, 3, 4],
+        [2, 2, 3, 4],
       ),
       prepareResourceRectangularDynamicDispatchCase(
         "f32-resource-rectangular-dynamic-rank2-small",
@@ -627,7 +639,7 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
     expect(unalignedResourceDynamic127?.expandedStepCount).toBe(4);
     expect(unalignedResourceDynamic65?.midGraphFeedbackCount).toBe(1);
     expect(unalignedResourceDynamic127?.midGraphFeedbackCount).toBe(1);
-    for (const rank of [2, 3] as const) {
+    for (const rank of [2, 3, 4] as const) {
       const small = completedCases.find(({ caseId }) =>
         caseId === `f32-rectangular-dynamic-rank${rank}-small`);
       const large = completedCases.find(({ caseId }) =>
@@ -639,6 +651,7 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       expect(large?.expandedStepCount).toBe(2);
       expect(small?.completedDynamicDispatches).toHaveLength(1);
       expect(large?.completedDynamicDispatches).toHaveLength(1);
+      if (rank === 4) continue;
       const resourceSmall = completedCases.find(({ caseId }) =>
         caseId ===
           `f32-resource-rectangular-dynamic-rank${rank}-small`);
@@ -1188,10 +1201,17 @@ async function prepareRectangularDynamicDispatchCase(
     | "f32-rectangular-dynamic-rank2-small"
     | "f32-rectangular-dynamic-rank2-large"
     | "f32-rectangular-dynamic-rank3-small"
-    | "f32-rectangular-dynamic-rank3-large",
-  shape: readonly [number, number] | readonly [number, number, number],
+    | "f32-rectangular-dynamic-rank3-large"
+    | "f32-rectangular-dynamic-rank4-small"
+    | "f32-rectangular-dynamic-rank4-large",
+  shape:
+    | readonly [number, number]
+    | readonly [number, number, number]
+    | readonly [number, number, number, number],
   logicalExtents:
-    readonly [number, number] | readonly [number, number, number],
+    | readonly [number, number]
+    | readonly [number, number, number]
+    | readonly [number, number, number, number],
 ): Promise<PreparedCase> {
   const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
     inputShape: shape.map((extent) => parseWireI64(String(extent))),
@@ -1500,7 +1520,10 @@ function dynamicDispatchProgram(
 
 function rectangularDynamicDispatchProgram(
   artifacts: VerifiedViewCopyArtifacts,
-  shape: readonly [number, number] | readonly [number, number, number],
+  shape:
+    | readonly [number, number]
+    | readonly [number, number, number]
+    | readonly [number, number, number, number],
 ): HostGraphProgram {
   const staticDispatch = dispatch(artifacts);
   const elementCount = shape.reduce(
@@ -1509,7 +1532,7 @@ function rectangularDynamicDispatchProgram(
   );
   return {
     kind: "host-graph",
-    version: { major: 1, minor: 12 },
+    version: { major: 1, minor: shape.length === 4 ? 14 : 12 },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire(2),
     resources: [

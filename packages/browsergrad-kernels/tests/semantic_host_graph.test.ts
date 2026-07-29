@@ -168,7 +168,7 @@ function rectangularDynamicProgram(
   );
   return {
     kind: "host-graph",
-    version: { major: 1, minor: 12 },
+    version: { major: 1, minor: shape.length === 4 ? 14 : 12 },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire("1"),
     resources: [
@@ -1001,8 +1001,12 @@ describe("semantic host-graph WebGPU preparation", () => {
     });
   });
 
-  it("prewarms bounded rank-2 and rank-3 rectangular dynamic dispatch", async () => {
-    for (const shape of [[3, 4], [2, 3, 4]] as const) {
+  it("prewarms bounded rank-2 through rank-4 rectangular dynamic dispatch", async () => {
+    for (const shape of [
+      [3, 4],
+      [2, 3, 4],
+      [2, 2, 3, 4],
+    ] as const) {
       const artifacts = await rectangularIdentityArtifacts(shape);
       const graph = await verified(
         rectangularDynamicProgram(artifacts, shape),
@@ -1114,6 +1118,33 @@ describe("semantic host-graph WebGPU preparation", () => {
     )).rejects.toMatchObject({
       code: "BG-WEBGPU-GRAPH-DEVICE-LIMIT",
       path: "$.steps[0].launch[1]",
+    });
+
+    const rankFourShape = [2, 2, 2, 2] as const;
+    const rankFourArtifacts = await rectangularIdentityArtifacts(
+      rankFourShape,
+    );
+    const rankFourGraph = await verified(
+      rectangularDynamicProgram(rankFourArtifacts, rankFourShape),
+      rankFourArtifacts,
+    );
+    const rankFourPrepared = await prepareSemanticHostGraphWebGpu(
+      rankFourGraph,
+      { ...artifactOptions(rankFourArtifacts), workgroupSize: 64 },
+    );
+    await expect(runSemanticHostGraphWebGpu(
+      device,
+      rankFourPrepared,
+      {
+        inputs: [input(0, new Uint8Array(64))],
+        controls: rankFourShape.map((extent, axis) => ({
+          controlId: `prefix-axis-${axis}`,
+          value: wire(String(extent)),
+        })),
+      },
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-DEVICE-LIMIT",
+      path: "$.steps[0].launch[2]",
     });
   });
 
