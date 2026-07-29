@@ -48,9 +48,9 @@ rank-1-through-rank-4 identities retain their exact meaning. The separate
 negative coordinate scales only in rank-2/rank-3 source maps and predicates;
 the distinct
 `browsergrad.view-copy.signed-affine-rank4-rank5-word32@1` profile provides
-the same source capability at ranks 4 and 5. The destination remains
-positive-affine, dense, and exactly proved. Signed rank 1 remains an explicit
-refusal.
+the same source capability at ranks 4 and 5, and
+`browsergrad.view-copy.signed-affine-rank1-word32@1` covers rank 1. The
+destination remains positive-affine, dense, and exactly proved.
 
 `/kernel` also defines one frontend-neutral logical GEMM tile with exact dense
 f32 operand/view roles, boundary policy, increasing-K accumulation order, and

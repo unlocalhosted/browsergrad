@@ -135,14 +135,14 @@ Portable profiles support exact same-dtype f32/i32/u32 words, disjoint global
 allocations, nonzero offsets, broadcast, guarded float fill, and:
 
 - positive-affine equal-rank layouts from rank 1 through rank 5; and
-- distinct signed-affine rank-2/rank-3 and rank-4/rank-5 source profiles with
-  a positive-affine dense destination.
+- distinct signed-affine rank-1, rank-2/rank-3, and rank-4/rank-5 source
+  profiles with a positive-affine dense destination.
 
-Required Apple Metal 3 backend-2.3 evidence passes 19 complete-destination,
+Required Apple Metal 3 backend-2.4 evidence passes 20 complete-destination,
 bit-exact CPU/WebGPU cases covering those profiles, dynamic specialization,
 and zero-extent no-submit behavior. Exact identities stay in the ledger.
-Signed rank-1 maps, rank 6, packed/16-bit/bf16/f64 storage, overlap, and other
-undeclared layouts remain explicit refusals.
+Rank 6, signed destinations, packed/16-bit/bf16/f64 storage, overlap, and
+other undeclared layouts remain explicit refusals.
 
 ### Tiled kernels and framework convergence
 
@@ -689,12 +689,13 @@ The distinct
 negative coordinate scale only in a fully specialized rank-2/rank-3 source
 location or source predicate. The distinct
 `browsergrad.view-copy.signed-affine-rank4-rank5-word32@1` profile applies the
-same source rule at ranks 4 and 5 without widening the lower-rank identity. A
-nonnegative view byte offset rebases every proved guarded source word into its
-root allocation. The destination remains positive-affine, dense, and
-injective, and the same CPU coordinate proof checks every guarded source
-access and complete destination write. Existing positive-affine profile
-identities retain their exact meaning. Signed rank 1, rank 6, integer
+same source rule at ranks 4 and 5 without widening the lower-rank identity.
+`browsergrad.view-copy.signed-affine-rank1-word32@1` provides the rank-1
+profile. A nonnegative view byte offset rebases every proved guarded source
+word into its root allocation. The destination remains positive-affine,
+dense, and injective, and the same CPU coordinate proof checks every guarded
+source access and complete destination write. Existing positive-affine profile
+identities retain their exact meaning. Rank 6, signed destinations, integer
 division/modulo, 16-bit packed storage, bf16, f64, overlap, and non-global
 memory remain outside the declared portable profiles.
 
@@ -732,6 +733,7 @@ this existing signed-i32 path; it adds no second executor, source-shaped
 kernel, address clamping, or unsigned reinterpretation.
 Backend 2.3.0 applies that same path to the separately named rank-4/rank-5
 profile and reuses the canonical mixed-radix coordinate reconstruction.
+Backend 2.4.0 applies the same path to the separately named rank-1 profile.
 
 ### Logical tiles versus physical schedules
 
@@ -2077,6 +2079,14 @@ across TypeScript and Python.
   `b6647fc142d285ca7b9f4322a63bd6de5dcb965395517e2937af033386e857ab`,
   and device profile
   `9589abc8fafb412d83194febaf210f7f89da7a580bf20d3272e1eef9dcda2f66`.
+- Add the distinct signed-affine rank-1 word32 source profile while preserving
+  every previous signed and positive-affine identity. The required 20-case
+  Apple Metal 3 lane records correctness artifact
+  `803dc85c4732ac6d38fe42dc175f56542663918f231d4c13b6aae596af1f2b8f`,
+  case set
+  `2082651176bced642137045555353528972e4a5b6ca3bef81cf273ed1dd3b7ed`,
+  and device profile
+  `9589abc8fafb412d83194febaf210f7f89da7a580bf20d3272e1eef9dcda2f66`.
 
 **Exit:** two frontend paths and two execution tiers consume the same view/index
 fixtures; reference and WebGPU do not reconstruct offsets independently;
@@ -2085,7 +2095,9 @@ widening the frozen tensor-plan schema or treating device absence as success.
 The separately named rank-5 portable profile also passes complete CPU/WebGPU
 parity without reinterpreting an older profile. The separately named
 signed-affine profiles prove exact negative source strides at ranks 2 through
-5 without widening another identity or admitting signed destinations.
+5 without widening another identity or admitting signed destinations. The
+rank-1 signed profile completes that source capability across ranks 1 through
+5.
 
 ### Gate 3 — Real C++/CuTe frontend slice
 

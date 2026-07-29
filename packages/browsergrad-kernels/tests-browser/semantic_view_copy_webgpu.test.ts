@@ -59,6 +59,7 @@ const PLANNED_CASE_IDS = Object.freeze([
   "rank1-positive-stride",
   "rank4-permutation",
   "rank5-permutation",
+  "rank1-u32-negative-stride",
   "rank2-negative-stride",
   "rank3-u32-negative-stride",
   "rank4-negative-stride",
@@ -421,6 +422,20 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     sequenceWords(32, 0x41800000),
   );
 
+  const rank1U32NegativeStride = await makeCase(
+    "rank1-u32-negative-stride",
+    {
+      shape: dims("4"),
+      sourceLocation: multiply(coordinate(0), indexConstant("-1")),
+      sourceByteOffset: dimConstant("12"),
+      sourceBytes: dimConstant("16"),
+      destinationBytes: dimConstant("16"),
+      dtype: "u32",
+    },
+    { kind: "reject" },
+    sequenceWords(4, 0x80000000),
+  );
+
   const rank2NegativeStride = await makeCase(
     "rank2-negative-stride",
     {
@@ -663,6 +678,7 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     rank1PositiveStride,
     rank4Permutation,
     rank5Permutation,
+    rank1U32NegativeStride,
     rank2NegativeStride,
     rank3U32NegativeStride,
     rank4NegativeStride,

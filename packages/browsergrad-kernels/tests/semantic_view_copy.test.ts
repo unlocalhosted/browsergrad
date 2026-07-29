@@ -404,8 +404,18 @@ describe("semantic view-copy WGSL lowering", () => {
     expect(source).not.toContain("select(");
   });
 
-  it("lowers signed-affine rank-2 through rank-5 source strides through exact i32 addresses", async () => {
+  it("lowers signed-affine rank-1 through rank-5 source strides through exact i32 addresses", async () => {
     const cases = [
+      {
+        shape: [constant("4")] as const,
+        sourceLocation: multiply(coordinate(0), constant("-1")),
+        sourceByteOffset: constant("12"),
+        sourceBytes: constant("16"),
+        destinationBytes: constant("16"),
+        dtype: "u32" as const,
+        expectedRange: { minimum: -3n, maximum: 0n },
+        profileId: "browsergrad.view-copy.signed-affine-rank1-word32@1",
+      },
       {
         shape: [constant("2"), constant("3")] as const,
         sourceLocation: add(

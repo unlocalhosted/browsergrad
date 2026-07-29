@@ -727,16 +727,31 @@ describe("verified materializing view-copy", () => {
       expect(f32Values(highRankDestination)).toEqual(values.reverse());
     }
 
-    const unsupportedRank = await verifiedLayout({
+    const rank1Layout = await verifiedLayout({
       shape: ["2"],
       sourceLocation: mul(c(0), k("-1")),
       sourceByteOffset: "4",
       sourceBytes: "8",
       destinationBytes: "8",
     });
-    expect((await diagnostic(async () =>
-      prepare(unsupportedRank, await verifiedKernel(unsupportedRank))
-    )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
+    const rank1Kernel = await verifiedKernel(rank1Layout);
+    const rank1Plan = await prepare(rank1Layout, rank1Kernel);
+    const rank1Specialization = await prepareViewCopySpecialization(
+      rank1Layout,
+      rank1Kernel,
+      { operationId: rank1Plan.operationId },
+    );
+    const rank1Destination = new Uint8Array(8);
+    rank1Plan.execute({
+      source: f32Bytes([1, 2]),
+      destination: rank1Destination,
+    });
+    expect(rank1Specialization.portableProfile).toMatchObject({
+      profileId: "browsergrad.view-copy.signed-affine-rank1-word32@1",
+      rank: 1,
+      dtype: "f32",
+    });
+    expect(f32Values(rank1Destination)).toEqual([2, 1]);
 
     const unsupportedDestination = await verifiedLayout({
       shape: ["2", "2"],

@@ -10,11 +10,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 
 - Add the distinct
+  `browsergrad.view-copy.signed-affine-rank1-word32@1` portable profile for
+  exact same-dtype f32/i32/u32 rank-1 source reversals. This completes signed
+  source-coordinate scales across portable ranks 1 through 5 without
+  reinterpreting any existing identity. Signed destinations, rank 6, integer
+  division/modulo, packed storage, and overlap remain explicit refusals.
+- Add the distinct
   `browsergrad.view-copy.signed-affine-rank4-rank5-word32@1` portable profile
   for exact same-dtype f32/i32/u32 high-rank source reversals. It reuses the
   canonical CPU proof while preserving the rank-2/rank-3 signed profile and
-  every positive-affine identity. Signed rank 1, signed destinations, integer
-  division/modulo, packed storage, and overlap remain explicit refusals.
+  every positive-affine identity. The separate rank-1 signed profile follows
+  without reinterpreting this high-rank identity.
 - Add the distinct
   `browsergrad.view-copy.signed-affine-rank2-rank3-word32@1` portable profile
   for exact same-dtype f32/i32/u32 global-memory view copies with negative
