@@ -640,7 +640,7 @@ describe("verified materializing view-copy", () => {
       .toBe(KERNEL_DIAGNOSTIC_CODES.aliasConflict);
   });
 
-  it("rejects deferred signed-stride and division profiles at CPU legalization", async () => {
+  it("executes signed-affine rank-2 source strides and still rejects division", async () => {
     const negativeStride = await verifiedLayout({
       shape: ["2", "2"],
       sourceLocation: add(mul(c(0), k("-2")), mul(c(1), k("-1"))),
@@ -648,8 +648,51 @@ describe("verified materializing view-copy", () => {
       sourceBytes: "16",
       destinationBytes: "16",
     });
-    expect((await diagnostic(async () => prepare(negativeStride, await verifiedKernel(negativeStride)))).diagnostic.code)
-      .toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
+    const negativeKernel = await verifiedKernel(negativeStride);
+    const negativePlan = await prepare(negativeStride, negativeKernel);
+    const negativeSpecialization = await prepareViewCopySpecialization(
+      negativeStride,
+      negativeKernel,
+      { operationId: negativePlan.operationId },
+    );
+    const negativeDestination = new Uint8Array(16);
+    negativePlan.execute({
+      source: f32Bytes([1, 2, 3, 4]),
+      destination: negativeDestination,
+    });
+    expect(negativeSpecialization.portableProfile).toMatchObject({
+      profileId:
+        "browsergrad.view-copy.signed-affine-rank2-rank3-word32@1",
+      rank: 2,
+      dtype: "f32",
+    });
+    expect(f32Values(negativeDestination)).toEqual([4, 3, 2, 1]);
+
+    const unsupportedRank = await verifiedLayout({
+      shape: ["1", "1", "1", "2"],
+      sourceLocation: mul(c(3), k("-1")),
+      sourceByteOffset: "4",
+      sourceBytes: "8",
+      destinationBytes: "8",
+    });
+    expect((await diagnostic(async () =>
+      prepare(unsupportedRank, await verifiedKernel(unsupportedRank))
+    )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const unsupportedDestination = await verifiedLayout({
+      shape: ["2", "2"],
+      sourceLocation: rowMajorLocation(["2", "2"]),
+      destinationLocation: add(mul(c(0), k("-2")), mul(c(1), k("-1"))),
+      destinationByteOffset: "12",
+      sourceBytes: "16",
+      destinationBytes: "16",
+    });
+    expect((await diagnostic(async () =>
+      prepare(
+        unsupportedDestination,
+        await verifiedKernel(unsupportedDestination),
+      )
+    )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
 
     const divided = await verifiedLayout({
       shape: ["2", "2"],
@@ -659,6 +702,31 @@ describe("verified materializing view-copy", () => {
     });
     expect((await diagnostic(async () => prepare(divided, await verifiedKernel(divided)))).diagnostic.code)
       .toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const signedBeforeDividedPredicate = await verifiedLayout({
+      shape: ["2", "2"],
+      sourceLocation: add(mul(c(0), k("-2")), mul(c(1), k("-1"))),
+      sourcePredicate: {
+        kind: "and",
+        values: [
+          { kind: "lessEqual", lhs: mul(c(0), k("-1")), rhs: k("0") },
+          {
+            kind: "lessEqual",
+            lhs: { kind: "floorDiv", value: c(1), divisor: k("1") },
+            rhs: k("1"),
+          },
+        ],
+      },
+      sourceByteOffset: "12",
+      sourceBytes: "16",
+      destinationBytes: "16",
+    });
+    expect((await diagnostic(async () =>
+      prepare(
+        signedBeforeDividedPredicate,
+        await verifiedKernel(signedBeforeDividedPredicate),
+      )
+    )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
   });
 
   it("rejects dynamic geometry and address failures during preparation", async () => {

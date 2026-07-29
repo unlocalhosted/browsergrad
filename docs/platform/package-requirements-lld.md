@@ -130,27 +130,19 @@ Synthetic fixtures prove the transitions but are not production evidence.
 
 The canonical view-copy path has one semantic construction and execution seam:
 frontend Artifact V3 facts lower into semantic-core layout/kernel artifacts,
-then the same artifacts execute through the CPU reference or kernels WebGPU
-backend. There is no source-spelling-specific execution path.
+then execute through CPU or kernels WebGPU without a source-spelling path.
+Portable profiles support exact same-dtype f32/i32/u32 words, disjoint global
+allocations, nonzero offsets, broadcast, guarded float fill, and:
 
-The current portable word profile supports:
+- positive-affine equal-rank layouts from rank 1 through rank 5; and
+- a distinct signed-affine rank-2/rank-3 source profile with a positive-affine
+  dense destination.
 
-- same-dtype f32, i32, and u32 storage with exact 32-bit size and alignment;
-- equal source/destination ranks 1 through 4;
-- positive affine layouts, nonzero byte offsets, positive strided slices, and
-  read-only broadcasts;
-- pairwise-disjoint global allocations and synchronous exact-word copy; and
-- exact float fill bits for guarded invalid reads, while integer profiles
-  reject invalid source coordinates.
-
-The WebGPU backend identity is
-`browsergrad.webgpu.view-copy.word32@2`. Required headed Chromium on Apple
-Metal 3 passes a 13-case complete-destination, bit-exact CPU/WebGPU matrix
-covering all three dtypes, ranks 1 through 4, striding, broadcast, offsets,
-float padding, dynamic specialization, and zero-extent no-submit behavior.
-Signed/negative strides, 16-bit packed storage, bf16, f64, overlap, and layouts
-outside the declared rank/profile remain explicit refusals rather than silent
-substitutions.
+Required Apple Metal 3 backend-2.2 evidence passes 17 complete-destination,
+bit-exact CPU/WebGPU cases covering those profiles, dynamic specialization,
+and zero-extent no-submit behavior. Exact identities stay in the ledger.
+Signed rank-1/rank-4/rank-5 maps, rank 6, packed/16-bit/bf16/f64 storage,
+overlap, and other undeclared layouts remain explicit refusals.
 
 ### Tiled kernels and framework convergence
 
@@ -674,9 +666,10 @@ Generic L2 verification checks operation version, references, matching logical
 shapes and dtypes, writable destination space, exact fill dtype, and declared
 cross-allocation non-aliasing. Backend/profile legalization is separate. The
 initial portable profile is same-dtype `f32`, rank-2/rank-3, global memory,
-positive-affine indexing, and a dense injective destination. Signed strides and
-integer division/modulo remain unavailable until the target integer profile is
-proved. These are lowering decisions, not restrictions of the L1 or L2 model.
+positive-affine indexing, and a dense injective destination. That initial
+profile excluded signed strides and integer division/modulo pending separately
+proved target profiles. These are lowering decisions, not restrictions of the
+L1 or L2 model.
 
 Follow-on portable profiles preserve that operation meaning while admitting
 same-dtype `i32` and `u32` exact-word copies plus equal source/destination ranks
@@ -688,8 +681,20 @@ storage uses
 uses the distinct
 `browsergrad.view-copy.positive-affine-rank5-word32@1`. Integer profiles
 require `reject` for an invalid source coordinate, while f32 may use an exact
-fill bit pattern. These profiles do not admit rank 6, signed/negative strides,
-16-bit packed storage, bf16, f64, overlap, or a non-global memory space.
+fill bit pattern. These positive-affine profiles do not admit rank 6 or a
+negative coordinate scale.
+
+The distinct
+`browsergrad.view-copy.signed-affine-rank2-rank3-word32@1` profile admits a
+negative coordinate scale only in a fully specialized rank-2/rank-3 source
+location or source predicate. A nonnegative view byte offset rebases every
+proved guarded source word into its root allocation. The destination remains
+positive-affine, dense, and injective, and the same CPU coordinate proof checks
+every guarded source access and complete destination write. Existing
+positive-affine profile identities retain their exact meaning. Signed
+rank-1/rank-4/rank-5 maps, rank 6, integer division/modulo, 16-bit packed
+storage, bf16, f64, overlap, and non-global memory remain outside the declared
+portable profiles.
 
 CPU reference and WGSL lowering consume the same verified normalized
 expressions or a specialization accompanied by a differential proof against
@@ -720,6 +725,9 @@ WGSL, workgroup schedule, the selected feature profile, and every device limit
 used for legalization. Adapter identity, the full available feature inventory,
 and input hashes belong to execution evidence,
 not correctness cache keys.
+Backend 2.2.0 admits the signed-affine rank-2/rank-3 source profile through
+this existing signed-i32 path; it adds no second executor, source-shaped
+kernel, address clamping, or unsigned reinterpretation.
 
 ### Logical tiles versus physical schedules
 
@@ -2028,9 +2036,8 @@ across TypeScript and Python.
   verified layout/view-copy artifact and require identical semantic hashes.
 - Extend the unchanged operation shape to rank-3 permutation, positive strided
   slice, read-only broadcast, nonzero byte offset, and padded rank-2/3 views.
-  Signed/negative-stride profiles remain rejected until backend integer
-  division/modulo semantics are proved equivalent to the canonical BigInt
-  rules.
+  Keep signed/negative-stride and integer division/modulo as separately named
+  backend profiles rather than coupling their admission.
 - Execute the exact same artifacts and buffers through CPU reference and real
   WebGPU. Padding uses structured guarded loads; eager `select`, CPU zero-fill,
   or robust-buffer behavior is not conformance evidence.
@@ -2048,13 +2055,24 @@ across TypeScript and Python.
   `50afa87acf5f404a3f6b5c515349a426237c2425ad36d15599e5693cfb4d5a41`
   and device profile
   `9589abc8fafb412d83194febaf210f7f89da7a580bf20d3272e1eef9dcda2f66`.
+- Add the distinct signed-affine rank-2/rank-3 word32 source profile while
+  retaining the dense positive-affine destination and all existing profile
+  identities. Reuse the canonical CPU proof and signed-i32 WGSL address path.
+  The required 17-case Apple Metal 3 lane records correctness artifact
+  `51f8d40f64ed1e848321f2e00133b0908c157cccab9f0633dfb5758b1eaf5ec5`,
+  case set
+  `8c0a76d0357a98731cc4bdbe69b3267661ebc0edc2d6d463ea7f3ac20c93287c`,
+  and device profile
+  `9589abc8fafb412d83194febaf210f7f89da7a580bf20d3272e1eef9dcda2f66`.
 
 **Exit:** two frontend paths and two execution tiers consume the same view/index
 fixtures; reference and WebGPU do not reconstruct offsets independently;
 transpose, strided slice, broadcast, and padded rank-2/3 cases pass without
 widening the frozen tensor-plan schema or treating device absence as success.
 The separately named rank-5 portable profile also passes complete CPU/WebGPU
-parity without reinterpreting an older profile.
+parity without reinterpreting an older profile. The separately named
+signed-affine rank-2/rank-3 profile proves exact negative source strides
+without widening positive-affine identities or admitting signed destinations.
 
 ### Gate 3 — Real C++/CuTe frontend slice
 

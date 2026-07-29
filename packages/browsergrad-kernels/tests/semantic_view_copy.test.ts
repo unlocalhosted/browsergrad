@@ -404,6 +404,78 @@ describe("semantic view-copy WGSL lowering", () => {
     expect(source).not.toContain("select(");
   });
 
+  it("lowers signed-affine rank-2 and rank-3 source strides through exact i32 addresses", async () => {
+    const cases = [
+      {
+        shape: [constant("2"), constant("3")] as const,
+        sourceLocation: add(
+          multiply(coordinate(0), constant("-3")),
+          multiply(coordinate(1), constant("-1")),
+        ),
+        sourceByteOffset: constant("20"),
+        sourceBytes: constant("24"),
+        destinationBytes: constant("24"),
+        dtype: "f32" as const,
+        expectedRange: { minimum: -5n, maximum: 0n },
+      },
+      {
+        shape: [constant("2"), constant("2"), constant("3")] as const,
+        sourceLocation: add(
+          multiply(coordinate(0), constant("-6")),
+          multiply(coordinate(1), constant("-3")),
+          multiply(coordinate(2), constant("-1")),
+        ),
+        sourceByteOffset: constant("44"),
+        sourceBytes: constant("48"),
+        destinationBytes: constant("48"),
+        dtype: "u32" as const,
+        expectedRange: { minimum: -11n, maximum: 0n },
+      },
+    ];
+    for (const testCase of cases) {
+      const layout = await verifiedLayout(testCase);
+      const prepared = await prepare(layout, await verifiedKernel(layout));
+      expect(prepared.semantic.portableProfile).toMatchObject({
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank2-rank3-word32@1",
+        rank: testCase.shape.length,
+        dtype: testCase.dtype,
+      });
+      expect(prepared.sourceLocationRange).toEqual(testCase.expectedRange);
+      expect(prepared.program.wgsl).toContain("* -");
+      expect(prepared.program.wgsl).toContain("u32(");
+    }
+
+    const signedPredicateLayout = await verifiedLayout({
+      shape: [constant("2"), constant("3")],
+      sourceLocation: add(
+        multiply(coordinate(0), constant("3")),
+        coordinate(1),
+      ),
+      sourcePredicate: {
+        kind: "lessEqual",
+        lhs: constant("-1"),
+        rhs: multiply(coordinate(1), constant("-1")),
+      },
+      sourceBytes: constant("24"),
+      destinationBytes: constant("24"),
+    });
+    const signedPredicate = await prepare(
+      signedPredicateLayout,
+      await verifiedKernel(signedPredicateLayout, {
+        kind: "fill",
+        value: { kind: "float-bits", dtype: "f32", bits: "7fc01234" },
+      }),
+    );
+    expect(signedPredicate.semantic.portableProfile.profileId).toBe(
+      "browsergrad.view-copy.signed-affine-rank2-rank3-word32@1",
+    );
+    expect(signedPredicate.program.wgsl).toContain("* -1i");
+    expect(signedPredicate.program.wgsl).toContain(
+      "if ((-1i <= (coordinate_1 * -1i)))",
+    );
+  });
+
   it("keeps one backend shape for rank-3 permutation, slice, broadcast, offsets, and byte maps", async () => {
     const rank3 = [constant("2"), constant("3"), constant("4")] as const;
     const permutation = await verifiedLayout({

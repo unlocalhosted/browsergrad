@@ -43,7 +43,11 @@ or exact-bit fill behavior for invalid source coordinates; integer profiles
 require rejection. Generic operation verification is separate from these
 lowering profiles. Rank 5 uses the distinct
 `browsergrad.view-copy.positive-affine-rank5-word32@1` profile so the existing
-rank-1-through-rank-4 identities retain their exact meaning.
+rank-1-through-rank-4 identities retain their exact meaning. The separate
+`browsergrad.view-copy.signed-affine-rank2-rank3-word32@1` profile admits
+negative coordinate scales only in rank-2/rank-3 source maps and predicates;
+the destination remains positive-affine, dense, and exactly proved. Signed
+rank-1/rank-4/rank-5 maps remain explicit refusals.
 
 `/kernel` also defines one frontend-neutral logical GEMM tile with exact dense
 f32 operand/view roles, boundary policy, increasing-K accumulation order, and

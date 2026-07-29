@@ -59,6 +59,9 @@ const PLANNED_CASE_IDS = Object.freeze([
   "rank1-positive-stride",
   "rank4-permutation",
   "rank5-permutation",
+  "rank2-negative-stride",
+  "rank3-u32-negative-stride",
+  "rank2-negative-predicate-padding",
   "positive-strided-slice",
   "read-only-broadcast",
   "byte-map-nonzero-offsets",
@@ -416,6 +419,60 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     sequenceWords(32, 0x41800000),
   );
 
+  const rank2NegativeStride = await makeCase(
+    "rank2-negative-stride",
+    {
+      shape: dims("2", "3"),
+      sourceLocation: add(
+        multiply(coordinate(0), indexConstant("-3")),
+        multiply(coordinate(1), indexConstant("-1")),
+      ),
+      sourceByteOffset: dimConstant("20"),
+      sourceBytes: dimConstant("24"),
+      destinationBytes: dimConstant("24"),
+    },
+    { kind: "reject" },
+    sequenceWords(6, 0x41c00000),
+  );
+
+  const rank3U32NegativeStride = await makeCase(
+    "rank3-u32-negative-stride",
+    {
+      shape: dims("2", "2", "3"),
+      sourceLocation: add(
+        multiply(coordinate(0), indexConstant("-6")),
+        multiply(coordinate(1), indexConstant("-3")),
+        multiply(coordinate(2), indexConstant("-1")),
+      ),
+      sourceByteOffset: dimConstant("44"),
+      sourceBytes: dimConstant("48"),
+      destinationBytes: dimConstant("48"),
+      dtype: "u32",
+    },
+    { kind: "reject" },
+    sequenceWords(12, 0x80000000),
+  );
+
+  const rank2NegativePredicatePadding = await makeCase(
+    "rank2-negative-predicate-padding",
+    {
+      shape: dims("2", "3"),
+      sourceLocation: add(
+        multiply(coordinate(0), indexConstant("3")),
+        coordinate(1),
+      ),
+      sourcePredicate: {
+        kind: "lessEqual",
+        lhs: indexConstant("-1"),
+        rhs: multiply(coordinate(1), indexConstant("-1")),
+      },
+      sourceBytes: dimConstant("24"),
+      destinationBytes: dimConstant("24"),
+    },
+    exactNanFill(),
+    sequenceWords(6, 0x42000000),
+  );
+
   const sliceShape = dims("2", "2");
   const stridedSlice = await makeCase(
     "positive-strided-slice",
@@ -566,6 +623,9 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     rank1PositiveStride,
     rank4Permutation,
     rank5Permutation,
+    rank2NegativeStride,
+    rank3U32NegativeStride,
+    rank2NegativePredicatePadding,
     stridedSlice,
     broadcast,
     byteOffsets,

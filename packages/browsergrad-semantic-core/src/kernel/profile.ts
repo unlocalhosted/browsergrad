@@ -13,6 +13,8 @@ export const PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.positive-affine-rank1-rank4-word32@1";
 export const PORTABLE_RANK5_WORD32_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.positive-affine-rank5-word32@1";
+export const PORTABLE_SIGNED_AFFINE_WORD32_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.signed-affine-rank2-rank3-word32@1";
 
 export type PortableViewCopyDType = "f32" | "i32" | "u32";
 
@@ -21,7 +23,8 @@ export interface PortableViewCopyProfile {
     | typeof PORTABLE_F32_VIEW_COPY_PROFILE
     | typeof PORTABLE_WORD32_VIEW_COPY_PROFILE
     | typeof PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE
-    | typeof PORTABLE_RANK5_WORD32_VIEW_COPY_PROFILE;
+    | typeof PORTABLE_RANK5_WORD32_VIEW_COPY_PROFILE
+    | typeof PORTABLE_SIGNED_AFFINE_WORD32_VIEW_COPY_PROFILE;
   readonly rank: 1 | 2 | 3 | 4 | 5;
   readonly dtype: PortableViewCopyDType;
 }
@@ -71,18 +74,55 @@ export function verifyPortableViewCopyProfile(
   const destinationMap = indexMaps.get(destination.indexMapId);
   if (sourceMap === undefined || destinationMap === undefined) throw new Error("internal: prepared index map disappeared");
   const symbolMinima = new Map(layout.symbols.map((symbol) => [symbol.id, BigInt(symbol.domain.min)]));
-  requirePositiveAffine(sourceMap.location, symbolMinima, "$.operation.source.indexMap.location");
-  requirePortablePredicate(sourceMap.inBounds, symbolMinima, "$.operation.source.indexMap.inBounds");
-  requirePositiveAffine(destinationMap.location, symbolMinima, "$.operation.destination.indexMap.location");
-  requirePortablePredicate(destinationMap.inBounds, symbolMinima, "$.operation.destination.indexMap.inBounds");
+  const sourceLocationProfile = analyzeAffine(
+    sourceMap.location,
+    symbolMinima,
+    "$.operation.source.indexMap.location",
+  );
+  const sourcePredicateSignedCoordinateScale = analyzePortablePredicate(
+    sourceMap.inBounds,
+    symbolMinima,
+    "$.operation.source.indexMap.inBounds",
+  );
+  const sourceSignedCoordinateScale =
+    sourceLocationProfile.signedCoordinateScale ||
+    sourcePredicateSignedCoordinateScale;
+  const destinationLocationProfile = analyzeAffine(
+    destinationMap.location,
+    symbolMinima,
+    "$.operation.destination.indexMap.location",
+  );
+  const destinationPredicateSignedCoordinateScale = analyzePortablePredicate(
+    destinationMap.inBounds,
+    symbolMinima,
+    "$.operation.destination.indexMap.inBounds",
+  );
+  const destinationSignedCoordinateScale =
+    destinationLocationProfile.signedCoordinateScale ||
+    destinationPredicateSignedCoordinateScale;
+  if (destinationSignedCoordinateScale) {
+    unsupported(
+      "$.operation.destination",
+      "portable view-copy requires a positive-affine dense destination",
+    );
+  }
+  const signedCoordinateScale = sourceSignedCoordinateScale;
+  if (signedCoordinateScale && rank !== 2 && rank !== 3) {
+    unsupported(
+      "$.operation",
+      "portable signed-affine view-copy supports equal source and destination ranks 2 or 3 only",
+    );
+  }
   return Object.freeze({
-    profileId: rank === 5
-      ? PORTABLE_RANK5_WORD32_VIEW_COPY_PROFILE
-      : rank === 1 || rank === 4
-        ? PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE
-        : operation.dtype === "f32"
-          ? PORTABLE_F32_VIEW_COPY_PROFILE
-          : PORTABLE_WORD32_VIEW_COPY_PROFILE,
+    profileId: signedCoordinateScale
+      ? PORTABLE_SIGNED_AFFINE_WORD32_VIEW_COPY_PROFILE
+      : rank === 5
+        ? PORTABLE_RANK5_WORD32_VIEW_COPY_PROFILE
+        : rank === 1 || rank === 4
+          ? PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE
+          : operation.dtype === "f32"
+            ? PORTABLE_F32_VIEW_COPY_PROFILE
+            : PORTABLE_WORD32_VIEW_COPY_PROFILE,
     rank: rank as 1 | 2 | 3 | 4 | 5,
     dtype: operation.dtype,
   });
@@ -94,33 +134,73 @@ export const verifyInitialPortableViewCopyProfile = verifyPortableViewCopyProfil
 interface AffineProfile {
   readonly coordinateDependent: boolean;
   readonly provablyNonnegative: boolean;
+  readonly signedCoordinateScale: boolean;
 }
 
-function requirePositiveAffine(
+function analyzeAffine(
   expression: IndexExpr,
   symbolMinima: ReadonlyMap<string, bigint>,
   path: string,
 ): AffineProfile {
   switch (expression.kind) {
-    case "const": return { coordinateDependent: false, provablyNonnegative: BigInt(expression.value) >= 0n };
-    case "dimension": return { coordinateDependent: false, provablyNonnegative: (symbolMinima.get(expression.symbolId) ?? -1n) >= 0n };
-    case "coordinate": return { coordinateDependent: true, provablyNonnegative: true };
+    case "const": {
+      return {
+        coordinateDependent: false,
+        provablyNonnegative: BigInt(expression.value) >= 0n,
+        signedCoordinateScale: false,
+      };
+    }
+    case "dimension": {
+      return {
+        coordinateDependent: false,
+        provablyNonnegative:
+          (symbolMinima.get(expression.symbolId) ?? -1n) >= 0n,
+        signedCoordinateScale: false,
+      };
+    }
+    case "coordinate": {
+      return {
+        coordinateDependent: true,
+        provablyNonnegative: true,
+        signedCoordinateScale: false,
+      };
+    }
     case "add": {
-      const terms = expression.terms.map((term, index) => requirePositiveAffine(term, symbolMinima, `${path}.terms[${index}]`));
+      const terms = expression.terms.map((term, index) =>
+        analyzeAffine(term, symbolMinima, `${path}.terms[${index}]`));
       return {
         coordinateDependent: terms.some((term) => term.coordinateDependent),
         provablyNonnegative: terms.every((term) => term.provablyNonnegative),
+        signedCoordinateScale: terms.some(
+          (term) => term.signedCoordinateScale,
+        ),
       };
     }
     case "mul": {
-      const lhs = requirePositiveAffine(expression.lhs, symbolMinima, `${path}.lhs`);
-      const rhs = requirePositiveAffine(expression.rhs, symbolMinima, `${path}.rhs`);
-      if (lhs.coordinateDependent && rhs.coordinateDependent) unsupported(path, "non-affine coordinate multiplication is outside the initial portable profile");
-      if (lhs.coordinateDependent && !rhs.provablyNonnegative) unsupported(`${path}.rhs`, "negative or unproved coordinate stride is outside the initial portable profile");
-      if (rhs.coordinateDependent && !lhs.provablyNonnegative) unsupported(`${path}.lhs`, "negative or unproved coordinate stride is outside the initial portable profile");
+      const lhs = analyzeAffine(
+        expression.lhs,
+        symbolMinima,
+        `${path}.lhs`,
+      );
+      const rhs = analyzeAffine(
+        expression.rhs,
+        symbolMinima,
+        `${path}.rhs`,
+      );
+      if (lhs.coordinateDependent && rhs.coordinateDependent) {
+        unsupported(
+          path,
+          "non-affine coordinate multiplication is outside the portable affine profiles",
+        );
+      }
       return {
         coordinateDependent: lhs.coordinateDependent || rhs.coordinateDependent,
         provablyNonnegative: lhs.provablyNonnegative && rhs.provablyNonnegative,
+        signedCoordinateScale:
+          lhs.signedCoordinateScale ||
+          rhs.signedCoordinateScale ||
+          (lhs.coordinateDependent && !rhs.provablyNonnegative) ||
+          (rhs.coordinateDependent && !lhs.provablyNonnegative),
       };
     }
     case "floorDiv":
@@ -131,23 +211,36 @@ function requirePositiveAffine(
   }
 }
 
-function requirePortablePredicate(
+function analyzePortablePredicate(
   expression: PredicateExpr,
   symbolMinima: ReadonlyMap<string, bigint>,
   path: string,
-): void {
+): boolean {
   switch (expression.kind) {
-    case "bool": return;
+    case "bool": return false;
     case "equal":
-    case "lessEqual":
-      requirePositiveAffine(expression.lhs, symbolMinima, `${path}.lhs`);
-      requirePositiveAffine(expression.rhs, symbolMinima, `${path}.rhs`);
-      return;
+    case "lessEqual": {
+      const lhs = analyzeAffine(expression.lhs, symbolMinima, `${path}.lhs`);
+      const rhs = analyzeAffine(expression.rhs, symbolMinima, `${path}.rhs`);
+      return lhs.signedCoordinateScale || rhs.signedCoordinateScale;
+    }
     case "and":
-    case "or":
-      expression.values.forEach((value, index) => requirePortablePredicate(value, symbolMinima, `${path}.values[${index}]`));
-      return;
-    case "not": requirePortablePredicate(expression.value, symbolMinima, `${path}.value`); return;
+    case "or": {
+      const values = expression.values.map((value, index) =>
+        analyzePortablePredicate(
+          value,
+          symbolMinima,
+          `${path}.values[${index}]`,
+        ));
+      return values.some(Boolean);
+    }
+    case "not": {
+      return analyzePortablePredicate(
+        expression.value,
+        symbolMinima,
+        `${path}.value`,
+      );
+    }
   }
 }
 
