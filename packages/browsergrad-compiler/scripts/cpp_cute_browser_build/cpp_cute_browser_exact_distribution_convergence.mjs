@@ -34,7 +34,7 @@ import {
   admitCppCuteBrowserProducerTrustPolicy,
 } from "../../dist/cpp_cute_browser_producer_trust_policy.js";
 import {
-  CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS,
+  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS,
   cppCuteBrowserRealCompileCase,
 } from "../../dist/cpp_cute_browser_real_compile_cases.js";
 import {
@@ -523,10 +523,10 @@ export function prepareCppCuteBrowserExactDistributionConvergenceMatrix(
   }
   if (!Array.isArray(observations) ||
       observations.length !==
-        CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.length) {
-    invalid("$.observations", "expected exactly eight convergence observations");
+        CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.length) {
+    invalid("$.observations", "expected exactly nine convergence observations");
   }
-  const cases = CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.map(
+  const cases = CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.map(
     (caseId, index) => {
       const observation = observations[index];
       const compileCase = cppCuteBrowserRealCompileCase(caseId);
@@ -617,7 +617,7 @@ export function prepareCppCuteBrowserExactDistributionConvergenceMatrix(
     claims: Object.freeze({
       exactPrivateDistributionTreeVerified: true,
       packagePinnedFullDistributionReproducibilityMatched: true,
-      exactEightCaseBrowserWorkerCompilationObserved: true,
+      exactNineCaseBrowserWorkerCompilationObserved: true,
       localEngineeringProducerAuthenticated: true,
       exactCandidatesAuthorizedThroughSharedSeam: true,
       cpuReferenceConvergenceObservedForEveryCase: true,
@@ -655,7 +655,7 @@ export async function runCppCuteBrowserExactDistributionConvergence(
   const observations = [];
   // Each Clang-Wasm Worker reserves a bounded large memory. Sequential cases
   // keep peak memory bounded while preserving case-isolated browser evidence.
-  for (const caseId of CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS) {
+  for (const caseId of CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS) {
     const checkpointPath = checkpointDirectory === undefined
       ? undefined
       : exactCheckpointPath(
@@ -985,7 +985,7 @@ function requireIdentity(input, sha256_, byteLength, path) {
 function requireUnique(cases, name, select) {
   const values = new Set(cases.map(select));
   if (values.size !== cases.length) {
-    invalid("$.observations", `${name} must be unique for all eight cases`);
+    invalid("$.observations", `${name} must be unique for all nine cases`);
   }
 }
 

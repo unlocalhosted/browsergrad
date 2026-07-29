@@ -30,7 +30,8 @@ interface ExternalInputs {
     | "strided-slice"
     | "broadcast"
     | "i32-rank2"
-    | "u32-broadcast";
+    | "u32-broadcast"
+    | "signed-rank2";
   readonly sourceRevision: string;
   readonly controls: Readonly<Record<string, ServedInput>>;
   readonly assets: readonly (ServedInput & {
@@ -136,6 +137,7 @@ function parseInputs(value: string | undefined): ExternalInputs {
     "broadcast",
     "i32-rank2",
     "u32-broadcast",
+    "signed-rank2",
   ]);
   if (parsed.schema !==
         "browsergrad.compiler.cpp-cute.browser-exact-distribution-convergence-inputs" ||

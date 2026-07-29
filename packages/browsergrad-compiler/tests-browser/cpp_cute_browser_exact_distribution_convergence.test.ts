@@ -166,7 +166,7 @@ interface RuntimeStorage {
   readonly expectedDestinationWords: Uint32Array;
   readonly sourceAllocationByteLength: string;
   readonly destinationAllocationByteLength: string;
-  readonly sourceByteOffset: "4";
+  readonly sourceByteOffset: string;
   readonly destinationByteOffset: "4";
 }
 
@@ -745,13 +745,20 @@ async function fetchInput(
 function createRuntimeStorage(
   compileCase: CppCuteBrowserRealCompileCase,
 ): RuntimeStorage {
-  const sourceSpan = Number(compileCase.sourceSpanElements);
+  const sourceBounds = affineElementBounds(compileCase.sourceLayout);
+  const destinationBounds =
+    affineElementBounds(compileCase.destinationLayout);
+  const sourceSpan = sourceBounds.maximum - sourceBounds.minimum + 1;
   const destinationSpan = Number(compileCase.destinationSpanElements);
   if (!Number.isSafeInteger(sourceSpan) ||
       !Number.isSafeInteger(destinationSpan) ||
-      sourceSpan <= 0 || destinationSpan <= 0) {
+      sourceSpan <= 0 || destinationSpan <= 0 ||
+      BigInt(sourceSpan) !== compileCase.sourceSpanElements ||
+      destinationBounds.minimum !== 0 ||
+      destinationBounds.maximum + 1 !== destinationSpan) {
     throw new Error("compile case storage spans exceed browser evidence bounds");
   }
+  const sourceOriginWordIndex = 1 - sourceBounds.minimum;
   const sourceWords = new Uint32Array(sourceSpan + 2);
   sourceWords[0] = 0xa1b2c3d4;
   sourceWords[sourceWords.length - 1] = 0xd4c3b2a1;
@@ -771,6 +778,7 @@ function createRuntimeStorage(
     compileCase,
     sourceWords,
     expectedDestinationWords,
+    sourceOriginWordIndex,
   );
   return Object.freeze({
     sourceWords,
@@ -779,7 +787,7 @@ function createRuntimeStorage(
     sourceAllocationByteLength: String(sourceWords.byteLength),
     destinationAllocationByteLength:
       String(initialDestinationWords.byteLength),
-    sourceByteOffset: "4",
+    sourceByteOffset: String(sourceOriginWordIndex * 4),
     destinationByteOffset: "4",
   });
 }
@@ -788,6 +796,7 @@ function applyIndependentViewCopy(
   compileCase: CppCuteBrowserRealCompileCase,
   sourceWords: Uint32Array,
   destinationWords: Uint32Array,
+  sourceOriginWordIndex: number,
 ): void {
   const extents = compileCase.sourceLayout.shape.map(Number);
   const sourceStrides = compileCase.sourceLayout.strides.map(Number);
@@ -805,13 +814,39 @@ function applyIndependentViewCopy(
       sourceIndex += coordinate * sourceStrides[axis]!;
       destinationIndex += coordinate * destinationStrides[axis]!;
     }
-    const source = sourceWords[sourceIndex + 1];
+    const source = sourceWords[sourceIndex + sourceOriginWordIndex];
     if (source === undefined ||
         destinationWords[destinationIndex + 1] === undefined) {
       throw new Error("independent view-copy geometry exceeded storage");
     }
     destinationWords[destinationIndex + 1] = source;
   }
+}
+
+function affineElementBounds(
+  layout: CppCuteBrowserRealCompileCase["sourceLayout"],
+): Readonly<{ minimum: number; maximum: number }> {
+  let minimum = 0;
+  let maximum = 0;
+  for (let axis = 0; axis < layout.shape.length; axis += 1) {
+    const extent = Number(layout.shape[axis]);
+    const stride = Number(layout.strides[axis]);
+    if (!Number.isSafeInteger(extent) || extent <= 0 ||
+        !Number.isSafeInteger(stride)) {
+      throw new Error("compile case affine layout exceeds browser evidence bounds");
+    }
+    const contribution = (extent - 1) * stride;
+    if (!Number.isSafeInteger(contribution)) {
+      throw new Error("compile case affine span exceeds browser evidence bounds");
+    }
+    minimum += Math.min(0, contribution);
+    maximum += Math.max(0, contribution);
+  }
+  if (!Number.isSafeInteger(minimum) ||
+      !Number.isSafeInteger(maximum)) {
+    throw new Error("compile case affine bounds exceed browser evidence bounds");
+  }
+  return Object.freeze({ minimum, maximum });
 }
 
 function logicalElementCount(
