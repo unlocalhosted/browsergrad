@@ -54,11 +54,14 @@ export const SEMANTIC_VIEW_COPY_PACKED8_WEBGPU_PROFILE =
   "browsergrad.webgpu.view-copy.packed8@1";
 export const SEMANTIC_VIEW_COPY_PACKED16_WEBGPU_PROFILE =
   "browsergrad.webgpu.view-copy.packed16@1";
-export const SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION = "2.8.0";
+export const SEMANTIC_VIEW_COPY_WORD64_WEBGPU_PROFILE =
+  "browsergrad.webgpu.view-copy.word64@1";
+export const SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION = "2.9.0";
 export type SemanticViewCopyWebGpuProfile =
   | typeof SEMANTIC_VIEW_COPY_WEBGPU_PROFILE
   | typeof SEMANTIC_VIEW_COPY_PACKED8_WEBGPU_PROFILE
-  | typeof SEMANTIC_VIEW_COPY_PACKED16_WEBGPU_PROFILE;
+  | typeof SEMANTIC_VIEW_COPY_PACKED16_WEBGPU_PROFILE
+  | typeof SEMANTIC_VIEW_COPY_WORD64_WEBGPU_PROFILE;
 const DEFAULT_WORKGROUP_SIZE = 64;
 const MAX_CONFIGURABLE_WORKGROUP_SIZE = 256;
 const DEFAULT_MAX_WGSL_BYTES = 64 * 1024;
@@ -256,11 +259,9 @@ async function prepareSemanticViewCopyWgslWithLaunchMode(
   );
   const semantic = await prepareViewCopySpecialization(layoutArtifact, kernelArtifact, request);
   verifyWebGpuProfile(semantic, launchMode);
-  const backendProfile = semantic.source.dtypeBytes === 1
-    ? SEMANTIC_VIEW_COPY_PACKED8_WEBGPU_PROFILE
-    : semantic.source.dtypeBytes === 2
-      ? SEMANTIC_VIEW_COPY_PACKED16_WEBGPU_PROFILE
-      : SEMANTIC_VIEW_COPY_WEBGPU_PROFILE;
+  const backendProfile = selectViewCopyBackendProfile(
+    semantic.source.dtypeBytes,
+  );
   const plannedTransientGpuBytes = semantic.source.allocationByteLength
     + (semantic.destination.allocationByteLength * 2n);
   const plannedTransientHostBytes = semantic.destination.allocationByteLength;
@@ -602,12 +603,13 @@ function verifyWebGpuProfile(
   if (
     prepared.source.dtypeBytes !== 1 &&
     prepared.source.dtypeBytes !== 2 &&
-    prepared.source.dtypeBytes !== 4
+    prepared.source.dtypeBytes !== 4 &&
+    prepared.source.dtypeBytes !== 8
   ) {
     fail(
       "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
       "$.operation.dtype",
-      "WebGPU view-copy supports exact 8-bit, 16-bit, or 32-bit storage only",
+      "WebGPU view-copy supports exact 8-bit, 16-bit, 32-bit, or 64-bit storage only",
     );
   }
   if (
@@ -619,19 +621,35 @@ function verifyWebGpuProfile(
       "WebGPU view-copy requires matching source and destination storage widths",
     );
   }
-  if (prepared.source.dtypeBytes < 4) {
+  if (prepared.source.dtypeBytes !== 4) {
     if (launchMode !== "static") {
       fail(
         "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
         "$.launchMode",
-        "packed-subword WebGPU view-copy currently supports static launch only",
+        "non-word32 WebGPU view-copy currently supports static launch only",
       );
     }
-    if (prepared.destination.viewByteOffset % 4n !== 0n) {
+    if (
+      prepared.source.dtypeBytes < 4 &&
+      prepared.destination.viewByteOffset % 4n !== 0n
+    ) {
       fail(
         "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
         "$.destination.viewByteOffset",
         "packed-subword WebGPU destination must begin on a 32-bit word boundary",
+      );
+    }
+    if (
+      prepared.source.dtypeBytes === 8 &&
+      (
+        prepared.source.viewByteOffset % 4n !== 0n ||
+        prepared.destination.viewByteOffset % 4n !== 0n
+      )
+    ) {
+      fail(
+        "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
+        "$.operation",
+        "word64 WebGPU views must begin on 32-bit word boundaries",
       );
     }
   }
@@ -645,6 +663,23 @@ function verifyWebGpuProfile(
     if (accessor.allocationByteLength > 2_147_483_647n) {
       fail("BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE", `$.${role}.allocationByteLength`, "initial signed-address WGSL profile is limited to i32-sized allocations");
     }
+  }
+}
+
+function selectViewCopyBackendProfile(
+  dtypeBytes: number,
+): SemanticViewCopyWebGpuProfile {
+  switch (dtypeBytes) {
+    case 1:
+      return SEMANTIC_VIEW_COPY_PACKED8_WEBGPU_PROFILE;
+    case 2:
+      return SEMANTIC_VIEW_COPY_PACKED16_WEBGPU_PROFILE;
+    case 4:
+      return SEMANTIC_VIEW_COPY_WEBGPU_PROFILE;
+    case 8:
+      return SEMANTIC_VIEW_COPY_WORD64_WEBGPU_PROFILE;
+    default:
+      throw new Error("internal: verified view-copy storage width has no backend profile");
   }
 }
 

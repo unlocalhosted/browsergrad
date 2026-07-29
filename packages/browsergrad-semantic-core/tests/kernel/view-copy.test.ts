@@ -44,7 +44,10 @@ interface LayoutCase {
     | "bf16"
     | "f32"
     | "i32"
-    | "u32";
+    | "u32"
+    | "f64"
+    | "i64"
+    | "u64";
 }
 
 async function verifiedLayout(input: LayoutCase): Promise<VerifiedLayoutArtifact> {
@@ -60,6 +63,10 @@ async function verifiedLayout(input: LayoutCase): Promise<VerifiedLayoutArtifact
     dtype === "f16" ||
     dtype === "bf16"
       ? 2
+      : dtype === "f64" ||
+          dtype === "i64" ||
+          dtype === "u64"
+        ? 8
       : 4;
   const envelope = {
     schema: "browsergrad.layout",
@@ -78,14 +85,14 @@ async function verifiedLayout(input: LayoutCase): Promise<VerifiedLayoutArtifact
           allocationId: "sourceAllocation",
           byteLength: dim(input.sourceBytes),
           memorySpace: input.sourceSpace ?? { kind: "global" },
-          alignmentBytes: 4,
+          alignmentBytes: Math.max(4, requiredAlignmentBytes),
           aliasSetId: input.sourceAlias ?? "sourceAlias",
         },
         {
           allocationId: "destinationAllocation",
           byteLength: dim(input.destinationBytes),
           memorySpace: input.destinationSpace ?? { kind: "global" },
-          alignmentBytes: 4,
+          alignmentBytes: Math.max(4, requiredAlignmentBytes),
           aliasSetId: input.destinationAlias ?? "destinationAlias",
         },
       ],
@@ -235,6 +242,21 @@ function u16Values(bytes: Uint8Array): number[] {
   return Array.from(
     { length: bytes.byteLength / 2 },
     (_, index) => view.getUint16(index * 2, true),
+  );
+}
+
+function u32Bytes(values: readonly number[]): Uint8Array {
+  const bytes = new Uint8Array(values.length * 4);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  values.forEach((value, index) => view.setUint32(index * 4, value, true));
+  return bytes;
+}
+
+function u32Values(bytes: Uint8Array): number[] {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return Array.from(
+    { length: bytes.byteLength / 4 },
+    (_, index) => view.getUint32(index * 4, true),
   );
 }
 
@@ -637,6 +659,70 @@ describe("verified materializing view-copy", () => {
         bytesWritten: "6",
       });
     }
+  });
+
+  it("executes exact f64, i64, and u64 storage through one word64 profile", async () => {
+    const inputWords = [
+      0x00000000, 0x80000000,
+      0x00000001, 0x7ff00000,
+      0x00000001, 0x7ff80000,
+      0xffffffff, 0xffffffff,
+      0x89abcdef, 0x01234567,
+      0x76543210, 0xfedcba98,
+    ];
+    const transposedElementIndices = [0, 2, 4, 1, 3, 5];
+    const expectedWords = transposedElementIndices.flatMap((index) => [
+      inputWords[index * 2] as number,
+      inputWords[(index * 2) + 1] as number,
+    ]);
+    for (const dtype of ["f64", "i64", "u64"] as const) {
+      const layout = await verifiedLayout({
+        shape: ["2", "3"],
+        sourceLocation: add(mul(c(1), k("2")), c(0)),
+        sourceBytes: "48",
+        destinationBytes: "48",
+        dtype,
+      });
+      const kernel = await verifiedKernel(layout);
+      const plan = await prepare(layout, kernel);
+      const specialization = await prepareViewCopySpecialization(
+        layout,
+        kernel,
+        { operationId: plan.operationId },
+      );
+      const destination = new Uint8Array(48);
+      const trace = plan.execute({
+        source: u32Bytes(inputWords),
+        destination,
+      });
+
+      expect(specialization.portableProfile).toMatchObject({
+        profileId:
+          "browsergrad.view-copy.positive-affine-rank2-rank3-word64@1",
+        rank: 2,
+        dtype,
+      });
+      expect(u32Values(destination)).toEqual(expectedWords);
+      expect(trace).toMatchObject({
+        elementCount: "6",
+        readElements: "6",
+        filledElements: "0",
+        bytesRead: "48",
+        bytesWritten: "48",
+      });
+    }
+
+    const signedSource = await verifiedLayout({
+      shape: ["2", "2"],
+      sourceLocation: add(mul(c(0), k("-2")), mul(c(1), k("-1"))),
+      sourceByteOffset: "24",
+      sourceBytes: "32",
+      destinationBytes: "32",
+      dtype: "f64",
+    });
+    expect((await diagnostic(async () =>
+      prepare(signedSource, await verifiedKernel(signedSource))
+    )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
   });
 
   it("guards padded reads and preserves exact f32 fill bits", async () => {

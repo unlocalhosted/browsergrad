@@ -53,7 +53,10 @@ interface LayoutInput {
     | "bf16"
     | "f32"
     | "i32"
-    | "u32";
+    | "u32"
+    | "f64"
+    | "i64"
+    | "u64";
 }
 
 async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifact> {
@@ -68,6 +71,10 @@ async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifac
     dtype === "f16" ||
     dtype === "bf16"
       ? 2
+      : dtype === "f64" ||
+          dtype === "i64" ||
+          dtype === "u64"
+        ? 8
       : 4;
   return verifyLayoutArtifact(JSON.parse(JSON.stringify({
     schema: "browsergrad.layout",
@@ -83,14 +90,14 @@ async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifac
           allocationId: "sourceAllocation",
           byteLength: input.sourceBytes,
           memorySpace: { kind: "global" },
-          alignmentBytes: 4,
+          alignmentBytes: Math.max(4, requiredAlignmentBytes),
           aliasSetId: "sourceAlias",
         },
         {
           allocationId: "destinationAllocation",
           byteLength: input.destinationBytes,
           memorySpace: { kind: "global" },
-          alignmentBytes: 4,
+          alignmentBytes: Math.max(4, requiredAlignmentBytes),
           aliasSetId: "destinationAlias",
         },
       ],
@@ -460,7 +467,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.packed16@1",
       );
-      expect(prepared.backendVersion).toBe("2.8.0");
+      expect(prepared.backendVersion).toBe("2.9.0");
       expect(prepared.launch.dispatchCount).toEqual([5, 1, 1]);
       expect(prepared.program.wgsl).toContain(
         "fn copy_packed_element(linear_index: u32)",
@@ -538,7 +545,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.packed8@1",
       );
-      expect(prepared.backendVersion).toBe("2.8.0");
+      expect(prepared.backendVersion).toBe("2.9.0");
       expect(prepared.launch.dispatchCount).toEqual([3, 1, 1]);
       expect(prepared.program.wgsl).toContain(
         "let first_element_index: u32 = global_id.x * 4u;",
@@ -552,6 +559,65 @@ describe("semantic view-copy WGSL lowering", () => {
       modules.set(dtype, prepared.program.wgsl);
     }
     expect(new Set(modules.values()).size).toBe(1);
+  });
+
+  it("copies exact f64, i64, and u64 storage as two raw words", async () => {
+    const modules = new Map<string, string>();
+    for (const dtype of ["f64", "i64", "u64"] as const) {
+      const shape = [constant("2"), constant("3")] as const;
+      const layout = await verifiedLayout({
+        shape,
+        sourceLocation: add(
+          multiply(coordinate(1), constant("2")),
+          coordinate(0),
+        ),
+        sourceBytes: constant("48"),
+        destinationBytes: constant("48"),
+        dtype,
+      });
+      const prepared = await prepare(layout, await verifiedKernel(layout));
+
+      expect(prepared.semantic.portableProfile).toMatchObject({
+        profileId:
+          "browsergrad.view-copy.positive-affine-rank2-rank3-word64@1",
+        rank: 2,
+        dtype,
+      });
+      expect(prepared.backendProfile).toBe(
+        "browsergrad.webgpu.view-copy.word64@1",
+      );
+      expect(prepared.backendVersion).toBe("2.9.0");
+      expect(prepared.launch.dispatchCount).toEqual([6, 1, 1]);
+      expect(prepared.program.wgsl).toContain(
+        "destination_words[destination_word] = source_words[source_word];",
+      );
+      expect(prepared.program.wgsl).toContain(
+        "destination_words[destination_word + 1u] = source_words[source_word + 1u];",
+      );
+      expect(prepared.program.wgsl).not.toContain("enable f64;");
+      modules.set(dtype, prepared.program.wgsl);
+    }
+    expect(new Set(modules.values()).size).toBe(1);
+
+    const dynamicLayout = await verifiedLayout({
+      shape: [constant("2"), constant("2")],
+      sourceLocation: rowMajor([constant("2"), constant("2")]),
+      sourceBytes: constant("32"),
+      destinationBytes: constant("32"),
+      dtype: "f64",
+    });
+    const dynamicKernel = await verifiedKernel(dynamicLayout);
+    const operation = kernelArtifactPayload(dynamicKernel).operations[0];
+    if (operation === undefined) throw new Error("fixture operation missing");
+    await expect(prepareSemanticViewCopyDynamicWgsl(
+      dynamicLayout,
+      dynamicKernel,
+      { operationId: operation.operationId },
+      "linear-prefix",
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
+      path: "$.launchMode",
+    });
   });
 
   it("keeps signed padding arithmetic and exact fill bits inside a structured guard", async () => {

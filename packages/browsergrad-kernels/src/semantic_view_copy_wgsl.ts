@@ -37,7 +37,7 @@ interface LoweredInteger extends IntegerRange {
   readonly code: string;
 }
 
-interface LoweredPackedAddress extends IntegerRange {
+interface LoweredByteAddress extends IntegerRange {
   readonly byteCode: string;
 }
 
@@ -46,7 +46,7 @@ interface LoweringContext {
   readonly path: string;
 }
 
-/** Lowers only an already verified and specialized exact 8/16/32-bit storage profile. */
+/** Lowers only an already verified and specialized exact 8/16/32/64-bit storage profile. */
 export function emitSemanticViewCopyWgsl(
   layout: LayoutArtifactPayloadV1,
   prepared: PreparedViewCopySpecialization,
@@ -71,6 +71,78 @@ export function emitSemanticViewCopyWgsl(
     prepared,
     path: "$.destination.indexMap.inBounds",
   });
+  if (prepared.source.dtypeBytes === 8) {
+    if (prepared.destination.dtypeBytes !== 8) {
+      return unsupported(
+        "$.operation.dtype",
+        "word64 lowering requires matching source and destination storage widths",
+      );
+    }
+    if (launchMode !== "static") {
+      return unsupported(
+        "$.launchMode",
+        "word64 lowering currently supports static launch only",
+      );
+    }
+    if (prepared.operation.source.invalidSource.kind !== "reject") {
+      return unsupported(
+        "$.operation.source.invalidSource",
+        "word64 lowering requires reject-on-invalid-source",
+      );
+    }
+    const sourceAddress = lowerByteAddress(
+      sourceLocation,
+      sourceMap.locationUnit,
+      prepared.source.viewByteOffset,
+      8,
+      "$.source",
+    );
+    const destinationAddress = lowerByteAddress(
+      destinationLocation,
+      destinationMap.locationUnit,
+      prepared.destination.viewByteOffset,
+      8,
+      "$.destination",
+    );
+    const elementCount = asU32(prepared.elementCount, "$.elementCount");
+    const source = [
+      "@group(0) @binding(0) var<storage, read> source_words: array<u32>;",
+      "@group(0) @binding(1) var<storage, read_write> destination_words: array<u32>;",
+      "",
+      `@compute @workgroup_size(${workgroupSize}, 1, 1)`,
+      "fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {",
+      "  let linear_index: u32 = global_id.x;",
+      `  if (linear_index >= ${elementCount}u) {`,
+      "    return;",
+      "  }",
+      ...emitCoordinates(prepared.logicalShape),
+      `  if (!(${destinationPredicate})) {`,
+      "    return;",
+      "  }",
+      `  if (!(${sourcePredicate})) {`,
+      "    return;",
+      "  }",
+      `  let source_byte_address: i32 = ${sourceAddress.byteCode};`,
+      "  let source_word: u32 = u32(source_byte_address / 4i);",
+      `  let destination_byte_address: i32 = ${destinationAddress.byteCode};`,
+      "  let destination_word: u32 = u32(destination_byte_address / 4i);",
+      "  destination_words[destination_word] = source_words[source_word];",
+      "  destination_words[destination_word + 1u] = source_words[source_word + 1u];",
+      "}",
+      "",
+    ].join("\n");
+    return Object.freeze({
+      source,
+      sourceLocationRange: Object.freeze({
+        minimum: sourceLocation.minimum,
+        maximum: sourceLocation.maximum,
+      }),
+      destinationLocationRange: Object.freeze({
+        minimum: destinationLocation.minimum,
+        maximum: destinationLocation.maximum,
+      }),
+    });
+  }
   if (prepared.source.dtypeBytes === 1 || prepared.source.dtypeBytes === 2) {
     const dtypeBytes = prepared.source.dtypeBytes;
     if (prepared.destination.dtypeBytes !== dtypeBytes) {
@@ -91,14 +163,14 @@ export function emitSemanticViewCopyWgsl(
         "packed-subword lowering requires reject-on-invalid-source",
       );
     }
-    const sourceAddress = lowerPackedAddress(
+    const sourceAddress = lowerByteAddress(
       sourceLocation,
       sourceMap.locationUnit,
       prepared.source.viewByteOffset,
       dtypeBytes,
       "$.source",
     );
-    const destinationAddress = lowerPackedAddress(
+    const destinationAddress = lowerByteAddress(
       destinationLocation,
       destinationMap.locationUnit,
       prepared.destination.viewByteOffset,
@@ -168,7 +240,7 @@ export function emitSemanticViewCopyWgsl(
   ) {
     return unsupported(
       "$.operation.dtype",
-      "WGSL view-copy supports exact 8-bit, 16-bit, or 32-bit storage only",
+      "WGSL view-copy supports exact 8-bit, 16-bit, 32-bit, or 64-bit storage only",
     );
   }
   const sourceWord = lowerWordAddress(
@@ -408,17 +480,17 @@ function lowerWordAddress(
   };
 }
 
-function lowerPackedAddress(
+function lowerByteAddress(
   location: LoweredInteger,
   unit: "element" | "byte",
   viewByteOffset: bigint,
-  dtypeBytes: 1 | 2,
+  dtypeBytes: 1 | 2 | 8,
   path: string,
-): LoweredPackedAddress {
+): LoweredByteAddress {
   if (viewByteOffset % BigInt(dtypeBytes) !== 0n) {
     unsupported(
       `${path}.viewByteOffset`,
-      "packed-subword view byte offset must satisfy dtype alignment",
+      "non-word32 view byte offset must satisfy dtype alignment",
     );
   }
   const byteScale = unit === "element" ? BigInt(dtypeBytes) : 1n;

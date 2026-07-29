@@ -85,6 +85,9 @@ const PLANNED_CASE_IDS = Object.freeze([
   "u16-read-only-broadcast",
   "f16-rank2-odd-transpose",
   "bf16-rank3-permutation",
+  "f64-rank2-transpose",
+  "i64-byte-map-broadcast",
+  "u64-rank3-permutation",
   "zero-extent-no-submit",
 ]);
 const PRODUCER_VERSIONS = Object.freeze({
@@ -123,7 +126,10 @@ interface LayoutInput {
     | "bf16"
     | "f32"
     | "i32"
-    | "u32";
+    | "u32"
+    | "f64"
+    | "i64"
+    | "u64";
 }
 
 interface EvidenceCase {
@@ -915,6 +921,76 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     ),
   );
 
+  const f64Transpose = await makeCase(
+    "f64-rank2-transpose",
+    {
+      shape: dims("2", "3"),
+      sourceLocation: add(
+        multiply(coordinate(1), indexConstant("2")),
+        coordinate(0),
+      ),
+      sourceByteOffset: dimConstant("8"),
+      destinationByteOffset: dimConstant("8"),
+      sourceBytes: dimConstant("56"),
+      destinationBytes: dimConstant("56"),
+      dtype: "f64",
+    },
+    { kind: "reject" },
+    words(
+      0xa5a5a5a5, 0x5a5a5a5a,
+      0x00000000, 0x80000000,
+      0x00000001, 0x7ff00000,
+      0x00000001, 0x7ff80000,
+      0xffffffff, 0xffffffff,
+      0x89abcdef, 0x01234567,
+      0x76543210, 0xfedcba98,
+    ),
+  );
+
+  const i64ByteMapBroadcast = await makeCase(
+    "i64-byte-map-broadcast",
+    {
+      shape: dims("2", "3"),
+      sourceLocation: multiply(coordinate(1), indexConstant("8")),
+      sourceLocationUnit: "byte",
+      sourceBytes: dimConstant("24"),
+      destinationBytes: dimConstant("48"),
+      dtype: "i64",
+    },
+    { kind: "reject" },
+    words(
+      0x00000000, 0x80000000,
+      0xffffffff, 0xffffffff,
+      0x00000001, 0x7fffffff,
+    ),
+  );
+
+  const u64Rank3Permutation = await makeCase(
+    "u64-rank3-permutation",
+    {
+      shape: dims("2", "2", "2"),
+      sourceLocation: add(
+        multiply(coordinate(2), indexConstant("4")),
+        multiply(coordinate(0), indexConstant("2")),
+        coordinate(1),
+      ),
+      sourceBytes: dimConstant("64"),
+      destinationBytes: dimConstant("64"),
+      dtype: "u64",
+    },
+    { kind: "reject" },
+    words(
+      0x00000000, 0x00000000,
+      0x00000001, 0x00000000,
+      0xffffffff, 0x00000000,
+      0x00000000, 0x00000001,
+      0xffffffff, 0xffffffff,
+      0x89abcdef, 0x01234567,
+      0x76543210, 0xfedcba98,
+      0xaaaaaaaa, 0x55555555,
+    ),
+  );
+
   const zero = await makeCase(
     "zero-extent-no-submit",
     {
@@ -964,6 +1040,9 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     u16Broadcast,
     f16OddTranspose,
     bf16Rank3Permutation,
+    f64Transpose,
+    i64ByteMapBroadcast,
+    u64Rank3Permutation,
     zero,
   ]);
 }
@@ -1013,6 +1092,10 @@ async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifac
     dtype === "f16" ||
     dtype === "bf16"
       ? 2
+      : dtype === "f64" ||
+          dtype === "i64" ||
+          dtype === "u64"
+        ? 8
       : 4;
   return verifyLayoutArtifact(JSON.parse(JSON.stringify({
     schema: "browsergrad.layout",
@@ -1024,8 +1107,8 @@ async function verifiedLayout(input: LayoutInput): Promise<VerifiedLayoutArtifac
       symbols: input.symbols ?? [],
       constraints: [],
       allocations: [
-        { allocationId: "source", byteLength: input.sourceBytes, memorySpace: { kind: "global" }, alignmentBytes: 4, aliasSetId: "sourceAlias" },
-        { allocationId: "destination", byteLength: input.destinationBytes, memorySpace: { kind: "global" }, alignmentBytes: 4, aliasSetId: "destinationAlias" },
+        { allocationId: "source", byteLength: input.sourceBytes, memorySpace: { kind: "global" }, alignmentBytes: Math.max(4, requiredAlignmentBytes), aliasSetId: "sourceAlias" },
+        { allocationId: "destination", byteLength: input.destinationBytes, memorySpace: { kind: "global" }, alignmentBytes: Math.max(4, requiredAlignmentBytes), aliasSetId: "destinationAlias" },
       ],
       indexMaps: [
         { indexMapId: "sourceMap", coordinateRank: input.shape.length, locationUnit: input.sourceLocationUnit ?? "element", location: input.sourceLocation, inBounds: input.sourcePredicate ?? TRUE },

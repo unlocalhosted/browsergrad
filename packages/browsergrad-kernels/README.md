@@ -30,7 +30,7 @@ PyTorch-shaped surface.
 | `defineKernel1DProgram` / `runKernel1DProgramReference` / `emitKernel1DProgramWgsl` / `runKernel1DProgramWebGpu` | BrowserGrad-owned 1D kernel IR with reference executor, WGSL lowering, and browser WebGPU dispatch | ✅ |
 | `runThreadGrid`, `referenceSaxpy`, `referenceExclusiveScan`, `referenceFindRepeats`, `referenceOrderedCircleRender` | Thread-grid teaching references for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
 | `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` / `simulateCuda1DGrid` | CUDA-shaped compatibility aliases for labs and rubrics that teach CUDA vocabulary | ✅ |
-| `prepareSemanticViewCopyWgsl` / `runSemanticViewCopyWebGpu` | Verified `view-copy@1.0` lowering over canonical layout/index artifacts, with exact raw 8-bit/16-bit/32-bit storage and structured guarded padding | ✅ 31-case strict CPU/WebGPU parity on Apple Metal 3 across f32/i32/u32 ranks 1–7, bool/i8/u8 and i16/u16/f16/bf16 ranks 2–3, negative word32 source strides at every portable rank, guarded negative predicates, broadcast, offsets, odd packed destinations, and float padding; release evidence remains commit-scoped |
+| `prepareSemanticViewCopyWgsl` / `runSemanticViewCopyWebGpu` | Verified `view-copy@1.0` lowering over canonical layout/index artifacts, with exact raw 8-bit/16-bit/32-bit/64-bit storage and structured guarded padding | ✅ 34-case strict CPU/WebGPU parity on Apple Metal 3 across f32/i32/u32 ranks 1–7, bool/i8/u8, i16/u16/f16/bf16, and f64/i64/u64 ranks 2–3, negative word32 source strides at every portable rank, guarded negative predicates, broadcast, offsets, packed tails, and float padding; release evidence remains commit-scoped |
 | `prepareSemanticHostGraphWebGpu` / `prepareSemanticHostGraphWebGpuPipeline` / `runSemanticHostGraphWebGpuPipeline` | Authority-bound `browsergrad.host-graph@1` execution with a separately prepared exact device-bound pipeline authority, per-rank private storage, canonical view-copy dispatches, whole-allocation raw copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch, rank-2-through-rank-7 request-time or produced-resource rectangular prefix dispatch, captured-input, runtime-control, and one produced-resource u32 conditional, terminal materialization, and ordered f32/i32/u32 all-reduce | ✅ required real-WebGPU complete-output bit parity with the CPU graph oracle for finite f32 sum/signed-zero min, wrapping i32 sum, exact u32 max, event-marked/materialized u8 allocation copy, fixed plus zero/two-iteration request-time and produced-resource f32 repetition, 1/2-, aligned 64/128-, and unaligned 65/127-element workgroup-64 request-time and produced-resource linear launch, small/full request-time and produced-resource rank-2-through-rank-7 rectangular launch, and both branches of all three conditional sources through prewarmed pipeline authority, plus a separate observational fixed-repeat/unrolled authority-reuse record; repeated/device-side feedback, rank-8-and-higher dynamic domains, transport, and native companions remain separate |
 | `prepareSemanticGemmWgsl` / `runSemanticGemmWebGpu` | Verified logical GEMM plus independent schedule lowering with cooperative workgroup staging, uniform barriers, and masked boundary tiles | ✅ bit-exact only for semantic-core certified exact f32 inputs; required irregular two-schedule WebGPU evidence |
 | `prepareSemanticAttentionWgsl` / `runSemanticAttentionWebGpu` | Verified attention plus independent online K/V-tile schedule lowering/execution with cooperative staging, uniform barriers, and causal/tail masks before state updates | ✅ required causal/non-causal two-schedule CPU/WebGPU comparison plus separate observational host-API performance record on Apple Metal 3 |
@@ -152,8 +152,8 @@ artifacts from `@unlocalhosted/browsergrad-semantic-core`. Shared preparation
 resolves bindings, proves every guarded access and dense destination write,
 and derives one semantic specialization hash. Kernels then lowers the same
 canonical index/predicate expressions into either
-`browsergrad.webgpu.view-copy.word32@2` or the distinct packed8/packed16
-profiles. The word32 profile uses
+`browsergrad.webgpu.view-copy.word32@2` or the distinct packed8, packed16, and
+word64 profiles. The word32 profile uses
 signed-i32 address expressions while preserving same-dtype f32, i32, or u32
 storage bit-for-bit. Positive-affine word32 profiles cover ranks 1 through 7.
 The distinct
@@ -177,6 +177,14 @@ static launch, a word-aligned destination, and word-sized root allocations.
 They perform no boolean canonicalization, arithmetic, or conversion, need no
 `shader-f16` feature, and make no widened-arithmetic claim.
 
+`browsergrad.view-copy.positive-affine-rank2-rank3-word64@1` preserves
+same-dtype f64/i64/u64 bits at ranks 2 and 3. Each invocation copies one logical
+element as two adjacent raw u32 words, so destination writes are disjoint. The
+current WebGPU backend requires static launch, positive-affine maps, a dense
+destination, reject-on-invalid-source, aligned views, and word-sized roots. It
+uses no native 64-bit WGSL type and grants no f64 or 64-bit integer arithmetic
+or conversion claim.
+
 Root allocations are bound at offset zero as `array<u32>`, so ordinary values,
 signed zero, infinities, NaN payloads, and integer bit patterns copy exactly.
 Float padding initializes exact fill bits and performs the source load only
@@ -186,11 +194,11 @@ clamping, or ignored writes as semantics. Device execution validates storage,
 dispatch, workgroup, and binding limits before submission and reports separate
 pipeline, validation, memory, device-loss, and execution diagnostics.
 
-Required Chromium 148 on Apple Metal 3 passes 31 complete-destination cases
-through backend 2.8.0. Correctness artifact
-`191a1f65b4c2005315f6f2a7d342e898d536cf2a37dee6fd25f218659ac070dc`;
+Required Chromium 148 on Apple Metal 3 passes 34 complete-destination cases
+through backend 2.9.0. Correctness artifact
+`5fffcc9fc5a595bfb92d764b899a1081754409a60a290243658c6e6b30c27c5b`;
 case set
-`0bc4c04adde40864644d60cf525a76fca730e68394f732edf8623ca5f0a54917`;
+`d9fde92a99e3aaef8191f13cc46a2a088322c98bed9645f432b545b00f997f8b`;
 device profile
 `9589abc8fafb412d83194febaf210f7f89da7a580bf20d3272e1eef9dcda2f66`.
 
