@@ -70,6 +70,8 @@
     "extract:browser-header-sources": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_source_extraction.mjs",
     "materialize:browser-header-packs-from-archives": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_pack_pipeline.mjs",
     "verify:browser-header-distribution-reproducibility": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_distribution_reproducibility.mjs",
+    "author:browser-header-distribution-reproducibility": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_distribution_reproducibility_authoring.mjs",
+    "check:browser-header-distribution-reproducibility": "node scripts/cpp_cute_browser_build/cpp_cute_browser_header_distribution_reproducibility_authoring.mjs --check",
     "verify:browser-header-normalization-environment": "node scripts/cpp_cute_browser_build/cpp_cute_browser_archive_normalization.mjs --verify-pinned=/usr/bin/bsdtar",
     "verify:browser-header-source-plan": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_source_plan.mjs",
     "author:browser-header-pack-inventory": "pnpm run build && node scripts/cpp_cute_browser_build/cpp_cute_browser_header_pack_inventory.mjs",

@@ -15,14 +15,19 @@ import {
   CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_V2_RESOURCE,
   type CppCuteBrowserHeaderDistributionReproducibilityOutputV2,
 } from "./resources/cpp_cute_browser_header_distribution_reproducibility_v2.js";
+import {
+  CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_SHA256,
+  CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION,
+  CPP_CUTE_BROWSER_HEADER_INPUT_PROJECTION_ID,
+} from "./resources/cpp_cute_browser_header_distribution_reproducibility_identity_v1.js";
 
-export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_SHA256 =
-  "7a39e78d7aa3f1f0ff68e4b7b095425c75aa5e3947b208cdc6c5c30b46524838";
-export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_BYTE_LENGTH = 4_181;
-export const CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION =
-  "29a172ffa93ca4c3b63ae9f60e806a6b9d8b27c1";
-export const CPP_CUTE_BROWSER_HEADER_INPUT_PROJECTION_ID =
-  "bg.cpp.browser-header-input-projection.sha256.48490ddb7b2fe655ec36824e276b90122e2f548a77b768f5978029a31129c5b7";
+export {
+  CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_RESOURCE_SHA256,
+  CPP_CUTE_BROWSER_HEADER_DISTRIBUTION_REPRODUCIBILITY_VERIFIER_SOURCE_REVISION,
+  CPP_CUTE_BROWSER_HEADER_INPUT_PROJECTION_ID,
+} from "./resources/cpp_cute_browser_header_distribution_reproducibility_identity_v1.js";
 
 const OUTPUT_VERIFICATION_HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.distribution-output-file-verification.v1";
@@ -204,7 +209,7 @@ export async function verifyCppCuteBrowserHeaderDistributionReproducibilityResou
     signedProvenanceVerified: false,
     workerExecutionObserved: false,
     releaseReady: false,
-  }) as VerifiedCppCuteBrowserHeaderDistributionReproducibility;
+  }) as unknown as VerifiedCppCuteBrowserHeaderDistributionReproducibility;
   VERIFIED_RESOURCES.add(authority);
   return authority;
 }
