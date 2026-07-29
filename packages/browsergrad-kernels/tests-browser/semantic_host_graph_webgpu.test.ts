@@ -96,6 +96,8 @@ const CASE_IDS = Object.freeze([
   "f32-resource-rectangular-dynamic-rank5-large",
   "f32-resource-rectangular-dynamic-rank6-small",
   "f32-resource-rectangular-dynamic-rank6-large",
+  "f32-resource-rectangular-dynamic-rank7-small",
+  "f32-resource-rectangular-dynamic-rank7-large",
   "u8-input-conditional-then",
   "u8-input-conditional-else",
   "u8-runtime-conditional-then",
@@ -391,6 +393,16 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         "f32-resource-rectangular-dynamic-rank6-large",
         [2, 2, 2, 2, 3, 4],
         [2, 2, 2, 2, 3, 4],
+      ),
+      prepareResourceRectangularDynamicDispatchCase(
+        "f32-resource-rectangular-dynamic-rank7-small",
+        [2, 2, 2, 2, 2, 3, 4],
+        [1, 2, 1, 2, 1, 2, 3],
+      ),
+      prepareResourceRectangularDynamicDispatchCase(
+        "f32-resource-rectangular-dynamic-rank7-large",
+        [2, 2, 2, 2, 2, 3, 4],
+        [2, 2, 2, 2, 2, 3, 4],
       ),
       prepareConditionalRawCopyCase(
         "u8-input-conditional-then",
@@ -1357,19 +1369,23 @@ async function prepareResourceRectangularDynamicDispatchCase(
     | "f32-resource-rectangular-dynamic-rank5-small"
     | "f32-resource-rectangular-dynamic-rank5-large"
     | "f32-resource-rectangular-dynamic-rank6-small"
-    | "f32-resource-rectangular-dynamic-rank6-large",
+    | "f32-resource-rectangular-dynamic-rank6-large"
+    | "f32-resource-rectangular-dynamic-rank7-small"
+    | "f32-resource-rectangular-dynamic-rank7-large",
   shape:
     | readonly [number, number]
     | readonly [number, number, number]
     | readonly [number, number, number, number]
     | readonly [number, number, number, number, number]
-    | readonly [number, number, number, number, number, number],
+    | readonly [number, number, number, number, number, number]
+    | readonly [number, number, number, number, number, number, number],
   logicalExtents:
     | readonly [number, number]
     | readonly [number, number, number]
     | readonly [number, number, number, number]
     | readonly [number, number, number, number, number]
-    | readonly [number, number, number, number, number, number],
+    | readonly [number, number, number, number, number, number]
+    | readonly [number, number, number, number, number, number, number],
 ): Promise<PreparedCase> {
   const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
     inputShape: shape.map((extent) => parseWireI64(String(extent))),
@@ -1681,7 +1697,8 @@ function resourceRectangularDynamicDispatchProgram(
     | readonly [number, number, number]
     | readonly [number, number, number, number]
     | readonly [number, number, number, number, number]
-    | readonly [number, number, number, number, number, number],
+    | readonly [number, number, number, number, number, number]
+    | readonly [number, number, number, number, number, number, number],
 ): HostGraphProgram {
   const base = rectangularDynamicDispatchProgram(artifacts, shape);
   const producerIds = shape.map((_, axis) => `produce-extent-${axis}`);
@@ -1689,13 +1706,15 @@ function resourceRectangularDynamicDispatchProgram(
     ...base,
     version: {
       major: 1,
-      minor: shape.length === 6
-        ? 19
-        : shape.length === 5
-          ? 17
-          : shape.length === 4
-            ? 15
-            : 13,
+      minor: shape.length === 7
+        ? 21
+        : shape.length === 6
+          ? 19
+          : shape.length === 5
+            ? 17
+            : shape.length === 4
+              ? 15
+              : 13,
     },
     resources: [
       ...base.resources,

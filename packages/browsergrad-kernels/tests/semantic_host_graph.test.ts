@@ -219,13 +219,15 @@ function resourceRectangularDynamicProgram(
     ...base,
     version: {
       major: 1,
-      minor: shape.length === 6
-        ? 19
-        : shape.length === 5
-          ? 17
-          : shape.length === 4
-            ? 15
-            : 13,
+      minor: shape.length === 7
+        ? 21
+        : shape.length === 6
+          ? 19
+          : shape.length === 5
+            ? 17
+            : shape.length === 4
+              ? 15
+              : 13,
     },
     resources: [
       ...base.resources,
@@ -1061,13 +1063,14 @@ describe("semantic host-graph WebGPU preparation", () => {
     }
   });
 
-  it("prewarms one produced rank-2 through rank-6 rectangle with exact feedback budgets", async () => {
+  it("prewarms one produced rank-2 through rank-7 rectangle with exact feedback budgets", async () => {
     for (const shape of [
       [3, 4],
       [2, 3, 4],
       [2, 2, 3, 4],
       [2, 2, 2, 3, 4],
       [2, 2, 2, 2, 3, 4],
+      [2, 2, 2, 2, 2, 3, 4],
     ] as const) {
       const artifacts = await rectangularIdentityArtifacts(shape);
       const graph = await verified(
