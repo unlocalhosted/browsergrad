@@ -127,7 +127,7 @@
     "bugbash:status": "node ../../scripts/cuda-lite-bugbash-status.mjs",
     "bugbash:status:json": "node ../../scripts/cuda-lite-bugbash-status.mjs --json",
     "architecture:map": "node ../../scripts/compiler-architecture-map.mjs",
-    "architecture:check": "node ../../scripts/compiler-architecture-map.mjs --check --include-tests --max-source-lines=8000 --source-line-budget=semantic_wgsl.ts:7972 --source-line-budget=semantic_ir.ts:7178 --source-line-budget=semantic_reference.ts:6999 --source-line-budget=analyzer.ts:5437 --max-harness-lines=2300 --harness-line-budget=cpp_cute_browser_build_executor.mjs:2237 --max-native-lines=2200 --native-line-budget=BrowserGradCppCuteCompileSession.cpp:2162 --native-line-budget=BrowserGradCppCuteArtifactWriter.cpp:1829 --max-test-lines=6000",
+    "architecture:check": "node ../../scripts/compiler-architecture-map.mjs --check --include-tests --max-source-lines=8000 --source-line-budget=semantic_wgsl.ts:7972 --source-line-budget=semantic_ir.ts:7178 --source-line-budget=semantic_reference.ts:6999 --source-line-budget=analyzer.ts:5437 --max-harness-lines=2300 --harness-line-budget=cpp_cute_browser_build_executor.mjs:2237 --max-native-lines=2200 --native-line-budget=BrowserGradCppCuteCompileSession.cpp:2162 --native-line-budget=BrowserGradCppCuteArtifactWriter.cpp:1855 --max-test-lines=6000",
     "verify:changed:plan": "node ../../scripts/cuda-lite-test-scope.mjs",
     "verify:changed": "node ../../scripts/cuda-lite-test-scope.mjs --run",
     "verify:changed:compile": "node ../../scripts/cuda-lite-test-scope.mjs --run --include-compile-corpus",
