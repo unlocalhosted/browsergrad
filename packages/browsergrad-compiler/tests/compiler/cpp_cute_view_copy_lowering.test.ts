@@ -5,6 +5,7 @@ import {
 } from "@unlocalhosted/browsergrad-semantic-core/kernel";
 import { layoutArtifactPayload } from "@unlocalhosted/browsergrad-semantic-core/layout";
 import { parseWireU64 } from "@unlocalhosted/browsergrad-semantic-core/schema";
+import { prepareSemanticViewCopyWgsl } from "@unlocalhosted/browsergrad-kernels";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   lowerAuthorizedCppCuteViewCopyEntry,
@@ -25,6 +26,8 @@ import {
   mutateCppCutePayloadToViewCopy,
   mutateCppCutePayloadToRank3ViewCopy,
   mutateCppCutePayloadToRank4ViewCopy,
+  mutateCppCutePayloadToMixedSignedRank2ViewCopy,
+  mutateCppCutePayloadToSignedViewCopy,
   mutateCppCutePayloadToStridedSliceViewCopy,
   mutateCppCutePayloadToU32ViewCopy,
 } from "./support/cpp_cute_frontend_view_copy_fixtures.js";
@@ -339,6 +342,184 @@ describe("authorized C++/CuTe view-copy lowering", () => {
     }
   });
 
+  it("executes signed-affine rank-1 through rank-4 sources through canonical CPU and WGSL", async () => {
+    for (const testCase of [
+      {
+        rank: 1 as const,
+        elementCount: 4,
+        profileId: "browsergrad.view-copy.signed-affine-rank1-word32@1",
+      },
+      {
+        rank: 2 as const,
+        elementCount: 6,
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank2-rank3-word32@1",
+      },
+      {
+        rank: 3 as const,
+        elementCount: 12,
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank2-rank3-word32@1",
+      },
+      {
+        rank: 4 as const,
+        elementCount: 16,
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank4-rank5-word32@1",
+      },
+    ]) {
+      const signed = await createAuthorizedCppCuteProvenanceFixture({
+        mutatePayload: (payload) =>
+          mutateCppCutePayloadToSignedViewCopy(payload, testCase.rank),
+      });
+      const allocationWords = testCase.elementCount + 2;
+      const allocationBytes = allocationWords * 4;
+      const artifacts = await lowerAuthorizedCppCuteViewCopyEntry(
+        signed.authorization,
+        {
+          ...requestFor(signed),
+          sourceAllocationByteLength: wire(allocationBytes),
+          destinationAllocationByteLength: wire(allocationBytes),
+          sourceByteOffset: wire(testCase.elementCount * 4),
+          destinationByteOffset: wire(4),
+        },
+      );
+      const cpu = await prepareViewCopyCpu(artifacts.layout, artifacts.kernel, {
+        operationId: artifacts.operationId,
+      });
+      const specialization = await prepareViewCopySpecialization(
+        artifacts.layout,
+        artifacts.kernel,
+        { operationId: artifacts.operationId },
+      );
+      const wgsl = await prepareSemanticViewCopyWgsl(
+        artifacts.layout,
+        artifacts.kernel,
+        { operationId: artifacts.operationId },
+      );
+      const source = Uint32Array.from([
+        0xaaaa_aaaa,
+        ...Array.from(
+          { length: testCase.elementCount },
+          (_, index) => index + 1,
+        ),
+        0xbbbb_bbbb,
+      ]);
+      const destination = new Uint32Array(allocationWords);
+      destination.fill(0xcccc_cccc);
+      cpu.execute({
+        source: new Uint8Array(source.buffer),
+        destination: new Uint8Array(destination.buffer),
+      });
+
+      expect(specialization.portableProfile).toMatchObject({
+        profileId: testCase.profileId,
+        rank: testCase.rank,
+        dtype: "f32",
+      });
+      expect(wgsl.semantic.specializationHash).toBe(
+        specialization.specializationHash,
+      );
+      expect(wgsl.sourceLocationRange).toEqual({
+        minimum: BigInt(1 - testCase.elementCount),
+        maximum: 0n,
+      });
+      expect(wgsl.program.wgsl).toContain("* -");
+      expect([...source]).toEqual([
+        0xaaaa_aaaa,
+        ...Array.from(
+          { length: testCase.elementCount },
+          (_, index) => index + 1,
+        ),
+        0xbbbb_bbbb,
+      ]);
+      expect([...destination]).toEqual([
+        0xcccc_cccc,
+        ...Array.from(
+          { length: testCase.elementCount },
+          (_, index) => testCase.elementCount - index,
+        ),
+        0xcccc_cccc,
+      ]);
+    }
+
+    const mixed = await createAuthorizedCppCuteProvenanceFixture({
+      mutatePayload: mutateCppCutePayloadToMixedSignedRank2ViewCopy,
+    });
+    const mixedArtifacts = await lowerAuthorizedCppCuteViewCopyEntry(
+      mixed.authorization,
+      {
+        ...requestFor(mixed),
+        sourceAllocationByteLength: wire(32),
+        destinationAllocationByteLength: wire(32),
+        sourceByteOffset: wire(16),
+        destinationByteOffset: wire(4),
+      },
+    );
+    const mixedCpu = await prepareViewCopyCpu(
+      mixedArtifacts.layout,
+      mixedArtifacts.kernel,
+      { operationId: mixedArtifacts.operationId },
+    );
+    const mixedSource = Uint32Array.from([
+      0xaaaa_aaaa,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      0xbbbb_bbbb,
+    ]);
+    const mixedDestination = new Uint32Array(8);
+    mixedDestination.fill(0xcccc_cccc);
+    mixedCpu.execute({
+      source: new Uint8Array(mixedSource.buffer),
+      destination: new Uint8Array(mixedDestination.buffer),
+    });
+    expect([...mixedDestination]).toEqual([
+      0xcccc_cccc,
+      4,
+      5,
+      6,
+      1,
+      2,
+      3,
+      0xcccc_cccc,
+    ]);
+
+    const signed = await createAuthorizedCppCuteProvenanceFixture({
+      mutatePayload: (payload) =>
+        mutateCppCutePayloadToSignedViewCopy(payload, 2),
+    });
+    await expect(lowerAuthorizedCppCuteViewCopyEntry(
+      signed.authorization,
+      {
+        ...requestFor(signed),
+        sourceAllocationByteLength: wire(32),
+        destinationAllocationByteLength: wire(24),
+        sourceByteOffset: wire(16),
+        destinationByteOffset: wire(0),
+      },
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-VIEW-COPY-UNSUPPORTED-LAYOUT",
+      path: "$.request.sourceByteOffset",
+    });
+    await expect(lowerAuthorizedCppCuteViewCopyEntry(
+      signed.authorization,
+      {
+        ...requestFor(signed),
+        sourceAllocationByteLength: wire(24),
+        destinationAllocationByteLength: wire(24),
+        sourceByteOffset: wire(24),
+        destinationByteOffset: wire(0),
+      },
+    )).rejects.toMatchObject({
+      code: "BG-COMPILER-CPP-CUTE-VIEW-COPY-UNSUPPORTED-LAYOUT",
+      path: "$.request.sourceAllocationByteLength",
+    });
+  });
+
   it("keeps authorization opaque and refuses caller semantic IDs or implicit storage capacity", async () => {
     await expect(lowerAuthorizedCppCuteViewCopyEntry(
       { ...fixture.authorization } as AuthorizedCppCuteFrontendArtifact,
@@ -400,7 +581,7 @@ describe("authorized C++/CuTe view-copy lowering", () => {
       });
   });
 
-  it("rejects dynamic, negative-source, and non-positive destination strides", async () => {
+  it("rejects dynamic and non-positive destination strides", async () => {
     const dynamicStride = await viewCopyFixture((payload) => {
       for (const layout of payload.facts.filter((fact) => fact.kind === "affine-layout")) {
         if (layout.kind !== "affine-layout" || layout.stride.kind !== "tuple") continue;
@@ -413,22 +594,6 @@ describe("authorized C++/CuTe view-copy lowering", () => {
       }
     });
     await expect(lowerAuthorizedCppCuteViewCopyEntry(dynamicStride.authorization, requestFor(dynamicStride)))
-      .rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-VIEW-COPY-UNSUPPORTED-LAYOUT" });
-
-    const negativeStride = await viewCopyFixture((payload) => {
-      const sourceTensor = payload.facts.find((fact) => fact.kind === "tensor");
-      const layout = sourceTensor?.kind === "tensor"
-        ? payload.facts.find((fact) => fact.factId === sourceTensor.layoutFactId)
-        : undefined;
-      if (layout?.kind !== "affine-layout" || layout.stride.kind !== "tuple") {
-        throw new Error("fixture lost source layout");
-      }
-      const first = layout.stride.elements[0];
-      if (first?.kind !== "scalar") throw new Error("fixture lost flat layout stride");
-      (first as { value: unknown }).value = { kind: "integer", value: "-1" };
-      (layout as { cosize: unknown }).cosize = { kind: "integer", value: "2" };
-    });
-    await expect(lowerAuthorizedCppCuteViewCopyEntry(negativeStride.authorization, requestFor(negativeStride)))
       .rejects.toMatchObject({ code: "BG-COMPILER-CPP-CUTE-VIEW-COPY-UNSUPPORTED-LAYOUT" });
 
     const broadcastDestination = await viewCopyFixture((payload) => {

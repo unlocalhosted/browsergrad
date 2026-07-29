@@ -161,6 +161,49 @@ export async function mutateCppCutePayloadToRank4ViewCopy(
   });
 }
 
+/** Exact signed-affine source reversal with a dense destination. */
+export async function mutateCppCutePayloadToSignedViewCopy(
+  payload: CppCuteFrontendPayloadV3,
+  rank: 1 | 2 | 3 | 4,
+): Promise<void> {
+  await mutateCppCutePayloadToViewCopy(payload);
+  const profiles = {
+    1: { shape: [4], sourceStrides: [-1], destinationStrides: [1] },
+    2: {
+      shape: [2, 3],
+      sourceStrides: [-3, -1],
+      destinationStrides: [3, 1],
+    },
+    3: {
+      shape: [2, 2, 3],
+      sourceStrides: [-6, -3, -1],
+      destinationStrides: [6, 3, 1],
+    },
+    4: {
+      shape: [2, 2, 2, 2],
+      sourceStrides: [-8, -4, -2, -1],
+      destinationStrides: [8, 4, 2, 1],
+    },
+  } as const;
+  mutateCppCuteViewCopyFlatLayouts(payload, {
+    shape: profiles[rank].shape,
+    sourceStrides: profiles[rank].sourceStrides,
+    destinationStrides: profiles[rank].destinationStrides,
+  });
+}
+
+/** Signed leading mode plus positive trailing mode exercises both affine extrema. */
+export async function mutateCppCutePayloadToMixedSignedRank2ViewCopy(
+  payload: CppCuteFrontendPayloadV3,
+): Promise<void> {
+  await mutateCppCutePayloadToViewCopy(payload);
+  mutateCppCuteViewCopyFlatLayouts(payload, {
+    shape: [2, 3],
+    sourceStrides: [-3, 1],
+    destinationStrides: [3, 1],
+  });
+}
+
 export async function mutateCppCutePayloadToViewCopy(payload: CppCuteFrontendPayloadV3): Promise<void> {
   const baseInt = payload.types.find((type) => type.typeId === CPP_CUTE_FIXTURE_INT_TYPE_ID);
   if (baseInt === undefined || baseInt.kind !== "builtin") throw new Error("fixture lost int type");

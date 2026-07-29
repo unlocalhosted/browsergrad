@@ -13,7 +13,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
 describe requirement strength. They are used deliberately rather than as
 general emphasis.
 
-## Implementation Checkpoint — Active 2026-07-28
+## Implementation Checkpoint — Active 2026-07-29
 
 This checkpoint is informational. The rest of this document is normative, and
 the [implementation ledger](../internal/package-requirements-implementation-ledger.md)
@@ -26,7 +26,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
 | 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. |
-| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-clobber producer/reviewer exchange, and unified in-process backend/final-release composition are package-pinned; external evidence and actual production issuance remain open. |
+| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, signed-source-aware authorized Artifact V3 lowering, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-clobber producer/reviewer exchange, and unified in-process backend/final-release composition are package-pinned; a real signed-stride source case, external evidence, and actual production issuance remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
@@ -141,6 +141,14 @@ allocations, nonzero offsets, broadcast, guarded float fill, and:
 Required Apple Metal 3 backend-2.4 evidence passes 20 complete-destination,
 bit-exact CPU/WebGPU cases covering those profiles, dynamic specialization,
 and zero-extent no-submit behavior. Exact identities stay in the ledger.
+The authorized C++/CuTe transition carries signed source strides at ranks 1
+through 4 into canonical artifacts and derives exact affine element extrema,
+then requires the host-supplied nonnegative view offset and allocation length
+to rebase that complete range; CuTe `cosize` remains non-authoritative storage
+metadata. Focused f32 reversals converge through the shared CPU and canonical
+WGSL preparation paths. The strict real-browser source matrix still has no
+negative-stride case, so this proves Artifact V3-to-backend convergence, not
+production source compilation or producer trust.
 Rank 6, signed destinations, packed/16-bit/bf16/f64 storage, overlap, and
 other undeclared layouts remain explicit refusals.
 

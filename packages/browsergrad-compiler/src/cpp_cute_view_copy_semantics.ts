@@ -81,11 +81,18 @@ export interface PreparedVerifiedCppCuteViewCopySemantics {
   readonly intrinsic: IntrinsicFact;
   readonly sourceLayout: LayoutExpr;
   readonly destinationLayout: LayoutExpr;
+  readonly sourceAddressRangeElements: StaticAffineAddressRange;
+  readonly destinationAddressRangeElements: StaticAffineAddressRange;
   readonly sourceSpanElements: bigint;
   readonly destinationSpanElements: bigint;
   readonly dtype: CppCuteViewCopyDType;
   readonly entrySubjectHash: string;
   readonly loweringAuthorityMinted: false;
+}
+
+export interface StaticAffineAddressRange {
+  readonly minimum: bigint;
+  readonly maximum: bigint;
 }
 
 export async function prepareVerifiedCppCuteViewCopySemantics(
@@ -136,18 +143,26 @@ export async function prepareVerifiedCppCuteViewCopySemantics(
         : "BG-COMPILER-CPP-CUTE-VIEW-COPY-UNSUPPORTED-LAYOUT";
     cppCuteViewCopyFailure(code, cause.path, cause.message, { cause });
   }
-  const sourceSpanElements = staticAffineSpanElements(
+  const sourceAddressRangeElements = staticAffineAddressRange(
     sourceLayout,
     sourceLayoutFact.rank,
     "$.artifact.source.layout",
     true,
   );
-  const destinationSpanElements = staticAffineSpanElements(
+  const destinationAddressRangeElements = staticAffineAddressRange(
     destinationLayout,
     destinationLayoutFact.rank,
     "$.artifact.destination.layout",
     false,
   );
+  const sourceSpanElements =
+    sourceAddressRangeElements.maximum -
+    sourceAddressRangeElements.minimum +
+    1n;
+  const destinationSpanElements =
+    destinationAddressRangeElements.maximum -
+    destinationAddressRangeElements.minimum +
+    1n;
   throwIfCppCuteViewCopyAborted(normalizedOptions.signal);
   let entrySubjectHash: string;
   try {
@@ -186,6 +201,8 @@ export async function prepareVerifiedCppCuteViewCopySemantics(
     intrinsic,
     sourceLayout,
     destinationLayout,
+    sourceAddressRangeElements,
+    destinationAddressRangeElements,
     sourceSpanElements,
     destinationSpanElements,
     dtype,
@@ -398,12 +415,12 @@ function validatePointer(
   }
 }
 
-function staticAffineSpanElements(
+function staticAffineAddressRange(
   layout: LayoutExpr,
   expectedRank: number,
   path: string,
-  allowBroadcast: boolean,
-): bigint {
+  allowSignedSource: boolean,
+): StaticAffineAddressRange {
   if (expectedRank < 1 || expectedRank > 4) {
     inconsistent(path, "unsupported view-copy rank reached affine span projection");
   }
@@ -423,13 +440,13 @@ function staticAffineSpanElements(
       );
     }
     const value = wireIntegerToBigInt(expression.value);
-    const minimum = component === "strides" && allowBroadcast ? 0n : 1n;
-    if (value < minimum) {
+    const minimum = component === "strides" && allowSignedSource
+      ? undefined
+      : 1n;
+    if (minimum !== undefined && value < minimum) {
       unsupportedLayout(
         `${path}.${component}[${index}]`,
-        component === "strides" && allowBroadcast
-          ? "view-copy source layout strides must be non-negative"
-          : "view-copy layout shape and destination strides must be positive",
+        "view-copy layout shape and destination strides must be positive",
       );
     }
     return value;
@@ -437,16 +454,19 @@ function staticAffineSpanElements(
 
   const shape = staticValues(layout.shape, "shape");
   const strides = staticValues(layout.strides, "strides");
-  let spanElements = 1n;
+  let minimum = 0n;
+  let maximum = 0n;
   for (let axis = 0; axis < expectedRank; axis += 1) {
     const extent = shape[axis];
     const stride = strides[axis];
     if (extent === undefined || stride === undefined) {
-      inconsistent(path, `positive rank-${expectedRank} layout projection disappeared`);
+      inconsistent(path, `rank-${expectedRank} layout projection disappeared`);
     }
-    spanElements += (extent - 1n) * stride;
+    const contribution = (extent - 1n) * stride;
+    if (contribution < 0n) minimum += contribution;
+    else maximum += contribution;
   }
-  return spanElements;
+  return NATIVE_OBJECT_FREEZE({ minimum, maximum });
 }
 
 function closedDataRecord(

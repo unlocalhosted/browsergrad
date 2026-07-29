@@ -20,6 +20,7 @@ import {
   prepareVerifiedCppCuteViewCopySemantics,
   throwIfCppCuteViewCopyAborted,
   type PrepareVerifiedCppCuteViewCopySemanticsOptions,
+  type StaticAffineAddressRange,
 } from "./cpp_cute_view_copy_semantics.js";
 
 export {
@@ -79,14 +80,14 @@ export async function lowerAuthorizedCppCuteViewCopyEntry(
   validateStorage(
     normalizedRequest.sourceAllocationByteLength,
     normalizedRequest.sourceByteOffset,
-    semantics.sourceSpanElements,
+    semantics.sourceAddressRangeElements,
     "$.request.sourceAllocationByteLength",
     "$.request.sourceByteOffset",
   );
   validateStorage(
     normalizedRequest.destinationAllocationByteLength,
     normalizedRequest.destinationByteOffset,
-    semantics.destinationSpanElements,
+    semantics.destinationAddressRangeElements,
     "$.request.destinationAllocationByteLength",
     "$.request.destinationByteOffset",
   );
@@ -118,7 +119,7 @@ export async function lowerAuthorizedCppCuteViewCopyEntry(
       },
       invalidSource: { kind: "reject" },
     }, {
-      producer: { id: "browsergrad.compiler.cpp-cute-view-copy-lowering", version: "1" },
+      producer: { id: "browsergrad.compiler.cpp-cute-view-copy-lowering", version: "2" },
       layoutArtifactId: "authorized-cpp-cute-view-copy-layout",
       kernelArtifactId: "authorized-cpp-cute-view-copy-kernel",
       limits: normalizedOptions.limits,
@@ -142,7 +143,7 @@ export async function lowerAuthorizedCppCuteViewCopyEntry(
 function validateStorage(
   byteLength: bigint,
   byteOffset: bigint,
-  spanElements: bigint,
+  addressRangeElements: StaticAffineAddressRange,
   byteLengthPath: string,
   byteOffsetPath: string,
 ): void {
@@ -158,12 +159,21 @@ function validateStorage(
       "32-bit scalar view byte offset must be 4-byte aligned",
     );
   }
-  const required = byteOffset + spanElements * 4n;
-  if (required > byteLength) {
+  const firstByte = byteOffset + addressRangeElements.minimum * 4n;
+  if (firstByte < 0n) {
+    cppCuteViewCopyFailure(
+      "BG-COMPILER-CPP-CUTE-VIEW-COPY-UNSUPPORTED-LAYOUT",
+      byteOffsetPath,
+      `view byte offset ${byteOffset} cannot represent the verified minimum affine element offset ${addressRangeElements.minimum}`,
+    );
+  }
+  const endByteExclusive =
+    byteOffset + addressRangeElements.maximum * 4n + 4n;
+  if (endByteExclusive > byteLength) {
     cppCuteViewCopyFailure(
       "BG-COMPILER-CPP-CUTE-VIEW-COPY-UNSUPPORTED-LAYOUT",
       byteLengthPath,
-      `explicit allocation has ${byteLength} bytes but the verified affine address span requires ${required}`,
+      `explicit allocation has ${byteLength} bytes but the verified affine address range ends at ${endByteExclusive}`,
     );
   }
 }
