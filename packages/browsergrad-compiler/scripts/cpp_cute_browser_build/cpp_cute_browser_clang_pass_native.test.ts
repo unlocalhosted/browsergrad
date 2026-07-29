@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -25,6 +25,7 @@ interface NativeClangToolchain {
   readonly includeDirectory: string;
   readonly libraryDirectory: string;
   readonly llvmLibrary: string;
+  readonly sdkRoot?: string;
 }
 
 async function discoverNativeClangToolchain(): Promise<NativeClangToolchain | undefined> {
@@ -53,11 +54,34 @@ async function discoverNativeClangToolchain(): Promise<NativeClangToolchain | un
       (!existsSync(clangLibrary) && !existsSync(linuxClangLibrary))) {
     return undefined;
   }
+  const sdkRoot = process.platform === "darwin"
+    ? await (async () => {
+        const result = await runNativeTestProcess(
+          "/usr/bin/xcrun",
+          ["--show-sdk-path"],
+          { encoding: "utf8", timeout: 10_000 },
+        );
+        const candidate = result.status === 0
+          ? result.stdout.trim()
+          : "";
+        try {
+          return isAbsolute(candidate) && statSync(candidate).isDirectory()
+            ? candidate
+            : undefined;
+        } catch {
+          return undefined;
+        }
+      })()
+    : undefined;
+  if (process.platform === "darwin" && sdkRoot === undefined) {
+    return undefined;
+  }
   return {
     compiler,
     includeDirectory,
     libraryDirectory,
     llvmLibrary: `-lLLVM-${version.split(".")[0]}`,
+    ...(sdkRoot === undefined ? {} : { sdkRoot }),
   };
 }
 
@@ -79,6 +103,9 @@ async function compileAndRun(): Promise<void> {
       "-I", scriptRoot,
       "-I", extractorRoot,
       "-isystem", toolchain.includeDirectory,
+      ...(toolchain.sdkRoot === undefined
+        ? []
+        : ["-isysroot", toolchain.sdkRoot]),
       nativeSource,
       join(extractorRoot, "BrowserGradCppCuteClangAction.cpp"),
       join(extractorRoot, "BrowserGradCppCuteMetrics.cpp"),

@@ -79,6 +79,50 @@ describe("native C++ test harness compiler discovery", () => {
     }
   });
 
+  it("skips a compiler that fails a warning-clean C++ syntax probe", () => {
+    const root = mkdtempSync(join(tmpdir(), "browsergrad-broken-cxx-"));
+    const broken = join(root, "broken-clang++");
+    const usable = join(root, "usable-clang++");
+    try {
+      writeFileSync(
+        broken,
+        [
+          "#!/bin/sh",
+          "if [ \"${1:-}\" = \"--version\" ]; then",
+          "  printf 'clang version 22.1.8\\n'",
+          "elif [ \"${1:-}\" = \"-dM\" ]; then",
+          "  printf '#define __clang__ 1\\n'",
+          "else",
+          "  printf 'configured sysroot is unavailable\\n' >&2",
+          "  exit 1",
+          "fi",
+          "",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+      writeFileSync(
+        usable,
+        [
+          "#!/bin/sh",
+          "if [ \"${1:-}\" = \"--version\" ]; then",
+          "  printf 'clang version 22.1.8\\n'",
+          "else",
+          "  printf '#define __clang__ 1\\n'",
+          "fi",
+          "",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+
+      expect(resolveNativeCompiler([broken, usable])).toMatchObject({
+        path: usable,
+        isClang: true,
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("bounds native process trees through the shared no-shell process boundary", async () => {
     const startedAt = performance.now();
     const result = await runNativeTestProcess(process.execPath, [

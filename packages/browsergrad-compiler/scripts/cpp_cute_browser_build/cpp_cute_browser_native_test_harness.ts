@@ -115,6 +115,14 @@ export function resolveNativeCompiler(
         ["-dM", "-E", "-x", "c++", "/dev/null"],
         { encoding: "utf8", timeout: 5_000 },
       );
+      const syntaxProbe = spawnSync(
+        invocationPath,
+        ["-Werror", "-fsyntax-only", "-x", "c++", "/dev/null"],
+        { encoding: "utf8", timeout: 5_000 },
+      );
+      if (syntaxProbe.status !== 0 || syntaxProbe.error !== undefined) {
+        continue;
+      }
       return {
         path: invocationPath,
         canonicalPath,
