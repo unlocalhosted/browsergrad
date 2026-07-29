@@ -6,6 +6,7 @@ import {
 import {
   CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_MATRIX_SCHEMA,
   CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_OBSERVATION_SCHEMA,
+  isRetryableCppCuteBrowserExactDistributionFailure,
   parseCppCuteBrowserExactDistributionConvergenceArguments,
   prepareCppCuteBrowserExactDistributionConvergenceMatrix,
   type CppCuteBrowserExactDistributionConvergencePreflight,
@@ -40,6 +41,7 @@ describe("exact distribution browser convergence harness", () => {
         "--profile=/private/profile.json",
         "--producer-policy=/private/policy.json",
         "--producer-trust-store=/private/trust-store.json",
+        "--checkpoint-directory=/private/checkpoints",
         "--evidence-output=/private/evidence.json",
         `--source-revision=${sourceRevision}`,
       ]);
@@ -48,6 +50,7 @@ describe("exact distribution browser convergence harness", () => {
       profilePath: "/private/profile.json",
       producerPolicyPath: "/private/policy.json",
       producerTrustStorePath: "/private/trust-store.json",
+      checkpointDirectory: "/private/checkpoints",
       evidenceOutput: "/private/evidence.json",
       sourceRevision,
       preflightOnly: false,
@@ -76,6 +79,34 @@ describe("exact distribution browser convergence harness", () => {
     ).toThrowError(expect.objectContaining({
       path: "$.argv[4]",
     }));
+    expect(() =>
+      parseCppCuteBrowserExactDistributionConvergenceArguments([
+        "--distribution-root=/distribution",
+        "--profile=/profile.json",
+        "--producer-policy=/policy.json",
+        "--producer-trust-store=/trust-store.json",
+        "--checkpoint-directory=/checkpoints",
+        "--preflight-only",
+      ])
+    ).toThrowError(expect.objectContaining({
+      path: "$.argv",
+    }));
+  });
+
+  it("retries only pre-evidence browser transport disconnects", () => {
+    expect(isRetryableCppCuteBrowserExactDistributionFailure(
+      "Browser connection was closed while running tests",
+    )).toBe(true);
+    expect(isRetryableCppCuteBrowserExactDistributionFailure(
+      "rpc is closed, cannot call \"createTesters\"",
+    )).toBe(true);
+    expect(isRetryableCppCuteBrowserExactDistributionFailure(
+      "TypeError: compiler semantic mismatch",
+    )).toBe(false);
+    expect(isRetryableCppCuteBrowserExactDistributionFailure(
+      `BROWSERGRAD_CPP_CUTE_EXACT_DISTRIBUTION_CONVERGENCE_EVIDENCE={}\n` +
+      "Browser connection was closed while running tests",
+    )).toBe(false);
   });
 
   it("closes the exact eight-case matrix without widening authority", () => {
@@ -145,6 +176,18 @@ describe("exact distribution browser convergence harness", () => {
       path: "$.observations",
       message: expect.stringContaining("candidateId"),
     }));
+
+    const staleRevision = structuredClone(observations);
+    staleRevision[0]!.sourceRevision = "b".repeat(40);
+    expect(() =>
+      prepareCppCuteBrowserExactDistributionConvergenceMatrix(
+        staleRevision,
+        preflight,
+        sourceRevision,
+      )
+    ).toThrowError(expect.objectContaining({
+      path: "$.observations[0]",
+    }));
   });
 });
 
@@ -162,6 +205,7 @@ function observation(
     evidenceId:
       `bg.cpp.browser-exact-distribution-case-convergence.sha256.${digest(index + 1)}`,
     caseId,
+    sourceRevision,
     source: {
       sourceSha256: compileCase.sourceSha256,
       dtype: compileCase.dtype,

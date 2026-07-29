@@ -86,7 +86,20 @@ const ANSI_COLOR_PATTERN = new RegExp(
   "gu",
 );
 const MAX_CAPTURED_OUTPUT_BYTES = 16 * 1024 * 1024;
+const MAX_CHECKPOINT_BYTES = 256 * 1024;
+const MAX_BROWSER_ATTEMPTS = 2;
 const TRUST_STORE_BYTE_LIMIT = 256 * 1024;
+const CHECKPOINT_DECODE_LIMITS = Object.freeze({
+  maxDocumentBytes: MAX_CHECKPOINT_BYTES,
+  maxDepth: 16,
+  maxNodes: 16_384,
+  maxStringBytes: 192 * 1024,
+  maxArrayLength: 512,
+  maxObjectProperties: 128,
+  maxRank: 8,
+  maxIntegerBits: 64,
+  maxArithmeticOperations: 32_768,
+});
 const TRUST_STORE_DECODE_LIMITS = Object.freeze({
   maxDocumentBytes: TRUST_STORE_BYTE_LIMIT,
   maxDepth: 8,
@@ -141,6 +154,9 @@ export function parseCppCuteBrowserExactDistributionConvergenceArguments(
     else if (name === "producer-trust-store") {
       values.producerTrustStorePath = value;
     } else if (name === "evidence-output") values.evidenceOutput = value;
+    else if (name === "checkpoint-directory") {
+      values.checkpointDirectory = value;
+    }
     else if (name === "source-revision") values.sourceRevision = value;
     else invalid(`$.argv[${index}]`, `unsupported option --${name}`);
   }
@@ -165,12 +181,19 @@ export function parseCppCuteBrowserExactDistributionConvergenceArguments(
         "source revision must be one lowercase 40-hex Git revision",
       );
     }
+    if (values.checkpointDirectory !== undefined) {
+      values.checkpointDirectory = requiredAbsolutePath(
+        values.checkpointDirectory,
+        "$.checkpointDirectory",
+      );
+    }
   } else {
     if (values.evidenceOutput !== undefined ||
-        values.sourceRevision !== undefined) {
+        values.sourceRevision !== undefined ||
+        values.checkpointDirectory !== undefined) {
       invalid(
         "$.argv",
-        "preflight-only does not accept evidence-output or source-revision",
+        "preflight-only does not accept evidence-output, checkpoint-directory, or source-revision",
       );
     }
   }
@@ -183,6 +206,7 @@ export function parseCppCuteBrowserExactDistributionConvergenceArguments(
       ? { preflightOnly: true }
       : {
           evidenceOutput: values.evidenceOutput,
+          checkpointDirectory: values.checkpointDirectory,
           sourceRevision: values.sourceRevision,
           preflightOnly: false,
         }),
@@ -511,6 +535,7 @@ export function prepareCppCuteBrowserExactDistributionConvergenceMatrix(
             CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_OBSERVATION_SCHEMA ||
           observation.version !== 1 ||
           observation.caseId !== caseId ||
+          observation.sourceRevision !== sourceRevision ||
           observation.source?.sourceSha256 !== compileCase.sourceSha256 ||
           observation.source?.dtype !== compileCase.dtype ||
           observation.source?.coordinateRank !== compileCase.coordinateRank ||
@@ -621,15 +646,50 @@ export async function runCppCuteBrowserExactDistributionConvergence(
   );
   if (options.preflightOnly) return preflight;
 
+  const checkpointDirectory = options.checkpointDirectory === undefined
+    ? undefined
+    : await canonicalDirectory(
+      options.checkpointDirectory,
+      "$.checkpointDirectory",
+    );
   const observations = [];
   // Each Clang-Wasm Worker reserves a bounded large memory. Sequential cases
   // keep peak memory bounded while preserving case-isolated browser evidence.
   for (const caseId of CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS) {
-    observations.push(await runBrowserCase(
+    const checkpointPath = checkpointDirectory === undefined
+      ? undefined
+      : exactCheckpointPath(
+        checkpointDirectory,
+        preflight,
+        caseId,
+        options.sourceRevision,
+      );
+    const checkpoint = checkpointPath === undefined
+      ? undefined
+      : await readBrowserCaseCheckpoint(
+        checkpointPath,
+        preflight,
+        caseId,
+        options.sourceRevision,
+      );
+    if (checkpoint !== undefined) {
+      process.stdout.write(`Reused exact ${caseId} browser checkpoint\n`);
+      observations.push(checkpoint);
+      continue;
+    }
+    const observation = await runBrowserCase(
       preflight,
       caseId,
       options.sourceRevision,
-    ));
+    );
+    if (checkpointPath !== undefined) {
+      await persistCppCuteBrowserRealCompileEvidence(
+        checkpointPath,
+        observation,
+      );
+      process.stdout.write(`Saved exact ${caseId} browser checkpoint\n`);
+    }
+    observations.push(observation);
   }
   const matrix =
     prepareCppCuteBrowserExactDistributionConvergenceMatrix(
@@ -648,6 +708,35 @@ export async function runCppCuteBrowserExactDistributionConvergence(
 }
 
 async function runBrowserCase(preflight, caseId, sourceRevision) {
+  for (let attempt = 1; attempt <= MAX_BROWSER_ATTEMPTS; attempt += 1) {
+    const result =
+      await runBrowserCaseAttempt(preflight, caseId, sourceRevision);
+    if (result.exitCode === 0) {
+      return parseBrowserEvidence(
+        result.captured,
+        preflight,
+        caseId,
+        sourceRevision,
+      );
+    }
+    if (attempt < MAX_BROWSER_ATTEMPTS &&
+        isRetryableCppCuteBrowserExactDistributionFailure(
+          result.captured,
+        )) {
+      process.stderr.write(
+        `Retrying exact ${caseId} browser case after transient browser disconnect\n`,
+      );
+      continue;
+    }
+    invalid(
+      "$.browser",
+      `${caseId} browser verifier exited with status ${result.exitCode}`,
+    );
+  }
+  invalid("$.browser", `${caseId} browser verifier exhausted retries`);
+}
+
+async function runBrowserCaseAttempt(preflight, caseId, sourceRevision) {
   const input = Object.freeze({ ...preflight, caseId, sourceRevision });
   const child = spawn(
     "pnpm",
@@ -699,16 +788,21 @@ async function runBrowserCase(preflight, caseId, sourceRevision) {
       resolveExit(code ?? 1);
     });
   });
-  if (exitCode !== 0) {
-    invalid(
-      "$.browser",
-      `${caseId} browser verifier exited with status ${exitCode}`,
-    );
-  }
-  return parseBrowserEvidence(captured, preflight, caseId);
+  return Object.freeze({ exitCode, captured });
 }
 
-function parseBrowserEvidence(output, preflight, caseId) {
+export function
+isRetryableCppCuteBrowserExactDistributionFailure(output) {
+  return typeof output === "string" &&
+    !output.includes(EVIDENCE_MARKER) &&
+    (
+      output.includes("Browser connection was closed while running tests") ||
+      output.includes('rpc is closed, cannot call "createTesters"') ||
+      output.includes("browser process was unexpectedly closed")
+    );
+}
+
+function parseBrowserEvidence(output, preflight, caseId, sourceRevision) {
   const clean = output.replaceAll(ANSI_COLOR_PATTERN, "");
   const lines = clean.split(/\r?\n/u)
     .filter((line) => line.includes(EVIDENCE_MARKER));
@@ -726,11 +820,21 @@ function parseBrowserEvidence(output, preflight, caseId) {
   } catch (cause) {
     invalid("$.evidence", "browser evidence is not valid JSON", { cause });
   }
+  return admitBrowserEvidence(evidence, preflight, caseId, sourceRevision);
+}
+
+function admitBrowserEvidence(
+  evidence,
+  preflight,
+  caseId,
+  sourceRevision,
+) {
   const compileCase = cppCuteBrowserRealCompileCase(caseId);
   if (evidence?.schema !==
         CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_OBSERVATION_SCHEMA ||
       evidence?.version !== 1 ||
       evidence?.caseId !== caseId ||
+      evidence?.sourceRevision !== sourceRevision ||
       evidence?.source?.sourceSha256 !== compileCase.sourceSha256 ||
       evidence?.distribution?.reproducibilityId !==
         preflight.distribution.reproducibilityId ||
@@ -757,6 +861,53 @@ function parseBrowserEvidence(output, preflight, caseId) {
   return evidence;
 }
 
+function exactCheckpointPath(
+  checkpointDirectory,
+  preflight,
+  caseId,
+  sourceRevision,
+) {
+  const scope = sha256(canonicalJsonBytes({
+    domain:
+      "browsergrad.compiler.cpp-cute.browser-exact-distribution-convergence-checkpoint.v1",
+    sourceRevision,
+    reproducibilityId: preflight.distribution.reproducibilityId,
+    buildSubjectId: preflight.distribution.buildSubjectId,
+    producerEvidenceId: preflight.producer.producerEvidenceId,
+  }));
+  return join(checkpointDirectory, `${scope}.${caseId}.json`);
+}
+
+async function readBrowserCaseCheckpoint(
+  checkpointPath,
+  preflight,
+  caseId,
+  sourceRevision,
+) {
+  try {
+    await lstat(checkpointPath);
+  } catch (cause) {
+    if (cause?.code === "ENOENT") return undefined;
+    invalid("$.checkpoint", "checkpoint identity is unavailable", { cause });
+  }
+  const input = await readImmutableInput(
+    checkpointPath,
+    MAX_CHECKPOINT_BYTES,
+    "$.checkpoint",
+  );
+  const evidence = decodeCanonicalJson(
+    input.bytes,
+    CHECKPOINT_DECODE_LIMITS,
+    "$.checkpoint",
+  );
+  return admitBrowserEvidence(
+    evidence,
+    preflight,
+    caseId,
+    sourceRevision,
+  );
+}
+
 function exactPreflightInput(input) {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     invalid("$.input", "expected one plain preflight input record");
@@ -768,6 +919,7 @@ function exactPreflightInput(input) {
     "producerPolicyPath",
     "producerTrustStorePath",
     "evidenceOutput",
+    "checkpointDirectory",
     "sourceRevision",
     "preflightOnly",
   ]);

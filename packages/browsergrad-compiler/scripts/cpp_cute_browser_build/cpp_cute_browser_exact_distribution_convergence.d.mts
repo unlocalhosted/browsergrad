@@ -4,6 +4,7 @@ export interface CppCuteBrowserExactDistributionConvergenceArguments {
   readonly producerPolicyPath: string;
   readonly producerTrustStorePath: string;
   readonly preflightOnly: boolean;
+  readonly checkpointDirectory?: string;
   readonly evidenceOutput?: string;
   readonly sourceRevision?: string;
 }
@@ -60,6 +61,10 @@ export const
 export function parseCppCuteBrowserExactDistributionConvergenceArguments(
   argv: readonly string[],
 ): CppCuteBrowserExactDistributionConvergenceArguments;
+
+export function isRetryableCppCuteBrowserExactDistributionFailure(
+  output: unknown,
+): boolean;
 
 export function preflightCppCuteBrowserExactDistributionConvergence(
   input: Readonly<{
