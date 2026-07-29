@@ -365,6 +365,24 @@ ProducerReviewResult run_cpp_cute_producer_review(
     result.passes[1].layout.canonical_usr = "c:@other_layout";
   } else if (g_producer_mode == "view-copy-surface-drift") {
     result.passes[1].view_copy.canonical_usr = "c:@F@other_copy#*1f#*f#";
+  } else if (g_producer_mode == "view-copy-signed") {
+    for (ProducerPassObservation& pass : result.passes) {
+      ProducerViewCopyTensorObservation& source =
+          pass.view_copy.tensors[0U];
+      source.canonical_type =
+          "cute::Tensor<const float *, "
+          "cute::Layout<cute::Shape<cute::Int<3>, cute::Int<2>>, "
+          "cute::Stride<cute::Int<-2>, cute::Int<1>>>>";
+      source.layout_canonical_type =
+          "cute::Layout<cute::Shape<cute::Int<3>, cute::Int<2>>, "
+          "cute::Stride<cute::Int<-2>, cute::Int<1>>>";
+      source.cosize = -2;
+      source.stride = {
+          true,
+          0,
+          {{false, -2, {}}, {false, 1, {}}},
+      };
+    }
   } else if (g_producer_mode == "view-copy-semantic-failure") {
     result.status =
         ProducerReviewStatus::kReviewCompleteWithBlockingDiagnostics;
@@ -643,6 +661,7 @@ int run(const char* frame_path, const char* artifact_path,
   const bool artifact_expected = producer_mode == "success" ||
                                  producer_mode == "semantic-failure" ||
                                  producer_mode == "surface-divergence" ||
+                                 producer_mode == "view-copy-signed" ||
                                  producer_mode ==
                                      "view-copy-semantic-failure";
   if (g_decode_status == CompileSessionDecodeStatus::kReady &&

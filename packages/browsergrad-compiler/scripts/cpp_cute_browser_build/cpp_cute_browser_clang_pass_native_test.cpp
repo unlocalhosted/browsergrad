@@ -303,6 +303,51 @@ int main() {
   BG_CHECK(complete_frontend_work_invocation(2U));
   BG_CHECK(frontend_work_metrics_ready());
 
+  std::string signed_view_copy_source(view_copy_source);
+  constexpr std::string_view positive_source_stride =
+      "cute::Stride<cute::C<1>, cute::C<2>>";
+  constexpr std::string_view signed_source_stride =
+      "cute::Stride<cute::C<-3>, cute::C<1>>";
+  const std::size_t signed_stride_begin =
+      signed_view_copy_source.find(positive_source_stride);
+  BG_CHECK(signed_stride_begin != std::string::npos);
+  signed_view_copy_source.replace(
+      signed_stride_begin, positive_source_stride.size(),
+      signed_source_stride);
+  const std::size_t signed_identity =
+      signed_view_copy_source.rfind("copy_views");
+  BG_CHECK(signed_identity != std::string::npos);
+  const SourceAnchor signed_anchor{
+      "/workspace/main.cu",
+      static_cast<std::uint32_t>(signed_identity),
+      static_cast<std::uint32_t>(
+          signed_identity + std::string_view("copy_views").size()),
+      SourceAnchorKind::kViewCopyFunction,
+  };
+  reset_frontend_work_metrics();
+  BG_CHECK(begin_frontend_work_invocation(frontend_limits));
+  install_source(signed_view_copy_source,
+                 "/toolchain/cutlass/include/cute/tensor.hpp",
+                 view_copy_header_source);
+  ClangPassReview signed_review;
+  BG_CHECK(run_cpp_cute_clang_pass_for_review(
+      arguments("host"), signed_anchor, {},
+      ImportedVfsObservationLimits{}, 1024U, 1024U * 1024U,
+      signed_review));
+  BG_CHECK(signed_review.view_copy_trace.resolved_function);
+  BG_CHECK(signed_review.view_copy_trace.tensors.size() == 2U);
+  const ViewCopyTensorTrace& signed_source_tensor =
+      signed_review.view_copy_trace.tensors[0U];
+  BG_CHECK(signed_source_tensor.resolved_static_affine_layout);
+  BG_CHECK(signed_source_tensor.cosize == 0);
+  BG_CHECK(signed_source_tensor.stride.elements.size() == 2U);
+  BG_CHECK(signed_source_tensor.stride.elements[0U].value == -3);
+  BG_CHECK(signed_source_tensor.stride.elements[1U].value == 1);
+  BG_CHECK(
+      signed_review.view_copy_trace.tensors[1U].cosize == 6);
+  BG_CHECK(complete_frontend_work_invocation(1U));
+  BG_CHECK(frontend_work_metrics_ready());
+
   struct ScalarProfile final {
     std::string_view source_name;
     ViewCopyScalarKind kind;

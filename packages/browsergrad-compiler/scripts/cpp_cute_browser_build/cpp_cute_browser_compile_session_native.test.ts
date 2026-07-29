@@ -479,6 +479,58 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
     expect(semantics.destinationLayoutFact.rank).toBe(2);
     expect(semantics.sourceSpanElements).toBe(6n);
     expect(semantics.destinationSpanElements).toBe(6n);
+
+    const signedArtifactPath = join(
+      workingDirectory,
+      "view-copy-signed.artifact.json",
+    );
+    const signedExecution = await runNativeTestProcess(executable, [
+      viewCopyFramePath,
+      signedArtifactPath,
+      "view-copy-signed",
+      "ready",
+      viewCopyFixture.profileHash,
+      viewCopyFixture.compilationContractHash,
+      viewCopyFixture.requestHash,
+    ], {
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    expect(signedExecution.error).toBeUndefined();
+    expect(
+      signedExecution.status,
+      `signed view-copy: signal=${signedExecution.signal ?? "none"}\n`
+        + `${signedExecution.stdout}\n${signedExecution.stderr}`,
+    ).toBe(0);
+    const signedResource = await decodeCppCuteFrontendArtifact(
+      readFileSync(signedArtifactPath),
+    );
+    const signedBinding = await prepareCppCuteFrontendRequestBinding(
+      viewCopyFixture.preparedRequest,
+      signedResource,
+    );
+    expect(signedBinding.outcome).toBe("accepted");
+    const signedArtifact = unwrapVerifiedCppCuteFrontendArtifactResource(
+      signedResource,
+    );
+    const signedEntry = unwrapVerifiedCppCuteFrontendArtifact(
+      signedArtifact,
+    ).envelope.payload.entries[0];
+    expect(signedEntry?.kind).toBe("view-copy");
+    if (signedEntry?.kind !== "view-copy") {
+      throw new Error("signed native view-copy artifact lost its entry");
+    }
+    const signedSemantics = await prepareVerifiedCppCuteViewCopySemantics(
+      signedArtifact,
+      { entryId: signedEntry.entryId },
+    );
+    expect(signedSemantics.sourceLayoutFact.cosize).toMatchObject({
+      kind: "integer",
+      value: "-2",
+    });
+    expect(signedSemantics.sourceSpanElements).toBe(6n);
+    expect(signedSemantics.destinationSpanElements).toBe(6n);
+
     const rejectedViewCopyArtifactPath = join(
       workingDirectory,
       "view-copy-semantic-failure.artifact.json",

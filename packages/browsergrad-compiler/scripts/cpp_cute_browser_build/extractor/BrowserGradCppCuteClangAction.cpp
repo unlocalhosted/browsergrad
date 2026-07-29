@@ -169,8 +169,11 @@ bool is_cutlass_cute_header_path(const std::string_view path) {
 
 bool checked_multiply(const std::int64_t left, const std::int64_t right,
                       std::int64_t& output) noexcept {
-  if (left < 0 || right < 0 ||
-      (right != 0 && left > std::numeric_limits<std::int64_t>::max() / right)) {
+  if (left < 0 ||
+      (right > 0 &&
+       left > std::numeric_limits<std::int64_t>::max() / right) ||
+      (right < 0 &&
+       left > std::numeric_limits<std::int64_t>::min() / right)) {
     return false;
   }
   output = left * right;
@@ -310,7 +313,7 @@ bool decode_static_affine_layout(clang::QualType type, LayoutTrace& trace) {
       return false;
     }
   }
-  if (cosize < 0 || shapes.size() > std::numeric_limits<std::uint32_t>::max()) {
+  if (shapes.size() > std::numeric_limits<std::uint32_t>::max()) {
     return false;
   }
   trace.resolved_static_affine_layout = true;

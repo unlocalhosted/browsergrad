@@ -78,6 +78,40 @@ std::string decimal_u64(const std::uint64_t value) {
   return std::string(output.data(), converted.ptr);
 }
 
+std::string decimal_i64(const std::int64_t value) {
+  std::array<char, 32U> output{};
+  const auto converted =
+      std::to_chars(output.data(), output.data() + output.size(), value);
+  if (converted.ec != std::errc{}) throw InvalidObservation();
+  return std::string(output.data(), converted.ptr);
+}
+
+bool checked_multiply_nonnegative(const std::int64_t left,
+                                  const std::int64_t right,
+                                  std::int64_t& output) noexcept {
+  if (left < 0 ||
+      (right > 0 &&
+       left > std::numeric_limits<std::int64_t>::max() / right) ||
+      (right < 0 &&
+       left > std::numeric_limits<std::int64_t>::min() / right)) {
+    return false;
+  }
+  output = left * right;
+  return true;
+}
+
+bool checked_add(const std::int64_t left, const std::int64_t right,
+                 std::int64_t& output) noexcept {
+  if ((right > 0 &&
+       left > std::numeric_limits<std::int64_t>::max() - right) ||
+      (right < 0 &&
+       left < std::numeric_limits<std::int64_t>::min() - right)) {
+    return false;
+  }
+  output = left + right;
+  return true;
+}
+
 Json qualifiers(const bool is_const = false) {
   return object(
       {{"const", is_const}, {"restrict", false}, {"volatile", false}});
@@ -120,7 +154,7 @@ void validate_hierarchy_pair(const ProducerIntegerHierarchy& shape,
   summary.nodes += 2U;
   if (!shape.tuple) {
     if (!shape.elements.empty() || !stride.elements.empty() ||
-        shape.value <= 0 || stride.value < 0) {
+        shape.value <= 0) {
       throw InvalidObservation();
     }
     summary.shape_leaves.push_back(shape.value);
@@ -172,15 +206,11 @@ void validate_tensor_layout(const ProducerViewCopyTensorObservation& tensor) {
     }
     size *= shape;
     const std::int64_t extent = shape - 1;
-    if (stride != 0 &&
-        extent > std::numeric_limits<std::int64_t>::max() / stride) {
+    std::int64_t contribution = 0;
+    if (!checked_multiply_nonnegative(extent, stride, contribution) ||
+        !checked_add(cosize, contribution, cosize)) {
       throw InvalidObservation();
     }
-    const std::int64_t contribution = extent * stride;
-    if (cosize > std::numeric_limits<std::int64_t>::max() - contribution) {
-      throw InvalidObservation();
-    }
-    cosize += contribution;
   }
   if (tensor.size != size || tensor.cosize != cosize) {
     throw InvalidObservation();
@@ -192,8 +222,7 @@ Json hierarchy_json(const ProducerIntegerHierarchy& hierarchy) {
     return object(
         {{"kind", "scalar"},
          {"value", object({{"kind", "integer"},
-                           {"value", decimal_u64(static_cast<std::uint64_t>(
-                                         hierarchy.value))}})}});
+                           {"value", decimal_i64(hierarchy.value)}})}});
   }
   Json::Array elements;
   elements.reserve(hierarchy.elements.size());
@@ -885,8 +914,7 @@ ViewCopyArtifactGraph build_view_copy_artifact_graph(
   for (std::size_t index = 0U; index < tensors.size(); ++index) {
     facts.push_back(object(
         {{"cosize", object({{"kind", "integer"},
-                            {"value", decimal_u64(static_cast<std::uint64_t>(
-                                          tensors[index]->cosize))}})},
+                            {"value", decimal_i64(tensors[index]->cosize)}})},
          {"factId", layout_fact_ids[index]},
          {"kind", "affine-layout"},
          {"leafRank", tensors[index]->leaf_rank},
@@ -895,8 +923,7 @@ ViewCopyArtifactGraph build_view_copy_artifact_graph(
          {"resultDeclarationId", layout_declaration_ids[index]},
          {"shape", hierarchy_json(tensors[index]->shape)},
          {"size", object({{"kind", "integer"},
-                          {"value", decimal_u64(static_cast<std::uint64_t>(
-                                        tensors[index]->size))}})},
+                          {"value", decimal_i64(tensors[index]->size)}})},
          {"stride", hierarchy_json(tensors[index]->stride)}}));
     facts.push_back(object(
         {{"elementTypeId", type_ids.scalar_type},

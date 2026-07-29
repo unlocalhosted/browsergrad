@@ -77,11 +77,11 @@ describe("package-owned real browser compile cases", () => {
   it("preserves an unchanged signed-stride CuTe source case", () => {
     const compileCase = cppCuteBrowserRealCompileCase("signed-rank2");
     expect(compileCase.source).toContain(
-      "cute::Stride<cute::Int<-3>, cute::Int<-1>>",
+      "cute::Stride<cute::Int<-3>, cute::Int<1>>",
     );
     expect(compileCase.sourceLayout).toEqual({
       shape: ["2", "3"],
-      strides: ["-3", "-1"],
+      strides: ["-3", "1"],
     });
     expect(compileCase.destinationLayout).toEqual({
       shape: ["2", "3"],
