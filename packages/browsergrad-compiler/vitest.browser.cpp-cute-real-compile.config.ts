@@ -4,6 +4,11 @@ import { fileURLToPath } from "node:url";
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig, type Plugin } from "vitest/config";
 
+import {
+  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS,
+  type CppCuteBrowserRealCompileCaseId,
+} from "./src/cpp_cute_browser_real_compile_cases.js";
+
 interface ExternalAsset {
   readonly assetId: string;
   readonly path: string;
@@ -16,15 +21,7 @@ interface ExternalInputs {
   readonly schema: "browsergrad.compiler.cpp-cute.browser-real-compile-inputs";
   readonly version: 3;
   readonly authority: "local-exact-byte-preflight-only";
-  readonly caseId:
-    | "rank2"
-    | "rank3"
-    | "rank1"
-    | "rank4"
-    | "strided-slice"
-    | "broadcast"
-    | "i32-rank2"
-    | "u32-broadcast";
+  readonly caseId: CppCuteBrowserRealCompileCaseId;
   readonly assets: readonly ExternalAsset[];
   readonly wasmAuthority:
     | "package-pinned-two-clean-build-output"
@@ -40,6 +37,9 @@ interface ExternalInputs {
   readonly releaseReady: false;
 }
 
+const realCompileCaseIds = new Set<string>(
+  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS,
+);
 const inputs = parseInputs(process.env.BG_CPP_CUTE_REAL_COMPILE_INPUTS);
 const routePrefix = "/__browsergrad_cpp_cute_real_compile__/";
 const assetsByRoute = new Map(inputs.assets.map((asset) => [
@@ -120,14 +120,8 @@ function parseInputs(value: string | undefined): ExternalInputs {
   if (parsed.schema !== "browsergrad.compiler.cpp-cute.browser-real-compile-inputs" ||
       parsed.version !== 3 ||
       parsed.authority !== "local-exact-byte-preflight-only" ||
-      (parsed.caseId !== "rank2" &&
-       parsed.caseId !== "rank3" &&
-       parsed.caseId !== "rank1" &&
-       parsed.caseId !== "rank4" &&
-       parsed.caseId !== "strided-slice" &&
-       parsed.caseId !== "broadcast" &&
-       parsed.caseId !== "i32-rank2" &&
-       parsed.caseId !== "u32-broadcast") ||
+      typeof parsed.caseId !== "string" ||
+      !realCompileCaseIds.has(parsed.caseId) ||
       (!pinned && !diagnostic) ||
       !/^bg\.cpp\.browser-header-distribution-reproducibility\.sha256\.[0-9a-f]{64}$/u
         .test(parsed.headerDistributionReproducibilityId ?? "") ||
