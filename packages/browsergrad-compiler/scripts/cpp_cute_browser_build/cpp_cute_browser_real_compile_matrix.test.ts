@@ -13,7 +13,8 @@ type CaseId =
   | "strided-slice"
   | "broadcast"
   | "i32-rank2"
-  | "u32-broadcast";
+  | "u32-broadcast"
+  | "signed-rank2";
 
 function observation(caseId: CaseId, diagnostic = false) {
   const rank =
@@ -72,7 +73,7 @@ function observation(caseId: CaseId, diagnostic = false) {
 }
 
 describe("real browser C++/CuTe compile matrix", () => {
-  it("retains eight distinct compiled layout and dtype cases under one closed authority tier", () => {
+  it("retains nine distinct compiled layout and dtype cases under one closed authority tier", () => {
     const matrix = prepareCppCuteBrowserRealCompileMatrix([
       observation("rank2"),
       observation("rank3"),
@@ -82,12 +83,13 @@ describe("real browser C++/CuTe compile matrix", () => {
       observation("broadcast"),
       observation("i32-rank2"),
       observation("u32-broadcast"),
+      observation("signed-rank2"),
     ], "a".repeat(40));
     expect(matrix).toMatchObject({
       schema:
         "browsergrad.compiler.cpp-cute.browser-real-compile-matrix-observation",
       version: 2,
-      caseCount: 8,
+      caseCount: 9,
       packageBinding: {
         compilerWorkerSha256:
           "9c9591e725fca512d10a366bdec38b0067366f3d8ebdef50c29a5ebb0134def5",
@@ -105,6 +107,7 @@ describe("real browser C++/CuTe compile matrix", () => {
         unchangedCpp17CuteBroadcastCompiled: true,
         unchangedCpp17CuteI32Rank2Compiled: true,
         unchangedCpp17CuteU32BroadcastCompiled: true,
+        unchangedCpp17CuteSignedRank2Compiled: true,
         canonicalGate2LayoutFixturesMatched: true,
         pinnedReproducibleWasmMatched: true,
         untrustedDiagnosticWasm: false,
@@ -127,6 +130,7 @@ describe("real browser C++/CuTe compile matrix", () => {
       observation("broadcast"),
       observation("i32-rank2"),
       observation("u32-broadcast"),
+      observation("signed-rank2"),
     ], "a".repeat(40))).toThrow();
     expect(() => prepareCppCuteBrowserRealCompileMatrix([
       observation("rank2"),
@@ -140,6 +144,7 @@ describe("real browser C++/CuTe compile matrix", () => {
       observation("broadcast"),
       observation("i32-rank2"),
       observation("u32-broadcast"),
+      observation("signed-rank2"),
     ], "a".repeat(40))).toThrow();
     expect(() => prepareCppCuteBrowserRealCompileMatrix([
       observation("rank2"),
@@ -150,6 +155,7 @@ describe("real browser C++/CuTe compile matrix", () => {
       observation("broadcast"),
       observation("i32-rank2"),
       observation("u32-broadcast"),
+      observation("signed-rank2"),
     ], "a".repeat(40))).toThrow();
     expect(() => prepareCppCuteBrowserRealCompileMatrix([
       observation("rank2"),
@@ -160,6 +166,7 @@ describe("real browser C++/CuTe compile matrix", () => {
       observation("broadcast"),
       observation("i32-rank2"),
       observation("u32-broadcast"),
+      observation("signed-rank2"),
     ], "A".repeat(40))).toThrow();
   });
 

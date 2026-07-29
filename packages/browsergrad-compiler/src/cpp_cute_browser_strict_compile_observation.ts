@@ -16,7 +16,7 @@ import {
 } from "./cpp_cute_browser_reproducibility.js";
 import {
   CPP_CUTE_BROWSER_REAL_COMPILE_CASES,
-  CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS,
+  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS,
 } from "./cpp_cute_browser_real_compile_cases.js";
 import {
   verifyCppCuteBrowserWorkerBundle,
@@ -71,7 +71,7 @@ const STRICT_OBSERVATION_HEADER_PACKS = Object.freeze([
   }),
 ]);
 const EXPECTED_CASES = Object.freeze(
-  CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.map(
+  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.map(
     (caseId) => CPP_CUTE_BROWSER_REAL_COMPILE_CASES[caseId],
   ),
 );
@@ -101,7 +101,7 @@ export interface VerifiedCppCuteBrowserStrictCompileCase {
 }
 
 /**
- * Exact package authority for the strict eight-case layout and dtype browser
+ * Exact package authority for the strict nine-case layout and dtype browser
  * compilation matrix. It proves source execution and semantic-candidate
  * preparation only. Producer trust, licensing, lowering, backend execution,
  * and release stay false.
@@ -120,7 +120,7 @@ export interface VerifiedCppCuteBrowserStrictCompileObservation {
     typeof CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256;
   readonly verifierWorkerBundleSha256:
     typeof CPP_CUTE_BROWSER_STRICT_COMPILE_VERIFIER_WORKER_BUNDLE_SHA256;
-  readonly caseCount: 8;
+  readonly caseCount: 9;
   readonly cases: readonly VerifiedCppCuteBrowserStrictCompileCase[];
   readonly unchangedCpp17CuteRank1Compiled: true;
   readonly unchangedCpp17CuteRank2Compiled: true;
@@ -130,6 +130,7 @@ export interface VerifiedCppCuteBrowserStrictCompileObservation {
   readonly unchangedCpp17CuteBroadcastCompiled: true;
   readonly unchangedCpp17CuteI32Rank2Compiled: true;
   readonly unchangedCpp17CuteU32BroadcastCompiled: true;
+  readonly unchangedCpp17CuteSignedRank2Compiled: true;
   readonly canonicalGate2LayoutFixturesMatched: true;
   readonly reproducibleWasmMatched: true;
   readonly packagePinnedHeaderPacksMatched: true;
@@ -344,6 +345,7 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
       !resource.claims.unchangedCpp17CuteBroadcastCompiled ||
       !resource.claims.unchangedCpp17CuteI32Rank2Compiled ||
       !resource.claims.unchangedCpp17CuteU32BroadcastCompiled ||
+      !resource.claims.unchangedCpp17CuteSignedRank2Compiled ||
       !resource.claims.canonicalGate2LayoutFixturesMatched ||
       !resource.claims.packagePinnedHeaderPacksMatched ||
       !resource.claims.pinnedReproducibleWasmMatched ||
@@ -380,7 +382,7 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
       CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256,
     verifierWorkerBundleSha256:
       CPP_CUTE_BROWSER_STRICT_COMPILE_VERIFIER_WORKER_BUNDLE_SHA256,
-    caseCount: 8,
+    caseCount: 9,
     cases,
     unchangedCpp17CuteRank1Compiled: true,
     unchangedCpp17CuteRank2Compiled: true,
@@ -390,6 +392,7 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
     unchangedCpp17CuteBroadcastCompiled: true,
     unchangedCpp17CuteI32Rank2Compiled: true,
     unchangedCpp17CuteU32BroadcastCompiled: true,
+    unchangedCpp17CuteSignedRank2Compiled: true,
     canonicalGate2LayoutFixturesMatched: true,
     reproducibleWasmMatched: true,
     packagePinnedHeaderPacksMatched: true,

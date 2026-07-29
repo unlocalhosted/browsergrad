@@ -10,20 +10,24 @@ import {
 import {
   CPP_CUTE_BROWSER_WORKER_BUNDLE_V1_SHA256,
 } from "../../dist/resources/cpp_cute_browser_worker_bundle_v1.js";
+import {
+  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS,
+  cppCuteBrowserRealCompileCase,
+} from "../../dist/cpp_cute_browser_real_compile_cases.js";
 
 const ERROR_CODE =
   "BG-COMPILER-CPP-CUTE-BROWSER-REAL-COMPILE-MATRIX";
 const SOURCE_REVISION = /^[0-9a-f]{40}$/u;
-const CASE_PROFILES = Object.freeze([
-  Object.freeze({ caseId: "rank2", rank: 2, dtype: "f32" }),
-  Object.freeze({ caseId: "rank3", rank: 3, dtype: "f32" }),
-  Object.freeze({ caseId: "rank1", rank: 1, dtype: "f32" }),
-  Object.freeze({ caseId: "rank4", rank: 4, dtype: "f32" }),
-  Object.freeze({ caseId: "strided-slice", rank: 2, dtype: "f32" }),
-  Object.freeze({ caseId: "broadcast", rank: 2, dtype: "f32" }),
-  Object.freeze({ caseId: "i32-rank2", rank: 2, dtype: "i32" }),
-  Object.freeze({ caseId: "u32-broadcast", rank: 2, dtype: "u32" }),
-]);
+const CASE_PROFILES = Object.freeze(
+  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.map((caseId) => {
+    const sourceCase = cppCuteBrowserRealCompileCase(caseId);
+    return Object.freeze({
+      caseId,
+      rank: sourceCase.coordinateRank,
+      dtype: sourceCase.dtype,
+    });
+  }),
+);
 
 export class CppCuteBrowserRealCompileMatrixError extends Error {
   constructor(path, message, options) {
@@ -118,7 +122,7 @@ export function prepareCppCuteBrowserRealCompileMatrix(
       observations.length !== CASE_PROFILES.length) {
     invalid(
       "$.observations",
-      "expected exactly rank2, rank3, rank1, rank4, strided-slice, broadcast, i32-rank2, and u32-broadcast observations",
+      `expected exactly ${CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.join(", ")} observations`,
     );
   }
   const cases = CASE_PROFILES.map(({ caseId, rank, dtype }, index) => {
@@ -204,6 +208,7 @@ export function prepareCppCuteBrowserRealCompileMatrix(
       unchangedCpp17CuteBroadcastCompiled: true,
       unchangedCpp17CuteI32Rank2Compiled: true,
       unchangedCpp17CuteU32BroadcastCompiled: true,
+      unchangedCpp17CuteSignedRank2Compiled: true,
       canonicalGate2LayoutFixturesMatched: true,
       packagePinnedHeaderPacksMatched: true,
       pinnedReproducibleWasmMatched,

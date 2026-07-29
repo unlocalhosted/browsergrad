@@ -12,7 +12,7 @@ import {
 } from "../../src/cpp_cute_browser_strict_compile_observation.js";
 
 describe("package-pinned strict browser compile observation", () => {
-  it("admits the exact eight-case layout and dtype matrix without widening authority", async () => {
+  it("admits the exact nine-case layout and dtype matrix without widening authority", async () => {
     const bytes = cppCuteBrowserStrictCompileObservationResourceBytes();
     expect(bytes.byteLength).toBe(
       CPP_CUTE_BROWSER_STRICT_COMPILE_OBSERVATION_RESOURCE_BYTE_LENGTH,
@@ -22,7 +22,7 @@ describe("package-pinned strict browser compile observation", () => {
     expect(authority).toMatchObject({
       authority:
         "package-pinned-strict-browser-compile-matrix-observation-only",
-      caseCount: 8,
+      caseCount: 9,
       cases: [
         { caseId: "rank2", dtype: "f32", coordinateRank: 2 },
         { caseId: "rank3", dtype: "f32", coordinateRank: 3 },
@@ -32,6 +32,7 @@ describe("package-pinned strict browser compile observation", () => {
         { caseId: "broadcast", dtype: "f32", coordinateRank: 2 },
         { caseId: "i32-rank2", dtype: "i32", coordinateRank: 2 },
         { caseId: "u32-broadcast", dtype: "u32", coordinateRank: 2 },
+        { caseId: "signed-rank2", dtype: "f32", coordinateRank: 2 },
       ],
       unchangedCpp17CuteRank1Compiled: true,
       unchangedCpp17CuteRank2Compiled: true,
@@ -41,6 +42,7 @@ describe("package-pinned strict browser compile observation", () => {
       unchangedCpp17CuteBroadcastCompiled: true,
       unchangedCpp17CuteI32Rank2Compiled: true,
       unchangedCpp17CuteU32BroadcastCompiled: true,
+      unchangedCpp17CuteSignedRank2Compiled: true,
       canonicalGate2LayoutFixturesMatched: true,
       reproducibleWasmMatched: true,
       packagePinnedHeaderPacksMatched: true,
@@ -54,9 +56,9 @@ describe("package-pinned strict browser compile observation", () => {
       backendExecutionAuthorized: false,
       releaseReady: false,
     });
-    expect(new Set(authority.cases.map((entry) => entry.evidenceId)).size).toBe(8);
-    expect(new Set(authority.cases.map((entry) => entry.artifactId)).size).toBe(8);
-    expect(new Set(authority.cases.map((entry) => entry.candidateId)).size).toBe(8);
+    expect(new Set(authority.cases.map((entry) => entry.evidenceId)).size).toBe(9);
+    expect(new Set(authority.cases.map((entry) => entry.artifactId)).size).toBe(9);
+    expect(new Set(authority.cases.map((entry) => entry.candidateId)).size).toBe(9);
     expect(Object.isFrozen(authority)).toBe(true);
     expect(Object.isFrozen(authority.cases)).toBe(true);
     expect(authority.cases.every((entry) => Object.isFrozen(entry))).toBe(true);
