@@ -16,6 +16,8 @@ export {
   type HostGraphRectangularDynamicDispatchCompletion,
   type HostGraphResourceDynamicDispatchNode,
   type HostGraphResourceDynamicDispatchSource,
+  type HostGraphResourceDynamicExtentSource,
+  type HostGraphResourceRectangularDynamicDispatchNode,
   type HostGraphRuntimeRectangularDynamicDispatchNode,
   type HostGraphRuntimeDynamicDispatchNode,
   type HostGraphDispatchNode,

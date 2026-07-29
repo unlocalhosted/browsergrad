@@ -64,6 +64,7 @@ import {
   type HostGraphRepeatNode,
   type HostGraphResource,
   type HostGraphResourceDynamicDispatchSource,
+  type HostGraphResourceDynamicExtentSource,
   type HostGraphResourcePredicate,
   type HostGraphResourceRepeatNode,
   type HostGraphResourceRepeatSource,
@@ -74,7 +75,7 @@ import {
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 12;
+export const HOST_GRAPH_ARTIFACT_MINOR = 13;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
@@ -401,12 +402,13 @@ function parseProgram(
       version.minor !== 9 &&
       version.minor !== 10 &&
       version.minor !== 11 &&
-      version.minor !== 12)
+      version.minor !== 12 &&
+      version.minor !== 13)
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 through 1.12 only",
+      "host graph program reader supports versions 1.0 through 1.13 only",
     );
   }
   if (version.minor !== envelopeMinor) {
@@ -714,7 +716,7 @@ function parseNode(
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, version-1.10 resource repeat, version-1.11 resource dynamic dispatch, and version-1.12 rectangular dynamic dispatch nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, version-1.10 resource repeat, version-1.11 resource dynamic dispatch, version-1.12 runtime rectangular dynamic dispatch, and version-1.13 resource rectangular dynamic dispatch nodes",
   );
 }
 
@@ -1264,6 +1266,46 @@ function parseDynamicDispatchNode(
   programMinor: HostGraphProgram["version"]["minor"],
 ): HostGraphDynamicDispatchNode {
   const mode = stringValue(field(value, "mode", path), `${path}.mode`);
+  if (mode === "resource-u32-rectangular-prefix") {
+    if (programMinor < 13) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${path}.mode`,
+        "resource rectangular dynamic dispatch requires host graph program version 1.13",
+      );
+    }
+    const object = closedObject(
+      value,
+      [
+        "nodeId",
+        "kind",
+        "dependsOn",
+        "semanticArtifactHash",
+        "entrypointId",
+        "dimensionBindings",
+        "bindings",
+        "launchSources",
+        "maxExtents",
+        "mode",
+      ],
+      path,
+    );
+    const maxExtents = parseRectangularDynamicMaximum(
+      field(object, "maxExtents", path),
+      `${path}.maxExtents`,
+    );
+    return {
+      ...parseDispatchFields(object, path),
+      kind: "dynamic-dispatch",
+      launchSources: parseResourceRectangularDynamicSources(
+        field(object, "launchSources", path),
+        `${path}.launchSources`,
+        maxExtents.length,
+      ),
+      maxExtents,
+      mode: "resource-u32-rectangular-prefix",
+    };
+  }
   if (mode === "runtime-u32-rectangular-prefix") {
     if (programMinor < 12) {
       invalid(
@@ -1359,7 +1401,7 @@ function parseDynamicDispatchNode(
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       `${path}.mode`,
-      "dynamic dispatch mode must be runtime-u32-prefix-elements, resource-u32-prefix-elements, or runtime-u32-rectangular-prefix",
+      "dynamic dispatch mode must be runtime-u32-prefix-elements, resource-u32-prefix-elements, runtime-u32-rectangular-prefix, or resource-u32-rectangular-prefix",
     );
   }
   return {
@@ -1455,6 +1497,65 @@ function parseRectangularDynamicControls(
     "rectangular dynamic dispatch control",
   );
   return Object.freeze(controls.map((control) => Object.freeze(control)));
+}
+
+function parseResourceRectangularDynamicSources(
+  value: JsonValue,
+  path: string,
+  rank: number,
+): readonly HostGraphResourceDynamicExtentSource[] {
+  const values = arrayValue(value, path);
+  if (values.length !== rank) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.invalidArtifact,
+      path,
+      `resource rectangular dynamic dispatch requires exactly ${rank} axis sources`,
+    );
+  }
+  const sources = values.map((candidate, index) => {
+    const sourcePath = `${path}[${index}]`;
+    const object = closedObject(
+      candidate,
+      ["axis", "resourceId", "rank", "mode"],
+      sourcePath,
+    );
+    if (object.mode !== "u32-prefix-extent") {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        `${sourcePath}.mode`,
+        "resource rectangular dynamic dispatch sources must use u32-prefix-extent",
+      );
+    }
+    return {
+      axis: rectangularDynamicAxis(
+        field(object, "axis", sourcePath),
+        `${sourcePath}.axis`,
+        rank,
+      ),
+      resourceId: identifier(
+        field(object, "resourceId", sourcePath),
+        `${sourcePath}.resourceId`,
+      ),
+      rank: parseWireU64(
+        field(object, "rank", sourcePath),
+        `${sourcePath}.rank`,
+      ),
+      mode: "u32-prefix-extent" as const,
+    };
+  }).sort((left, right) => left.axis - right.axis);
+  if (sources.some((source, axis) => source.axis !== axis)) {
+    invalid(
+      GRAPH_DIAGNOSTIC_CODES.duplicateId,
+      path,
+      "resource rectangular dynamic dispatch must bind every axis exactly once",
+    );
+  }
+  unique(
+    sources.map((source) => source.resourceId),
+    path,
+    "resource rectangular dynamic dispatch source resource",
+  );
+  return Object.freeze(sources.map((source) => Object.freeze(source)));
 }
 
 function rectangularDynamicAxis(
@@ -1867,7 +1968,10 @@ function analyzeProgram(
       );
       if (node.kind === "dynamic-dispatch") {
         dynamicDispatchCount += 1;
-        if (node.mode !== "resource-u32-prefix-elements") {
+        if (
+          node.mode === "runtime-u32-prefix-elements" ||
+          node.mode === "runtime-u32-rectangular-prefix"
+        ) {
           const controlIds = node.mode === "runtime-u32-prefix-elements"
             ? [node.launchControl.controlId]
             : node.launchControls.map((control) => control.controlId);
@@ -1885,12 +1989,20 @@ function analyzeProgram(
           dispatchEffects.set(node, effects);
         } else {
           resourceDynamicDispatchCount += 1;
-          verifyResourceDynamicDispatchSource(
-            node.launchSource,
-            resources,
-            rankCount,
-            `${path}.launchSource`,
-          );
+          const launchSources =
+            node.mode === "resource-u32-prefix-elements"
+              ? [node.launchSource]
+              : node.launchSources;
+          for (const [sourceIndex, source] of launchSources.entries()) {
+            verifyResourceDynamicDispatchSource(
+              source,
+              resources,
+              rankCount,
+              node.mode === "resource-u32-prefix-elements"
+                ? `${path}.launchSource`
+                : `${path}.launchSources[${sourceIndex}]`,
+            );
+          }
           verifyResourceFeedbackBound(
             resourceConditionalCount +
               resourceRepeatCount +
@@ -2243,6 +2355,7 @@ function verifyExecutableNodeBinding(
   if (
     node.kind === "dynamic-dispatch" &&
     node.mode !== "runtime-u32-rectangular-prefix" &&
+    node.mode !== "resource-u32-rectangular-prefix" &&
     wireIntegerToBigInt(node.maxElementCount) > geometry.elementCount
   ) {
     invalid(
@@ -2253,7 +2366,10 @@ function verifyExecutableNodeBinding(
   }
   if (
     node.kind === "dynamic-dispatch" &&
-    node.mode === "runtime-u32-rectangular-prefix"
+    (
+      node.mode === "runtime-u32-rectangular-prefix" ||
+      node.mode === "resource-u32-rectangular-prefix"
+    )
   ) {
     verifyRectangularDynamicGeometry(node, geometry, path);
   }
@@ -2426,32 +2542,43 @@ function resourceRepeatEffects(
 function resourceDynamicDispatchEffects(
   node: Extract<
     HostGraphDynamicDispatchNode,
-    { readonly mode: "resource-u32-prefix-elements" }
+    {
+      readonly mode:
+        | "resource-u32-prefix-elements"
+        | "resource-u32-rectangular-prefix";
+    }
   >,
   effects: readonly HostGraphResourceEffect[],
   path: string,
 ): readonly HostGraphResourceEffect[] {
-  if (effects.some((effect) =>
-    effect.resourceId === node.launchSource.resourceId)) {
+  const launchSources = node.mode === "resource-u32-prefix-elements"
+    ? [node.launchSource]
+    : node.launchSources;
+  const launchResourceIds = new Set(
+    launchSources.map((source) => source.resourceId),
+  );
+  if (effects.some((effect) => launchResourceIds.has(effect.resourceId))) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.invalidBinding,
       `${path}.bindings`,
-      "resource dynamic dispatch cannot access its captured launch source",
+      "resource dynamic dispatch cannot access its captured launch sources",
     );
   }
   return Object.freeze([
     ...effects,
-    Object.freeze({
-      resourceId: node.launchSource.resourceId,
+    ...launchSources.map((source) => Object.freeze({
+      resourceId: source.resourceId,
       access: "read" as const,
       requiresPriorWriter: true,
       guaranteesWrite: false,
-    }),
+    })),
   ]);
 }
 
 function verifyResourceDynamicDispatchSource(
-  source: HostGraphResourceDynamicDispatchSource,
+  source:
+    | HostGraphResourceDynamicDispatchSource
+    | HostGraphResourceDynamicExtentSource,
   resources: ReadonlyMap<string, HostGraphResource>,
   rankCount: bigint,
   path: string,
@@ -2863,14 +2990,22 @@ function resolveDispatchGeometry(
 function verifyRectangularDynamicGeometry(
   node: Extract<
     HostGraphDynamicDispatchNode,
-    { readonly mode: "runtime-u32-rectangular-prefix" }
+    {
+      readonly mode:
+        | "runtime-u32-rectangular-prefix"
+        | "resource-u32-rectangular-prefix";
+    }
   >,
   geometry: ResolvedDispatchGeometry,
   path: string,
 ): void {
   if (
     node.maxExtents.length !== geometry.logicalShape.length ||
-    node.launchControls.length !== geometry.logicalShape.length
+    (
+      node.mode === "runtime-u32-rectangular-prefix"
+        ? node.launchControls.length
+        : node.launchSources.length
+    ) !== geometry.logicalShape.length
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.invalidBinding,
@@ -3006,6 +3141,11 @@ function verifyEffects(
             node.mode === "resource-u32-prefix-elements" &&
             effect.resourceId === node.launchSource.resourceId
           ? `${path}.launchSource`
+          : node.kind === "dynamic-dispatch" &&
+              node.mode === "resource-u32-rectangular-prefix" &&
+              node.launchSources.some((source) =>
+                source.resourceId === effect.resourceId)
+            ? `${path}.launchSources`
           : node.kind === "dispatch" || node.kind === "dynamic-dispatch"
             ? `${path}.bindings[${effectIndex}]`
         : node.kind === "all-reduce"

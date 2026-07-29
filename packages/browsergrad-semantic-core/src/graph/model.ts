@@ -79,6 +79,13 @@ export interface HostGraphResourceDynamicDispatchNode
   readonly mode: "resource-u32-prefix-elements";
 }
 
+export interface HostGraphResourceDynamicExtentSource extends JsonObject {
+  readonly axis: number;
+  readonly resourceId: string;
+  readonly rank: WireU64;
+  readonly mode: "u32-prefix-extent";
+}
+
 export interface HostGraphRuntimeRectangularDynamicDispatchNode
   extends HostGraphDynamicDispatchNodeBase {
   readonly launchControls: readonly HostGraphDynamicExtentControl[];
@@ -86,10 +93,18 @@ export interface HostGraphRuntimeRectangularDynamicDispatchNode
   readonly mode: "runtime-u32-rectangular-prefix";
 }
 
+export interface HostGraphResourceRectangularDynamicDispatchNode
+  extends HostGraphDynamicDispatchNodeBase {
+  readonly launchSources: readonly HostGraphResourceDynamicExtentSource[];
+  readonly maxExtents: readonly WireU64[];
+  readonly mode: "resource-u32-rectangular-prefix";
+}
+
 export type HostGraphDynamicDispatchNode =
   | HostGraphRuntimeDynamicDispatchNode
   | HostGraphResourceDynamicDispatchNode
-  | HostGraphRuntimeRectangularDynamicDispatchNode;
+  | HostGraphRuntimeRectangularDynamicDispatchNode
+  | HostGraphResourceRectangularDynamicDispatchNode;
 
 export interface HostGraphLinearDynamicDispatchCompletion extends JsonObject {
   readonly nodeId: string;
@@ -273,7 +288,8 @@ export interface HostGraphProgram extends JsonObject {
   readonly kind: "host-graph";
   readonly version: {
     readonly major: 1;
-    readonly minor: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+    readonly minor:
+      0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
   };
   readonly failureModel: typeof HOST_GRAPH_FAILURE_MODEL;
   readonly rankCount: WireU64;

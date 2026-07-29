@@ -31,7 +31,7 @@ PyTorch-shaped surface.
 | `runThreadGrid`, `referenceSaxpy`, `referenceExclusiveScan`, `referenceFindRepeats`, `referenceOrderedCircleRender` | Thread-grid teaching references for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
 | `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` / `simulateCuda1DGrid` | CUDA-shaped compatibility aliases for labs and rubrics that teach CUDA vocabulary | ✅ |
 | `prepareSemanticViewCopyWgsl` / `runSemanticViewCopyWebGpu` | Verified `view-copy@1.0` lowering over canonical layout/index artifacts, with exact 32-bit-word storage and structured guarded padding | ✅ 13-case strict CPU/WebGPU parity on Apple Metal 3 across f32/i32/u32, ranks 1–4, striding, broadcast, offsets, and float padding; release evidence remains commit-scoped |
-| `prepareSemanticHostGraphWebGpu` / `prepareSemanticHostGraphWebGpuPipeline` / `runSemanticHostGraphWebGpuPipeline` | Authority-bound `browsergrad.host-graph@1` execution with a separately prepared exact device-bound pipeline authority, per-rank private storage, canonical view-copy dispatches, whole-allocation raw copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch, rank-2/rank-3 request-time rectangular prefix dispatch, captured-input, runtime-control, and one produced-resource u32 conditional, terminal materialization, and ordered f32/i32/u32 all-reduce | ✅ required real-WebGPU complete-output bit parity with the CPU graph oracle for finite f32 sum/signed-zero min, wrapping i32 sum, exact u32 max, event-marked/materialized u8 allocation copy, fixed plus zero/two-iteration request-time and produced-resource f32 repetition, 1/2-, aligned 64/128-, and unaligned 65/127-element workgroup-64 request-time and produced-resource linear launch, small/full rank-2/rank-3 rectangular launch, and both branches of all three conditional sources through prewarmed pipeline authority, plus a separate observational fixed-repeat/unrolled authority-reuse record; repeated/device-side feedback, GPU-produced multidimensional schedules, rank-4-or-higher dynamic domains, transport, and native companions remain separate |
+| `prepareSemanticHostGraphWebGpu` / `prepareSemanticHostGraphWebGpuPipeline` / `runSemanticHostGraphWebGpuPipeline` | Authority-bound `browsergrad.host-graph@1` execution with a separately prepared exact device-bound pipeline authority, per-rank private storage, canonical view-copy dispatches, whole-allocation raw copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch, rank-2/rank-3 request-time or produced-resource rectangular prefix dispatch, captured-input, runtime-control, and one produced-resource u32 conditional, terminal materialization, and ordered f32/i32/u32 all-reduce | ✅ required real-WebGPU complete-output bit parity with the CPU graph oracle for finite f32 sum/signed-zero min, wrapping i32 sum, exact u32 max, event-marked/materialized u8 allocation copy, fixed plus zero/two-iteration request-time and produced-resource f32 repetition, 1/2-, aligned 64/128-, and unaligned 65/127-element workgroup-64 request-time and produced-resource linear launch, small/full request-time and produced-resource rank-2/rank-3 rectangular launch, and both branches of all three conditional sources through prewarmed pipeline authority, plus a separate observational fixed-repeat/unrolled authority-reuse record; repeated/device-side feedback, rank-4-or-higher dynamic domains, transport, and native companions remain separate |
 | `prepareSemanticGemmWgsl` / `runSemanticGemmWebGpu` | Verified logical GEMM plus independent schedule lowering with cooperative workgroup staging, uniform barriers, and masked boundary tiles | ✅ bit-exact only for semantic-core certified exact f32 inputs; required irregular two-schedule WebGPU evidence |
 | `prepareSemanticAttentionWgsl` / `runSemanticAttentionWebGpu` | Verified attention plus independent online K/V-tile schedule lowering/execution with cooperative staging, uniform barriers, and causal/tail masks before state updates | ✅ required causal/non-causal two-schedule CPU/WebGPU comparison plus separate observational host-API performance record on Apple Metal 3 |
 | `rowWiseOnlineAttentionDirect` | Fused row-wise online-softmax attention baseline with strict real-WebGPU parity vs composed reference; not block-tiled FlashAttention. | ✅ |
@@ -269,6 +269,15 @@ WebGPU x/y/z to the canonical trailing-to-leading tensor axes. Every out-of-
 rectangle or physical tail invocation returns before coordinate, address, or
 resource evaluation. The CPU oracle executes the same selected rectangle and
 completion records retain the logical extents plus their product.
+Version-1.13 adds one `resource-u32-rectangular-prefix` dispatch under the
+same graph-wide feedback bound. Preparation retains the same maximum-prewarmed
+rectangular program and exact rank slots. Execution submits all ordered extent
+producers in one prefix stage, reads back exactly one four-byte rank-local u32
+per axis, rejects zero or above-maximum values, and substitutes only the
+validated 2D/3D geometry plus the existing 16-byte uniform before submitting
+the suffix. Intermediate extents remain private and the lifecycle remains one
+timeout, cancellation, device-owner, loss, cleanup, and terminal-publication
+contract.
 Each dynamic rank step charges its aligned 16-byte GPU uniform allocation and
 either a four-byte linear value or 16-byte rectangular value to the graph's
 transient working-set plan. Pipeline
@@ -319,19 +328,19 @@ same eight expanded WebGPU steps. The f32 two-rank, 65,536-element workload
 prewarms both exact device-bound pipeline authorities, then uses eight warmups
 and twelve alternating paired samples around authority-bound execution,
 including readback and queue drain. The current Apple Metal 3 observation
-records 1.30 ms candidate and 1.30 ms unrolled medians under backend 1.15.0; it
+records 1.60 ms candidate and 1.30 ms unrolled medians under backend 1.16.0; it
 asserts no superiority or regression threshold.
 
 This profile is a bounded DAG plus fixed-count and bounded request-time
 u32-count sequential repetition, one bounded produced-resource u32-count
 repeat, and bounded request-time or produced-resource
 arbitrary positive one-dimensional prefix dynamic dispatch,
-rank-2/rank-3 request-time rectangular prefix dynamic dispatch,
+rank-2/rank-3 request-time or produced-resource rectangular prefix dynamic
+dispatch,
 captured-input/runtime-control conditionals, and one produced-resource
 conditional, repeat count, or launch prefix with at most one explicit
 mid-graph feedback node total. It does
-not claim repeated/device-side feedback, GPU-produced multidimensional dynamic
-launch, rank-4-or-higher dynamic domains,
+not claim repeated/device-side feedback, rank-4-or-higher dynamic domains,
 nested/device-side branching, event
 timestamps/external waits, transport/topology, a worker mesh, or native
 collectives. Its performance record is observational and does not establish a

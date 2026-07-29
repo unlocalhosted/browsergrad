@@ -198,6 +198,55 @@ function rectangularDynamicProgram(
   };
 }
 
+function resourceRectangularDynamicProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+  shape: readonly number[],
+): HostGraphProgram {
+  const base = rectangularDynamicProgram(artifacts, shape);
+  const producerIds = shape.map((_, axis) => `produce-extent-${axis}`);
+  return {
+    ...base,
+    version: { major: 1, minor: 13 },
+    resources: [
+      ...base.resources,
+      ...shape.flatMap((_, axis) => [
+        resource(`extent-input-${axis}`, "input", "u32", "4"),
+        resource(`extent-${axis}`, "temporary", "u32", "4"),
+      ]),
+    ],
+    nodes: [
+      ...shape.map((_, axis) => ({
+        nodeId: producerIds[axis] as string,
+        kind: "copy" as const,
+        dependsOn: [],
+        sourceResourceId: `extent-input-${axis}`,
+        destinationResourceId: `extent-${axis}`,
+        mode: "whole-allocation-bytes-per-rank" as const,
+      })),
+      ...base.nodes.map((node) => {
+        if (
+          node.kind !== "dynamic-dispatch" ||
+          node.mode !== "runtime-u32-rectangular-prefix"
+        ) {
+          return node;
+        }
+        const { launchControls: _launchControls, ...common } = node;
+        return {
+          ...common,
+          dependsOn: producerIds,
+          launchSources: shape.map((_, axis) => ({
+            axis,
+            resourceId: `extent-${axis}`,
+            rank: wire("0"),
+            mode: "u32-prefix-extent" as const,
+          })),
+          mode: "resource-u32-rectangular-prefix" as const,
+        };
+      }),
+    ],
+  };
+}
+
 function resourceDynamicPipelineProgram(
   artifacts: VerifiedViewCopyArtifacts,
 ): HostGraphProgram {
@@ -980,6 +1029,42 @@ describe("semantic host-graph WebGPU preparation", () => {
         shape.reduce((product, extent) => product * extent, 1) * 20 + 16,
       );
       expect(prepared.wgslModuleHashes).toHaveLength(1);
+    }
+  });
+
+  it("prewarms one produced rank-2 and rank-3 rectangle with exact feedback budgets", async () => {
+    for (const shape of [[3, 4], [2, 3, 4]] as const) {
+      const artifacts = await rectangularIdentityArtifacts(shape);
+      const graph = await verified(
+        resourceRectangularDynamicProgram(artifacts, shape),
+        artifacts,
+      );
+      const prepared = await prepareSemanticHostGraphWebGpu(
+        graph,
+        { ...artifactOptions(artifacts), workgroupSize: 64 },
+      );
+      const elementCount = shape.reduce(
+        (product, extent) => product * extent,
+        1,
+      );
+
+      expect(prepared).toMatchObject({
+        backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+        nodeCount: shape.length + 2,
+        expandedStepCount: shape.length + 1,
+        dispatchStepCount: 1,
+        copyStepCount: shape.length,
+        materializationCount: 1,
+        dynamicDispatchCount: 1,
+        resourceDynamicDispatchCount: 1,
+        midGraphFeedbackCount: 1,
+        runtimeControlIds: [],
+        plannedTransientGpuBytes:
+          String(elementCount * 12 + 16 + shape.length * 12),
+        plannedTransientHostBytes:
+          String(elementCount * 20 + 16 + shape.length * 16),
+      });
+      expect(prepared.wgslModuleHashes).toHaveLength(2);
     }
   });
 

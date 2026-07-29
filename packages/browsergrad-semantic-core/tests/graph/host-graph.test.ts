@@ -504,6 +504,77 @@ function resourceDynamicDispatchProgram(
   };
 }
 
+function resourceRectangularDynamicDispatchProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  const base = rectangularDynamicDispatchProgram(artifacts);
+  const sourceResources = ["rows", "columns"].flatMap((axisName) => [
+    {
+      resourceId: `${axisName}-input`,
+      role: "input" as const,
+      multiplicity: "per-rank" as const,
+      initialization: "external-input" as const,
+      dtype: "u32" as const,
+      byteLength: wire("4"),
+      alignmentBytes: 4,
+    },
+    {
+      resourceId: `${axisName}-extent`,
+      role: "temporary" as const,
+      multiplicity: "per-rank" as const,
+      initialization: "zero-fill" as const,
+      dtype: "u32" as const,
+      byteLength: wire("4"),
+      alignmentBytes: 4,
+    },
+  ]);
+  const producerIds = ["rows", "columns"].map((axisName) =>
+    `produce-${axisName}-extent`);
+  return {
+    ...base,
+    version: { major: 1, minor: 13 },
+    resources: [...base.resources, ...sourceResources],
+    nodes: [
+      ...["rows", "columns"].map((axisName) => ({
+        nodeId: `produce-${axisName}-extent`,
+        kind: "copy" as const,
+        dependsOn: [],
+        sourceResourceId: `${axisName}-input`,
+        destinationResourceId: `${axisName}-extent`,
+        mode: "whole-allocation-bytes-per-rank" as const,
+      })),
+      ...base.nodes.map((node) => {
+        if (
+          node.kind !== "dynamic-dispatch" ||
+          node.mode !== "runtime-u32-rectangular-prefix"
+        ) {
+          return node;
+        }
+        const { launchControls: _launchControls, ...common } = node;
+        return {
+          ...common,
+          dependsOn: [...node.dependsOn, ...producerIds],
+          launchSources: [
+            {
+              axis: 1,
+              resourceId: "columns-extent",
+              rank: wire("0"),
+              mode: "u32-prefix-extent" as const,
+            },
+            {
+              axis: 0,
+              resourceId: "rows-extent",
+              rank: wire("0"),
+              mode: "u32-prefix-extent" as const,
+            },
+          ],
+          mode: "resource-u32-rectangular-prefix" as const,
+        };
+      }),
+    ],
+  };
+}
+
 function conditionalCopyProgram(): HostGraphProgram {
   return {
     kind: "host-graph",
@@ -1529,6 +1600,114 @@ describe("host graph artifact", () => {
     }
   });
 
+  it("normalizes one bounded produced-resource rectangle in version 1.13", async () => {
+    const artifacts = await semantic();
+    const constructed = await createVerifiedHostGraphArtifact(
+      resourceRectangularDynamicDispatchProgram(artifacts),
+      {
+        kernelArtifacts: [artifacts.kernel],
+        layoutArtifacts: [artifacts.layout],
+      },
+    );
+    const payload = hostGraphArtifactPayload(constructed.artifact);
+    const prepared = await prepareHostGraphProgram(constructed.artifact);
+
+    expect(payload.program.version).toEqual({ major: 1, minor: 13 });
+    expect(payload.program.nodes.find((node) =>
+      node.kind === "dynamic-dispatch")).toMatchObject({
+        nodeId: "transform",
+        launchSources: [
+          {
+            axis: 0,
+            resourceId: "rows-extent",
+            rank: "0",
+            mode: "u32-prefix-extent",
+          },
+          {
+            axis: 1,
+            resourceId: "columns-extent",
+            rank: "0",
+            mode: "u32-prefix-extent",
+          },
+        ],
+        maxExtents: ["2", "2"],
+        mode: "resource-u32-rectangular-prefix",
+      });
+    expect(prepared).toMatchObject({
+      dynamicDispatchCount: 1,
+      resourceDynamicDispatchCount: 1,
+      runtimeControlIds: [],
+    });
+  });
+
+  it("rejects malformed, unordered, and pre-version produced-resource rectangles", async () => {
+    const artifacts = await semantic();
+    const options = {
+      kernelArtifacts: [artifacts.kernel],
+      layoutArtifacts: [artifacts.layout],
+    };
+    const oldVersion = clone(
+      resourceRectangularDynamicDispatchProgram(artifacts),
+    );
+    oldVersion.version.minor = 12;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      oldVersion,
+      options,
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.unsupportedProfile);
+
+    const unordered = clone(
+      resourceRectangularDynamicDispatchProgram(artifacts),
+    );
+    const unorderedNode = unordered.nodes.find((node) =>
+      node.kind === "dynamic-dispatch");
+    if (
+      unorderedNode?.kind !== "dynamic-dispatch" ||
+      unorderedNode.mode !== "resource-u32-rectangular-prefix"
+    ) {
+      throw new Error("missing resource rectangular dynamic dispatch");
+    }
+    unorderedNode.dependsOn = [];
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      unordered,
+      options,
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.readBeforeWrite);
+
+    const duplicateAxis = clone(
+      resourceRectangularDynamicDispatchProgram(artifacts),
+    );
+    const duplicateAxisNode = duplicateAxis.nodes.find((node) =>
+      node.kind === "dynamic-dispatch");
+    if (
+      duplicateAxisNode?.kind !== "dynamic-dispatch" ||
+      duplicateAxisNode.mode !== "resource-u32-rectangular-prefix"
+    ) {
+      throw new Error("missing resource rectangular dynamic dispatch");
+    }
+    duplicateAxisNode.launchSources[1]!.axis = 1;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      duplicateAxis,
+      options,
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.duplicateId);
+
+    const duplicateResource = clone(
+      resourceRectangularDynamicDispatchProgram(artifacts),
+    );
+    const duplicateResourceNode = duplicateResource.nodes.find((node) =>
+      node.kind === "dynamic-dispatch");
+    if (
+      duplicateResourceNode?.kind !== "dynamic-dispatch" ||
+      duplicateResourceNode.mode !== "resource-u32-rectangular-prefix"
+    ) {
+      throw new Error("missing resource rectangular dynamic dispatch");
+    }
+    duplicateResourceNode.launchSources[1]!.resourceId =
+      duplicateResourceNode.launchSources[0]!.resourceId;
+    expect((await diagnostic(() => createVerifiedHostGraphArtifact(
+      duplicateResource,
+      options,
+    ))).diagnostic.code).toBe(GRAPH_DIAGNOSTIC_CODES.duplicateId);
+  });
+
   it("normalizes one bounded produced-resource dynamic dispatch in version 1.11", async () => {
     const artifacts = await semantic();
     const constructed = await createVerifiedHostGraphArtifact(
@@ -1972,7 +2151,7 @@ describe("host graph artifact", () => {
 
   it("rejects copy version, mode, resource, dtype, and hazard drift", async () => {
     const future = clone(copyProgram());
-    future.version.minor = 13 as unknown as typeof future.version.minor;
+    future.version.minor = 14 as unknown as typeof future.version.minor;
     expect((await diagnostic(() => createVerifiedHostGraphArtifact(
       future,
       { kernelArtifacts: [], layoutArtifacts: [] },

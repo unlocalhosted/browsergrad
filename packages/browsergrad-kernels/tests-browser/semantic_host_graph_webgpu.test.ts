@@ -78,6 +78,10 @@ const CASE_IDS = Object.freeze([
   "f32-rectangular-dynamic-rank2-large",
   "f32-rectangular-dynamic-rank3-small",
   "f32-rectangular-dynamic-rank3-large",
+  "f32-resource-rectangular-dynamic-rank2-small",
+  "f32-resource-rectangular-dynamic-rank2-large",
+  "f32-resource-rectangular-dynamic-rank3-small",
+  "f32-resource-rectangular-dynamic-rank3-large",
   "u8-input-conditional-then",
   "u8-input-conditional-else",
   "u8-runtime-conditional-then",
@@ -281,6 +285,26 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       ),
       prepareRectangularDynamicDispatchCase(
         "f32-rectangular-dynamic-rank3-large",
+        [2, 3, 4],
+        [2, 3, 4],
+      ),
+      prepareResourceRectangularDynamicDispatchCase(
+        "f32-resource-rectangular-dynamic-rank2-small",
+        [3, 4],
+        [2, 3],
+      ),
+      prepareResourceRectangularDynamicDispatchCase(
+        "f32-resource-rectangular-dynamic-rank2-large",
+        [3, 4],
+        [3, 4],
+      ),
+      prepareResourceRectangularDynamicDispatchCase(
+        "f32-resource-rectangular-dynamic-rank3-small",
+        [2, 3, 4],
+        [1, 2, 3],
+      ),
+      prepareResourceRectangularDynamicDispatchCase(
+        "f32-resource-rectangular-dynamic-rank3-large",
         [2, 3, 4],
         [2, 3, 4],
       ),
@@ -615,6 +639,22 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       expect(large?.expandedStepCount).toBe(2);
       expect(small?.completedDynamicDispatches).toHaveLength(1);
       expect(large?.completedDynamicDispatches).toHaveLength(1);
+      const resourceSmall = completedCases.find(({ caseId }) =>
+        caseId ===
+          `f32-resource-rectangular-dynamic-rank${rank}-small`);
+      const resourceLarge = completedCases.find(({ caseId }) =>
+        caseId ===
+          `f32-resource-rectangular-dynamic-rank${rank}-large`);
+      expect(resourceSmall?.pipelineIdentityHash)
+        .toBe(resourceLarge?.pipelineIdentityHash);
+      expect(resourceSmall?.backendSpecializationHash)
+        .not.toBe(resourceLarge?.backendSpecializationHash);
+      expect(resourceSmall?.expandedStepCount).toBe(rank * 2 + 2);
+      expect(resourceLarge?.expandedStepCount).toBe(rank * 2 + 2);
+      expect(resourceSmall?.completedDynamicDispatches).toHaveLength(1);
+      expect(resourceLarge?.completedDynamicDispatches).toHaveLength(1);
+      expect(resourceSmall?.midGraphFeedbackCount).toBe(1);
+      expect(resourceLarge?.midGraphFeedbackCount).toBe(1);
     }
 
     stage = "resource-repeat-bound-refusal";
@@ -664,6 +704,32 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       )).rejects.toMatchObject({
         code: "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
         path: "$.nodes.copy.launchSource",
+      });
+    }
+
+    stage = "resource-rectangular-dynamic-dispatch-bound-refusal";
+    const resourceRectangularCase = cases.find(({ caseId }) =>
+      caseId === "f32-resource-rectangular-dynamic-rank2-small");
+    if (resourceRectangularCase === undefined) {
+      throw new Error("missing resource rectangular dynamic dispatch case");
+    }
+    for (const [axis, extent] of [[0, 0], [1, 5]] as const) {
+      await expect(runSemanticHostGraphWebGpu(
+        kernelDevice,
+        resourceRectangularCase.prepared,
+        {
+          inputs: resourceRectangularCase.inputs.map((binding) => ({
+            ...binding,
+            bytes:
+              binding.resourceId === `extent-input-${axis}` &&
+                binding.rank === wire(0)
+                ? u32Bytes([extent])
+                : new Uint8Array(binding.bytes),
+          })),
+        },
+      )).rejects.toMatchObject({
+        code: "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
+        path: `$.nodes.copy.launchSources[${axis}]`,
       });
     }
 
@@ -1177,6 +1243,69 @@ async function prepareRectangularDynamicDispatchCase(
   });
 }
 
+async function prepareResourceRectangularDynamicDispatchCase(
+  caseId:
+    | "f32-resource-rectangular-dynamic-rank2-small"
+    | "f32-resource-rectangular-dynamic-rank2-large"
+    | "f32-resource-rectangular-dynamic-rank3-small"
+    | "f32-resource-rectangular-dynamic-rank3-large",
+  shape: readonly [number, number] | readonly [number, number, number],
+  logicalExtents:
+    readonly [number, number] | readonly [number, number, number],
+): Promise<PreparedCase> {
+  const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
+    inputShape: shape.map((extent) => parseWireI64(String(extent))),
+    axes: shape.map((_, axis) => axis),
+    dtype: "f32",
+  });
+  const elementCount = shape.reduce(
+    (product, extent) => product * extent,
+    1,
+  );
+  const values = [
+    f32Bytes(Array.from(
+      { length: elementCount },
+      (_, index) => index + 0.25,
+    )),
+    f32Bytes(Array.from(
+      { length: elementCount },
+      (_, index) => -index - 0.5,
+    )),
+  ];
+  const graph = (await createVerifiedHostGraphArtifact(
+    resourceRectangularDynamicDispatchProgram(artifacts, shape),
+    artifactOptions(artifacts),
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(
+    graph,
+    { ...artifactOptions(artifacts), workgroupSize: 64 },
+  );
+  const inputs = Object.freeze([
+    ...values.map((bytes, rank) => input(rank, bytes)),
+    ...logicalExtents.flatMap((extent, axis) => [
+      namedInput(0, `extent-input-${axis}`, u32Bytes([extent])),
+      namedInput(1, `extent-input-${axis}`, u32Bytes([0])),
+    ]),
+  ]);
+  return Object.freeze({
+    caseId,
+    artifacts,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: inputs.map(({ rank, resourceId, bytes }) => ({
+        rank,
+        resourceId,
+        bytes: Array.from(bytes),
+      })),
+    }),
+  });
+}
+
 async function prepareConditionalRawCopyCase(
   caseId: "u8-input-conditional-then" | "u8-input-conditional-else",
   predicate: 0 | 1,
@@ -1406,6 +1535,55 @@ function rectangularDynamicDispatchProgram(
         resourceId: "output",
         mode: "host-readback-after-graph-success",
       },
+    ],
+  };
+}
+
+function resourceRectangularDynamicDispatchProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+  shape: readonly [number, number] | readonly [number, number, number],
+): HostGraphProgram {
+  const base = rectangularDynamicDispatchProgram(artifacts, shape);
+  const producerIds = shape.map((_, axis) => `produce-extent-${axis}`);
+  return {
+    ...base,
+    version: { major: 1, minor: 13 },
+    resources: [
+      ...base.resources,
+      ...shape.flatMap((_, axis) => [
+        resource(`extent-input-${axis}`, "input", "u32", 4),
+        resource(`extent-${axis}`, "temporary", "u32", 4),
+      ]),
+    ],
+    nodes: [
+      ...shape.map((_, axis) => ({
+        nodeId: producerIds[axis] as string,
+        kind: "copy" as const,
+        dependsOn: [],
+        sourceResourceId: `extent-input-${axis}`,
+        destinationResourceId: `extent-${axis}`,
+        mode: "whole-allocation-bytes-per-rank" as const,
+      })),
+      ...base.nodes.map((node) => {
+        if (
+          node.kind !== "dynamic-dispatch" ||
+          node.mode !== "runtime-u32-rectangular-prefix"
+        ) {
+          return node;
+        }
+        const { launchControls: _launchControls, ...common } = node;
+        return {
+          ...common,
+          dependsOn: producerIds,
+          launchSources: shape.map((_, axis) => ({
+            axis,
+            resourceId: `extent-${axis}`,
+            rank: wire(0),
+            mode: "u32-prefix-extent" as const,
+          })),
+          mode: "resource-u32-rectangular-prefix" as const,
+        };
+      }),
     ],
   };
 }
@@ -1800,7 +1978,7 @@ function resourceConditionalRawCopyProgram(): HostGraphProgram {
 
 function resource(
   resourceId: string,
-  role: "input" | "output",
+  role: "input" | "temporary" | "output",
   dtype: "f32" | "i32" | "u32",
   byteLength = 8,
 ) {

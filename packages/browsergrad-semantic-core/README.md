@@ -181,6 +181,12 @@ must fit the corresponding verified logical shape extent, and the product of
 the maxima enters preparation work budgets. Zero, above-maximum, missing,
 duplicate-axis, duplicate-control, rank-mismatched, and pre-version forms fail
 before input copying.
+Version 1.13 adds `resource-u32-rectangular-prefix` under the existing
+at-most-one feedback-node bound. Its `launchSources` bind one distinct,
+ordered, rank-local four-byte temporary u32 per axis. Each source writer must
+dominate the dispatch; the dispatch cannot also bind a source as data. Zero,
+above-maximum, duplicate-axis/resource, unordered, malformed, and pre-version
+forms fail closed.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -245,6 +251,10 @@ row-major coordinate domain, and reports both logical extents and their
 product only after whole-graph success. Rank-2 and rank-3 CPU cases cover
 partial and full rectangles plus hostile extent admission without input
 observation.
+Version-1.13 reads every rectangular extent from private rank-local storage
+only after all ordered producers execute, applies the same per-axis bounds and
+maximum-product admission, and publishes the same logical-extent/product
+completion only after whole-graph success.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -260,10 +270,11 @@ DAG/repeat/dynamic-dispatch/bounded-input/runtime-control/resource-feedback adap
 its required actual-device evidence. The version-1.7 backend profile uses one
 explicit bounded host readback/resubmission point for its GPU-produced
 predicate; versions 1.10 and 1.11 reuse that authority for one bounded
-GPU-produced loop count or dynamic-launch prefix. Neither adapter grants
+GPU-produced loop count or dynamic-launch prefix, and version 1.13 reuses it
+for one rank-2/rank-3 produced rectangle. Neither adapter grants
 transport, topology, retries, event
 timestamps or external waits, repeated/device-side feedback,
-GPU-produced multidimensional launch, rank-4-or-higher dynamic domains,
+rank-4-or-higher dynamic domains,
 worker-mesh, native-companion,
 performance, or release authority.
 

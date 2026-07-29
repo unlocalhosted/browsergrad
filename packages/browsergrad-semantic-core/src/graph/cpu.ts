@@ -252,10 +252,23 @@ interface RuntimeRectangularDynamicDispatchPlan
   readonly maxExtents: readonly number[];
 }
 
+interface ResourceRectangularDynamicDispatchPlan
+  extends DynamicDispatchPlanBase {
+  readonly mode: "resource-rectangular";
+  readonly sources: readonly Readonly<{
+    readonly axis: number;
+    readonly resourceId: string;
+    readonly rank: number;
+    readonly maxExtent: number;
+  }>[];
+  readonly maxExtents: readonly number[];
+}
+
 type DynamicDispatchPlan =
   | RuntimeDynamicDispatchPlan
   | ResourceDynamicDispatchPlan
-  | RuntimeRectangularDynamicDispatchPlan;
+  | RuntimeRectangularDynamicDispatchPlan
+  | ResourceRectangularDynamicDispatchPlan;
 
 interface CollectivePlan {
   readonly kind: "all-reduce";
@@ -978,7 +991,10 @@ async function prepareDynamicDispatchPlan(
     options,
     startedAt,
   );
-  if (node.mode === "runtime-u32-rectangular-prefix") {
+  if (
+    node.mode === "runtime-u32-rectangular-prefix" ||
+    node.mode === "resource-u32-rectangular-prefix"
+  ) {
     const maxExtents = Object.freeze(node.maxExtents.map((extent, axis) =>
       safeNumber(
         wireIntegerToBigInt(extent),
@@ -1002,13 +1018,29 @@ async function prepareDynamicDispatchPlan(
     return Object.freeze({
       ...base,
       kind: "dynamic-dispatch",
-      mode: "runtime-rectangular",
-      controls: Object.freeze(node.launchControls.map((control) =>
-        Object.freeze({
-          axis: control.axis,
-          controlId: control.controlId,
-          maxExtent: maxExtents[control.axis] as number,
-        }))),
+      ...(node.mode === "runtime-u32-rectangular-prefix"
+        ? {
+            mode: "runtime-rectangular" as const,
+            controls: Object.freeze(node.launchControls.map((control) =>
+              Object.freeze({
+                axis: control.axis,
+                controlId: control.controlId,
+                maxExtent: maxExtents[control.axis] as number,
+              }))),
+          }
+        : {
+            mode: "resource-rectangular" as const,
+            sources: Object.freeze(node.launchSources.map((source, index) =>
+              Object.freeze({
+                axis: source.axis,
+                resourceId: source.resourceId,
+                rank: safeNumber(
+                  wireIntegerToBigInt(source.rank),
+                  `$.nodes.${node.nodeId}.launchSources[${index}].rank`,
+                ),
+                maxExtent: maxExtents[source.axis] as number,
+              }))),
+          }),
       maxExtents,
       rankCount,
       elementOperations: maxElementCount * BigInt(rankCount),
@@ -1212,7 +1244,7 @@ function readProducedU32(
   resourceId: string,
   rank: number,
   rankResources: RankResources,
-  fieldName: "iterationSource" | "launchSource",
+  fieldName: "iterationSource" | "launchSource" | "launchSources",
   label: string,
 ): number {
   const bytes = rankResources[rank]?.get(resourceId);
@@ -1388,19 +1420,45 @@ function executeDynamicDispatch(
   maxExecutionMs: number,
   signal: AbortSignal | undefined,
 ): HostGraphDynamicDispatchCompletion {
-  const logicalExtents = plan.mode === "runtime-rectangular"
-    ? Object.freeze(plan.controls.map((axisControl) => {
-        const extent = controls.find((control) =>
-          control.controlId === axisControl.controlId)?.value;
+  const logicalExtents =
+    plan.mode === "runtime-rectangular" ||
+      plan.mode === "resource-rectangular"
+    ? Object.freeze((
+        plan.mode === "runtime-rectangular"
+          ? plan.controls.map((axisControl) => ({
+              axis: axisControl.axis,
+              extent: controls.find((control) =>
+                control.controlId === axisControl.controlId)?.value,
+              maxExtent: axisControl.maxExtent,
+            }))
+          : plan.sources.map((source) => ({
+              axis: source.axis,
+              extent: readProducedU32(
+                plan.nodeId,
+                source.resourceId,
+                source.rank,
+                rankResources,
+                "launchSources",
+                "rectangular dynamic dispatch source",
+              ),
+              maxExtent: source.maxExtent,
+            }))
+      ).map(({ axis, extent, maxExtent }) => {
         if (
           extent === undefined ||
           extent <= 0 ||
-          extent > axisControl.maxExtent
+          extent > maxExtent
         ) {
           fail(
-            "BG-GRAPH-CPU-INTERNAL",
-            `$.nodes.${plan.nodeId}.launchControls[${axisControl.axis}]`,
-            "admitted rectangular dispatch extent is outside its verified bound",
+            plan.mode === "resource-rectangular"
+              ? "BG-GRAPH-CPU-RESOURCE-LIMIT"
+              : "BG-GRAPH-CPU-INTERNAL",
+            plan.mode === "resource-rectangular"
+              ? `$.nodes.${plan.nodeId}.launchSources[${axis}]`
+              : `$.nodes.${plan.nodeId}.launchControls[${axis}]`,
+            plan.mode === "resource-rectangular"
+              ? "produced rectangular dynamic dispatch extent must be between one and its verified bound"
+              : "admitted rectangular dispatch extent is outside its verified bound",
           );
         }
         return extent;
@@ -1421,6 +1479,7 @@ function executeDynamicDispatch(
       : undefined;
   if (
     plan.mode !== "runtime-rectangular" &&
+    plan.mode !== "resource-rectangular" &&
     linearElementCount === undefined
   ) {
     fail(
@@ -1431,6 +1490,7 @@ function executeDynamicDispatch(
   }
   if (
     plan.mode !== "runtime-rectangular" &&
+    plan.mode !== "resource-rectangular" &&
     (
       linearElementCount! <= 0 ||
       linearElementCount! > plan.maxElementCount

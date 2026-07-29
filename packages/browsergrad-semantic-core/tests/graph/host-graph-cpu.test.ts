@@ -276,6 +276,71 @@ function rectangularDynamicProgram(
   };
 }
 
+function resourceRectangularDynamicProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+  shape: readonly number[],
+): HostGraphProgram {
+  const base = rectangularDynamicProgram(artifacts, shape);
+  const producerIds = shape.map((_, axis) => `produce-extent-${axis}`);
+  return {
+    ...base,
+    version: { major: 1, minor: 13 },
+    resources: [
+      ...base.resources,
+      ...shape.flatMap((_, axis) => [
+        {
+          resourceId: `extent-input-${axis}`,
+          role: "input" as const,
+          multiplicity: "per-rank" as const,
+          initialization: "external-input" as const,
+          dtype: "u32" as const,
+          byteLength: wire("4"),
+          alignmentBytes: 4,
+        },
+        {
+          resourceId: `extent-${axis}`,
+          role: "temporary" as const,
+          multiplicity: "per-rank" as const,
+          initialization: "zero-fill" as const,
+          dtype: "u32" as const,
+          byteLength: wire("4"),
+          alignmentBytes: 4,
+        },
+      ]),
+    ],
+    nodes: [
+      ...shape.map((_, axis) => ({
+        nodeId: producerIds[axis] as string,
+        kind: "copy" as const,
+        dependsOn: [],
+        sourceResourceId: `extent-input-${axis}`,
+        destinationResourceId: `extent-${axis}`,
+        mode: "whole-allocation-bytes-per-rank" as const,
+      })),
+      ...base.nodes.map((node) => {
+        if (
+          node.kind !== "dynamic-dispatch" ||
+          node.mode !== "runtime-u32-rectangular-prefix"
+        ) {
+          return node;
+        }
+        const { launchControls: _launchControls, ...common } = node;
+        return {
+          ...common,
+          dependsOn: producerIds,
+          launchSources: shape.map((_, axis) => ({
+            axis,
+            resourceId: `extent-${axis}`,
+            rank: wire("0"),
+            mode: "u32-prefix-extent" as const,
+          })),
+          mode: "resource-u32-rectangular-prefix" as const,
+        };
+      }),
+    ],
+  };
+}
+
 function collectiveProgram(
   artifacts: VerifiedViewCopyArtifacts,
   dtype: "f32" | "i32" | "u32",
@@ -1360,7 +1425,7 @@ describe("host graph CPU reference", () => {
         (product, extent) => product * extent,
         1,
       );
-      const selectedElementCount = testCase.extents.reduce(
+      const selectedElementCount = testCase.extents.reduce<number>(
         (product, extent) => product * extent,
         1,
       );
@@ -1440,6 +1505,97 @@ describe("host graph CPU reference", () => {
       });
     }
     expect(inputReads).toBe(0);
+  });
+
+  it("executes and reports produced rank-2 and rank-3 rectangular prefixes", async () => {
+    const cases = [
+      { shape: [3, 4], extents: [2, 3] },
+      { shape: [2, 3, 4], extents: [1, 2, 3] },
+    ] as const;
+    for (const testCase of cases) {
+      const artifacts = await rectangularArtifacts(testCase.shape);
+      const graph = await verified(
+        resourceRectangularDynamicProgram(artifacts, testCase.shape),
+        artifacts,
+      );
+      const prepared = await prepareHostGraphCpu(
+        graph,
+        artifactOptions(artifacts),
+      );
+      const elementCount = testCase.shape.reduce(
+        (product, extent) => product * extent,
+        1,
+      );
+      const selectedElementCount = testCase.extents.reduce<number>(
+        (product, extent) => product * extent,
+        1,
+      );
+      const values = Array.from(
+        { length: elementCount },
+        (_, index) => index + 0.5,
+      );
+      const result = await prepared.execute({
+        inputs: [
+          input(0, f32Bytes(values)),
+          ...testCase.extents.map((extent, axis) => ({
+            rank: wire("0"),
+            resourceId: `extent-input-${axis}`,
+            bytes: u32Bytes([extent]),
+          })),
+        ],
+      });
+
+      expect(prepared).toMatchObject({
+        dynamicDispatchCount: 1,
+        resourceDynamicDispatchCount: 1,
+        runtimeControlIds: [],
+      });
+      expect(result).toMatchObject({
+        completedDynamicDispatches: [{
+          nodeId: "copy-region",
+          logicalExtents: testCase.extents.map(String),
+          elementCount: String(selectedElementCount),
+        }],
+      });
+      expect(readF32(result.outputs[0]!.bytes)).toEqual(
+        rectangularExpected(values, testCase.shape, testCase.extents),
+      );
+    }
+  });
+
+  it("rejects produced rectangular extents before output publication", async () => {
+    const shape = [3, 4] as const;
+    const artifacts = await rectangularArtifacts(shape);
+    const graph = await verified(
+      resourceRectangularDynamicProgram(artifacts, shape),
+      artifacts,
+    );
+    const prepared = await prepareHostGraphCpu(
+      graph,
+      artifactOptions(artifacts),
+    );
+    const executionInputs = (
+      extents: readonly number[],
+    ): HostGraphCpuInputBinding[] => [
+      input(0, f32Bytes(Array.from({ length: 12 }, (_, index) => index))),
+      ...extents.map((extent, axis) => ({
+        rank: wire("0"),
+        resourceId: `extent-input-${axis}`,
+        bytes: u32Bytes([extent]),
+      })),
+    ];
+
+    for (const [axis, extents] of [
+      [0, [0, 3]],
+      [1, [2, 5]],
+    ] as const) {
+      await expect(prepared.execute({
+        inputs: executionInputs(extents),
+      })).rejects.toMatchObject({
+        code: "BG-GRAPH-CPU-RESOURCE-LIMIT",
+        path: `$.nodes.copy-region.launchSources[${axis}]`,
+      });
+    }
   });
 
   it("executes one produced-resource dynamic dispatch prefix within its artifact bound", async () => {

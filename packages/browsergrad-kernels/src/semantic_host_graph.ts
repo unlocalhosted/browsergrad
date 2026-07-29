@@ -78,7 +78,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.15.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.16.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -363,7 +363,7 @@ interface PreparedState {
   readonly resourceRepeat?: PreparedResourceRepeatPlan;
   readonly runtimeRepeatLimits: ReadonlyMap<string, number>;
   readonly dynamicDispatches: readonly PreparedDynamicDispatchPlan[];
-  readonly resourceDynamicDispatch?: PreparedLinearDynamicDispatchPlan;
+  readonly resourceDynamicDispatch?: PreparedDynamicDispatchPlan;
   readonly dynamicDispatchLimits: ReadonlyMap<string, number>;
   readonly runtimeControlIds: readonly string[];
   readonly maximumCounts: Readonly<MutablePreparationCounts>;
@@ -453,11 +453,24 @@ interface PreparedLinearDynamicDispatchPlan
 interface PreparedRectangularDynamicDispatchPlan
   extends PreparedDynamicDispatchPlanBase {
   readonly kind: "rectangular-prefix";
-  readonly controls: readonly Readonly<{
-    readonly axis: number;
-    readonly controlId: string;
-    readonly maxExtent: number;
-  }>[];
+  readonly selector:
+    | Readonly<{
+        readonly kind: "runtime-control";
+        readonly controls: readonly Readonly<{
+          readonly axis: number;
+          readonly controlId: string;
+          readonly maxExtent: number;
+        }>[];
+      }>
+    | Readonly<{
+        readonly kind: "resource";
+        readonly sources: readonly Readonly<{
+          readonly axis: number;
+          readonly resourceId: string;
+          readonly rank: number;
+          readonly maxExtent: number;
+        }>[];
+      }>;
   readonly maxExtents: readonly number[];
   readonly maxElementCount: number;
 }
@@ -519,7 +532,7 @@ interface SelectedExecution {
   readonly completedConditionals: readonly HostGraphConditionalCompletion[];
   readonly resourceConditional?: PreparedConditionalPlan;
   readonly resourceRepeat?: PreparedResourceRepeatPlan;
-  readonly resourceDynamicDispatch?: PreparedLinearDynamicDispatchPlan;
+  readonly resourceDynamicDispatch?: PreparedDynamicDispatchPlan;
 }
 
 interface ExecutedGraph {
@@ -812,9 +825,7 @@ export async function prepareSemanticHostGraphWebGpu(
   const resourceRepeat = resourceRepeats[0];
   const resourceDynamicDispatches = dynamicDispatches.filter((
     dispatch,
-  ): dispatch is PreparedLinearDynamicDispatchPlan =>
-    dispatch.kind === "linear-prefix" &&
-    dispatch.selector.kind === "resource");
+  ) => dispatch.selector.kind === "resource");
   if (
     resourceDynamicDispatches.length !==
     preparedGraph.resourceDynamicDispatchCount
@@ -839,10 +850,14 @@ export async function prepareSemanticHostGraphWebGpu(
       "verified graph contains more than one resource feedback node",
     );
   }
-  const feedbackBytes =
-    resourceConditional === undefined &&
-      resourceRepeat === undefined &&
-      resourceDynamicDispatch === undefined
+  const feedbackBytes = resourceDynamicDispatch?.kind ===
+      "rectangular-prefix"
+    ? BigInt(resourceDynamicDispatch.selector.kind === "resource"
+      ? resourceDynamicDispatch.selector.sources.length * 4
+      : 0)
+    : resourceConditional === undefined &&
+        resourceRepeat === undefined &&
+        resourceDynamicDispatch === undefined
       ? 0n
       : 4n;
   const dynamicUniformGpuBytes =
@@ -1895,10 +1910,7 @@ function selectConditionalExecution(
     HostGraphDynamicDispatchCompletion
   >();
   for (const dispatch of state.dynamicDispatches) {
-    if (
-      dispatch.kind === "linear-prefix" &&
-      dispatch.selector.kind === "resource"
-    ) continue;
+    if (dispatch.selector.kind === "resource") continue;
     const selection = selectRuntimeDynamicLaunch(dispatch, controlMap);
     for (
       let pipelineIndex = dispatch.startStepIndex;
@@ -2082,7 +2094,8 @@ async function appendDispatchSteps(
           semantic.layout,
           semantic.kernel,
           request,
-          node.mode === "runtime-u32-rectangular-prefix"
+          node.mode === "runtime-u32-rectangular-prefix" ||
+              node.mode === "resource-u32-rectangular-prefix"
             ? "rectangular-prefix"
             : "linear-prefix",
         )
@@ -2178,7 +2191,8 @@ async function appendDynamicDispatchSteps(
   dynamicDispatches: PreparedDynamicDispatchPlan[],
 ): Promise<void> {
   const maxSelection: DynamicLaunchSelection =
-    node.mode === "runtime-u32-rectangular-prefix"
+    node.mode === "runtime-u32-rectangular-prefix" ||
+      node.mode === "resource-u32-rectangular-prefix"
       ? rectangularDynamicSelection(
           node.maxExtents.map((extent, axis) =>
             safeNumber(
@@ -2231,7 +2245,10 @@ async function appendDynamicDispatchSteps(
     dynamicUniformName: dynamicPrepared.dynamicUniformName,
     dynamicUniformHostBytes: dynamicPrepared.dynamicUniformByteLength,
   };
-  if (node.mode === "runtime-u32-rectangular-prefix") {
+  if (
+    node.mode === "runtime-u32-rectangular-prefix" ||
+    node.mode === "resource-u32-rectangular-prefix"
+  ) {
     if (
       dynamicPrepared.dynamicLaunchMode !== "rectangular-prefix" ||
       maxSelection.kind !== "rectangular-prefix"
@@ -2245,12 +2262,31 @@ async function appendDynamicDispatchSteps(
     dynamicDispatches.push(Object.freeze({
       ...common,
       kind: "rectangular-prefix",
-      controls: Object.freeze(node.launchControls.map((control) =>
-        Object.freeze({
-          axis: control.axis,
-          controlId: control.controlId,
-          maxExtent: maxSelection.logicalExtents[control.axis] as number,
-        }))),
+      selector: node.mode === "runtime-u32-rectangular-prefix"
+        ? Object.freeze({
+            kind: "runtime-control" as const,
+            controls: Object.freeze(node.launchControls.map((control) =>
+              Object.freeze({
+                axis: control.axis,
+                controlId: control.controlId,
+                maxExtent:
+                  maxSelection.logicalExtents[control.axis] as number,
+              }))),
+          })
+        : Object.freeze({
+            kind: "resource" as const,
+            sources: Object.freeze(node.launchSources.map((source, index) =>
+              Object.freeze({
+                axis: source.axis,
+                resourceId: source.resourceId,
+                rank: safeNumber(
+                  wireIntegerToBigInt(source.rank),
+                  `$.nodes.${node.nodeId}.launchSources[${index}].rank`,
+                ),
+                maxExtent:
+                  maxSelection.logicalExtents[source.axis] as number,
+              }))),
+          }),
       maxExtents: maxSelection.logicalExtents,
       maxElementCount: maxSelection.elementCount,
     }));
@@ -2723,7 +2759,14 @@ function selectRuntimeDynamicLaunch(
       elementCount,
     });
   }
-  const extents = dispatch.controls.map((control) => {
+  if (dispatch.selector.kind !== "runtime-control") {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${dispatch.nodeId}.launchSources`,
+      "resource rectangular dynamic dispatch entered request-time selection",
+    );
+  }
+  const extents = dispatch.selector.controls.map((control) => {
     const extent = controls.get(control.controlId);
     if (
       extent === undefined ||
@@ -3082,23 +3125,33 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
     buffers,
   );
   try {
-    const sourcePlan = state.resourcesById.get(
-      dispatch.selector.resourceId,
-    );
-    const sourceStorageName =
-      sourcePlan?.storageNames[dispatch.selector.rank];
-    if (
-      sourcePlan === undefined ||
-      sourceStorageName === undefined ||
-      sourcePlan.byteLength !== 4 ||
-      residents[sourceStorageName] === undefined
-    ) {
-      fail(
-        "BG-WEBGPU-GRAPH-INTERNAL",
-        `$.nodes.${dispatch.nodeId}.launchSource`,
-        "verified resource dynamic dispatch source storage disappeared",
-      );
-    }
+    const feedbackSources = dispatch.kind === "linear-prefix"
+      ? [Object.freeze({
+          axis: 0,
+          resourceId: dispatch.selector.resourceId,
+          rank: dispatch.selector.rank,
+          maxExtent: dispatch.maxElementCount,
+        })]
+      : dispatch.selector.sources;
+    const sourceStorageNames = feedbackSources.map((source, index) => {
+      const sourcePlan = state.resourcesById.get(source.resourceId);
+      const sourceStorageName = sourcePlan?.storageNames[source.rank];
+      if (
+        sourcePlan === undefined ||
+        sourceStorageName === undefined ||
+        sourcePlan.byteLength !== 4 ||
+        residents[sourceStorageName] === undefined
+      ) {
+        fail(
+          "BG-WEBGPU-GRAPH-INTERNAL",
+          dispatch.kind === "linear-prefix"
+            ? `$.nodes.${dispatch.nodeId}.launchSource`
+            : `$.nodes.${dispatch.nodeId}.launchSources[${index}]`,
+          "verified resource dynamic dispatch source storage disappeared",
+        );
+      }
+      return sourceStorageName;
+    });
     const selectedDispatchIndex =
       selectedExecution.pipelineStepIndices.indexOf(
         dispatch.startStepIndex,
@@ -3134,29 +3187,50 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
       residents,
       pipelineSet,
       prefixPipelineStepIndices,
-      [sourceStorageName],
+      sourceStorageNames,
       "$.feedback.prefix",
     );
     throwIfCancelled(signal);
-    const sourceValue = prefix.buffers[sourceStorageName];
-    if (!(sourceValue instanceof Uint32Array) || sourceValue.length !== 1) {
-      fail(
-        "BG-WEBGPU-GRAPH-INTERNAL",
-        `$.nodes.${dispatch.nodeId}.launchSource`,
-        "resource dynamic dispatch feedback returned an invalid u32 allocation",
-      );
-    }
-    const elementCount = sourceValue[0] as number;
-    if (
-      elementCount <= 0 ||
-      elementCount > dispatch.maxElementCount
-    ) {
-      fail(
-        "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
-        `$.nodes.${dispatch.nodeId}.launchSource`,
-        `produced resource dynamic dispatch count ${elementCount} must be between one and its artifact bound ${dispatch.maxElementCount}`,
-      );
-    }
+    const producedExtents = sourceStorageNames.map((storageName, index) => {
+      const sourceValue = prefix.buffers[storageName];
+      if (!(sourceValue instanceof Uint32Array) || sourceValue.length !== 1) {
+        fail(
+          "BG-WEBGPU-GRAPH-INTERNAL",
+          dispatch.kind === "linear-prefix"
+            ? `$.nodes.${dispatch.nodeId}.launchSource`
+            : `$.nodes.${dispatch.nodeId}.launchSources[${index}]`,
+          "resource dynamic dispatch feedback returned an invalid u32 allocation",
+        );
+      }
+      const value = sourceValue[0] as number;
+      const maximum = feedbackSources[index]?.maxExtent;
+      if (
+        maximum === undefined ||
+        value <= 0 ||
+        value > maximum
+      ) {
+        fail(
+          "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
+          dispatch.kind === "linear-prefix"
+            ? `$.nodes.${dispatch.nodeId}.launchSource`
+            : `$.nodes.${dispatch.nodeId}.launchSources[${index}]`,
+          dispatch.kind === "linear-prefix"
+            ? `produced resource dynamic dispatch count ${value} must be between one and its artifact bound ${maximum}`
+            : `produced rectangular dynamic dispatch extent ${value} must be between one and its artifact bound ${maximum}`,
+        );
+      }
+      return value;
+    });
+    const selection: DynamicLaunchSelection =
+      dispatch.kind === "linear-prefix"
+        ? Object.freeze({
+            kind: "linear-prefix" as const,
+            elementCount: producedExtents[0] as number,
+          })
+        : rectangularDynamicSelection(
+            producedExtents,
+            `$.nodes.${dispatch.nodeId}.launchSources`,
+          );
     const steps = [...selectedExecution.steps];
     for (
       let offset = 0;
@@ -3180,18 +3254,12 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
       steps[selectedIndex] = dynamicDispatchStep(
         step,
         dispatch,
-        Object.freeze({
-          kind: "linear-prefix",
-          elementCount,
-        }),
+        selection,
       );
     }
     const completion = dynamicDispatchCompletion(
       dispatch.nodeId,
-      Object.freeze({
-        kind: "linear-prefix",
-        elementCount,
-      }),
+      selection,
     );
     const completionsByNodeId = new Map(
       selectedExecution.completedDynamicDispatches.map((item) => [
@@ -3809,12 +3877,15 @@ function dynamicDispatchControlLimits(
 ): ReadonlyMap<string, number> {
   const limits = new Map<string, number>();
   for (const dispatch of dispatches) {
-    const controls = dispatch.kind === "rectangular-prefix"
-      ? dispatch.controls.map((control) => ({
+    const controls =
+      dispatch.kind === "rectangular-prefix" &&
+        dispatch.selector.kind === "runtime-control"
+      ? dispatch.selector.controls.map((control) => ({
           controlId: control.controlId,
           limit: control.maxExtent,
         }))
-      : dispatch.selector.kind === "runtime-control"
+      : dispatch.kind === "linear-prefix" &&
+          dispatch.selector.kind === "runtime-control"
         ? [{
             controlId: dispatch.selector.controlId,
             limit: dispatch.maxElementCount,

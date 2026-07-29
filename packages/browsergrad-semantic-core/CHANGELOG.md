@@ -20,7 +20,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   incompatible bindings, and invalid all-reduce rank/numerical contracts; and
   fixes a fail-stop, no-partial-output-commit failure model without claiming
   execution, transport, topology, retries, or backend pipelines.
-- Additive host-graph versions 1.1 through 1.12 add exact whole-allocation
+- Additive host-graph versions 1.1 through 1.13 add exact whole-allocation
   copies, terminal fail-stop materialization, dependency-ordered completion
   events, bounded fixed-count repetition, captured-input u32 conditionals, and
   runtime-control u32 conditionals, one ordered temporary-resource u32
@@ -43,14 +43,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   conditional, repeat, and dynamic dispatch. Version 1.12 adds rank-2/rank-3
   request-time rectangular prefix dispatch with one positive bounded u32
   extent per verified semantic axis, exact rectangular CPU execution, maximum
-  product admission, and logical-extent completion records. No profile grants
-  nested/device-side control, GPU-produced rectangular launch, rank-4-or-
+  product admission, and logical-extent completion records. Version 1.13 adds
+  one produced-resource rank-2/rank-3 rectangle through distinct ordered
+  rank-local temporary-u32 extent sources under the existing one-feedback-node
+  bound. No profile grants nested/device-side control, rank-4-or-
   higher dynamic domains, or repeated feedback.
 - Authority-bound `browsergrad.host-graph.cpu-reference@1` preparation and
   execution for dispatches, all-reduces, copies, events, materialization,
   fixed/runtime/produced-resource repetition, bounded request-time and
   produced-resource linear dynamic dispatch, rank-2/rank-3 request-time
-  rectangular dynamic dispatch, and bounded
+  or produced-resource rectangular dynamic dispatch, and bounded
   input/runtime-control/resource conditionals. The
   reference snapshots rank-local inputs and exact runtime controls into private
   state, bounds memory, element operations, preparation/execution time, and

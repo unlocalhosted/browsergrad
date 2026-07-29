@@ -9,6 +9,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Host-graph program version 1.13 and WebGPU backend 1.16 add one
+  produced-resource rank-2/rank-3 rectangular prefix dispatch under the
+  existing one-feedback-node bound. One ordered rank-local four-byte temporary
+  u32 supplies each axis. Execution reads all extents after one resident-buffer
+  prefix submission, validates them, then reuses the maximum-prewarmed
+  rectangular program and exact pipeline slots with only 2D/3D geometry and
+  the existing 16-byte uniform changed. Required real-device evidence expands
+  to 36 complete CPU/WebGPU parity cases and covers small/full rank-2/rank-3
+  produced rectangles plus zero/above-bound fail-stop refusal.
 - Host-graph program version 1.12 and WebGPU backend 1.15 add rank-2/rank-3
   request-time rectangular prefix dispatch. The graph binds one positive
   artifact-capped u32 extent per semantic axis. CPU executes the exact dense
