@@ -404,7 +404,7 @@ describe("semantic view-copy WGSL lowering", () => {
     expect(source).not.toContain("select(");
   });
 
-  it("lowers signed-affine rank-2 and rank-3 source strides through exact i32 addresses", async () => {
+  it("lowers signed-affine rank-2 through rank-5 source strides through exact i32 addresses", async () => {
     const cases = [
       {
         shape: [constant("2"), constant("3")] as const,
@@ -417,6 +417,8 @@ describe("semantic view-copy WGSL lowering", () => {
         destinationBytes: constant("24"),
         dtype: "f32" as const,
         expectedRange: { minimum: -5n, maximum: 0n },
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank2-rank3-word32@1",
       },
       {
         shape: [constant("2"), constant("2"), constant("3")] as const,
@@ -430,14 +432,59 @@ describe("semantic view-copy WGSL lowering", () => {
         destinationBytes: constant("48"),
         dtype: "u32" as const,
         expectedRange: { minimum: -11n, maximum: 0n },
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank2-rank3-word32@1",
+      },
+      {
+        shape: [
+          constant("2"),
+          constant("2"),
+          constant("2"),
+          constant("2"),
+        ] as const,
+        sourceLocation: add(
+          multiply(coordinate(0), constant("-8")),
+          multiply(coordinate(1), constant("-4")),
+          multiply(coordinate(2), constant("-2")),
+          multiply(coordinate(3), constant("-1")),
+        ),
+        sourceByteOffset: constant("60"),
+        sourceBytes: constant("64"),
+        destinationBytes: constant("64"),
+        dtype: "f32" as const,
+        expectedRange: { minimum: -15n, maximum: 0n },
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank4-rank5-word32@1",
+      },
+      {
+        shape: [
+          constant("2"),
+          constant("2"),
+          constant("2"),
+          constant("2"),
+          constant("2"),
+        ] as const,
+        sourceLocation: add(
+          multiply(coordinate(0), constant("-16")),
+          multiply(coordinate(1), constant("-8")),
+          multiply(coordinate(2), constant("-4")),
+          multiply(coordinate(3), constant("-2")),
+          multiply(coordinate(4), constant("-1")),
+        ),
+        sourceByteOffset: constant("124"),
+        sourceBytes: constant("128"),
+        destinationBytes: constant("128"),
+        dtype: "i32" as const,
+        expectedRange: { minimum: -31n, maximum: 0n },
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank4-rank5-word32@1",
       },
     ];
     for (const testCase of cases) {
       const layout = await verifiedLayout(testCase);
       const prepared = await prepare(layout, await verifiedKernel(layout));
       expect(prepared.semantic.portableProfile).toMatchObject({
-        profileId:
-          "browsergrad.view-copy.signed-affine-rank2-rank3-word32@1",
+        profileId: testCase.profileId,
         rank: testCase.shape.length,
         dtype: testCase.dtype,
       });

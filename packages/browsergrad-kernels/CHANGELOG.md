@@ -9,13 +9,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Semantic view-copy WebGPU backend 2.3 executes the distinct semantic-core
+  signed-affine rank-4/rank-5 word32 profile through the same canonical
+  signed-i32 interval/address lowerer and mixed-radix coordinate path.
+  Required real-device evidence expands to 19 complete CPU/WebGPU parity cases
+  while preserving both the rank-2/rank-3 signed identity and all
+  positive-affine identities. Signed rank 1 remains refused.
 - Semantic view-copy WebGPU backend 2.2 executes the distinct semantic-core
   signed-affine rank-2/rank-3 word32 profile through the existing canonical
   signed-i32 interval/address lowerer. Required real-device evidence expands
   to 17 complete CPU/WebGPU parity cases, including negative source strides
   and a guarded negative-scale source predicate. Positive-affine profile
-  identities remain unchanged; signed rank 1/4/5 and integer division/modulo
-  remain explicit refusals.
+  identities remain unchanged; the separately versioned high-rank profile
+  follows without reinterpreting this identity.
 - Semantic view-copy WebGPU backend 2.1 adds exact mixed-radix rank-5
   coordinate lowering for the new distinct semantic-core rank-5 word32
   profile. Required real-device evidence expands to 14 complete CPU/WebGPU

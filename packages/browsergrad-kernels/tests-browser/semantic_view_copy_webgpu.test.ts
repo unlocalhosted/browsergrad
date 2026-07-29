@@ -61,6 +61,8 @@ const PLANNED_CASE_IDS = Object.freeze([
   "rank5-permutation",
   "rank2-negative-stride",
   "rank3-u32-negative-stride",
+  "rank4-negative-stride",
+  "rank5-i32-negative-stride",
   "rank2-negative-predicate-padding",
   "positive-strided-slice",
   "read-only-broadcast",
@@ -453,6 +455,44 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     sequenceWords(12, 0x80000000),
   );
 
+  const rank4NegativeStride = await makeCase(
+    "rank4-negative-stride",
+    {
+      shape: dims("2", "2", "2", "2"),
+      sourceLocation: add(
+        multiply(coordinate(0), indexConstant("-8")),
+        multiply(coordinate(1), indexConstant("-4")),
+        multiply(coordinate(2), indexConstant("-2")),
+        multiply(coordinate(3), indexConstant("-1")),
+      ),
+      sourceByteOffset: dimConstant("60"),
+      sourceBytes: dimConstant("64"),
+      destinationBytes: dimConstant("64"),
+    },
+    { kind: "reject" },
+    sequenceWords(16, 0x43000000),
+  );
+
+  const rank5I32NegativeStride = await makeCase(
+    "rank5-i32-negative-stride",
+    {
+      shape: dims("2", "2", "2", "2", "2"),
+      sourceLocation: add(
+        multiply(coordinate(0), indexConstant("-16")),
+        multiply(coordinate(1), indexConstant("-8")),
+        multiply(coordinate(2), indexConstant("-4")),
+        multiply(coordinate(3), indexConstant("-2")),
+        multiply(coordinate(4), indexConstant("-1")),
+      ),
+      sourceByteOffset: dimConstant("124"),
+      sourceBytes: dimConstant("128"),
+      destinationBytes: dimConstant("128"),
+      dtype: "i32",
+    },
+    { kind: "reject" },
+    sequenceWords(32, 0x80000000),
+  );
+
   const rank2NegativePredicatePadding = await makeCase(
     "rank2-negative-predicate-padding",
     {
@@ -625,6 +665,8 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     rank5Permutation,
     rank2NegativeStride,
     rank3U32NegativeStride,
+    rank4NegativeStride,
+    rank5I32NegativeStride,
     rank2NegativePredicatePadding,
     stridedSlice,
     broadcast,

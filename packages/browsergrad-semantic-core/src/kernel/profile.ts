@@ -15,6 +15,8 @@ export const PORTABLE_RANK5_WORD32_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.positive-affine-rank5-word32@1";
 export const PORTABLE_SIGNED_AFFINE_WORD32_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.signed-affine-rank2-rank3-word32@1";
+export const PORTABLE_SIGNED_AFFINE_HIGH_RANK_WORD32_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.signed-affine-rank4-rank5-word32@1";
 
 export type PortableViewCopyDType = "f32" | "i32" | "u32";
 
@@ -24,7 +26,8 @@ export interface PortableViewCopyProfile {
     | typeof PORTABLE_WORD32_VIEW_COPY_PROFILE
     | typeof PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE
     | typeof PORTABLE_RANK5_WORD32_VIEW_COPY_PROFILE
-    | typeof PORTABLE_SIGNED_AFFINE_WORD32_VIEW_COPY_PROFILE;
+    | typeof PORTABLE_SIGNED_AFFINE_WORD32_VIEW_COPY_PROFILE
+    | typeof PORTABLE_SIGNED_AFFINE_HIGH_RANK_WORD32_VIEW_COPY_PROFILE;
   readonly rank: 1 | 2 | 3 | 4 | 5;
   readonly dtype: PortableViewCopyDType;
 }
@@ -107,15 +110,17 @@ export function verifyPortableViewCopyProfile(
     );
   }
   const signedCoordinateScale = sourceSignedCoordinateScale;
-  if (signedCoordinateScale && rank !== 2 && rank !== 3) {
+  if (signedCoordinateScale && rank === 1) {
     unsupported(
       "$.operation",
-      "portable signed-affine view-copy supports equal source and destination ranks 2 or 3 only",
+      "portable signed-affine view-copy supports equal source and destination ranks 2 through 5 only",
     );
   }
   return Object.freeze({
     profileId: signedCoordinateScale
-      ? PORTABLE_SIGNED_AFFINE_WORD32_VIEW_COPY_PROFILE
+      ? rank === 2 || rank === 3
+        ? PORTABLE_SIGNED_AFFINE_WORD32_VIEW_COPY_PROFILE
+        : PORTABLE_SIGNED_AFFINE_HIGH_RANK_WORD32_VIEW_COPY_PROFILE
       : rank === 5
         ? PORTABLE_RANK5_WORD32_VIEW_COPY_PROFILE
         : rank === 1 || rank === 4

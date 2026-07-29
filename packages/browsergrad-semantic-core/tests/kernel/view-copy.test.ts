@@ -668,9 +668,68 @@ describe("verified materializing view-copy", () => {
     });
     expect(f32Values(negativeDestination)).toEqual([4, 3, 2, 1]);
 
+    const highRankCases = [
+      {
+        shape: ["2", "2", "2", "2"] as const,
+        sourceLocation: add(
+          mul(c(0), k("-8")),
+          mul(c(1), k("-4")),
+          mul(c(2), k("-2")),
+          mul(c(3), k("-1")),
+        ),
+        elementCount: 16,
+        rank: 4,
+      },
+      {
+        shape: ["2", "2", "2", "2", "2"] as const,
+        sourceLocation: add(
+          mul(c(0), k("-16")),
+          mul(c(1), k("-8")),
+          mul(c(2), k("-4")),
+          mul(c(3), k("-2")),
+          mul(c(4), k("-1")),
+        ),
+        elementCount: 32,
+        rank: 5,
+      },
+    ];
+    for (const testCase of highRankCases) {
+      const byteLength = String(testCase.elementCount * 4);
+      const highRankLayout = await verifiedLayout({
+        shape: testCase.shape,
+        sourceLocation: testCase.sourceLocation,
+        sourceByteOffset: String((testCase.elementCount - 1) * 4),
+        sourceBytes: byteLength,
+        destinationBytes: byteLength,
+      });
+      const highRankKernel = await verifiedKernel(highRankLayout);
+      const highRankPlan = await prepare(highRankLayout, highRankKernel);
+      const highRankSpecialization = await prepareViewCopySpecialization(
+        highRankLayout,
+        highRankKernel,
+        { operationId: highRankPlan.operationId },
+      );
+      const highRankDestination = new Uint8Array(testCase.elementCount * 4);
+      const values = Array.from(
+        { length: testCase.elementCount },
+        (_, index) => index + 1,
+      );
+      highRankPlan.execute({
+        source: f32Bytes(values),
+        destination: highRankDestination,
+      });
+      expect(highRankSpecialization.portableProfile).toMatchObject({
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank4-rank5-word32@1",
+        rank: testCase.rank,
+        dtype: "f32",
+      });
+      expect(f32Values(highRankDestination)).toEqual(values.reverse());
+    }
+
     const unsupportedRank = await verifiedLayout({
-      shape: ["1", "1", "1", "2"],
-      sourceLocation: mul(c(3), k("-1")),
+      shape: ["2"],
+      sourceLocation: mul(c(0), k("-1")),
       sourceByteOffset: "4",
       sourceBytes: "8",
       destinationBytes: "8",
