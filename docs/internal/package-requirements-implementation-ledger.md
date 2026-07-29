@@ -500,6 +500,7 @@ Their `verified` labels apply only to synthetic optional-lane contracts.
 | D-196 | 2026-07-29 | accepted | Define the browser compiler Wasm table contract structurally and with reviewed bounds instead of pinning one exact linker-produced table minimum. Require exactly one non-imported `funcref` table with a declared maximum, a minimum of at least one, and a maximum no greater than 65,536; continue to pin imports, exports, memory, globals, tags, start policy, custom sections, and all other runtime ABI facts exactly. Retain the previous table minimum only as a reviewed baseline observation. | Adding one valid signed-layout source branch changed the linker table minimum from 15,301 to 15,302 without changing the Worker-visible interface. Exact cardinality made a private linker allocation detail a false ABI break and forced unnecessary rebuild cycles. The bounded structural policy remains fail-closed while allowing semantically irrelevant linker placement drift. |
 | D-197 | 2026-07-29 | accepted | Give clean-validation and reproducibility workflow modes a dedicated JavaScript evidence-input gate covering build planning, locked inputs, source projection, execution, cache isolation, raw-Wasm review, and two-build comparison machinery. Keep the broad fast/release gates responsible for package-pinned strict-compile, complete-distribution, convergence, external-exchange, and release-output resources after those outputs are regenerated. | A compiler input change necessarily makes its previously pinned output observations stale. Running output consumers before the replacement artifact exists made a valid clean build red for the expected evidence rotation and could skip two-build comparison after both expensive builds succeeded. Separating input integrity from downstream output promotion removes that false dependency without weakening either gate. |
 | D-198 | 2026-07-29 | accepted | Implement signed layout contribution multiplication with one shared safe predicate shape across Clang extraction, Artifact V3 writing, and view-copy artifact preparation: for a nonnegative extent delta and negative stride, divide `INT64_MIN` only by the positive extent delta and compare the stride before multiplying. Exercise the valid stride `-1` path in both Clang and complete-session native tests, and keep overflow fail-closed. | Dividing `INT64_MIN` by the negative stride made `-1`, the most ordinary reversed-layout stride, execute the undefined `INT64_MIN / -1` operation while checking for overflow. Rewriting the guard around a positive divisor removes undefined behavior without widening the accepted integer domain or weakening exact signed layout preservation. |
+| D-199 | 2026-07-29 | accepted | Make the manual cached fast-build workflow consume the same dedicated evidence-input JavaScript gate as clean-validation and reproducibility. Keep the comprehensive fast package gate and release verification as explicit downstream output-consumer gates after generated observations are current. | The cached compiler build itself succeeded in 4 minutes 46 seconds, but its parallel JavaScript job made the workflow red solely because strict-compile, full-distribution, convergence, and asset observations described the previous compiler. A build-producing workflow must report whether its locked inputs and artifact are valid, not whether outputs that artifact exists to replace have already been promoted. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -8011,6 +8012,22 @@ whether any files may be left partially changed.
   identities. Its compiler Wasm and every downstream browser/distribution
   observation must be rebuilt; no stale pre-fix artifact is eligible for
   promotion.
+
+### 2026-07-29 — Fast compiler build gate isolation
+
+- The corrected cached compiler build completed successfully in 4 minutes 46
+  seconds, including exact Runtime ABI review and artifact upload, while its
+  independent JavaScript job failed only on intentionally stale
+  strict-compile, distribution, convergence, and asset identities.
+- All three artifact-producing modes now run the 14-file evidence-input suite
+  beside the expensive build. The workflow regression test requires exactly
+  one input-gate invocation and forbids routing cached feedback through the
+  broad output-consumer suite.
+- The comprehensive fast package verifier and release verifier remain
+  downstream gates after replacement observations are authored. This makes a
+  compiler build run green or red on the build it performs without weakening
+  later package-pinned output, external trust, legal approval, convergence,
+  or release checks.
 
 ### 2026-07-28 — Compiler verifier native-load isolation
 

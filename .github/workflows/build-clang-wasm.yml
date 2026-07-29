@@ -38,16 +38,13 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - name: Verify the JavaScript boundary outside the compiler critical path
+      - name: Verify build evidence inputs outside the compiler critical path
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
           pnpm --filter @unlocalhosted/browsergrad-compiler... build
-          if [[ "${{ inputs.mode }}" == 'fast-validation' ]]; then
-            pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:fast
-          else
-            pnpm --filter @unlocalhosted/browsergrad-compiler test:browser-clang-wasm-build-plan:evidence-input
-          fi
+          pnpm --filter @unlocalhosted/browsergrad-compiler \
+            test:browser-clang-wasm-build-plan:evidence-input
 
   build:
     name: Locked Linux amd64 build ${{ matrix.buildOrdinal }}

@@ -151,9 +151,11 @@ describe("Clang-Wasm evidence workflow", () => {
     );
     expect(workflow).toContain("if-no-files-found: error");
     expect(workflow).toContain("retention-days: 3");
-    expect(workflow).toContain("test:browser-clang-wasm-build-plan:fast");
     expect(workflow).toContain(
       "test:browser-clang-wasm-build-plan:evidence-input",
+    );
+    expect(workflow).not.toContain(
+      "test:browser-clang-wasm-build-plan:fast",
     );
     expect(workflow).not.toContain(
       "test:browser-clang-wasm-build-plan:run",
@@ -168,9 +170,11 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(workflow).toContain("verification-boundary:");
     expect(workflow).toContain("name: Verify JavaScript build boundary");
     expect(workflow).toContain(
-      "name: Verify the JavaScript boundary outside the compiler critical path",
+      "name: Verify build evidence inputs outside the compiler critical path",
     );
-    expect(workflow.match(/test:browser-clang-wasm-build-plan:fast/gu)).toHaveLength(1);
+    expect(workflow).not.toContain(
+      "test:browser-clang-wasm-build-plan:fast",
+    );
     expect(
       workflow.match(
         /test:browser-clang-wasm-build-plan:evidence-input/gu,
