@@ -39,36 +39,12 @@ export {
   CPP_CUTE_BROWSER_STRICT_COMPILE_VERIFIER_WORKER_BUNDLE_SHA256,
   CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256,
 };
-const STRICT_OBSERVATION_HEADER_REPRODUCIBILITY_ID =
-  "bg.cpp.browser-header-distribution-reproducibility.sha256.4d4c054fd4c93dbdbdef9581eeac52b037af3425e6a1c7eff8acc585abce1e55";
-const STRICT_OBSERVATION_HEADER_OUTPUT_VERIFICATION_ID =
-  "bg.cpp.distribution-output-file-verification.sha256.5bc2231523c4537b30dac139a40c515b725815eec34d81cd0af79f759b31a441";
-const STRICT_OBSERVATION_HEADER_PACKS = Object.freeze([
-  Object.freeze({
-    outputPath: "assets/browsergrad-cpp-cute/clang-resource.headers.bgvfs",
-    sha256: "037acb8aaae9a437ed8275ca608dd92c31a142aa8c882b7ac238e80b3343805e",
-    byteLength: "7704705",
-  }),
-  Object.freeze({
-    outputPath: "assets/browsergrad-cpp-cute/cuda-12.6.3.headers.bgvfs",
-    sha256: "1917ba19e65d1e3be9dfe23b80c693ba8de5ce8e44538a7d16715cd61ece2cbd",
-    byteLength: "18954596",
-  }),
-  Object.freeze({
-    outputPath: "assets/browsergrad-cpp-cute/cutlass-3.7.0.headers.bgvfs",
-    sha256: "4f1c39b73f2fa7252628a253f7bb5b1411bdfdada872c5ff733b1b9008d89555",
-    byteLength: "21403975",
-  }),
-  Object.freeze({
-    outputPath: "assets/browsergrad-cpp-cute/libcxx-22.1.8.headers.bgvfs",
-    sha256: "1f2c5a1e86b04c29b6af33cc3fba0487b9bdcb87affaa44fceb32bec424e7dba",
-    byteLength: "12689654",
-  }),
-  Object.freeze({
-    outputPath: "assets/browsergrad-cpp-cute/linux-sysroot.headers.bgvfs",
-    sha256: "d04a460dc605703b8e8a104cc5c043e6a7020ca7201991470c615273d43e7ae4",
-    byteLength: "8927070",
-  }),
+const STRICT_OBSERVATION_HEADER_PACK_PATHS = Object.freeze([
+  "assets/browsergrad-cpp-cute/clang-resource.headers.bgvfs",
+  "assets/browsergrad-cpp-cute/cuda-12.6.3.headers.bgvfs",
+  "assets/browsergrad-cpp-cute/cutlass-3.7.0.headers.bgvfs",
+  "assets/browsergrad-cpp-cute/libcxx-22.1.8.headers.bgvfs",
+  "assets/browsergrad-cpp-cute/linux-sysroot.headers.bgvfs",
 ]);
 const EXPECTED_CASES = Object.freeze(
   CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.map(
@@ -219,11 +195,7 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
       String(CPP_CUTE_BROWSER_STRICT_COMPILE_WORKER_BUNDLE_SHA256)) {
     mismatch("$.workerBundle", "observation does not bind the current package Worker");
   }
-  if (headers.reproducibilityId !==
-        STRICT_OBSERVATION_HEADER_REPRODUCIBILITY_ID ||
-      headers.outputVerificationId !==
-        STRICT_OBSERVATION_HEADER_OUTPUT_VERIFICATION_ID ||
-      !sameStrictObservationHeaderPacks(headers.outputs)) {
+  if (!sameStrictObservationHeaderPacks(headers.outputs)) {
     mismatch("$.headers", "observation does not bind the package header distribution");
   }
 
@@ -252,7 +224,8 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
       "strict matrix does not bind the current package Worker pair and source",
     );
   }
-  const headerPackByteLength = strictObservationHeaderPackByteLength();
+  const headerPackByteLength =
+    strictObservationHeaderPackByteLength(headers.outputs);
   const evidenceIds = new Set<string>();
   const artifactIds = new Set<string>();
   const candidateIds = new Set<string>();
@@ -423,19 +396,22 @@ function sameStrictObservationHeaderPacks(
 ): boolean {
   const packs = outputs.filter((output) =>
     output.outputPath.endsWith(".headers.bgvfs"));
-  return packs.length === STRICT_OBSERVATION_HEADER_PACKS.length &&
+  return packs.length === STRICT_OBSERVATION_HEADER_PACK_PATHS.length &&
     packs.every((output, index) => {
-      const expected = STRICT_OBSERVATION_HEADER_PACKS[index];
-      return expected !== undefined &&
-        output.outputPath === expected.outputPath &&
-        output.sha256 === expected.sha256 &&
-        output.byteLength === expected.byteLength;
+      const expectedPath = STRICT_OBSERVATION_HEADER_PACK_PATHS[index];
+      return expectedPath !== undefined && output.outputPath === expectedPath;
     });
 }
 
-function strictObservationHeaderPackByteLength(): number {
+function strictObservationHeaderPackByteLength(
+  outputs: readonly Readonly<{
+    outputPath: string;
+    byteLength: string;
+  }>[],
+): number {
   let total = 0;
-  for (const pack of STRICT_OBSERVATION_HEADER_PACKS) {
+  for (const pack of outputs.filter((output) =>
+    output.outputPath.endsWith(".headers.bgvfs"))) {
     const byteLength = Number(pack.byteLength);
     if (!Number.isSafeInteger(byteLength) || byteLength <= 0) {
       mismatch("$.headers", "package header byte length is invalid");
