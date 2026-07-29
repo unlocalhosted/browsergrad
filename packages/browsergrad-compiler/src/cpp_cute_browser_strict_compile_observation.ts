@@ -337,25 +337,28 @@ export async function verifyCppCuteBrowserStrictCompileObservationResource(
       assetSetIds.size !== 1) {
     mismatch("$.cases", "strict matrix identities are reused or divergent");
   }
-  if (!resource.claims.unchangedCpp17CuteRank1Compiled ||
-      !resource.claims.unchangedCpp17CuteRank2Compiled ||
-      !resource.claims.unchangedCpp17CuteRank3Compiled ||
-      !resource.claims.unchangedCpp17CuteRank4Compiled ||
-      !resource.claims.unchangedCpp17CuteStridedSliceCompiled ||
-      !resource.claims.unchangedCpp17CuteBroadcastCompiled ||
-      !resource.claims.unchangedCpp17CuteI32Rank2Compiled ||
-      !resource.claims.unchangedCpp17CuteU32BroadcastCompiled ||
-      !resource.claims.unchangedCpp17CuteSignedRank2Compiled ||
-      !resource.claims.canonicalGate2LayoutFixturesMatched ||
-      !resource.claims.packagePinnedHeaderPacksMatched ||
-      !resource.claims.pinnedReproducibleWasmMatched ||
-      resource.claims.untrustedDiagnosticWasm ||
-      !resource.claims.workerExecutionObserved ||
-      resource.claims.headerDistributionLicenseApproved ||
-      resource.claims.producerTrusted ||
-      resource.claims.loweringAuthorityMinted ||
-      resource.claims.backendExecutionAuthorized ||
-      resource.claims.releaseReady) {
+  const claims = resource.claims as typeof resource.claims & {
+    readonly unchangedCpp17CuteSignedRank2Compiled?: boolean;
+  };
+  if (!claims.unchangedCpp17CuteRank1Compiled ||
+      !claims.unchangedCpp17CuteRank2Compiled ||
+      !claims.unchangedCpp17CuteRank3Compiled ||
+      !claims.unchangedCpp17CuteRank4Compiled ||
+      !claims.unchangedCpp17CuteStridedSliceCompiled ||
+      !claims.unchangedCpp17CuteBroadcastCompiled ||
+      !claims.unchangedCpp17CuteI32Rank2Compiled ||
+      !claims.unchangedCpp17CuteU32BroadcastCompiled ||
+      claims.unchangedCpp17CuteSignedRank2Compiled !== true ||
+      !claims.canonicalGate2LayoutFixturesMatched ||
+      !claims.packagePinnedHeaderPacksMatched ||
+      !claims.pinnedReproducibleWasmMatched ||
+      claims.untrustedDiagnosticWasm ||
+      !claims.workerExecutionObserved ||
+      claims.headerDistributionLicenseApproved ||
+      claims.producerTrusted ||
+      claims.loweringAuthorityMinted ||
+      claims.backendExecutionAuthorized ||
+      claims.releaseReady) {
     mismatch("$.claims", "strict matrix claims are inconsistent");
   }
 
