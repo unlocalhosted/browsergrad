@@ -37,6 +37,7 @@ describe("exact header-pack pipeline", () => {
     expect(parsed.cudaRedistributionIndexPath).toBe("/private/tmp/redistrib_12.6.3.json");
     expect(parsed.sourceOutputRoot).toBe("/private/tmp/browsergrad-header-sources");
     expect(parsed.packOutputRoot).toBe("/private/tmp/browsergrad-header-packs");
+    expect(parsed.allowUnpinnedDiagnosticBsdtar).toBe(false);
     expect(() => parseCppCuteBrowserHeaderPackPipelineArguments([
       ...archiveArguments(),
       "--bsdtar=/usr/bin/bsdtar",
@@ -56,6 +57,28 @@ describe("exact header-pack pipeline", () => {
       "--bsdtar=/usr/bin/bsdtar",
       "--output-root=/private/tmp/sources",
       "--pack-output-root=/private/tmp/packs",
+    ])).toThrow(CppCuteBrowserHeaderPackPipelineError);
+  });
+
+  it("parses the explicit unpinned diagnostic lane without widening defaults", () => {
+    const parsed = parseCppCuteBrowserHeaderPackPipelineArguments([
+      ...archiveArguments(),
+      "--bsdtar=/usr/bin/bsdtar",
+      "--cuda-redistribution-index=/private/tmp/redistrib_12.6.3.json",
+      "--output-root=/private/tmp/browsergrad-header-sources",
+      "--pack-output-root=/private/tmp/browsergrad-header-packs",
+      "--allow-unpinned-diagnostic-bsdtar",
+    ]);
+
+    expect(parsed.allowUnpinnedDiagnosticBsdtar).toBe(true);
+    expect(() => parseCppCuteBrowserHeaderPackPipelineArguments([
+      ...archiveArguments(),
+      "--bsdtar=/usr/bin/bsdtar",
+      "--cuda-redistribution-index=/private/tmp/redistrib_12.6.3.json",
+      "--output-root=/private/tmp/browsergrad-header-sources",
+      "--pack-output-root=/private/tmp/browsergrad-header-packs",
+      "--allow-unpinned-diagnostic-bsdtar",
+      "--allow-unpinned-diagnostic-bsdtar",
     ])).toThrow(CppCuteBrowserHeaderPackPipelineError);
   });
 

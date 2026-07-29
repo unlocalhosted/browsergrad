@@ -495,6 +495,7 @@ Their `verified` labels apply only to synthetic optional-lane contracts.
 | D-191 | 2026-07-29 | accepted | Add `browsergrad.view-copy.signed-affine-rank4-rank5-word32@1` as a distinct portable profile for fully specialized f32/i32/u32 negative source-coordinate scales at ranks 4 and 5. Preserve the rank-2/rank-3 signed identity, every positive-affine identity, and the positive-affine dense destination. Reuse the canonical CPU access proof, signed-i32 interval/address WGSL lowerer, and existing rank-4/rank-5 mixed-radix coordinates. Keep signed rank 1, signed destinations, division/modulo, rank 6, packed storage, overlap, and non-global memory refused. | The higher-rank coordinate lowerer and signed address proof were already the same deep backend seam. A separate high-rank profile exposes their composition without reinterpreting the just-landed lower-rank identity or creating another executor, shader path, or source-shaped special case. |
 | D-192 | 2026-07-29 | accepted | Add `browsergrad.view-copy.signed-affine-rank1-word32@1` as a distinct portable profile for fully specialized f32/i32/u32 negative source-coordinate scales at rank 1. Preserve both existing signed identities, every positive-affine identity, and the positive-affine dense destination. Reuse the canonical CPU access proof and signed-i32 interval/address WGSL lowerer. Keep signed destinations, division/modulo, rank 6, packed storage, overlap, and non-global memory refused. | Rank 1 is the final signed-source rank in the current portable rank envelope. A distinct profile completes that layout capability without reinterpreting existing identities or adding another evaluator, shader path, or source-shaped special case. |
 | D-193 | 2026-07-29 | accepted | Extend the existing producer-neutral authorized C++/CuTe view-copy transition to static signed source strides at Artifact V3 ranks 1 through 4. Preserve the positive-affine dense destination, all semantic profile identities, and the sole `createVerifiedViewCopyArtifacts` sink. Replace positive-span storage validation with exact minimum/maximum affine element bounds, requiring explicit host byte offsets to rebase every negative source address and explicit allocation lengths to contain the upper endpoint. Bump only the compiler lowering producer version to 2. Keep browser compile observation, producer trust, backend execution authority, distribution approval, and release authority separate. | CuTe `cosize` is an endpoint expression and cannot establish pointer capacity for signed layouts. Exact affine extrema plus explicit runtime storage facts prove both bounds without inventing a source-shaped kernel or folding host geometry into producer authorization. Synthetic Artifact V3 fixtures prove the downstream semantic transition but do not prove the current browser extractor accepts an unchanged negative-stride source. |
+| D-194 | 2026-07-29 | accepted | Keep the package-reviewed archive-normalization identity mandatory for reproducibility, distribution, and release evidence, but add one explicit diagnostic-only header-pack materialization lane for an observed replacement `bsdtar`. Preserve exact archive admission, selected-source extraction, canonical VFS construction, and output hashing. Mark the tool, Node/Zstd package identity, selected-subtree completeness, and header-universe claims false; exact-byte consumers must independently match every pinned pack digest. | A routine macOS `bsdtar` update otherwise blocks browser compiler iteration even when the five canonical VFS packs are byte-identical. Exact output identity is sufficient for a local compile diagnostic, but version text or matching output cannot retroactively authorize the new host tool or widen package-pinned reproducibility and release evidence. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -7944,6 +7945,30 @@ whether any files may be left partially changed.
   remains eight positive/broadcast source cases. Its first unchanged signed
   C++/CuTe source plus actual compile/authorization/CPU/required-WebGPU
   evidence is the next software-owned checkpoint.
+
+### 2026-07-29 — Gate 3 diagnostic header-pack iteration lane
+
+- The package-reviewed Darwin `bsdtar` identity remains mandatory for
+  reproducibility and release evidence. The current macOS binary differs from
+  that reviewed identity, so the default pipeline still fails closed.
+- An explicit `--allow-unpinned-diagnostic-bsdtar` lane now admits the exact
+  observed executable only for local compile diagnostics. Its report records
+  the replacement executable hash and version and keeps tool identity,
+  Node/Zstd identity, selected-subtree completeness, header-universe,
+  licensing, and release claims false.
+- The diagnostic lane materialized all five header packs from the exact eight
+  pinned source archives in 20 seconds. Every output byte length and SHA-256
+  matches the package-pinned distribution identities, for a total of
+  69,680,000 bytes. Strict browser compilation independently rechecks those
+  exact pack identities before Worker execution.
+- The focused fast harness passes four tests, and the browser-build-plan
+  typecheck and lint pass. The independent reviewed-tool test still refuses
+  the installed `bsdtar`; that expected refusal was not repinned or converted
+  into a pass.
+- This removes host-tool drift from the local browser-compile feedback path
+  without changing production authority. The next checkpoint remains actual
+  Chromium Worker compilation of the package-owned unchanged signed-rank-2
+  CuTe source.
 
 ### 2026-07-28 — Compiler verifier native-load isolation
 

@@ -33,11 +33,18 @@ export interface CppCuteBrowserHeaderPackPipelineInput {
   readonly packOutputRoot: string;
 }
 
+export interface CppCuteBrowserHeaderPackPipelineArguments
+extends CppCuteBrowserHeaderPackPipelineInput {
+  readonly allowUnpinnedDiagnosticBsdtar: boolean;
+}
+
 export interface CppCuteBrowserHeaderPackPipeline {
   readonly schema: typeof CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA;
   readonly version: 6;
   readonly pipelineId: string;
-  readonly authority: "exact-source-host-tool-vfs-pack-pipeline-observation-only";
+  readonly authority:
+    | "exact-source-host-tool-vfs-pack-pipeline-observation-only"
+    | "exact-source-unpinned-host-tool-vfs-pack-diagnostic-only";
   readonly buildInputLockId: string;
   readonly buildInputLockResourceSha256: string;
   readonly headerInputProjectionId: string;
@@ -50,8 +57,10 @@ export interface CppCuteBrowserHeaderPackPipeline {
     executableSha256: string;
     executableByteLength: string;
     observedVersion: string;
-    packageToolIdentityPinned: true;
-    nodeZstdRuntime: NonNullable<CppCuteBrowserBsdtarToolAdmission["nodeZstdRuntime"]>;
+    packageToolIdentityPinned: boolean;
+    nodeZstdRuntime?: NonNullable<
+      CppCuteBrowserBsdtarToolAdmission["nodeZstdRuntime"]
+    >;
   }>;
   readonly sourceTotals: Readonly<{
     archiveCount: number;
@@ -90,10 +99,10 @@ export interface CppCuteBrowserHeaderPackPipeline {
     exactExtractedSourceBytesInventoried: true;
     canonicalVfsPacksIndependentlyInspected: true;
     allFiveSelectedSourcePacksMaterialized: true;
-    exactSelectedSourceSubtreesComplete: true;
+    exactSelectedSourceSubtreesComplete: boolean;
     hostToolImplementationAttested: false;
-    hostToolPackageIdentityPinned: true;
-    nodeZstdDecompressorPackageIdentityPinned: true;
+    hostToolPackageIdentityPinned: boolean;
+    nodeZstdDecompressorPackageIdentityPinned: boolean;
     generatedClangResourceHeadersComplete: true;
     configuredLibcxxHeaderComplete: true;
     exactUpstreamLicenseEvidenceExtracted: true;
@@ -106,7 +115,7 @@ export interface CppCuteBrowserHeaderPackPipeline {
     allHeaderNoticesResolved: false;
     externalDistributedFileLicenseMapReviewed: false;
     licenseReviewComplete: false;
-    headerUniverseComplete: true;
+    headerUniverseComplete: boolean;
     buildExecuted: false;
     releaseReady: false;
   }>;
@@ -116,13 +125,18 @@ export function materializeCppCuteBrowserHeaderPacksFromSourceArchives(
   input: CppCuteBrowserHeaderPackPipelineInput,
 ): Promise<Readonly<CppCuteBrowserHeaderPackPipeline>>;
 
+export function
+materializeDiagnosticCppCuteBrowserHeaderPacksFromSourceArchives(
+  input: CppCuteBrowserHeaderPackPipelineInput,
+): Promise<Readonly<CppCuteBrowserHeaderPackPipeline>>;
+
 export function requireCppCuteBrowserHeaderPackPipelineAuthority(
   report: CppCuteBrowserHeaderPackPipeline,
 ): void;
 
 export function parseCppCuteBrowserHeaderPackPipelineArguments(
   argv: readonly string[],
-): Readonly<CppCuteBrowserHeaderPackPipelineInput>;
+): Readonly<CppCuteBrowserHeaderPackPipelineArguments>;
 
 export function createCppCuteBrowserPrivatePackOutputRoot(
   outputRoot: string,

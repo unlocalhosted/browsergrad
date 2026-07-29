@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { canonicalJsonBytes } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
 import {
+  admitCppCuteBrowserBsdtarTool,
   admitPinnedCppCuteBrowserArchiveNormalizationEnvironment,
 } from "./cpp_cute_browser_archive_normalization.mjs";
 import {
@@ -52,6 +53,24 @@ export class CppCuteBrowserHeaderPackPipelineError extends Error {
  * authorities never need serialization.
  */
 export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(input) {
+  return materializeCppCuteBrowserHeaderPacksWithToolPolicy(input, false);
+}
+
+/**
+ * Materializes the same exact source selection through a caller-observed
+ * bsdtar for local compile diagnostics. Exact output consumers still verify
+ * every pack digest; this lane cannot claim a pinned tool or complete header
+ * universe and must never feed reproducibility or release authorization.
+ */
+export async function
+materializeDiagnosticCppCuteBrowserHeaderPacksFromSourceArchives(input) {
+  return materializeCppCuteBrowserHeaderPacksWithToolPolicy(input, true);
+}
+
+async function materializeCppCuteBrowserHeaderPacksWithToolPolicy(
+  input,
+  allowUnpinnedDiagnosticBsdtar,
+) {
   const object = exactObject(
     input,
     ["archives", "bsdtarPath", "cudaRedistributionIndexPath", "packOutputRoot", "sourceOutputRoot"],
@@ -74,7 +93,11 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
   try {
     [archiveAdmission, bsdtarTool, cudaRedistributionIndex, notices] = await Promise.all([
       admitCppCuteBrowserHeaderSourcePlanArchives({ archives: object.archives }),
-      admitPinnedCppCuteBrowserArchiveNormalizationEnvironment({ executablePath: bsdtarPath }),
+      allowUnpinnedDiagnosticBsdtar
+        ? admitCppCuteBrowserBsdtarTool({ executablePath: bsdtarPath })
+        : admitPinnedCppCuteBrowserArchiveNormalizationEnvironment({
+            executablePath: bsdtarPath,
+          }),
       admitCppCuteBrowserCudaRedistributionIndex({ indexPath: cudaRedistributionIndexPath }),
       verifyCppCuteBrowserHeaderPackNotices(),
     ]);
@@ -143,7 +166,9 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
     schema: CPP_CUTE_BROWSER_HEADER_PACK_PIPELINE_SCHEMA,
     version: 6,
     pipelineId: `bg.cpp.browser-header-pack-pipeline.sha256.${pipelineHash}`,
-    authority: "exact-source-host-tool-vfs-pack-pipeline-observation-only",
+    authority: allowUnpinnedDiagnosticBsdtar
+      ? "exact-source-unpinned-host-tool-vfs-pack-diagnostic-only"
+      : "exact-source-host-tool-vfs-pack-pipeline-observation-only",
     buildInputLockId: extraction.buildInputLockId,
     buildInputLockResourceSha256: extraction.buildInputLockResourceSha256,
     headerInputProjectionId: extraction.headerInputProjectionId,
@@ -170,10 +195,13 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
       exactExtractedSourceBytesInventoried: true,
       canonicalVfsPacksIndependentlyInspected: true,
       allFiveSelectedSourcePacksMaterialized: true,
-      exactSelectedSourceSubtreesComplete: true,
+      exactSelectedSourceSubtreesComplete:
+        extraction.claims.exactSelectedSourceSubtreesComplete,
       hostToolImplementationAttested: false,
-      hostToolPackageIdentityPinned: true,
-      nodeZstdDecompressorPackageIdentityPinned: true,
+      hostToolPackageIdentityPinned:
+        extraction.claims.hostToolPackageIdentityPinned,
+      nodeZstdDecompressorPackageIdentityPinned:
+        extraction.claims.nodeZstdDecompressorPackageIdentityPinned,
       generatedClangResourceHeadersComplete: true,
       configuredLibcxxHeaderComplete: true,
       exactUpstreamLicenseEvidenceExtracted: true,
@@ -186,7 +214,7 @@ export async function materializeCppCuteBrowserHeaderPacksFromSourceArchives(inp
       allHeaderNoticesResolved: false,
       externalDistributedFileLicenseMapReviewed: false,
       licenseReviewComplete: false,
-      headerUniverseComplete: true,
+      headerUniverseComplete: extraction.claims.headerUniverseComplete,
       buildExecuted: false,
       releaseReady: false,
     }),
@@ -244,8 +272,19 @@ export function parseCppCuteBrowserHeaderPackPipelineArguments(argv) {
   const pipelineArguments = [];
   let packOutputRoot;
   let cudaRedistributionIndexPath;
+  let allowUnpinnedDiagnosticBsdtar = false;
   for (const [index, argument] of arguments_.entries()) {
     if (typeof argument !== "string") invalid(`$arguments[${index}]`, "expected string argument");
+    if (argument === "--allow-unpinned-diagnostic-bsdtar") {
+      if (allowUnpinnedDiagnosticBsdtar) {
+        invalid(
+          `$arguments[${index}]`,
+          "duplicate --allow-unpinned-diagnostic-bsdtar",
+        );
+      }
+      allowUnpinnedDiagnosticBsdtar = true;
+      continue;
+    }
     const match = /^--pack-output-root=(.+)$/u.exec(argument);
     const cudaIndexMatch = /^--cuda-redistribution-index=(.+)$/u.exec(argument);
     if (match === null && cudaIndexMatch === null) {
@@ -281,6 +320,7 @@ export function parseCppCuteBrowserHeaderPackPipelineArguments(argv) {
     cudaRedistributionIndexPath,
     sourceOutputRoot: extraction.outputRoot,
     packOutputRoot,
+    allowUnpinnedDiagnosticBsdtar,
   });
 }
 
@@ -323,7 +363,17 @@ function invalid(path, message, options) {
 async function main() {
   try {
     const options = parseCppCuteBrowserHeaderPackPipelineArguments(process.argv.slice(2));
-    const report = await materializeCppCuteBrowserHeaderPacksFromSourceArchives(options);
+    const {
+      allowUnpinnedDiagnosticBsdtar,
+      ...pipelineOptions
+    } = options;
+    const report = allowUnpinnedDiagnosticBsdtar
+      ? await materializeDiagnosticCppCuteBrowserHeaderPacksFromSourceArchives(
+          pipelineOptions,
+        )
+      : await materializeCppCuteBrowserHeaderPacksFromSourceArchives(
+          pipelineOptions,
+        );
     process.stdout.write(`${JSON.stringify({
       sourceOutputRoot: options.sourceOutputRoot,
       packOutputRoot: options.packOutputRoot,
