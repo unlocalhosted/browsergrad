@@ -498,6 +498,7 @@ Their `verified` labels apply only to synthetic optional-lane contracts.
 | D-194 | 2026-07-29 | accepted | Keep the package-reviewed archive-normalization identity mandatory for reproducibility, distribution, and release evidence, but add one explicit diagnostic-only header-pack materialization lane for an observed replacement `bsdtar`. Preserve exact archive admission, selected-source extraction, canonical VFS construction, and output hashing. Mark the tool, Node/Zstd package identity, selected-subtree completeness, and header-universe claims false; exact-byte consumers must independently match every pinned pack digest. | A routine macOS `bsdtar` update otherwise blocks browser compiler iteration even when the five canonical VFS packs are byte-identical. Exact output identity is sufficient for a local compile diagnostic, but version text or matching output cannot retroactively authorize the new host tool or widen package-pinned reproducibility and release evidence. |
 | D-195 | 2026-07-29 | accepted | Extend the native C++/CuTe extractor and its canonical wire writer to preserve signed static layout strides and signed `cosize` results through checked signed arithmetic. Keep allocation capacity outside extracted layout facts, preserve the single semantic candidate and authorization path, and add the unchanged rank-2 mixed-sign CuTe source to the closed real-browser compile case registry. | Negative strides are layout meaning, not a source spelling or a request to infer storage. Emitting the exact signed facts lets the existing affine-bound runtime admission establish safe rebasing and capacity without a second parser, source-shaped kernel, or reinterpretation of `cosize` as allocation length. |
 | D-196 | 2026-07-29 | accepted | Define the browser compiler Wasm table contract structurally and with reviewed bounds instead of pinning one exact linker-produced table minimum. Require exactly one non-imported `funcref` table with a declared maximum, a minimum of at least one, and a maximum no greater than 65,536; continue to pin imports, exports, memory, globals, tags, start policy, custom sections, and all other runtime ABI facts exactly. Retain the previous table minimum only as a reviewed baseline observation. | Adding one valid signed-layout source branch changed the linker table minimum from 15,301 to 15,302 without changing the Worker-visible interface. Exact cardinality made a private linker allocation detail a false ABI break and forced unnecessary rebuild cycles. The bounded structural policy remains fail-closed while allowing semantically irrelevant linker placement drift. |
+| D-197 | 2026-07-29 | accepted | Give clean-validation and reproducibility workflow modes a dedicated JavaScript evidence-input gate covering build planning, locked inputs, source projection, execution, cache isolation, raw-Wasm review, and two-build comparison machinery. Keep the broad fast/release gates responsible for package-pinned strict-compile, complete-distribution, convergence, external-exchange, and release-output resources after those outputs are regenerated. | A compiler input change necessarily makes its previously pinned output observations stale. Running output consumers before the replacement artifact exists made a valid clean build red for the expected evidence rotation and could skip two-build comparison after both expensive builds succeeded. Separating input integrity from downstream output promotion removes that false dependency without weakening either gate. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -7971,6 +7972,25 @@ whether any files may be left partially changed.
   without changing production authority. The next checkpoint remains actual
   Chromium Worker compilation of the package-owned unchanged signed-rank-2
   CuTe source.
+
+### 2026-07-29 — Compiler evidence-input gate isolation
+
+- Clean-validation and reproducibility modes now run one dedicated
+  evidence-input suite instead of consuming the stale strict-compile,
+  full-distribution, convergence, external-exchange, and release observations
+  that the workflow is producing replacements for.
+- The input gate retains strict TypeScript and Oxlint checks plus build-lock,
+  source, executor, process-boundary, cache, runtime-closure, raw-Wasm,
+  workflow, and two-build reproducibility tests. It passes 14 files and 160
+  tests; a separate regression test freezes the exclusion of downstream
+  output-evidence consumers.
+- Fast validation and release verification keep their existing broad
+  output-consumer gates. Evidence generation is no longer falsely red merely
+  because a source change invalidated the prior generated observation, and a
+  successful pair of expensive clean builds can proceed to comparison.
+- This changes harness dependency direction only. It does not treat a clean
+  build as reproducibility, production provenance, legal approval, browser
+  execution, backend convergence, or release authority.
 
 ### 2026-07-28 — Compiler verifier native-load isolation
 
