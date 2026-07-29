@@ -284,7 +284,7 @@ function resourceRectangularDynamicProgram(
   const producerIds = shape.map((_, axis) => `produce-extent-${axis}`);
   return {
     ...base,
-    version: { major: 1, minor: 13 },
+    version: { major: 1, minor: shape.length === 4 ? 15 : 13 },
     resources: [
       ...base.resources,
       ...shape.flatMap((_, axis) => [
@@ -1511,10 +1511,11 @@ describe("host graph CPU reference", () => {
     expect(inputReads).toBe(0);
   });
 
-  it("executes and reports produced rank-2 and rank-3 rectangular prefixes", async () => {
+  it("executes and reports produced rank-2 through rank-4 rectangular prefixes", async () => {
     const cases = [
       { shape: [3, 4], extents: [2, 3] },
       { shape: [2, 3, 4], extents: [1, 2, 3] },
+      { shape: [2, 2, 3, 4], extents: [1, 2, 2, 3] },
     ] as const;
     for (const testCase of cases) {
       const artifacts = await rectangularArtifacts(testCase.shape);

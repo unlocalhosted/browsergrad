@@ -206,7 +206,7 @@ function resourceRectangularDynamicProgram(
   const producerIds = shape.map((_, axis) => `produce-extent-${axis}`);
   return {
     ...base,
-    version: { major: 1, minor: 13 },
+    version: { major: 1, minor: shape.length === 4 ? 15 : 13 },
     resources: [
       ...base.resources,
       ...shape.flatMap((_, axis) => [
@@ -1036,8 +1036,12 @@ describe("semantic host-graph WebGPU preparation", () => {
     }
   });
 
-  it("prewarms one produced rank-2 and rank-3 rectangle with exact feedback budgets", async () => {
-    for (const shape of [[3, 4], [2, 3, 4]] as const) {
+  it("prewarms one produced rank-2 through rank-4 rectangle with exact feedback budgets", async () => {
+    for (const shape of [
+      [3, 4],
+      [2, 3, 4],
+      [2, 2, 3, 4],
+    ] as const) {
       const artifacts = await rectangularIdentityArtifacts(shape);
       const graph = await verified(
         resourceRectangularDynamicProgram(artifacts, shape),

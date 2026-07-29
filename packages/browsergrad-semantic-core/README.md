@@ -190,7 +190,10 @@ forms fail closed.
 Version 1.14 extends only request-time rectangular dispatch to rank 4. The
 four positive bounded controls and maxima retain the same canonical axis,
 maximum-product admission, and fail-stop contracts; versions 1.12 and 1.13
-continue to reject rank 4 exactly.
+continue to reject rank 4 exactly. Version 1.15 extends produced-resource
+rectangular dispatch to rank 4 through four distinct ordered extent sources
+under the same one-feedback-node bound. Older versions retain their exact rank
+limits.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -261,7 +264,8 @@ maximum-product admission, and publishes the same logical-extent/product
 completion only after whole-graph success.
 Version-1.14 executes the exact selected rank-4 dense rectangle through the
 same coordinate-domain CPU path and reports all four extents plus their
-product. Produced-resource rank-4 launch remains outside this version.
+product. Version-1.15 reads four produced extents through the same ordered
+private-resource path and executes that identical rank-4 rectangle.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -278,10 +282,11 @@ its required actual-device evidence. The version-1.7 backend profile uses one
 explicit bounded host readback/resubmission point for its GPU-produced
 predicate; versions 1.10 and 1.11 reuse that authority for one bounded
 GPU-produced loop count or dynamic-launch prefix, and version 1.13 reuses it
-for one rank-2/rank-3 produced rectangle. Neither adapter grants
+for one rank-2/rank-3 produced rectangle. Version 1.15 extends that same
+single feedback lifecycle to one rank-4 produced rectangle. Neither adapter grants
 transport, topology, retries, event
 timestamps or external waits, repeated/device-side feedback,
-produced-resource rank-4 or rank-5-and-higher dynamic domains,
+rank-5-and-higher dynamic domains,
 worker-mesh, native-companion,
 performance, or release authority.
 

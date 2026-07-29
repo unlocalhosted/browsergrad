@@ -9,6 +9,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Host-graph program version 1.15 and WebGPU backend 1.18 extend the existing
+  produced-resource rectangular dispatch to rank 4. Four ordered rank-local
+  temporary u32 values are read through one resident-buffer feedback stage,
+  validated together, and passed to the same maximum-prewarmed rank-4 program,
+  flattened-z mapping, 16-byte uniform, and exact pipeline slots introduced
+  for version 1.14. Required real-device evidence expands to 40 complete
+  CPU/WebGPU parity cases with small/full produced rank-4 pipeline-identity
+  stability and one feedback stage.
 - Host-graph program version 1.14 and WebGPU backend 1.17 add request-time
   rank-4 rectangular prefix dispatch without widening the version-1.12 or
   produced-resource version-1.13 rank limits. The canonical 16-byte uniform

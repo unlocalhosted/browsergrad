@@ -84,6 +84,8 @@ const CASE_IDS = Object.freeze([
   "f32-resource-rectangular-dynamic-rank2-large",
   "f32-resource-rectangular-dynamic-rank3-small",
   "f32-resource-rectangular-dynamic-rank3-large",
+  "f32-resource-rectangular-dynamic-rank4-small",
+  "f32-resource-rectangular-dynamic-rank4-large",
   "u8-input-conditional-then",
   "u8-input-conditional-else",
   "u8-runtime-conditional-then",
@@ -319,6 +321,16 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         "f32-resource-rectangular-dynamic-rank3-large",
         [2, 3, 4],
         [2, 3, 4],
+      ),
+      prepareResourceRectangularDynamicDispatchCase(
+        "f32-resource-rectangular-dynamic-rank4-small",
+        [2, 2, 3, 4],
+        [1, 2, 2, 3],
+      ),
+      prepareResourceRectangularDynamicDispatchCase(
+        "f32-resource-rectangular-dynamic-rank4-large",
+        [2, 2, 3, 4],
+        [2, 2, 3, 4],
       ),
       prepareConditionalRawCopyCase(
         "u8-input-conditional-then",
@@ -651,7 +663,6 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       expect(large?.expandedStepCount).toBe(2);
       expect(small?.completedDynamicDispatches).toHaveLength(1);
       expect(large?.completedDynamicDispatches).toHaveLength(1);
-      if (rank === 4) continue;
       const resourceSmall = completedCases.find(({ caseId }) =>
         caseId ===
           `f32-resource-rectangular-dynamic-rank${rank}-small`);
@@ -1268,10 +1279,17 @@ async function prepareResourceRectangularDynamicDispatchCase(
     | "f32-resource-rectangular-dynamic-rank2-small"
     | "f32-resource-rectangular-dynamic-rank2-large"
     | "f32-resource-rectangular-dynamic-rank3-small"
-    | "f32-resource-rectangular-dynamic-rank3-large",
-  shape: readonly [number, number] | readonly [number, number, number],
+    | "f32-resource-rectangular-dynamic-rank3-large"
+    | "f32-resource-rectangular-dynamic-rank4-small"
+    | "f32-resource-rectangular-dynamic-rank4-large",
+  shape:
+    | readonly [number, number]
+    | readonly [number, number, number]
+    | readonly [number, number, number, number],
   logicalExtents:
-    readonly [number, number] | readonly [number, number, number],
+    | readonly [number, number]
+    | readonly [number, number, number]
+    | readonly [number, number, number, number],
 ): Promise<PreparedCase> {
   const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
     inputShape: shape.map((extent) => parseWireI64(String(extent))),
@@ -1564,13 +1582,16 @@ function rectangularDynamicDispatchProgram(
 
 function resourceRectangularDynamicDispatchProgram(
   artifacts: VerifiedViewCopyArtifacts,
-  shape: readonly [number, number] | readonly [number, number, number],
+  shape:
+    | readonly [number, number]
+    | readonly [number, number, number]
+    | readonly [number, number, number, number],
 ): HostGraphProgram {
   const base = rectangularDynamicDispatchProgram(artifacts, shape);
   const producerIds = shape.map((_, axis) => `produce-extent-${axis}`);
   return {
     ...base,
-    version: { major: 1, minor: 13 },
+    version: { major: 1, minor: shape.length === 4 ? 15 : 13 },
     resources: [
       ...base.resources,
       ...shape.flatMap((_, axis) => [
