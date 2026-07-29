@@ -285,7 +285,7 @@ describe("verified materializing view-copy", () => {
     }
   });
 
-  it("executes exact rank-2 through rank-5 rectangular prefixes", async () => {
+  it("executes exact rank-2 through rank-6 rectangular prefixes", async () => {
     const cases = [
       {
         shape: ["3", "4"] as const,
@@ -306,6 +306,11 @@ describe("verified materializing view-copy", () => {
         shape: ["2", "2", "2", "3", "4"] as const,
         extents: [1n, 2n, 1n, 2n, 3n] as const,
         expectedIndexes: [0, 1, 2, 4, 5, 6, 24, 25, 26, 28, 29, 30],
+      },
+      {
+        shape: ["2", "2", "2", "2", "2", "2"] as const,
+        extents: [1n, 2n, 1n, 2n, 1n, 2n] as const,
+        expectedIndexes: [0, 1, 4, 5, 16, 17, 20, 21],
       },
     ];
     for (const testCase of cases) {
@@ -429,46 +434,49 @@ describe("verified materializing view-copy", () => {
     }
   });
 
-  it("executes rank-5 positive-affine views under a distinct portable profile", async () => {
-    const shape = ["2", "2", "2", "2", "2"] as const;
-    const layout = await verifiedLayout({
-      shape,
-      sourceLocation: add(
-        c(0),
-        mul(c(1), k("2")),
-        mul(c(2), k("4")),
-        mul(c(3), k("8")),
-        mul(c(4), k("16")),
-      ),
-      sourceBytes: "128",
-      destinationBytes: "128",
-    });
-    const kernel = await verifiedKernel(layout);
-    const plan = await prepare(layout, kernel);
-    const specialization = await prepareViewCopySpecialization(
-      layout,
-      kernel,
-      { operationId: plan.operationId },
-    );
-    const input = Array.from({ length: 32 }, (_, index) => index + 1);
-    const destination = new Uint8Array(128);
-    plan.execute({ source: f32Bytes(input), destination });
+  it("executes rank-5 and rank-6 positive-affine views under distinct portable profiles", async () => {
+    for (const rank of [5, 6] as const) {
+      const shape = Array.from({ length: rank }, () => "2");
+      const elementCount = 2 ** rank;
+      const layout = await verifiedLayout({
+        shape,
+        sourceLocation: add(
+          ...shape.map((_, axis) =>
+            mul(c(axis), k(String(2 ** axis)))),
+        ),
+        sourceBytes: String(elementCount * 4),
+        destinationBytes: String(elementCount * 4),
+      });
+      const kernel = await verifiedKernel(layout);
+      const plan = await prepare(layout, kernel);
+      const specialization = await prepareViewCopySpecialization(
+        layout,
+        kernel,
+        { operationId: plan.operationId },
+      );
+      const input = Array.from(
+        { length: elementCount },
+        (_, index) => index + 1,
+      );
+      const destination = new Uint8Array(elementCount * 4);
+      plan.execute({ source: f32Bytes(input), destination });
 
-    expect(specialization.portableProfile).toMatchObject({
-      profileId:
-        "browsergrad.view-copy.positive-affine-rank5-word32@1",
-      rank: 5,
-      dtype: "f32",
-    });
-    expect(f32Values(destination)).toEqual(
-      Array.from({ length: 32 }, (_, index) => {
+      expect(specialization.portableProfile).toMatchObject({
+        profileId:
+          `browsergrad.view-copy.positive-affine-rank${rank}-word32@1`,
+        rank,
+        dtype: "f32",
+      });
+      expect(f32Values(destination)).toEqual(
+        Array.from({ length: elementCount }, (_, index) => {
         let reversed = 0;
-        for (let bit = 0; bit < 5; bit += 1) {
-          reversed |= ((index >> bit) & 1) << (4 - bit);
-        }
-        return input[reversed] as number;
-      }),
-    );
+          for (let bit = 0; bit < rank; bit += 1) {
+            reversed |= ((index >> bit) & 1) << (rank - 1 - bit);
+          }
+          return input[reversed] as number;
+        }),
+      );
+    }
   });
 
   it("guards padded reads and preserves exact f32 fill bits", async () => {
@@ -583,14 +591,22 @@ describe("verified materializing view-copy", () => {
     });
     expect((await diagnostic(() => verifiedKernel(aliasedLayout))).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.aliasConflict);
 
-    const rankSix = await verifiedLayout({
-      shape: ["1", "1", "1", "1", "1", "1"],
-      sourceLocation: rowMajorLocation(["1", "1", "1", "1", "1", "1"]),
+    const rankSeven = await verifiedLayout({
+      shape: ["1", "1", "1", "1", "1", "1", "1"],
+      sourceLocation: rowMajorLocation([
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+        "1",
+      ]),
       sourceBytes: "4",
       destinationBytes: "4",
     });
     expect((await diagnostic(async () =>
-      prepare(rankSix, await verifiedKernel(rankSix))
+      prepare(rankSeven, await verifiedKernel(rankSeven))
     )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
 
     const hostSource = await verifiedLayout({
@@ -679,6 +695,8 @@ describe("verified materializing view-copy", () => {
         ),
         elementCount: 16,
         rank: 4,
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank4-rank5-word32@1",
       },
       {
         shape: ["2", "2", "2", "2", "2"] as const,
@@ -691,6 +709,23 @@ describe("verified materializing view-copy", () => {
         ),
         elementCount: 32,
         rank: 5,
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank4-rank5-word32@1",
+      },
+      {
+        shape: ["2", "2", "2", "2", "2", "2"] as const,
+        sourceLocation: add(
+          mul(c(0), k("-32")),
+          mul(c(1), k("-16")),
+          mul(c(2), k("-8")),
+          mul(c(3), k("-4")),
+          mul(c(4), k("-2")),
+          mul(c(5), k("-1")),
+        ),
+        elementCount: 64,
+        rank: 6,
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank6-word32@1",
       },
     ];
     for (const testCase of highRankCases) {
@@ -719,8 +754,7 @@ describe("verified materializing view-copy", () => {
         destination: highRankDestination,
       });
       expect(highRankSpecialization.portableProfile).toMatchObject({
-        profileId:
-          "browsergrad.view-copy.signed-affine-rank4-rank5-word32@1",
+        profileId: testCase.profileId,
         rank: testCase.rank,
         dtype: "f32",
       });

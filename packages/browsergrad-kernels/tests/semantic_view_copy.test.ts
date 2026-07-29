@@ -224,12 +224,20 @@ describe("semantic view-copy WGSL lowering", () => {
     expect(dynamic.launch.dispatchCount).toEqual([65, 1, 1]);
   });
 
-  it("lowers rank-2 through rank-5 rectangular guards before semantic evaluation", async () => {
+  it("lowers rank-2 through rank-6 rectangular guards before semantic evaluation", async () => {
     for (const shape of [
       [constant("3"), constant("4")],
       [constant("2"), constant("3"), constant("4")],
       [constant("2"), constant("2"), constant("3"), constant("4")],
       [
+        constant("2"),
+        constant("2"),
+        constant("2"),
+        constant("3"),
+        constant("4"),
+      ],
+      [
+        constant("2"),
         constant("2"),
         constant("2"),
         constant("2"),
@@ -243,7 +251,9 @@ describe("semantic view-copy WGSL lowering", () => {
           ? 24
           : shape.length === 4
             ? 48
-            : 96;
+            : shape.length === 5
+              ? 96
+              : 192;
       const layout = await verifiedLayout({
         shape,
         sourceLocation: rowMajor(shape),
@@ -266,7 +276,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(dynamic.program.bindings).toContainEqual({
         kind: "uniform",
         name: dynamic.dynamicUniformName,
-        byteLength: shape.length === 5 ? 32 : 16,
+        byteLength: shape.length >= 5 ? 32 : 16,
         binding: 2,
       });
       expect(dynamic.launch.dispatchCount).toEqual(
@@ -276,7 +286,9 @@ describe("semantic view-copy WGSL lowering", () => {
             ? [4, 3, 2]
             : shape.length === 4
               ? [4, 3, 4]
-              : [4, 3, 8],
+              : shape.length === 5
+                ? [4, 3, 8]
+                : [4, 3, 16],
       );
       expect(dynamic.program.wgsl).toContain(
         "global_id.x >= bg_dynamic_region.extent_",
@@ -307,6 +319,16 @@ describe("semantic view-copy WGSL lowering", () => {
         );
         expect(dynamic.program.wgsl).toContain(
           "rank5_dynamic_remainder_0 % bg_dynamic_region.extent_2",
+        );
+      } else if (shape.length === 6) {
+        expect(dynamic.program.wgsl).toContain(
+          "bg_dynamic_region.extent_0 * (bg_dynamic_region.extent_1 * bg_dynamic_region.extent_2 * bg_dynamic_region.extent_3)",
+        );
+        expect(dynamic.program.wgsl).toContain(
+          "global_id.z / rank6_dynamic_stride_0",
+        );
+        expect(dynamic.program.wgsl).toContain(
+          "rank6_dynamic_remainder_1 % bg_dynamic_region.extent_3",
         );
       }
       const guardIndex = dynamic.program.wgsl.indexOf(
@@ -404,7 +426,7 @@ describe("semantic view-copy WGSL lowering", () => {
     expect(source).not.toContain("select(");
   });
 
-  it("lowers signed-affine rank-1 through rank-5 source strides through exact i32 addresses", async () => {
+  it("lowers signed-affine rank-1 through rank-6 source strides through exact i32 addresses", async () => {
     const cases = [
       {
         shape: [constant("4")] as const,
@@ -465,6 +487,31 @@ describe("semantic view-copy WGSL lowering", () => {
         expectedRange: { minimum: -15n, maximum: 0n },
         profileId:
           "browsergrad.view-copy.signed-affine-rank4-rank5-word32@1",
+      },
+      {
+        shape: [
+          constant("2"),
+          constant("2"),
+          constant("2"),
+          constant("2"),
+          constant("2"),
+          constant("2"),
+        ] as const,
+        sourceLocation: add(
+          multiply(coordinate(0), constant("-32")),
+          multiply(coordinate(1), constant("-16")),
+          multiply(coordinate(2), constant("-8")),
+          multiply(coordinate(3), constant("-4")),
+          multiply(coordinate(4), constant("-2")),
+          multiply(coordinate(5), constant("-1")),
+        ),
+        sourceByteOffset: constant("252"),
+        sourceBytes: constant("256"),
+        destinationBytes: constant("256"),
+        dtype: "u32" as const,
+        expectedRange: { minimum: -63n, maximum: 0n },
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank6-word32@1",
       },
       {
         shape: [
@@ -579,7 +626,7 @@ describe("semantic view-copy WGSL lowering", () => {
     expect(bytePrepared.program.wgsl).toContain("/ 4i");
   });
 
-  it("lowers exact rank-1, rank-4, and rank-5 coordinates without changing rank-2/rank-3 WGSL", async () => {
+  it("lowers exact rank-1, rank-4, rank-5, and rank-6 coordinates without changing rank-2/rank-3 WGSL", async () => {
     const rank1Shape = [constant("4")] as const;
     const rank1 = await verifiedLayout({
       shape: rank1Shape,
@@ -656,6 +703,39 @@ describe("semantic view-copy WGSL lowering", () => {
       "let coordinate_4: i32 = i32(rank5_remainder_2 % 2u);",
     );
     expect(rank5Prepared.launch.dispatchCount).toEqual([32, 1, 1]);
+
+    const rank6Shape = [
+      constant("2"),
+      constant("2"),
+      constant("2"),
+      constant("2"),
+      constant("2"),
+      constant("2"),
+    ] as const;
+    const rank6 = await verifiedLayout({
+      shape: rank6Shape,
+      sourceLocation: add(
+        coordinate(0),
+        multiply(coordinate(1), constant("2")),
+        multiply(coordinate(2), constant("4")),
+        multiply(coordinate(3), constant("8")),
+        multiply(coordinate(4), constant("16")),
+        multiply(coordinate(5), constant("32")),
+      ),
+      sourceBytes: constant("256"),
+      destinationBytes: constant("256"),
+    });
+    const rank6Prepared = await prepare(rank6, await verifiedKernel(rank6));
+    expect(rank6Prepared.semantic.portableProfile).toMatchObject({
+      profileId:
+        "browsergrad.view-copy.positive-affine-rank6-word32@1",
+      rank: 6,
+      dtype: "f32",
+    });
+    expect(rank6Prepared.program.wgsl).toContain(
+      "let coordinate_5: i32 = i32(rank6_remainder_3 % 2u);",
+    );
+    expect(rank6Prepared.launch.dispatchCount).toEqual([64, 1, 1]);
   });
 
   it("derives binding-sensitive modules and rejects i32 or source-size overflow", async () => {

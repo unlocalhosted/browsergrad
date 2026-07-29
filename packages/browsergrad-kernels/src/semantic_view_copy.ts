@@ -50,7 +50,7 @@ import {
 
 export const SEMANTIC_VIEW_COPY_WEBGPU_PROFILE =
   "browsergrad.webgpu.view-copy.word32@2";
-export const SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION = "2.4.0";
+export const SEMANTIC_VIEW_COPY_WEBGPU_BACKEND_VERSION = "2.5.0";
 const DEFAULT_WORKGROUP_SIZE = 64;
 const MAX_CONFIGURABLE_WORKGROUP_SIZE = 256;
 const DEFAULT_MAX_WGSL_BYTES = 64 * 1024;
@@ -393,10 +393,24 @@ function semanticLaunch(
       ] as const),
     });
   }
+  if (logicalShape.length === 6) {
+    return Object.freeze({
+      dispatchCount: Object.freeze([
+        Number(logicalShape[5]),
+        Number(logicalShape[4]),
+        Number(
+          logicalShape[0]! *
+            logicalShape[1]! *
+            logicalShape[2]! *
+            logicalShape[3]!,
+        ),
+      ] as const),
+    });
+  }
   fail(
     "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
     "$.semantic.logicalShape",
-    "rectangular dynamic launch supports semantic ranks 2 through 5 only",
+    "rectangular dynamic launch supports semantic ranks 2 through 6 only",
   );
 }
 

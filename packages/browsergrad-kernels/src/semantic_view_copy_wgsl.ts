@@ -140,11 +140,12 @@ function emitLaunchPrelude(
       shape.length !== 2 &&
       shape.length !== 3 &&
       shape.length !== 4 &&
-      shape.length !== 5
+      shape.length !== 5 &&
+      shape.length !== 6
     ) {
       return unsupported(
         "$.shape",
-        "rectangular dynamic WGSL launch supports semantic ranks 2 through 5 only",
+        "rectangular dynamic WGSL launch supports semantic ranks 2 through 6 only",
       );
     }
     const staticExtents = shape.map((extent, axis) =>
@@ -159,6 +160,34 @@ function emitLaunchPrelude(
       "}",
       `@group(0) @binding(${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_BINDING}) var<uniform> ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}: BrowserGradDynamicRegion;`,
     ]);
+    if (shape.length === 6) {
+      const leadingStaticProduct = asU32(
+        shape[0]! * shape[1]! * shape[2]! * shape[3]!,
+        "$.shape[0:4]",
+      );
+      const dynamicStride0 =
+        `(${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_1 * ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_2 * ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_3)`;
+      const dynamicStride1 =
+        `(${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_2 * ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_3)`;
+      return Object.freeze({
+        declarations,
+        body: Object.freeze([
+          `  if (global_id.x >= ${staticExtents[5]}u || global_id.x >= ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_5 || global_id.y >= ${staticExtents[4]}u || global_id.y >= ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_4 || global_id.z >= ${leadingStaticProduct}u || global_id.z >= (${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_0 * ${dynamicStride0})) {`,
+          "    return;",
+          "  }",
+          `  let rank6_dynamic_stride_0: u32 = ${dynamicStride0};`,
+          `  let rank6_dynamic_stride_1: u32 = ${dynamicStride1};`,
+          "  let coordinate_0: i32 = i32(global_id.z / rank6_dynamic_stride_0);",
+          "  let rank6_dynamic_remainder_0: u32 = global_id.z % rank6_dynamic_stride_0;",
+          "  let coordinate_1: i32 = i32(rank6_dynamic_remainder_0 / rank6_dynamic_stride_1);",
+          "  let rank6_dynamic_remainder_1: u32 = rank6_dynamic_remainder_0 % rank6_dynamic_stride_1;",
+          `  let coordinate_2: i32 = i32(rank6_dynamic_remainder_1 / ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_3);`,
+          `  let coordinate_3: i32 = i32(rank6_dynamic_remainder_1 % ${SEMANTIC_VIEW_COPY_DYNAMIC_REGION_UNIFORM}.extent_3);`,
+          "  let coordinate_4: i32 = i32(global_id.y);",
+          "  let coordinate_5: i32 = i32(global_id.x);",
+        ]),
+      });
+    }
     if (shape.length === 5) {
       const leadingStaticProduct = asU32(
         shape[0]! * shape[1]! * shape[2]!,
@@ -418,7 +447,42 @@ function emitCoordinates(shape: readonly bigint[]): readonly string[] {
       `  let coordinate_4: i32 = i32(rank5_remainder_2 % ${fifth}u);`,
     ];
   }
-  return unsupported("$.shape", "WGSL view-copy supports ranks in [1, 5] only");
+  if (shape.length === 6) {
+    const second = asU32(shape[1] as bigint, "$.shape[1]");
+    const third = asU32(shape[2] as bigint, "$.shape[2]");
+    const fourth = asU32(shape[3] as bigint, "$.shape[3]");
+    const fifth = asU32(shape[4] as bigint, "$.shape[4]");
+    const sixth = asU32(shape[5] as bigint, "$.shape[5]");
+    const stride3 = asU32(
+      BigInt(fifth) * BigInt(sixth),
+      "$.shape[4:6]",
+    );
+    const stride2 = asU32(
+      BigInt(fourth) * BigInt(stride3),
+      "$.shape[3:6]",
+    );
+    const stride1 = asU32(
+      BigInt(third) * BigInt(stride2),
+      "$.shape[2:6]",
+    );
+    const stride0 = asU32(
+      BigInt(second) * BigInt(stride1),
+      "$.shape[1:6]",
+    );
+    return [
+      `  let coordinate_0: i32 = i32(linear_index / ${stride0}u);`,
+      `  let rank6_remainder_0: u32 = linear_index % ${stride0}u;`,
+      `  let coordinate_1: i32 = i32(rank6_remainder_0 / ${stride1}u);`,
+      `  let rank6_remainder_1: u32 = rank6_remainder_0 % ${stride1}u;`,
+      `  let coordinate_2: i32 = i32(rank6_remainder_1 / ${stride2}u);`,
+      `  let rank6_remainder_2: u32 = rank6_remainder_1 % ${stride2}u;`,
+      `  let coordinate_3: i32 = i32(rank6_remainder_2 / ${stride3}u);`,
+      `  let rank6_remainder_3: u32 = rank6_remainder_2 % ${stride3}u;`,
+      `  let coordinate_4: i32 = i32(rank6_remainder_3 / ${sixth}u);`,
+      `  let coordinate_5: i32 = i32(rank6_remainder_3 % ${sixth}u);`,
+    ];
+  }
+  return unsupported("$.shape", "WGSL view-copy supports ranks in [1, 6] only");
 }
 
 function requiredIndexMap(layout: LayoutArtifactPayloadV1, indexMapId: string, role: string): IndexMap {
