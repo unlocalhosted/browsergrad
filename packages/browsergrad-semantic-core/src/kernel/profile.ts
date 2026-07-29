@@ -23,12 +23,24 @@ export const PORTABLE_PACKED16_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.positive-affine-rank2-rank3-packed16@1";
 export const PORTABLE_WORD64_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.positive-affine-rank2-rank3-word64@1";
+export const PORTABLE_RANK1_PACKED8_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.positive-affine-rank1-packed8@1";
+export const PORTABLE_RANK1_PACKED16_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.positive-affine-rank1-packed16@1";
+export const PORTABLE_RANK1_WORD64_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.positive-affine-rank1-word64@1";
 export const PORTABLE_SIGNED_AFFINE_PACKED8_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.signed-affine-rank2-rank3-packed8@1";
 export const PORTABLE_SIGNED_AFFINE_PACKED16_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.signed-affine-rank2-rank3-packed16@1";
 export const PORTABLE_SIGNED_AFFINE_WORD64_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.signed-affine-rank2-rank3-word64@1";
+export const PORTABLE_SIGNED_AFFINE_RANK1_PACKED8_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.signed-affine-rank1-packed8@1";
+export const PORTABLE_SIGNED_AFFINE_RANK1_PACKED16_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.signed-affine-rank1-packed16@1";
+export const PORTABLE_SIGNED_AFFINE_RANK1_WORD64_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.signed-affine-rank1-word64@1";
 export const PORTABLE_SIGNED_AFFINE_RANK1_WORD32_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.signed-affine-rank1-word32@1";
 export const PORTABLE_SIGNED_AFFINE_WORD32_VIEW_COPY_PROFILE =
@@ -66,9 +78,15 @@ export interface PortableViewCopyProfile {
     | typeof PORTABLE_PACKED8_VIEW_COPY_PROFILE
     | typeof PORTABLE_PACKED16_VIEW_COPY_PROFILE
     | typeof PORTABLE_WORD64_VIEW_COPY_PROFILE
+    | typeof PORTABLE_RANK1_PACKED8_VIEW_COPY_PROFILE
+    | typeof PORTABLE_RANK1_PACKED16_VIEW_COPY_PROFILE
+    | typeof PORTABLE_RANK1_WORD64_VIEW_COPY_PROFILE
     | typeof PORTABLE_SIGNED_AFFINE_PACKED8_VIEW_COPY_PROFILE
     | typeof PORTABLE_SIGNED_AFFINE_PACKED16_VIEW_COPY_PROFILE
     | typeof PORTABLE_SIGNED_AFFINE_WORD64_VIEW_COPY_PROFILE
+    | typeof PORTABLE_SIGNED_AFFINE_RANK1_PACKED8_VIEW_COPY_PROFILE
+    | typeof PORTABLE_SIGNED_AFFINE_RANK1_PACKED16_VIEW_COPY_PROFILE
+    | typeof PORTABLE_SIGNED_AFFINE_RANK1_WORD64_VIEW_COPY_PROFILE
     | typeof PORTABLE_SIGNED_AFFINE_RANK1_WORD32_VIEW_COPY_PROFILE
     | typeof PORTABLE_SIGNED_AFFINE_WORD32_VIEW_COPY_PROFILE
     | typeof PORTABLE_SIGNED_AFFINE_HIGH_RANK_WORD32_VIEW_COPY_PROFILE
@@ -104,12 +122,12 @@ export function verifyPortableViewCopyProfile(
     );
   }
   const rank = source.logicalShape.length;
-  if ((rank < (nonWord32 ? 2 : 1) || rank > (nonWord32 ? 3 : 7)) ||
+  if ((rank < 1 || rank > (nonWord32 ? 3 : 7)) ||
       destination.logicalShape.length !== rank) {
     unsupported(
       "$.operation",
       nonWord32
-        ? "portable non-word32 view-copy requires equal source and destination ranks in [2, 3]"
+        ? "portable non-word32 view-copy requires equal source and destination ranks in [1, 3]"
         : "portable word32 view-copy requires equal source and destination ranks in [1, 7]",
     );
   }
@@ -213,16 +231,31 @@ function selectPortableViewCopyProfile(
   signedCoordinateScale: boolean,
 ): PortableViewCopyProfile["profileId"] {
   if (dtypeProfile.storageClass === "packed8") {
+    if (rank === 1) {
+      return signedCoordinateScale
+        ? PORTABLE_SIGNED_AFFINE_RANK1_PACKED8_VIEW_COPY_PROFILE
+        : PORTABLE_RANK1_PACKED8_VIEW_COPY_PROFILE;
+    }
     return signedCoordinateScale
       ? PORTABLE_SIGNED_AFFINE_PACKED8_VIEW_COPY_PROFILE
       : PORTABLE_PACKED8_VIEW_COPY_PROFILE;
   }
   if (dtypeProfile.storageClass === "packed16") {
+    if (rank === 1) {
+      return signedCoordinateScale
+        ? PORTABLE_SIGNED_AFFINE_RANK1_PACKED16_VIEW_COPY_PROFILE
+        : PORTABLE_RANK1_PACKED16_VIEW_COPY_PROFILE;
+    }
     return signedCoordinateScale
       ? PORTABLE_SIGNED_AFFINE_PACKED16_VIEW_COPY_PROFILE
       : PORTABLE_PACKED16_VIEW_COPY_PROFILE;
   }
   if (dtypeProfile.storageClass === "word64") {
+    if (rank === 1) {
+      return signedCoordinateScale
+        ? PORTABLE_SIGNED_AFFINE_RANK1_WORD64_VIEW_COPY_PROFILE
+        : PORTABLE_RANK1_WORD64_VIEW_COPY_PROFILE;
+    }
     return signedCoordinateScale
       ? PORTABLE_SIGNED_AFFINE_WORD64_VIEW_COPY_PROFILE
       : PORTABLE_WORD64_VIEW_COPY_PROFILE;

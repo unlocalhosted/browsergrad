@@ -590,17 +590,6 @@ describe("verified materializing view-copy", () => {
       });
     }
 
-    const rankOne = await verifiedLayout({
-      shape: ["2"],
-      sourceLocation: c(0),
-      sourceBytes: "4",
-      destinationBytes: "4",
-      dtype: "f16",
-    });
-    expect((await diagnostic(async () =>
-      prepare(rankOne, await verifiedKernel(rankOne))
-    )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
-
     const signedSource = await verifiedLayout({
       shape: ["2", "3"],
       sourceLocation: add(mul(c(0), k("-3")), mul(c(1), k("-1"))),
@@ -788,6 +777,109 @@ describe("verified materializing view-copy", () => {
         inputWords[(index * 2) + 1] as number,
       ]),
     );
+  });
+
+  it("executes rank-1 exact storage through distinct positive and signed profiles", async () => {
+    const cases = [
+      {
+        dtype: "i8" as const,
+        dtypeBytes: 1,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank1-packed8@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank1-packed8@1",
+      },
+      {
+        dtype: "bf16" as const,
+        dtypeBytes: 2,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank1-packed16@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank1-packed16@1",
+      },
+      {
+        dtype: "f64" as const,
+        dtypeBytes: 8,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank1-word64@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank1-word64@1",
+      },
+    ];
+    for (const testCase of cases) {
+      const positiveLayout = await verifiedLayout({
+        shape: ["3"],
+        sourceLocation: mul(c(0), k("2")),
+        sourceBytes: String(testCase.dtypeBytes * 5),
+        destinationBytes: String(testCase.dtypeBytes * 3),
+        dtype: testCase.dtype,
+      });
+      const positiveKernel = await verifiedKernel(positiveLayout);
+      const positivePlan = await prepare(positiveLayout, positiveKernel);
+      const positiveSpecialization = await prepareViewCopySpecialization(
+        positiveLayout,
+        positiveKernel,
+        { operationId: positivePlan.operationId },
+      );
+      const positiveSource = Uint8Array.from(
+        { length: testCase.dtypeBytes * 5 },
+        (_, index) => index + 1,
+      );
+      const positiveDestination = new Uint8Array(testCase.dtypeBytes * 3);
+      positivePlan.execute({
+        source: positiveSource,
+        destination: positiveDestination,
+      });
+      expect(positiveSpecialization.portableProfile).toMatchObject({
+        profileId: testCase.positiveProfile,
+        rank: 1,
+        dtype: testCase.dtype,
+      });
+      expect(Array.from(positiveDestination)).toEqual(
+        [0, 2, 4].flatMap((elementIndex) =>
+          Array.from(positiveSource.slice(
+            elementIndex * testCase.dtypeBytes,
+            (elementIndex + 1) * testCase.dtypeBytes,
+          ))),
+      );
+
+      const signedLayout = await verifiedLayout({
+        shape: ["3"],
+        sourceLocation: mul(c(0), k("-1")),
+        sourceByteOffset: String(testCase.dtypeBytes * 2),
+        sourceBytes: String(testCase.dtypeBytes * 3),
+        destinationBytes: String(testCase.dtypeBytes * 3),
+        dtype: testCase.dtype,
+      });
+      const signedKernel = await verifiedKernel(signedLayout);
+      const signedPlan = await prepare(signedLayout, signedKernel);
+      const signedSpecialization = await prepareViewCopySpecialization(
+        signedLayout,
+        signedKernel,
+        { operationId: signedPlan.operationId },
+      );
+      const signedSource = Uint8Array.from(
+        { length: testCase.dtypeBytes * 3 },
+        (_, index) => 0x80 + index,
+      );
+      const signedDestination = new Uint8Array(testCase.dtypeBytes * 3);
+      signedPlan.execute({
+        source: signedSource,
+        destination: signedDestination,
+      });
+      expect(signedSpecialization.portableProfile).toMatchObject({
+        profileId: testCase.signedProfile,
+        rank: 1,
+        dtype: testCase.dtype,
+      });
+      expect(Array.from(signedDestination)).toEqual(
+        [2, 1, 0].flatMap((elementIndex) =>
+          Array.from(signedSource.slice(
+            elementIndex * testCase.dtypeBytes,
+            (elementIndex + 1) * testCase.dtypeBytes,
+          ))),
+      );
+    }
   });
 
   it("guards padded reads and preserves exact f32 fill bits", async () => {

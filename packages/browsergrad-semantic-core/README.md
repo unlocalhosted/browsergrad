@@ -38,7 +38,7 @@ preservation. Static definitions contain no support state or evidence outcome.
 verified, materializing view copy over a verified `browsergrad.layout@1`
 artifact. The portable execution profiles admit same-dtype f32, i32, or u32
 rank 1 through rank 7 global-memory views plus exact bool/i8/u8 and
-i16/u16/f16/bf16 and f64/i64/u64 storage copies at ranks 2 and 3, with explicit
+i16/u16/f16/bf16 and f64/i64/u64 storage copies at ranks 1 through 3, with explicit
 source-read and destination-write effects and disjoint alias sets. The f32 word
 profile admits reject or exact-bit fill behavior for invalid source
 coordinates; integer and non-word32 profiles require rejection. Generic
@@ -63,8 +63,10 @@ preserves raw f64/i64/u64 storage as two u32 words per element. Separate
 `signed-affine-rank2-rank3` identities for packed8, packed16, and word64 admit
 negative coordinate scales in the source while retaining the same proved
 nonnegative rebased addresses, dense positive-affine destination, and exact
-raw-storage schedules. These profiles do not claim boolean canonicalization,
-arithmetic, conversion, `shader-f16`, or native shader f64 support.
+raw-storage schedules. Separate positive and signed rank-1 identities provide
+the same width-specific contracts without widening any rank-2/rank-3 profile.
+These profiles do not claim boolean canonicalization, arithmetic, conversion,
+`shader-f16`, or native shader f64 support.
 
 `/kernel` also defines one frontend-neutral logical GEMM tile with exact dense
 f32 operand/view roles, boundary policy, increasing-K accumulation order, and

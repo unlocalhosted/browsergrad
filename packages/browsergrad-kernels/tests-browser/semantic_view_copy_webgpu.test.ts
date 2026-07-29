@@ -80,14 +80,20 @@ const PLANNED_CASE_IDS = Object.freeze([
   "u32-read-only-broadcast",
   "bool-rank2-odd-transpose",
   "i8-rank2-transpose",
+  "i8-rank1-positive-stride",
+  "i8-rank1-negative-stride",
   "i8-rank2-negative-stride",
   "u8-read-only-broadcast",
   "i16-rank2-transpose",
   "u16-read-only-broadcast",
   "f16-rank2-odd-transpose",
+  "f16-rank1-positive-stride",
+  "f16-rank1-negative-stride",
   "f16-rank2-negative-stride",
   "bf16-rank3-permutation",
   "f64-rank2-transpose",
+  "f64-rank1-positive-stride",
+  "f64-rank1-negative-stride",
   "f64-rank2-negative-stride",
   "i64-byte-map-broadcast",
   "u64-rank3-permutation",
@@ -827,6 +833,33 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     packed8Words(0x00, 0x80, 0xff, 0xa5),
   );
 
+  const i8Rank1PositiveStride = await makeCase(
+    "i8-rank1-positive-stride",
+    {
+      shape: dims("3"),
+      sourceLocation: multiply(coordinate(0), indexConstant("2")),
+      sourceBytes: dimConstant("8"),
+      destinationBytes: dimConstant("4"),
+      dtype: "i8",
+    },
+    { kind: "reject" },
+    packed8Words(0x00, 0x01, 0x7f, 0x80, 0xff, 0x5a, 0xa5, 0xc3),
+  );
+
+  const i8Rank1NegativeStride = await makeCase(
+    "i8-rank1-negative-stride",
+    {
+      shape: dims("3"),
+      sourceLocation: multiply(coordinate(0), indexConstant("-1")),
+      sourceByteOffset: dimConstant("2"),
+      sourceBytes: dimConstant("4"),
+      destinationBytes: dimConstant("4"),
+      dtype: "i8",
+    },
+    { kind: "reject" },
+    packed8Words(0x00, 0x80, 0xff, 0xa5),
+  );
+
   const i8NegativeStride = await makeCase(
     "i8-rank2-negative-stride",
     {
@@ -941,6 +974,33 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     ),
   );
 
+  const f16Rank1PositiveStride = await makeCase(
+    "f16-rank1-positive-stride",
+    {
+      shape: dims("3"),
+      sourceLocation: multiply(coordinate(0), indexConstant("2")),
+      sourceBytes: dimConstant("12"),
+      destinationBytes: dimConstant("8"),
+      dtype: "f16",
+    },
+    { kind: "reject" },
+    packed16Words(0x0000, 0x8000, 0x3c00, 0x7c00, 0x7e01, 0xffff),
+  );
+
+  const f16Rank1NegativeStride = await makeCase(
+    "f16-rank1-negative-stride",
+    {
+      shape: dims("3"),
+      sourceLocation: multiply(coordinate(0), indexConstant("-1")),
+      sourceByteOffset: dimConstant("4"),
+      sourceBytes: dimConstant("8"),
+      destinationBytes: dimConstant("8"),
+      dtype: "f16",
+    },
+    { kind: "reject" },
+    packed16Words(0x0000, 0x8000, 0x7e01, 0xa55a),
+  );
+
   const f16NegativeStride = await makeCase(
     "f16-rank2-negative-stride",
     {
@@ -999,6 +1059,43 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
       0x00000000, 0x80000000,
       0xffffffff, 0xffffffff,
       0x00000001, 0x7fffffff,
+    ),
+  );
+
+  const f64Rank1PositiveStride = await makeCase(
+    "f64-rank1-positive-stride",
+    {
+      shape: dims("3"),
+      sourceLocation: multiply(coordinate(0), indexConstant("2")),
+      sourceBytes: dimConstant("40"),
+      destinationBytes: dimConstant("24"),
+      dtype: "f64",
+    },
+    { kind: "reject" },
+    words(
+      0x00000000, 0x80000000,
+      0x00000001, 0x7ff00000,
+      0x00000001, 0x7ff80000,
+      0xffffffff, 0xffffffff,
+      0x89abcdef, 0x01234567,
+    ),
+  );
+
+  const f64Rank1NegativeStride = await makeCase(
+    "f64-rank1-negative-stride",
+    {
+      shape: dims("3"),
+      sourceLocation: multiply(coordinate(0), indexConstant("-1")),
+      sourceByteOffset: dimConstant("16"),
+      sourceBytes: dimConstant("24"),
+      destinationBytes: dimConstant("24"),
+      dtype: "f64",
+    },
+    { kind: "reject" },
+    words(
+      0x00000000, 0x80000000,
+      0x00000001, 0x7ff00000,
+      0x00000001, 0x7ff80000,
     ),
   );
 
@@ -1096,14 +1193,20 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     u32Broadcast,
     boolOddTranspose,
     i8Transpose,
+    i8Rank1PositiveStride,
+    i8Rank1NegativeStride,
     i8NegativeStride,
     u8Broadcast,
     i16Transpose,
     u16Broadcast,
     f16OddTranspose,
+    f16Rank1PositiveStride,
+    f16Rank1NegativeStride,
     f16NegativeStride,
     bf16Rank3Permutation,
     f64Transpose,
+    f64Rank1PositiveStride,
+    f64Rank1NegativeStride,
     f64NegativeStride,
     i64ByteMapBroadcast,
     u64Rank3Permutation,

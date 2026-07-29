@@ -467,7 +467,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.packed16@1",
       );
-      expect(prepared.backendVersion).toBe("3.0.0");
+      expect(prepared.backendVersion).toBe("3.1.0");
       expect(prepared.launch.dispatchCount).toEqual([5, 1, 1]);
       expect(prepared.program.wgsl).toContain(
         "fn copy_packed_element(linear_index: u32)",
@@ -545,7 +545,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.packed8@1",
       );
-      expect(prepared.backendVersion).toBe("3.0.0");
+      expect(prepared.backendVersion).toBe("3.1.0");
       expect(prepared.launch.dispatchCount).toEqual([3, 1, 1]);
       expect(prepared.program.wgsl).toContain(
         "let first_element_index: u32 = global_id.x * 4u;",
@@ -586,7 +586,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.word64@1",
       );
-      expect(prepared.backendVersion).toBe("3.0.0");
+      expect(prepared.backendVersion).toBe("3.1.0");
       expect(prepared.launch.dispatchCount).toEqual([6, 1, 1]);
       expect(prepared.program.wgsl).toContain(
         "destination_words[destination_word] = source_words[source_word];",
@@ -618,6 +618,99 @@ describe("semantic view-copy WGSL lowering", () => {
       code: "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
       path: "$.launchMode",
     });
+  });
+
+  it("lowers rank-1 packed8, packed16, and word64 source addresses", async () => {
+    const cases = [
+      {
+        dtype: "i8" as const,
+        dtypeBytes: 1,
+        positiveSourceBytes: 8,
+        signedSourceBytes: 4,
+        destinationBytes: 4,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank1-packed8@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank1-packed8@1",
+        backendProfile: "browsergrad.webgpu.view-copy.packed8@1",
+        dispatchCount: 1,
+      },
+      {
+        dtype: "bf16" as const,
+        dtypeBytes: 2,
+        positiveSourceBytes: 12,
+        signedSourceBytes: 8,
+        destinationBytes: 8,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank1-packed16@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank1-packed16@1",
+        backendProfile: "browsergrad.webgpu.view-copy.packed16@1",
+        dispatchCount: 2,
+      },
+      {
+        dtype: "f64" as const,
+        dtypeBytes: 8,
+        positiveSourceBytes: 40,
+        signedSourceBytes: 24,
+        destinationBytes: 24,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank1-word64@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank1-word64@1",
+        backendProfile: "browsergrad.webgpu.view-copy.word64@1",
+        dispatchCount: 3,
+      },
+    ];
+    for (const testCase of cases) {
+      for (const signed of [false, true]) {
+        const shape = [constant("3")] as const;
+        const layout = await verifiedLayout({
+          shape,
+          sourceLocation: multiply(
+            coordinate(0),
+            constant(signed ? "-1" : "2"),
+          ),
+          ...(signed
+            ? { sourceByteOffset: constant(String(testCase.dtypeBytes * 2)) }
+            : {}),
+          sourceBytes: constant(String(
+            signed
+              ? testCase.signedSourceBytes
+              : testCase.positiveSourceBytes,
+          )),
+          destinationBytes: constant(String(testCase.destinationBytes)),
+          dtype: testCase.dtype,
+        });
+        const prepared = await prepare(layout, await verifiedKernel(layout));
+
+        expect(prepared.semantic.portableProfile).toMatchObject({
+          profileId: signed
+            ? testCase.signedProfile
+            : testCase.positiveProfile,
+          rank: 1,
+          dtype: testCase.dtype,
+        });
+        expect(prepared.backendProfile).toBe(testCase.backendProfile);
+        expect(prepared.backendVersion).toBe("3.1.0");
+        expect(prepared.sourceLocationRange).toEqual(
+          signed
+            ? { minimum: -2n, maximum: 0n }
+            : { minimum: 0n, maximum: 4n },
+        );
+        expect(prepared.launch.dispatchCount).toEqual([
+          testCase.dispatchCount,
+          1,
+          1,
+        ]);
+        expect(prepared.program.wgsl).toContain(
+          "let coordinate_0: i32 = i32(linear_index);",
+        );
+        if (signed) {
+          expect(prepared.program.wgsl).toContain("* -1i");
+        }
+      }
+    }
   });
 
   it("lowers signed-affine packed8, packed16, and word64 source addresses", async () => {
@@ -674,7 +767,7 @@ describe("semantic view-copy WGSL lowering", () => {
         dtype: testCase.dtype,
       });
       expect(prepared.backendProfile).toBe(testCase.backendProfile);
-      expect(prepared.backendVersion).toBe("3.0.0");
+      expect(prepared.backendVersion).toBe("3.1.0");
       expect(prepared.sourceLocationRange).toEqual({
         minimum: -5n,
         maximum: 0n,
