@@ -7958,6 +7958,13 @@ whether any files may be left partially changed.
   authority: package-controlled production policies, externally controlled
   builder/reviewer keys, externally issued exact statements, and unified
   production issuance remain external prerequisites.
+- The first main CI run also caught two harness integration regressions: the
+  informational LLD checkpoint exceeded its architecture budget, and the
+  generic browser glob imported two dedicated input-bound suites without their
+  fail-closed host definitions. The checkpoint is back at the exact 180-line
+  ceiling; the generic config excludes those suites while their dedicated
+  configs remain unchanged. `architecture:check` passes and the aggregate
+  headed Apple Metal browser suite passes 6 files/213 tests in 6.46 seconds.
 
 ### 2026-07-29 — Gate 3 signed-source authorized lowering
 

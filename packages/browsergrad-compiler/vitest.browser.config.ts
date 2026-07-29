@@ -34,6 +34,12 @@ export default defineConfig(({ mode }) => ({
   },
   test: {
     include: ["tests-browser/**/*.test.ts"],
+    exclude: [
+      // These suites require host-preflighted immutable inputs and are owned
+      // by their dedicated fail-closed configs/runners.
+      "tests-browser/cpp_cute_browser_real_compile.test.ts",
+      "tests-browser/cpp_cute_browser_exact_distribution_convergence.test.ts",
+    ],
     testTimeout: 60_000,
     hookTimeout: 60_000,
     browser: {

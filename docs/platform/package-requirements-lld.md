@@ -32,35 +32,27 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
 | 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch, rank-2-through-rank-5 request-time or produced-resource rectangular prefix dispatch, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, an at-most-one produced-resource feedback-node bound across conditional, repeat, and dynamic-dispatch control, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; repeated/device-side feedback, rank-6-and-higher dynamic domains, transport/topology, and native companion evidence remain open. |
 
-Only `verified` means every exit criterion for the declared gate profile is
-complete. Verification of a closed initial profile does not imply broader
-dtype, layout, numerical, or backend coverage.
+Only `verified` means every declared exit criterion is complete. A closed
+profile does not imply broader dtype, layout, numerical, or backend coverage.
 
 ### Feedback and evidence lanes
 
 The 90-minute build is no longer an engineering iteration loop:
 
-- `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed` is the default
-  compiler edit loop and routes changed files to owning tests.
+- `verify:changed` is the default compiler edit loop and routes changes to owners.
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
   exact build lock, both zero-import Worker bundles, the strict matrix
-  projection, and the exact-distribution convergence projection; it passes
-  104 files/823 tests with the test phase completing in 14.72 seconds.
-- The complete compiler unit suite passes 106 files/1,660 tests in 14.50 seconds.
-- The evidence-input suite passes 19 files/177 tests in 15.87 seconds and can
-  run concurrently with the complete unit suite because neither consumes
-  artifact observations being replaced.
+  projection, and exact-distribution convergence; its 104 files/823 tests take
+  14.72 seconds. The complete 106-file/1,660-test suite takes 14.50 seconds.
+- The 19-file/177-test evidence-input suite takes 15.87 seconds and runs concurrently.
 - The required native boundary is one isolated prerequisite: 13 files/34 tests
   pass with nine platform skips in 78.87 seconds. Every behavioral native child
   uses the production no-shell, bounded-output, process-group termination boundary.
-- The remaining 42 Clang-Wasm surface files/257 tests run in the parallel
-  compiler lane in 16.13 seconds. The complete verifier, including builds,
-  native tests, four parallel lanes, architecture checks, and 1,658 tests, passes
-  in 129.30 seconds under concurrent host load.
+- Native and Clang-Wasm surface lanes stay isolated; the full verifier keeps
+  four safe read-only lanes parallel.
 - Cache-free LLVM/Clang builds only mint clean-build/reproducibility evidence.
   Their two jobs run concurrently and never replace focused or fast local paths.
-- A `dist`-rebuilding lane and consumer use separate worktrees/output roots when
-  parallelized; read-only lanes remain independently parallelizable.
+- `dist` rebuilds and consumers use separate worktrees/output roots.
 
 An unavailable browser, native sanitizer, external approval, signer, or release
 authority is an explicit non-passing result. No parser, fixture, CPU reference,
@@ -83,16 +75,13 @@ build/parity machinery and are not runtime dependencies. The controller:
 The package binds one exact build lock, factory, reproducible extractor, and
 zero-import verifier/compiler Worker pair. Exact evidence stays in the ledger.
 
-The package-pinned strict browser observation now records nine unchanged
-C++17/CuTe compilations: f32 ranks 1 through 4, positive strided-slice,
-read-only broadcast, i32 rank-2, u32 broadcast, and signed-source rank-2.
-Every case installs the same five exact header packs, executes the current
-reproducible Wasm through the verifier and compiler Workers, emits one accepted
-Artifact V3, and prepares one distinct semantic view-copy candidate. The
-browser test constructs its profile through the package-owned exact Clang
-22.1.8, CUDA 12.6.3, CUTLASS 3.7.0, libc++ 22.1.8, source-root,
-header-content, Worker, Wasm, and runtime-ABI contract. The matrix retains
-producer, legal, backend, and release authority as false.
+The strict browser observation records nine unchanged C++17/CuTe compilations:
+f32 ranks 1 through 4, positive strided-slice, read-only broadcast, i32
+rank-2, u32 broadcast, and signed-source rank-2. Every case mounts the same
+five exact packs, runs the current Wasm through both Workers, emits an accepted
+Artifact V3, and prepares a distinct semantic view-copy candidate. The exact
+profile binds the toolchain, source, headers, Workers, Wasm, and runtime ABI;
+producer, legal, backend, and release authority remain false.
 
 The build lock declares 24 deterministic subjects including diagnostic
 normalization plus one detached DSSE envelope across exactly 25 paths. The
@@ -123,11 +112,10 @@ immutable requests and returned envelopes, and persists no reusable authority.
 Its final mode re-verifies both responses, admits package-pinned distribution
 and convergence resources, and composes backend plus release before process
 exit. A closed authoring boundary rederives the exact convergence resource from
-the current distribution and nine-case observation, checks canonical bounded
-input and one real non-software WebGPU device profile, and fails on any stale
-package identity. The observation keeps every reusable authority and
-`releaseReady` false; only external evidence can authorize the build or header
-distribution.
+the current distribution and nine-case observation, admits one real
+non-software WebGPU profile, and rejects stale identities. The observation
+keeps reusable authority and `releaseReady` false; only external evidence can
+authorize the build or headers.
 
 Backend composition binds opaque producer, reproducibility, and convergence
 through the stable build subject, lock, Worker, output set, and matrix. Final
@@ -198,14 +186,11 @@ CPU/required-WebGPU convergence are no longer blockers.
    backend/final-release authority is minted in one process. Serialized
    observations and synthetic fixtures grant no production authority.
 
-Gate 7 remains incomplete: its CPU and portable-WebGPU executors cover the
-closed DAG, fixed and bounded request-time or produced-resource repetition,
-bounded one-dimensional and rank-2-through-rank-5 request-time or
-produced-resource dynamic dispatch, three bounded conditional sources
-including one explicit produced-resource feedback stage, and exact
-device-bound pipeline authority. Repeated or device-side feedback, arbitrary
-unbounded launches, rank-6-and-higher domains, transport/topology, worker
-meshes, and native systems remain unimplemented.
+Gate 7 covers the closed DAG, bounded request/resource repetition and dynamic
+dispatch through rank 5, three conditional sources including one explicit
+feedback stage, and device-bound pipelines on CPU/WebGPU. Repeated/device-side
+feedback, unbounded launches, rank 6+, transport/topology, worker meshes, and
+native systems remain open.
 
 ## Purpose
 
