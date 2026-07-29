@@ -66,6 +66,10 @@ const CASE_IDS = Object.freeze([
   "f32-dynamic-dispatch-two",
   "f32-resource-dynamic-dispatch-one",
   "f32-resource-dynamic-dispatch-two",
+  "f32-aligned-dynamic-dispatch-64",
+  "f32-aligned-dynamic-dispatch-128",
+  "f32-aligned-resource-dynamic-dispatch-64",
+  "f32-aligned-resource-dynamic-dispatch-128",
   "u8-input-conditional-then",
   "u8-input-conditional-else",
   "u8-runtime-conditional-then",
@@ -211,6 +215,26 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       prepareResourceDynamicDispatchCase(
         "f32-resource-dynamic-dispatch-two",
         2,
+      ),
+      prepareAlignedDynamicDispatchCase(
+        "f32-aligned-dynamic-dispatch-64",
+        64,
+        false,
+      ),
+      prepareAlignedDynamicDispatchCase(
+        "f32-aligned-dynamic-dispatch-128",
+        128,
+        false,
+      ),
+      prepareAlignedDynamicDispatchCase(
+        "f32-aligned-resource-dynamic-dispatch-64",
+        64,
+        true,
+      ),
+      prepareAlignedDynamicDispatchCase(
+        "f32-aligned-resource-dynamic-dispatch-128",
+        128,
+        true,
       ),
       prepareConditionalRawCopyCase(
         "u8-input-conditional-then",
@@ -483,6 +507,28 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
     expect(twoResourceDynamicDispatch?.expandedStepCount).toBe(4);
     expect(oneResourceDynamicDispatch?.midGraphFeedbackCount).toBe(1);
     expect(twoResourceDynamicDispatch?.midGraphFeedbackCount).toBe(1);
+    const alignedDynamic64 = completedCases.find(({ caseId }) =>
+      caseId === "f32-aligned-dynamic-dispatch-64");
+    const alignedDynamic128 = completedCases.find(({ caseId }) =>
+      caseId === "f32-aligned-dynamic-dispatch-128");
+    expect(alignedDynamic64?.pipelineIdentityHash)
+      .toBe(alignedDynamic128?.pipelineIdentityHash);
+    expect(alignedDynamic64?.backendSpecializationHash)
+      .not.toBe(alignedDynamic128?.backendSpecializationHash);
+    expect(alignedDynamic64?.expandedStepCount).toBe(2);
+    expect(alignedDynamic128?.expandedStepCount).toBe(2);
+    const alignedResourceDynamic64 = completedCases.find(({ caseId }) =>
+      caseId === "f32-aligned-resource-dynamic-dispatch-64");
+    const alignedResourceDynamic128 = completedCases.find(({ caseId }) =>
+      caseId === "f32-aligned-resource-dynamic-dispatch-128");
+    expect(alignedResourceDynamic64?.pipelineIdentityHash)
+      .toBe(alignedResourceDynamic128?.pipelineIdentityHash);
+    expect(alignedResourceDynamic64?.backendSpecializationHash)
+      .not.toBe(alignedResourceDynamic128?.backendSpecializationHash);
+    expect(alignedResourceDynamic64?.expandedStepCount).toBe(4);
+    expect(alignedResourceDynamic128?.expandedStepCount).toBe(4);
+    expect(alignedResourceDynamic64?.midGraphFeedbackCount).toBe(1);
+    expect(alignedResourceDynamic128?.midGraphFeedbackCount).toBe(1);
 
     stage = "resource-repeat-bound-refusal";
     const resourceRepeatCase = cases.find(({ caseId }) =>
@@ -533,6 +579,49 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         path: "$.nodes.copy.launchSource",
       });
     }
+
+    stage = "aligned-dynamic-dispatch-refusal";
+    const alignedDynamicCase = cases.find(({ caseId }) =>
+      caseId === "f32-aligned-dynamic-dispatch-128");
+    if (alignedDynamicCase === undefined) {
+      throw new Error("missing aligned dynamic dispatch case");
+    }
+    await expect(runSemanticHostGraphWebGpu(
+      kernelDevice,
+      alignedDynamicCase.prepared,
+      {
+        inputs: alignedDynamicCase.inputs,
+        controls: [{
+          controlId: "prefix-elements",
+          value: wire(65),
+        }],
+      },
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
+      path: "$.nodes.copy.launchControl",
+    });
+    const alignedResourceDynamicCase = cases.find(({ caseId }) =>
+      caseId === "f32-aligned-resource-dynamic-dispatch-128");
+    if (alignedResourceDynamicCase === undefined) {
+      throw new Error("missing aligned resource dynamic dispatch case");
+    }
+    await expect(runSemanticHostGraphWebGpu(
+      kernelDevice,
+      alignedResourceDynamicCase.prepared,
+      {
+        inputs: alignedResourceDynamicCase.inputs.map((binding) => ({
+          ...binding,
+          bytes:
+            binding.resourceId === "launch-input" &&
+              binding.rank === wire(0)
+              ? u32Bytes([65])
+              : new Uint8Array(binding.bytes),
+        })),
+      },
+    )).rejects.toMatchObject({
+      code: "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
+      path: "$.nodes.copy.launchSource",
+    });
 
     stage = "non-finite-fail-stop";
     const finiteCase = cases[0] as PreparedCase;
@@ -916,6 +1005,70 @@ async function prepareResourceDynamicDispatchCase(
   });
 }
 
+async function prepareAlignedDynamicDispatchCase(
+  caseId:
+    | "f32-aligned-dynamic-dispatch-64"
+    | "f32-aligned-dynamic-dispatch-128"
+    | "f32-aligned-resource-dynamic-dispatch-64"
+    | "f32-aligned-resource-dynamic-dispatch-128",
+  elementCount: 64 | 128,
+  resourceControlled: boolean,
+): Promise<PreparedCase> {
+  const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
+    inputShape: [parseWireI64("128")],
+    axes: [0],
+    dtype: "f32",
+  });
+  const values = [
+    f32Bytes(Array.from({ length: 128 }, (_, index) => index + 0.25)),
+    f32Bytes(Array.from({ length: 128 }, (_, index) => -index - 0.5)),
+  ];
+  const graph = (await createVerifiedHostGraphArtifact(
+    resourceControlled
+      ? resourceDynamicDispatchProgram(artifacts, 128)
+      : dynamicDispatchProgram(artifacts, 128),
+    artifactOptions(artifacts),
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(
+    graph,
+    { ...artifactOptions(artifacts), workgroupSize: 64 },
+  );
+  const inputs = Object.freeze([
+    ...values.map((bytes, rank) => input(rank, bytes)),
+    ...(resourceControlled
+      ? [
+          namedInput(0, "launch-input", u32Bytes([elementCount])),
+          namedInput(1, "launch-input", u32Bytes([0])),
+        ]
+      : []),
+  ]);
+  const controls = resourceControlled
+    ? undefined
+    : Object.freeze([{
+        controlId: "prefix-elements",
+        value: wire(elementCount),
+      }]);
+  return Object.freeze({
+    caseId,
+    artifacts,
+    graph,
+    prepared,
+    inputs,
+    ...(controls === undefined ? {} : { controls }),
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: inputs.map(({ rank, resourceId, bytes }) => ({
+        rank,
+        resourceId,
+        bytes: Array.from(bytes),
+      })),
+      ...(controls === undefined ? {} : { controls }),
+    }),
+  });
+}
+
 async function prepareConditionalRawCopyCase(
   caseId: "u8-input-conditional-then" | "u8-input-conditional-else",
   predicate: 0 | 1,
@@ -1074,6 +1227,7 @@ function collectiveProgram(
 
 function dynamicDispatchProgram(
   artifacts: VerifiedViewCopyArtifacts,
+  maxElementCount = 2,
 ): HostGraphProgram {
   const staticDispatch = dispatch(artifacts);
   return {
@@ -1082,8 +1236,8 @@ function dynamicDispatchProgram(
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire(2),
     resources: [
-      resource("input", "input", "f32"),
-      resource("output", "output", "f32"),
+      resource("input", "input", "f32", maxElementCount * 4),
+      resource("output", "output", "f32", maxElementCount * 4),
     ],
     nodes: [
       {
@@ -1093,7 +1247,7 @@ function dynamicDispatchProgram(
           controlId: "prefix-elements",
           mode: "u32-prefix-element-count",
         },
-        maxElementCount: wire(2),
+        maxElementCount: wire(maxElementCount),
         mode: "runtime-u32-prefix-elements",
       },
       {
@@ -1109,8 +1263,9 @@ function dynamicDispatchProgram(
 
 function resourceDynamicDispatchProgram(
   artifacts: VerifiedViewCopyArtifacts,
+  maxElementCount = 2,
 ): HostGraphProgram {
-  const base = dynamicDispatchProgram(artifacts);
+  const base = dynamicDispatchProgram(artifacts, maxElementCount);
   return {
     ...base,
     version: { major: 1, minor: 11 },
@@ -1498,6 +1653,7 @@ function resource(
   resourceId: string,
   role: "input" | "output",
   dtype: "f32" | "i32" | "u32",
+  byteLength = 8,
 ) {
   return {
     resourceId,
@@ -1507,7 +1663,7 @@ function resource(
       ? "external-input" as const
       : "zero-fill" as const,
     dtype,
-    byteLength: wire(8),
+    byteLength: wire(byteLength),
     alignmentBytes: 4,
   };
 }

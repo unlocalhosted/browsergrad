@@ -74,7 +74,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.12.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.13.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -1848,6 +1848,11 @@ function selectConditionalExecution(
         "admitted dynamic dispatch control is outside its verified bound",
       );
     }
+    const dispatchCount = exactDynamicDispatchCount(
+      elementCount,
+      state.workgroupSize,
+      `$.nodes.${dispatch.nodeId}.launchControl`,
+    );
     for (
       let pipelineIndex = dispatch.startStepIndex;
       pipelineIndex < dispatch.startStepIndex + dispatch.stepCount;
@@ -1868,7 +1873,7 @@ function selectConditionalExecution(
       }
       selectedSteps[selectedIndex] = Object.freeze({
         ...step,
-        launch: frozenLaunch(elementCount),
+        launch: frozenLaunch(dispatchCount),
       });
     }
     dynamicCompletions.set(dispatch.nodeId, Object.freeze({
@@ -2051,7 +2056,13 @@ async function appendDispatchSteps(
   }
   const launch = launchElementCount === undefined
     ? prepared.launch
-    : frozenLaunch(selectedElementCount);
+    : frozenLaunch(
+      exactDynamicDispatchCount(
+        selectedElementCount,
+        options.workgroupSize,
+        `$.nodes.${node.nodeId}.launch`,
+      ),
+    );
   for (let rank = 0; rank < rankCount; rank += 1) {
     const sourceName = source.storageNames[rank] as string;
     const destinationName = destination.storageNames[rank] as string;
@@ -2094,17 +2105,17 @@ async function appendDynamicDispatchSteps(
   moduleHashes: string[],
   dynamicDispatches: PreparedDynamicDispatchPlan[],
 ): Promise<void> {
-  if (options.workgroupSize !== 1) {
-    fail(
-      "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
-      `$.nodes.${node.nodeId}.mode`,
-      "initial dynamic dispatch profile requires one invocation per workgroup",
-    );
-  }
   const maxElementCount = safeNumber(
     wireIntegerToBigInt(node.maxElementCount),
     `$.nodes.${node.nodeId}.maxElementCount`,
   );
+  if (maxElementCount % options.workgroupSize !== 0) {
+    fail(
+      "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
+      `$.nodes.${node.nodeId}.mode`,
+      "dynamic dispatch artifact maximum must align to the prepared workgroup size",
+    );
+  }
   const startStepIndex = steps.length;
   await appendDispatchSteps(
     node,
@@ -2402,6 +2413,21 @@ function frozenLaunch(
   return Object.freeze({
     dispatchCount: Object.freeze([elementCount, 1, 1] as const),
   });
+}
+
+function exactDynamicDispatchCount(
+  elementCount: number,
+  workgroupSize: number,
+  path: string,
+): number {
+  if (elementCount <= 0 || elementCount % workgroupSize !== 0) {
+    fail(
+      "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
+      path,
+      `dynamic dispatch element count ${elementCount} must be a positive multiple of prepared workgroup size ${workgroupSize}`,
+    );
+  }
+  return elementCount;
 }
 
 async function buildSemanticCatalog(
@@ -2799,6 +2825,11 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
         `produced resource dynamic dispatch count ${elementCount} must be between one and its artifact bound ${dispatch.maxElementCount}`,
       );
     }
+    const dispatchCount = exactDynamicDispatchCount(
+      elementCount,
+      state.workgroupSize,
+      `$.nodes.${dispatch.nodeId}.launchSource`,
+    );
     const steps = [...selectedExecution.steps];
     for (
       let offset = 0;
@@ -2821,7 +2852,7 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
       }
       steps[selectedIndex] = Object.freeze({
         ...step,
-        launch: frozenLaunch(elementCount),
+        launch: frozenLaunch(dispatchCount),
       });
     }
     const completion = Object.freeze({

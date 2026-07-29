@@ -9,6 +9,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- WebGPU host-graph backend 1.13 widens the existing version-1.9 and
+  version-1.11 dynamic-dispatch profiles to exact workgroup-aligned prefixes.
+  The artifact maximum and selected request-time or produced-resource element
+  count must both be positive multiples of the prepared workgroup size. The
+  backend launches exactly `elementCount / workgroupSize` x workgroups through
+  the same prewarmed program and pipeline slots, without an inactive-lane mask
+  or overexecution. Unaligned counts fail explicitly. Required real-device
+  evidence covers 64- and 128-element prefixes at workgroup size 64 for both
+  control sources.
 - Host-graph program version 1.11 adds one bounded
   `resource-u32-prefix-elements` dynamic dispatch. CPU and portable WebGPU read
   one ordered temporary u32 after its producer, reject zero and above-maximum

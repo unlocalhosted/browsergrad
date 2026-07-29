@@ -885,6 +885,16 @@ describe("semantic host-graph WebGPU preparation", () => {
       dynamicDispatchCount: 1,
       runtimeControlIds: ["prefix-elements"],
     });
+    const aligned = await prepareSemanticHostGraphWebGpu(
+      graph,
+      { ...artifactOptions(artifacts), workgroupSize: 2 },
+    );
+    expect(aligned).toMatchObject({
+      dynamicDispatchCount: 1,
+      expandedStepCount: 4,
+      dispatchStepCount: 4,
+      runtimeControlIds: ["prefix-elements"],
+    });
   });
 
   it("prewarms one bounded version-1.11 produced-resource dynamic dispatch", async () => {
