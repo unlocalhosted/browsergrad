@@ -1,7 +1,7 @@
 # BrowserGrad Semantic Systems Architecture and Low-Level Requirements
 
 - **Status:** normative platform architecture; implementation status is not implied
-- **Last reviewed:** 2026-07-29
+- **Last reviewed:** 2026-07-30
 - **Implementation ledger:**
   [`docs/internal/package-requirements-implementation-ledger.md`](../internal/package-requirements-implementation-ledger.md)
 - **Scope:** compiler frontends, tensor/layout semantics, kernel semantics,
@@ -13,7 +13,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
 describe requirement strength. They are used deliberately rather than as
 general emphasis.
 
-## Implementation Checkpoint — Active 2026-07-29
+## Implementation Checkpoint — Active 2026-07-30
 
 This checkpoint is informational. The rest of this document is normative, and
 the [implementation ledger](../internal/package-requirements-implementation-ledger.md)
@@ -26,7 +26,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
 | 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. |
-| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict eight-case Worker matrix, signed-source-aware authorized Artifact V3 lowering, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-clobber producer/reviewer exchange, and unified in-process backend/final-release composition are package-pinned; a real signed-stride source case, external evidence, and actual production issuance remain open. |
+| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict nine-case Worker matrix including unchanged signed-rank-2 CuTe source, signed-source-aware authorized Artifact V3 lowering, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-clobber producer/reviewer exchange, and unified in-process backend/final-release composition are package-pinned. The declared portable implementation exit now passes; externally rooted producer and distribution-review evidence plus actual production issuance remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
@@ -43,9 +43,13 @@ The 90-minute build is no longer an engineering iteration loop:
 - `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed` is the default
   compiler edit loop and routes changed files to owning tests.
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
-  exact build lock, both zero-import Worker bundles, and the strict matrix authoring
-  projection; it passes 100 files/802 tests in 16.52 seconds.
-- The complete compiler unit suite passes 106 files/1,658 tests in 12.03 seconds.
+  exact build lock, both zero-import Worker bundles, the strict matrix
+  projection, and the exact-distribution convergence projection; it passes
+  104 files/823 tests with the test phase completing in 14.72 seconds.
+- The complete compiler unit suite passes 106 files/1,660 tests in 14.50 seconds.
+- The evidence-input suite passes 19 files/177 tests in 15.87 seconds and can
+  run concurrently with the complete unit suite because neither consumes
+  artifact observations being replaced.
 - The required native boundary is one isolated prerequisite: 13 files/34 tests
   pass with nine platform skips in 78.87 seconds. Every behavioral native child
   uses the production no-shell, bounded-output, process-group termination boundary.
@@ -79,16 +83,16 @@ build/parity machinery and are not runtime dependencies. The controller:
 The package binds one exact build lock, factory, reproducible extractor, and
 zero-import verifier/compiler Worker pair. Exact evidence stays in the ledger.
 
-The package-pinned strict browser observation now records eight unchanged
+The package-pinned strict browser observation now records nine unchanged
 C++17/CuTe compilations: f32 ranks 1 through 4, positive strided-slice,
-read-only broadcast, i32 rank-2, and u32 broadcast. Every case installs the
-same five exact header packs, executes the current reproducible Wasm through
-the verifier and compiler Workers, emits one accepted Artifact V3, and prepares
-one distinct semantic view-copy candidate. The browser test now constructs its
-profile through the package-owned exact Clang 22.1.8, CUDA 12.6.3, CUTLASS
-3.7.0, libc++ 22.1.8, source-root, header-content, Worker, Wasm, and runtime-ABI
-contract; it no longer imports the synthetic test-profile fixture. The matrix
-retains producer, legal, backend, and release authority as false.
+read-only broadcast, i32 rank-2, u32 broadcast, and signed-source rank-2.
+Every case installs the same five exact header packs, executes the current
+reproducible Wasm through the verifier and compiler Workers, emits one accepted
+Artifact V3, and prepares one distinct semantic view-copy candidate. The
+browser test constructs its profile through the package-owned exact Clang
+22.1.8, CUDA 12.6.3, CUTLASS 3.7.0, libc++ 22.1.8, source-root,
+header-content, Worker, Wasm, and runtime-ABI contract. The matrix retains
+producer, legal, backend, and release authority as false.
 
 The build lock declares 24 deterministic subjects including diagnostic
 normalization plus one detached DSSE envelope across exactly 25 paths. The
@@ -118,8 +122,12 @@ The no-clobber producer/reviewer exchange accepts no private key, rebinds exact
 immutable requests and returned envelopes, and persists no reusable authority.
 Its final mode re-verifies both responses, admits package-pinned distribution
 and convergence resources, and composes backend plus release before process
-exit. The observation keeps every reusable authority and `releaseReady` false;
-only external evidence can authorize the build or header distribution.
+exit. A closed authoring boundary rederives the exact convergence resource from
+the current distribution and nine-case observation, checks canonical bounded
+input and one real non-software WebGPU device profile, and fails on any stale
+package identity. The observation keeps every reusable authority and
+`releaseReady` false; only external evidence can authorize the build or header
+distribution.
 
 Backend composition binds opaque producer, reproducibility, and convergence
 through the stable build subject, lock, Worker, output set, and matrix. Final
@@ -146,9 +154,11 @@ through 4 into canonical artifacts and derives exact affine element extrema,
 then requires the host-supplied nonnegative view offset and allocation length
 to rebase that complete range; CuTe `cosize` remains non-authoritative storage
 metadata. Focused f32 reversals converge through the shared CPU and canonical
-WGSL preparation paths. The strict real-browser source matrix still has no
-negative-stride case, so this proves Artifact V3-to-backend convergence, not
-production source compilation or producer trust.
+WGSL preparation paths. The strict real-browser matrix now compiles unchanged
+signed-rank-2 CuTe source, authorizes the resulting exact distributed payload,
+and proves bit-exact CPU/required-WebGPU convergence on Apple Metal. This
+proves the declared portable source-to-backend implementation slice, not
+externally rooted producer trust, legal approval, or production release.
 Rank 6, signed destinations, packed/16-bit/bf16/f64 storage, overlap, and
 other undeclared layouts remain explicit refusals.
 
@@ -175,8 +185,9 @@ operation uses an opaque callback.
 
 ### Remaining production blockers
 
-Gate 3 cannot become verified until the following are independently satisfied;
-exact-payload CPU/required-WebGPU convergence is no longer a blocker.
+Gate 3 cannot become verified until the following are independently satisfied.
+The portable browser-local implementation exit and exact-payload
+CPU/required-WebGPU convergence are no longer blockers.
 
 1. A package-controlled production policy admits an externally controlled key
    and an externally issued exact-build statement for the exact build subject.
@@ -187,10 +198,14 @@ exact-payload CPU/required-WebGPU convergence is no longer a blocker.
    backend/final-release authority is minted in one process. Serialized
    observations and synthetic fixtures grant no production authority.
 
-Gate 7 remains incomplete: its CPU and portable-WebGPU executors cover the closed DAG, fixed and bounded request-time repetition, three bounded conditional sources including one
-explicit produced-resource feedback stage, and exact device-bound pipeline
-authority. GPU/backend-derived loops, dynamic launches, transport/topology, worker meshes,
-and native systems remain unimplemented.
+Gate 7 remains incomplete: its CPU and portable-WebGPU executors cover the
+closed DAG, fixed and bounded request-time or produced-resource repetition,
+bounded one-dimensional and rank-2-through-rank-5 request-time or
+produced-resource dynamic dispatch, three bounded conditional sources
+including one explicit produced-resource feedback stage, and exact
+device-bound pipeline authority. Repeated or device-side feedback, arbitrary
+unbounded launches, rank-6-and-higher domains, transport/topology, worker
+meshes, and native systems remain unimplemented.
 
 ## Purpose
 
