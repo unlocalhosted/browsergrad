@@ -80,12 +80,15 @@ const PLANNED_CASE_IDS = Object.freeze([
   "u32-read-only-broadcast",
   "bool-rank2-odd-transpose",
   "i8-rank2-transpose",
+  "i8-rank2-negative-stride",
   "u8-read-only-broadcast",
   "i16-rank2-transpose",
   "u16-read-only-broadcast",
   "f16-rank2-odd-transpose",
+  "f16-rank2-negative-stride",
   "bf16-rank3-permutation",
   "f64-rank2-transpose",
+  "f64-rank2-negative-stride",
   "i64-byte-map-broadcast",
   "u64-rank3-permutation",
   "zero-extent-no-submit",
@@ -824,6 +827,23 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     packed8Words(0x00, 0x80, 0xff, 0xa5),
   );
 
+  const i8NegativeStride = await makeCase(
+    "i8-rank2-negative-stride",
+    {
+      shape: dims("2", "3"),
+      sourceLocation: add(
+        multiply(coordinate(0), indexConstant("-3")),
+        multiply(coordinate(1), indexConstant("-1")),
+      ),
+      sourceByteOffset: dimConstant("5"),
+      sourceBytes: dimConstant("8"),
+      destinationBytes: dimConstant("8"),
+      dtype: "i8",
+    },
+    { kind: "reject" },
+    packed8Words(0x00, 0x01, 0x7f, 0x80, 0xff, 0x5a, 0xa5, 0xc3),
+  );
+
   const i16Transpose = await makeCase(
     "i16-rank2-transpose",
     {
@@ -921,6 +941,23 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     ),
   );
 
+  const f16NegativeStride = await makeCase(
+    "f16-rank2-negative-stride",
+    {
+      shape: dims("2", "3"),
+      sourceLocation: add(
+        multiply(coordinate(0), indexConstant("-3")),
+        multiply(coordinate(1), indexConstant("-1")),
+      ),
+      sourceByteOffset: dimConstant("10"),
+      sourceBytes: dimConstant("12"),
+      destinationBytes: dimConstant("12"),
+      dtype: "f16",
+    },
+    { kind: "reject" },
+    packed16Words(0x0000, 0x8000, 0x3c00, 0x7c00, 0x7e01, 0xffff),
+  );
+
   const f64Transpose = await makeCase(
     "f64-rank2-transpose",
     {
@@ -962,6 +999,30 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
       0x00000000, 0x80000000,
       0xffffffff, 0xffffffff,
       0x00000001, 0x7fffffff,
+    ),
+  );
+
+  const f64NegativeStride = await makeCase(
+    "f64-rank2-negative-stride",
+    {
+      shape: dims("2", "3"),
+      sourceLocation: add(
+        multiply(coordinate(0), indexConstant("-3")),
+        multiply(coordinate(1), indexConstant("-1")),
+      ),
+      sourceByteOffset: dimConstant("40"),
+      sourceBytes: dimConstant("48"),
+      destinationBytes: dimConstant("48"),
+      dtype: "f64",
+    },
+    { kind: "reject" },
+    words(
+      0x00000000, 0x80000000,
+      0x00000001, 0x7ff00000,
+      0x00000001, 0x7ff80000,
+      0xffffffff, 0xffffffff,
+      0x89abcdef, 0x01234567,
+      0x76543210, 0xfedcba98,
     ),
   );
 
@@ -1035,12 +1096,15 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     u32Broadcast,
     boolOddTranspose,
     i8Transpose,
+    i8NegativeStride,
     u8Broadcast,
     i16Transpose,
     u16Broadcast,
     f16OddTranspose,
+    f16NegativeStride,
     bf16Rank3Permutation,
     f64Transpose,
+    f64NegativeStride,
     i64ByteMapBroadcast,
     u64Rank3Permutation,
     zero,

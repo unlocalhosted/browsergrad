@@ -23,6 +23,12 @@ export const PORTABLE_PACKED16_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.positive-affine-rank2-rank3-packed16@1";
 export const PORTABLE_WORD64_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.positive-affine-rank2-rank3-word64@1";
+export const PORTABLE_SIGNED_AFFINE_PACKED8_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.signed-affine-rank2-rank3-packed8@1";
+export const PORTABLE_SIGNED_AFFINE_PACKED16_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.signed-affine-rank2-rank3-packed16@1";
+export const PORTABLE_SIGNED_AFFINE_WORD64_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.signed-affine-rank2-rank3-word64@1";
 export const PORTABLE_SIGNED_AFFINE_RANK1_WORD32_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.signed-affine-rank1-word32@1";
 export const PORTABLE_SIGNED_AFFINE_WORD32_VIEW_COPY_PROFILE =
@@ -60,6 +66,9 @@ export interface PortableViewCopyProfile {
     | typeof PORTABLE_PACKED8_VIEW_COPY_PROFILE
     | typeof PORTABLE_PACKED16_VIEW_COPY_PROFILE
     | typeof PORTABLE_WORD64_VIEW_COPY_PROFILE
+    | typeof PORTABLE_SIGNED_AFFINE_PACKED8_VIEW_COPY_PROFILE
+    | typeof PORTABLE_SIGNED_AFFINE_PACKED16_VIEW_COPY_PROFILE
+    | typeof PORTABLE_SIGNED_AFFINE_WORD64_VIEW_COPY_PROFILE
     | typeof PORTABLE_SIGNED_AFFINE_RANK1_WORD32_VIEW_COPY_PROFILE
     | typeof PORTABLE_SIGNED_AFFINE_WORD32_VIEW_COPY_PROFILE
     | typeof PORTABLE_SIGNED_AFFINE_HIGH_RANK_WORD32_VIEW_COPY_PROFILE
@@ -149,12 +158,6 @@ export function verifyPortableViewCopyProfile(
     );
   }
   const signedCoordinateScale = sourceSignedCoordinateScale;
-  if (nonWord32 && signedCoordinateScale) {
-    unsupported(
-      "$.operation.source",
-      "portable non-word32 view-copy requires a positive-affine source",
-    );
-  }
   return Object.freeze({
     profileId: selectPortableViewCopyProfile(
       dtypeProfile,
@@ -210,13 +213,19 @@ function selectPortableViewCopyProfile(
   signedCoordinateScale: boolean,
 ): PortableViewCopyProfile["profileId"] {
   if (dtypeProfile.storageClass === "packed8") {
-    return PORTABLE_PACKED8_VIEW_COPY_PROFILE;
+    return signedCoordinateScale
+      ? PORTABLE_SIGNED_AFFINE_PACKED8_VIEW_COPY_PROFILE
+      : PORTABLE_PACKED8_VIEW_COPY_PROFILE;
   }
   if (dtypeProfile.storageClass === "packed16") {
-    return PORTABLE_PACKED16_VIEW_COPY_PROFILE;
+    return signedCoordinateScale
+      ? PORTABLE_SIGNED_AFFINE_PACKED16_VIEW_COPY_PROFILE
+      : PORTABLE_PACKED16_VIEW_COPY_PROFILE;
   }
   if (dtypeProfile.storageClass === "word64") {
-    return PORTABLE_WORD64_VIEW_COPY_PROFILE;
+    return signedCoordinateScale
+      ? PORTABLE_SIGNED_AFFINE_WORD64_VIEW_COPY_PROFILE
+      : PORTABLE_WORD64_VIEW_COPY_PROFILE;
   }
   if (signedCoordinateScale) {
     if (rank === 1) return PORTABLE_SIGNED_AFFINE_RANK1_WORD32_VIEW_COPY_PROFILE;

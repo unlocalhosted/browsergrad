@@ -602,16 +602,32 @@ describe("verified materializing view-copy", () => {
     )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
 
     const signedSource = await verifiedLayout({
-      shape: ["2", "2"],
-      sourceLocation: add(mul(c(0), k("-2")), mul(c(1), k("-1"))),
-      sourceByteOffset: "6",
-      sourceBytes: "8",
-      destinationBytes: "8",
+      shape: ["2", "3"],
+      sourceLocation: add(mul(c(0), k("-3")), mul(c(1), k("-1"))),
+      sourceByteOffset: "10",
+      sourceBytes: "12",
+      destinationBytes: "12",
       dtype: "bf16",
     });
-    expect((await diagnostic(async () =>
-      prepare(signedSource, await verifiedKernel(signedSource))
-    )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
+    const signedKernel = await verifiedKernel(signedSource);
+    const signedPlan = await prepare(signedSource, signedKernel);
+    const signedSpecialization = await prepareViewCopySpecialization(
+      signedSource,
+      signedKernel,
+      { operationId: signedPlan.operationId },
+    );
+    const signedDestination = new Uint8Array(12);
+    signedPlan.execute({
+      source: u16Bytes(input),
+      destination: signedDestination,
+    });
+    expect(signedSpecialization.portableProfile).toMatchObject({
+      profileId:
+        "browsergrad.view-copy.signed-affine-rank2-rank3-packed16@1",
+      rank: 2,
+      dtype: "bf16",
+    });
+    expect(u16Values(signedDestination)).toEqual([...input].reverse());
   });
 
   it("executes exact bool, i8, and u8 storage through one packed profile", async () => {
@@ -659,6 +675,34 @@ describe("verified materializing view-copy", () => {
         bytesWritten: "6",
       });
     }
+
+    const signedSource = await verifiedLayout({
+      shape: ["2", "3"],
+      sourceLocation: add(mul(c(0), k("-3")), mul(c(1), k("-1"))),
+      sourceByteOffset: "5",
+      sourceBytes: "6",
+      destinationBytes: "6",
+      dtype: "i8",
+    });
+    const signedKernel = await verifiedKernel(signedSource);
+    const signedPlan = await prepare(signedSource, signedKernel);
+    const signedSpecialization = await prepareViewCopySpecialization(
+      signedSource,
+      signedKernel,
+      { operationId: signedPlan.operationId },
+    );
+    const signedDestination = new Uint8Array(6);
+    signedPlan.execute({
+      source: Uint8Array.from(input),
+      destination: signedDestination,
+    });
+    expect(signedSpecialization.portableProfile).toMatchObject({
+      profileId:
+        "browsergrad.view-copy.signed-affine-rank2-rank3-packed8@1",
+      rank: 2,
+      dtype: "i8",
+    });
+    expect(Array.from(signedDestination)).toEqual([...input].reverse());
   });
 
   it("executes exact f64, i64, and u64 storage through one word64 profile", async () => {
@@ -713,16 +757,37 @@ describe("verified materializing view-copy", () => {
     }
 
     const signedSource = await verifiedLayout({
-      shape: ["2", "2"],
-      sourceLocation: add(mul(c(0), k("-2")), mul(c(1), k("-1"))),
-      sourceByteOffset: "24",
-      sourceBytes: "32",
-      destinationBytes: "32",
+      shape: ["2", "3"],
+      sourceLocation: add(mul(c(0), k("-3")), mul(c(1), k("-1"))),
+      sourceByteOffset: "40",
+      sourceBytes: "48",
+      destinationBytes: "48",
       dtype: "f64",
     });
-    expect((await diagnostic(async () =>
-      prepare(signedSource, await verifiedKernel(signedSource))
-    )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
+    const signedKernel = await verifiedKernel(signedSource);
+    const signedPlan = await prepare(signedSource, signedKernel);
+    const signedSpecialization = await prepareViewCopySpecialization(
+      signedSource,
+      signedKernel,
+      { operationId: signedPlan.operationId },
+    );
+    const signedDestination = new Uint8Array(48);
+    signedPlan.execute({
+      source: u32Bytes(inputWords),
+      destination: signedDestination,
+    });
+    expect(signedSpecialization.portableProfile).toMatchObject({
+      profileId:
+        "browsergrad.view-copy.signed-affine-rank2-rank3-word64@1",
+      rank: 2,
+      dtype: "f64",
+    });
+    expect(u32Values(signedDestination)).toEqual(
+      Array.from({ length: 6 }, (_, index) => 5 - index).flatMap((index) => [
+        inputWords[index * 2] as number,
+        inputWords[(index * 2) + 1] as number,
+      ]),
+    );
   });
 
   it("guards padded reads and preserves exact f32 fill bits", async () => {

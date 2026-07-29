@@ -467,7 +467,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.packed16@1",
       );
-      expect(prepared.backendVersion).toBe("2.9.0");
+      expect(prepared.backendVersion).toBe("3.0.0");
       expect(prepared.launch.dispatchCount).toEqual([5, 1, 1]);
       expect(prepared.program.wgsl).toContain(
         "fn copy_packed_element(linear_index: u32)",
@@ -545,7 +545,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.packed8@1",
       );
-      expect(prepared.backendVersion).toBe("2.9.0");
+      expect(prepared.backendVersion).toBe("3.0.0");
       expect(prepared.launch.dispatchCount).toEqual([3, 1, 1]);
       expect(prepared.program.wgsl).toContain(
         "let first_element_index: u32 = global_id.x * 4u;",
@@ -586,7 +586,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.word64@1",
       );
-      expect(prepared.backendVersion).toBe("2.9.0");
+      expect(prepared.backendVersion).toBe("3.0.0");
       expect(prepared.launch.dispatchCount).toEqual([6, 1, 1]);
       expect(prepared.program.wgsl).toContain(
         "destination_words[destination_word] = source_words[source_word];",
@@ -618,6 +618,73 @@ describe("semantic view-copy WGSL lowering", () => {
       code: "BG-WEBGPU-VIEW-COPY-UNSUPPORTED-PROFILE",
       path: "$.launchMode",
     });
+  });
+
+  it("lowers signed-affine packed8, packed16, and word64 source addresses", async () => {
+    const cases = [
+      {
+        dtype: "i8" as const,
+        sourceByteOffset: constant("5"),
+        sourceBytes: constant("8"),
+        destinationBytes: constant("8"),
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank2-rank3-packed8@1",
+        backendProfile: "browsergrad.webgpu.view-copy.packed8@1",
+        addressScale: "* 1i",
+      },
+      {
+        dtype: "bf16" as const,
+        sourceByteOffset: constant("10"),
+        sourceBytes: constant("12"),
+        destinationBytes: constant("12"),
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank2-rank3-packed16@1",
+        backendProfile: "browsergrad.webgpu.view-copy.packed16@1",
+        addressScale: "* 2i",
+      },
+      {
+        dtype: "f64" as const,
+        sourceByteOffset: constant("40"),
+        sourceBytes: constant("48"),
+        destinationBytes: constant("48"),
+        profileId:
+          "browsergrad.view-copy.signed-affine-rank2-rank3-word64@1",
+        backendProfile: "browsergrad.webgpu.view-copy.word64@1",
+        addressScale: "* 8i",
+      },
+    ];
+    for (const testCase of cases) {
+      const shape = [constant("2"), constant("3")] as const;
+      const layout = await verifiedLayout({
+        shape,
+        sourceLocation: add(
+          multiply(coordinate(0), constant("-3")),
+          multiply(coordinate(1), constant("-1")),
+        ),
+        sourceByteOffset: testCase.sourceByteOffset,
+        sourceBytes: testCase.sourceBytes,
+        destinationBytes: testCase.destinationBytes,
+        dtype: testCase.dtype,
+      });
+      const prepared = await prepare(layout, await verifiedKernel(layout));
+
+      expect(prepared.semantic.portableProfile).toMatchObject({
+        profileId: testCase.profileId,
+        rank: 2,
+        dtype: testCase.dtype,
+      });
+      expect(prepared.backendProfile).toBe(testCase.backendProfile);
+      expect(prepared.backendVersion).toBe("3.0.0");
+      expect(prepared.sourceLocationRange).toEqual({
+        minimum: -5n,
+        maximum: 0n,
+      });
+      expect(prepared.program.wgsl).toContain("* -");
+      expect(prepared.program.wgsl).toContain(testCase.addressScale);
+      expect(prepared.program.wgsl).toContain(
+        "u32(source_byte_address / 4i)",
+      );
+    }
   });
 
   it("keeps signed padding arithmetic and exact fill bits inside a structured guard", async () => {

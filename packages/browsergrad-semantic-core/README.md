@@ -59,9 +59,12 @@ The separate
 `browsergrad.view-copy.positive-affine-rank2-rank3-packed16@1` profile
 identities preserve raw bool/i8/u8 and i16/u16/f16/bf16 storage bits. The
 separate `browsergrad.view-copy.positive-affine-rank2-rank3-word64@1` identity
-preserves raw f64/i64/u64 storage as two u32 words per element. These profiles
-do not claim boolean canonicalization, arithmetic, conversion, `shader-f16`,
-or native shader f64 support.
+preserves raw f64/i64/u64 storage as two u32 words per element. Separate
+`signed-affine-rank2-rank3` identities for packed8, packed16, and word64 admit
+negative coordinate scales in the source while retaining the same proved
+nonnegative rebased addresses, dense positive-affine destination, and exact
+raw-storage schedules. These profiles do not claim boolean canonicalization,
+arithmetic, conversion, `shader-f16`, or native shader f64 support.
 
 `/kernel` also defines one frontend-neutral logical GEMM tile with exact dense
 f32 operand/view roles, boundary policy, increasing-K accumulation order, and
