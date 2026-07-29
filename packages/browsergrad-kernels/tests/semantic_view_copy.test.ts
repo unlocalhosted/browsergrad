@@ -429,7 +429,7 @@ describe("semantic view-copy WGSL lowering", () => {
     expect(bytePrepared.program.wgsl).toContain("/ 4i");
   });
 
-  it("lowers exact rank-1 and rank-4 coordinates without changing rank-2/rank-3 WGSL", async () => {
+  it("lowers exact rank-1, rank-4, and rank-5 coordinates without changing rank-2/rank-3 WGSL", async () => {
     const rank1Shape = [constant("4")] as const;
     const rank1 = await verifiedLayout({
       shape: rank1Shape,
@@ -475,6 +475,37 @@ describe("semantic view-copy WGSL lowering", () => {
       "let coordinate_3: i32 = i32(inner_remainder % 2u);",
     );
     expect(rank4Prepared.launch.dispatchCount).toEqual([16, 1, 1]);
+
+    const rank5Shape = [
+      constant("2"),
+      constant("2"),
+      constant("2"),
+      constant("2"),
+      constant("2"),
+    ] as const;
+    const rank5 = await verifiedLayout({
+      shape: rank5Shape,
+      sourceLocation: add(
+        coordinate(0),
+        multiply(coordinate(1), constant("2")),
+        multiply(coordinate(2), constant("4")),
+        multiply(coordinate(3), constant("8")),
+        multiply(coordinate(4), constant("16")),
+      ),
+      sourceBytes: constant("128"),
+      destinationBytes: constant("128"),
+    });
+    const rank5Prepared = await prepare(rank5, await verifiedKernel(rank5));
+    expect(rank5Prepared.semantic.portableProfile).toMatchObject({
+      profileId:
+        "browsergrad.view-copy.positive-affine-rank5-word32@1",
+      rank: 5,
+      dtype: "f32",
+    });
+    expect(rank5Prepared.program.wgsl).toContain(
+      "let coordinate_4: i32 = i32(rank5_remainder_2 % 2u);",
+    );
+    expect(rank5Prepared.launch.dispatchCount).toEqual([32, 1, 1]);
   });
 
   it("derives binding-sensitive modules and rejects i32 or source-size overflow", async () => {

@@ -37,11 +37,13 @@ preservation. Static definitions contain no support state or evidence outcome.
 `/kernel` currently contains one concrete `browsergrad.kernel@1` operation: a
 verified, materializing view copy over a verified `browsergrad.layout@1`
 artifact. The portable execution profiles admit same-dtype f32, i32, or u32
-rank 1 through rank 4 global-memory views with explicit source-read and
+rank 1 through rank 5 global-memory views with explicit source-read and
 destination-write effects and disjoint alias sets. Float profiles admit reject
 or exact-bit fill behavior for invalid source coordinates; integer profiles
 require rejection. Generic operation verification is separate from these
-lowering profiles.
+lowering profiles. Rank 5 uses the distinct
+`browsergrad.view-copy.positive-affine-rank5-word32@1` profile so the existing
+rank-1-through-rank-4 identities retain their exact meaning.
 
 `/kernel` also defines one frontend-neutral logical GEMM tile with exact dense
 f32 operand/view roles, boundary policy, increasing-K accumulation order, and

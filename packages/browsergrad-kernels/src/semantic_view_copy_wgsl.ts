@@ -365,7 +365,35 @@ function emitCoordinates(shape: readonly bigint[]): readonly string[] {
       `  let coordinate_3: i32 = i32(inner_remainder % ${fourth}u);`,
     ];
   }
-  return unsupported("$.shape", "WGSL view-copy supports ranks in [1, 4] only");
+  if (shape.length === 5) {
+    const second = asU32(shape[1] as bigint, "$.shape[1]");
+    const third = asU32(shape[2] as bigint, "$.shape[2]");
+    const fourth = asU32(shape[3] as bigint, "$.shape[3]");
+    const fifth = asU32(shape[4] as bigint, "$.shape[4]");
+    const stride2 = asU32(
+      BigInt(fourth) * BigInt(fifth),
+      "$.shape[3:5]",
+    );
+    const stride1 = asU32(
+      BigInt(third) * BigInt(stride2),
+      "$.shape[2:5]",
+    );
+    const stride0 = asU32(
+      BigInt(second) * BigInt(stride1),
+      "$.shape[1:5]",
+    );
+    return [
+      `  let coordinate_0: i32 = i32(linear_index / ${stride0}u);`,
+      `  let rank5_remainder_0: u32 = linear_index % ${stride0}u;`,
+      `  let coordinate_1: i32 = i32(rank5_remainder_0 / ${stride1}u);`,
+      `  let rank5_remainder_1: u32 = rank5_remainder_0 % ${stride1}u;`,
+      `  let coordinate_2: i32 = i32(rank5_remainder_1 / ${stride2}u);`,
+      `  let rank5_remainder_2: u32 = rank5_remainder_1 % ${stride2}u;`,
+      `  let coordinate_3: i32 = i32(rank5_remainder_2 / ${fifth}u);`,
+      `  let coordinate_4: i32 = i32(rank5_remainder_2 % ${fifth}u);`,
+    ];
+  }
+  return unsupported("$.shape", "WGSL view-copy supports ranks in [1, 5] only");
 }
 
 function requiredIndexMap(layout: LayoutArtifactPayloadV1, indexMapId: string, role: string): IndexMap {

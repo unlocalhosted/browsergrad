@@ -9,6 +9,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Add the distinct
+  `browsergrad.view-copy.positive-affine-rank5-word32@1` portable profile for
+  exact same-dtype f32/i32/u32 positive-affine global-memory view copies.
+  Existing rank-1-through-rank-4 profile identities remain unchanged. The CPU
+  oracle executes exact rank-5 permutations and rectangular prefixes; rank 6
+  remains an explicit refusal.
 - Explicit `/graph` export with the closed `browsergrad.host-graph@1`
   multi-dispatch DAG profile. Per-rank resources bind exact dtype, resolved
   allocation bytes, alignment, lifetime role, and deterministic initialization:

@@ -9,6 +9,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Semantic view-copy WebGPU backend 2.1 adds exact mixed-radix rank-5
+  coordinate lowering for the new distinct semantic-core rank-5 word32
+  profile. Required real-device evidence expands to 14 complete CPU/WebGPU
+  parity cases while preserving the existing rank-1-through-rank-4 profile
+  identities and WGSL coordinate paths.
 - Host-graph program version 1.15 and WebGPU backend 1.18 extend the existing
   produced-resource rectangular dispatch to rank 4. Four ordered rank-local
   temporary u32 values are read through one resident-buffer feedback stage,

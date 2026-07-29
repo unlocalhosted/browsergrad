@@ -680,14 +680,16 @@ proved. These are lowering decisions, not restrictions of the L1 or L2 model.
 
 Follow-on portable profiles preserve that operation meaning while admitting
 same-dtype `i32` and `u32` exact-word copies plus equal source/destination ranks
-1 through 4. Rank-2/rank-3 f32 retains
+1 through 5. Rank-2/rank-3 f32 retains
 `browsergrad.view-copy.positive-affine-f32@1`; rank-2/rank-3 integer storage
 uses `browsergrad.view-copy.positive-affine-word32@1`; rank-1/rank-4 32-bit
 storage uses
-`browsergrad.view-copy.positive-affine-rank1-rank4-word32@1`. Integer profiles
+`browsergrad.view-copy.positive-affine-rank1-rank4-word32@1`; rank-5 storage
+uses the distinct
+`browsergrad.view-copy.positive-affine-rank5-word32@1`. Integer profiles
 require `reject` for an invalid source coordinate, while f32 may use an exact
-fill bit pattern. These profiles do not admit signed/negative strides, 16-bit
-packed storage, bf16, f64, overlap, or a non-global memory space.
+fill bit pattern. These profiles do not admit rank 6, signed/negative strides,
+16-bit packed storage, bf16, f64, overlap, or a non-global memory space.
 
 CPU reference and WGSL lowering consume the same verified normalized
 expressions or a specialization accompanied by a differential proof against
@@ -2034,11 +2036,20 @@ across TypeScript and Python.
 - Make the conformance lane require a WebGPU adapter/device and fail on skips.
   Evidence records the artifact hash, input hash, comparison policy, adapter,
   features, limits, and environment failure when execution is unavailable.
+- Extend portable positive-affine word32 execution to rank 5 under a distinct
+  profile identity, preserving all rank-1-through-rank-4 identities. CPU and
+  canonical WGSL use the same mixed-radix row-major coordinates. The required
+  14-case Apple Metal 3 lane records correctness artifact
+  `50afa87acf5f404a3f6b5c515349a426237c2425ad36d15599e5693cfb4d5a41`
+  and device profile
+  `9589abc8fafb412d83194febaf210f7f89da7a580bf20d3272e1eef9dcda2f66`.
 
 **Exit:** two frontend paths and two execution tiers consume the same view/index
 fixtures; reference and WebGPU do not reconstruct offsets independently;
 transpose, strided slice, broadcast, and padded rank-2/3 cases pass without
 widening the frozen tensor-plan schema or treating device absence as success.
+The separately named rank-5 portable profile also passes complete CPU/WebGPU
+parity without reinterpreting an older profile.
 
 ### Gate 3 — Real C++/CuTe frontend slice
 

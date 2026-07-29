@@ -285,7 +285,7 @@ describe("verified materializing view-copy", () => {
     }
   });
 
-  it("executes exact rank-2 through rank-4 rectangular prefixes", async () => {
+  it("executes exact rank-2 through rank-5 rectangular prefixes", async () => {
     const cases = [
       {
         shape: ["3", "4"] as const,
@@ -301,6 +301,11 @@ describe("verified materializing view-copy", () => {
         shape: ["2", "2", "3", "4"] as const,
         extents: [1n, 2n, 2n, 3n] as const,
         expectedIndexes: [0, 1, 2, 4, 5, 6, 12, 13, 14, 16, 17, 18],
+      },
+      {
+        shape: ["2", "2", "2", "3", "4"] as const,
+        extents: [1n, 2n, 1n, 2n, 3n] as const,
+        expectedIndexes: [0, 1, 2, 4, 5, 6, 24, 25, 26, 28, 29, 30],
       },
     ];
     for (const testCase of cases) {
@@ -424,6 +429,48 @@ describe("verified materializing view-copy", () => {
     }
   });
 
+  it("executes rank-5 positive-affine views under a distinct portable profile", async () => {
+    const shape = ["2", "2", "2", "2", "2"] as const;
+    const layout = await verifiedLayout({
+      shape,
+      sourceLocation: add(
+        c(0),
+        mul(c(1), k("2")),
+        mul(c(2), k("4")),
+        mul(c(3), k("8")),
+        mul(c(4), k("16")),
+      ),
+      sourceBytes: "128",
+      destinationBytes: "128",
+    });
+    const kernel = await verifiedKernel(layout);
+    const plan = await prepare(layout, kernel);
+    const specialization = await prepareViewCopySpecialization(
+      layout,
+      kernel,
+      { operationId: plan.operationId },
+    );
+    const input = Array.from({ length: 32 }, (_, index) => index + 1);
+    const destination = new Uint8Array(128);
+    plan.execute({ source: f32Bytes(input), destination });
+
+    expect(specialization.portableProfile).toMatchObject({
+      profileId:
+        "browsergrad.view-copy.positive-affine-rank5-word32@1",
+      rank: 5,
+      dtype: "f32",
+    });
+    expect(f32Values(destination)).toEqual(
+      Array.from({ length: 32 }, (_, index) => {
+        let reversed = 0;
+        for (let bit = 0; bit < 5; bit += 1) {
+          reversed |= ((index >> bit) & 1) << (4 - bit);
+        }
+        return input[reversed] as number;
+      }),
+    );
+  });
+
   it("guards padded reads and preserves exact f32 fill bits", async () => {
     const predicate: PredicateExpr = {
       kind: "and",
@@ -536,14 +583,14 @@ describe("verified materializing view-copy", () => {
     });
     expect((await diagnostic(() => verifiedKernel(aliasedLayout))).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.aliasConflict);
 
-    const rankFive = await verifiedLayout({
-      shape: ["1", "1", "1", "1", "1"],
-      sourceLocation: rowMajorLocation(["1", "1", "1", "1", "1"]),
+    const rankSix = await verifiedLayout({
+      shape: ["1", "1", "1", "1", "1", "1"],
+      sourceLocation: rowMajorLocation(["1", "1", "1", "1", "1", "1"]),
       sourceBytes: "4",
       destinationBytes: "4",
     });
     expect((await diagnostic(async () =>
-      prepare(rankFive, await verifiedKernel(rankFive))
+      prepare(rankSix, await verifiedKernel(rankSix))
     )).diagnostic.code).toBe(KERNEL_DIAGNOSTIC_CODES.unsupportedProfile);
 
     const hostSource = await verifiedLayout({

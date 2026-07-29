@@ -11,6 +11,8 @@ export const PORTABLE_WORD32_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.positive-affine-word32@1";
 export const PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE =
   "browsergrad.view-copy.positive-affine-rank1-rank4-word32@1";
+export const PORTABLE_RANK5_WORD32_VIEW_COPY_PROFILE =
+  "browsergrad.view-copy.positive-affine-rank5-word32@1";
 
 export type PortableViewCopyDType = "f32" | "i32" | "u32";
 
@@ -18,8 +20,9 @@ export interface PortableViewCopyProfile {
   readonly profileId:
     | typeof PORTABLE_F32_VIEW_COPY_PROFILE
     | typeof PORTABLE_WORD32_VIEW_COPY_PROFILE
-    | typeof PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE;
-  readonly rank: 1 | 2 | 3 | 4;
+    | typeof PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE
+    | typeof PORTABLE_RANK5_WORD32_VIEW_COPY_PROFILE;
+  readonly rank: 1 | 2 | 3 | 4 | 5;
   readonly dtype: PortableViewCopyDType;
 }
 
@@ -49,11 +52,11 @@ export function verifyPortableViewCopyProfile(
     );
   }
   const rank = source.logicalShape.length;
-  if ((rank < 1 || rank > 4) ||
+  if ((rank < 1 || rank > 5) ||
       destination.logicalShape.length !== rank) {
     unsupported(
       "$.operation",
-      "portable view-copy requires equal source and destination ranks in [1, 4]",
+      "portable view-copy requires equal source and destination ranks in [1, 5]",
     );
   }
   if (source.memorySpace.kind !== "global" || destination.memorySpace.kind !== "global") {
@@ -73,12 +76,14 @@ export function verifyPortableViewCopyProfile(
   requirePositiveAffine(destinationMap.location, symbolMinima, "$.operation.destination.indexMap.location");
   requirePortablePredicate(destinationMap.inBounds, symbolMinima, "$.operation.destination.indexMap.inBounds");
   return Object.freeze({
-    profileId: rank === 1 || rank === 4
-      ? PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE
-      : operation.dtype === "f32"
-        ? PORTABLE_F32_VIEW_COPY_PROFILE
-        : PORTABLE_WORD32_VIEW_COPY_PROFILE,
-    rank: rank as 1 | 2 | 3 | 4,
+    profileId: rank === 5
+      ? PORTABLE_RANK5_WORD32_VIEW_COPY_PROFILE
+      : rank === 1 || rank === 4
+        ? PORTABLE_EDGE_RANK_WORD32_VIEW_COPY_PROFILE
+        : operation.dtype === "f32"
+          ? PORTABLE_F32_VIEW_COPY_PROFILE
+          : PORTABLE_WORD32_VIEW_COPY_PROFILE,
+    rank: rank as 1 | 2 | 3 | 4 | 5,
     dtype: operation.dtype,
   });
 }

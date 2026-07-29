@@ -58,6 +58,7 @@ const PLANNED_CASE_IDS = Object.freeze([
   "rank3-permutation",
   "rank1-positive-stride",
   "rank4-permutation",
+  "rank5-permutation",
   "positive-strided-slice",
   "read-only-broadcast",
   "byte-map-nonzero-offsets",
@@ -397,6 +398,24 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     sequenceWords(16, 0x41000000),
   );
 
+  const rank5Permutation = await makeCase(
+    "rank5-permutation",
+    {
+      shape: dims("2", "2", "2", "2", "2"),
+      sourceLocation: add(
+        coordinate(0),
+        multiply(coordinate(1), indexConstant("2")),
+        multiply(coordinate(2), indexConstant("4")),
+        multiply(coordinate(3), indexConstant("8")),
+        multiply(coordinate(4), indexConstant("16")),
+      ),
+      sourceBytes: dimConstant("128"),
+      destinationBytes: dimConstant("128"),
+    },
+    { kind: "reject" },
+    sequenceWords(32, 0x41800000),
+  );
+
   const sliceShape = dims("2", "2");
   const stridedSlice = await makeCase(
     "positive-strided-slice",
@@ -546,6 +565,7 @@ async function createEvidenceCases(): Promise<readonly EvidenceCase[]> {
     rank3Permutation,
     rank1PositiveStride,
     rank4Permutation,
+    rank5Permutation,
     stridedSlice,
     broadcast,
     byteOffsets,
