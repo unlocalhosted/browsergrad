@@ -137,7 +137,7 @@ describe("host archive normalization", () => {
 
       expect(environment).toMatchObject({
         authority: "package-pinned-archive-normalization-environment",
-        executableSha256: "2806c6e01f077f360f4046e597ef1a62d96c772eb937b5c35852ad97c9d0a625",
+        executableSha256: "bc069dd7ef2ecea4c27ff9daa97f4ba4c5a1a41938bad8050e96bce5daa64346",
         nodeZstdRuntime: {
           runtimeVersion: "v25.9.0",
           executableSha256: "4b3fe8b384e30ee917e28a9f5b79a3ca64b72b13b70d9ab2273e6e9a823f4cbf",

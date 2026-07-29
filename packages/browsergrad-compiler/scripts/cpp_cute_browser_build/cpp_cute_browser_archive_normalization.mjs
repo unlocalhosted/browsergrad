@@ -47,9 +47,9 @@ const PINNED_BSDTAR = Object.freeze({
   platform: "darwin",
   architecture: "arm64",
   executablePath: "/usr/bin/bsdtar",
-  executableSha256: "2806c6e01f077f360f4046e597ef1a62d96c772eb937b5c35852ad97c9d0a625",
-  executableByteLength: "195680",
-  observedVersion: "bsdtar 3.5.3 - libarchive 3.5.3 zlib/1.2.12 liblzma/5.4.3 bz2lib/1.0.8",
+  executableSha256: "bc069dd7ef2ecea4c27ff9daa97f4ba4c5a1a41938bad8050e96bce5daa64346",
+  executableByteLength: "274448",
+  observedVersion: "bsdtar 3.5.3 - libarchive 3.7.4 zlib/1.2.12 liblzma/5.4.3 bz2lib/1.0.8",
 });
 const PINNED_NODE_ZSTD_RUNTIME = Object.freeze({
   platform: "darwin",
