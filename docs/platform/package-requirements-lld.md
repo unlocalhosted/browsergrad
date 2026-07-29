@@ -25,7 +25,7 @@ owns detailed chronology, decisions, failures, and evidence identities.
 | --- | --- | --- |
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
-| 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. Additive exact-storage profiles cover f32/i32/u32 word32 ranks 1–7 plus bool/i8/u8 packed8, i16/u16/f16/bf16 packed16, and f64/i64/u64 word64 ranks 1–4; every width admits separately identified signed-affine source maps without conflating storage copy with value semantics or arithmetic support. |
+| 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. Additive exact-storage profiles cover f32/i32/u32 word32 ranks 1–7 plus bool/i8/u8 packed8, i16/u16/f16/bf16 packed16, and f64/i64/u64 word64 ranks 1–5; every width admits separately identified signed-affine source maps without conflating storage copy with value semantics or arithmetic support. |
 | 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict nine-case Worker matrix including unchanged signed-rank-2 CuTe source, signed-source-aware authorized Artifact V3 lowering, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-clobber producer/reviewer exchange, and unified in-process backend/final-release composition are package-pinned. The declared portable implementation exit now passes; externally rooted producer and distribution-review evidence plus actual production issuance remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
@@ -134,10 +134,10 @@ allocations, nonzero offsets, broadcast, guarded float fill, and:
 - distinct signed-affine rank-1, rank-2/rank-3, rank-4/rank-5, rank-6, and rank-7 source
   profiles with a positive-affine dense destination.
 
-The rank-1-through-rank-4 non-word32 profiles preserve exact bool/i8/u8,
+The rank-1-through-rank-5 non-word32 profiles preserve exact bool/i8/u8,
 i16/u16/f16/bf16, and f64/i64/u64 storage through static raw-u32 schedules.
 Separate signed-affine source identities reuse the same complete byte-address proof and positive-affine dense
-destination. They grant no value semantics, arithmetic, conversion, or native 64-bit WGSL claim; Apple Metal 3 backend-3.2 evidence passes 49 complete CPU/WebGPU cases.
+destination. They grant no value semantics, arithmetic, conversion, or native 64-bit WGSL claim; Apple Metal 3 backend-3.3 evidence passes 55 complete CPU/WebGPU cases.
 The authorized C++/CuTe transition carries signed source strides at ranks 1
 through 4 into canonical artifacts and derives exact affine element extrema,
 then requires the host-supplied nonnegative view offset and allocation length
@@ -740,6 +740,10 @@ The distinct positive-affine and signed-affine rank-4 packed8 and packed16
 profiles apply those same rules to four-dimensional views without widening the
 rank-1 or rank-2/rank-3 identities.
 
+The distinct positive-affine and signed-affine rank-5 packed8 and packed16
+profiles apply those same rules to five-dimensional views without widening any
+lower-rank identities.
+
 The additive
 `browsergrad.view-copy.positive-affine-rank2-rank3-word64@1` profile admits
 same-dtype f64/i64/u64 exact storage copies at ranks 2 and 3. The separately
@@ -759,6 +763,10 @@ one-dimensional views without widening the rank-2/rank-3 word64 identities.
 The distinct positive-affine and signed-affine rank-4 word64 profiles apply
 that same schedule and proof to four-dimensional views without widening the
 rank-1 or rank-2/rank-3 word64 identities.
+
+The distinct positive-affine and signed-affine rank-5 word64 profiles apply
+that same schedule and proof to five-dimensional views without widening any
+lower-rank word64 identities.
 
 CPU reference and WGSL lowering consume the same verified normalized
 expressions or a specialization accompanied by a differential proof against
@@ -819,6 +827,9 @@ to the separately named positive-affine and signed-affine rank-1 packed8,
 packed16, and word64 profiles.
 Backend 3.2.0 applies those schedules and the shared rank-4 coordinate lowerer
 to separately named positive-affine and signed-affine rank-4 packed8, packed16,
+and word64 profiles.
+Backend 3.3.0 applies those schedules and the shared rank-5 coordinate lowerer
+to separately named positive-affine and signed-affine rank-5 packed8, packed16,
 and word64 profiles.
 
 ### Logical tiles versus physical schedules
@@ -2232,6 +2243,14 @@ across TypeScript and Python.
   `2a4ae1c056851af475fd7f1459b19ff68027bcb6984f66863c91e45edb385497`,
   and device profile
   `9589abc8fafb412d83194febaf210f7f89da7a580bf20d3272e1eef9dcda2f66`.
+- Add distinct positive-affine and signed-affine rank-5 packed8, packed16, and
+  word64 profiles while preserving every lower-rank identity. The required
+  55-case Apple Metal 3 lane records correctness artifact
+  `02fa8e42c657364383b624fc87a0d7b7f2a3618a8fc3421689b145c4aeab14b2`,
+  case set
+  `28e2c5e5cae79ff525606c5c8edcd702b6f26084015f55ef4e75c21f7288d48d`,
+  and device profile
+  `9589abc8fafb412d83194febaf210f7f89da7a580bf20d3272e1eef9dcda2f66`.
 
 **Exit:** two frontend paths and two execution tiers consume the same view/index
 fixtures; reference and WebGPU do not reconstruct offsets independently;
@@ -2244,7 +2263,7 @@ signed-affine profiles prove exact negative source strides at ranks 2 through
 rank-1 signed profile completes that source capability across ranks 1 through
 5. Later additive rank-6/rank-7 word32 profiles retain the same rule. The
 packed8, packed16, and word64 profiles separately prove raw non-word32 storage
-preservation at ranks 1 through 4, including signed-affine source addressing,
+preservation at ranks 1 through 5, including signed-affine source addressing,
 without claiming value semantics, arithmetic support, signed destinations, or
 widening an older rank or word32 identity.
 

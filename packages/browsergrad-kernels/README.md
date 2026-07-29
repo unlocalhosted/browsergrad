@@ -30,7 +30,7 @@ PyTorch-shaped surface.
 | `defineKernel1DProgram` / `runKernel1DProgramReference` / `emitKernel1DProgramWgsl` / `runKernel1DProgramWebGpu` | BrowserGrad-owned 1D kernel IR with reference executor, WGSL lowering, and browser WebGPU dispatch | ✅ |
 | `runThreadGrid`, `referenceSaxpy`, `referenceExclusiveScan`, `referenceFindRepeats`, `referenceOrderedCircleRender` | Thread-grid teaching references for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
 | `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` / `simulateCuda1DGrid` | CUDA-shaped compatibility aliases for labs and rubrics that teach CUDA vocabulary | ✅ |
-| `prepareSemanticViewCopyWgsl` / `runSemanticViewCopyWebGpu` | Verified `view-copy@1.0` lowering over canonical layout/index artifacts, with exact raw 8-bit/16-bit/32-bit/64-bit storage and structured guarded padding | ✅ 49-case strict CPU/WebGPU parity on Apple Metal 3 across f32/i32/u32 ranks 1–7 and bool/i8/u8, i16/u16/f16/bf16, and f64/i64/u64 ranks 1–4, with negative source strides for every storage width, guarded negative predicates, broadcast, offsets, packed tails, and float padding; release evidence remains commit-scoped |
+| `prepareSemanticViewCopyWgsl` / `runSemanticViewCopyWebGpu` | Verified `view-copy@1.0` lowering over canonical layout/index artifacts, with exact raw 8-bit/16-bit/32-bit/64-bit storage and structured guarded padding | ✅ 55-case strict CPU/WebGPU parity on Apple Metal 3 across f32/i32/u32 ranks 1–7 and bool/i8/u8, i16/u16/f16/bf16, and f64/i64/u64 ranks 1–5, with negative source strides for every storage width, guarded negative predicates, broadcast, offsets, packed tails, and float padding; release evidence remains commit-scoped |
 | `prepareSemanticHostGraphWebGpu` / `prepareSemanticHostGraphWebGpuPipeline` / `runSemanticHostGraphWebGpuPipeline` | Authority-bound `browsergrad.host-graph@1` execution with a separately prepared exact device-bound pipeline authority, per-rank private storage, canonical view-copy dispatches, whole-allocation raw copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch, rank-2-through-rank-7 request-time or produced-resource rectangular prefix dispatch, captured-input, runtime-control, and one produced-resource u32 conditional, terminal materialization, and ordered f32/i32/u32 all-reduce | ✅ required real-WebGPU complete-output bit parity with the CPU graph oracle for finite f32 sum/signed-zero min, wrapping i32 sum, exact u32 max, event-marked/materialized u8 allocation copy, fixed plus zero/two-iteration request-time and produced-resource f32 repetition, 1/2-, aligned 64/128-, and unaligned 65/127-element workgroup-64 request-time and produced-resource linear launch, small/full request-time and produced-resource rank-2-through-rank-7 rectangular launch, and both branches of all three conditional sources through prewarmed pipeline authority, plus a separate observational fixed-repeat/unrolled authority-reuse record; repeated/device-side feedback, rank-8-and-higher dynamic domains, transport, and native companions remain separate |
 | `prepareSemanticGemmWgsl` / `runSemanticGemmWebGpu` | Verified logical GEMM plus independent schedule lowering with cooperative workgroup staging, uniform barriers, and masked boundary tiles | ✅ bit-exact only for semantic-core certified exact f32 inputs; required irregular two-schedule WebGPU evidence |
 | `prepareSemanticAttentionWgsl` / `runSemanticAttentionWebGpu` | Verified attention plus independent online K/V-tile schedule lowering/execution with cooperative staging, uniform barriers, and causal/tail masks before state updates | ✅ required causal/non-causal two-schedule CPU/WebGPU comparison plus separate observational host-API performance record on Apple Metal 3 |
@@ -166,7 +166,7 @@ coverage through rank 7. All retain a dense positive-affine destination and
 the same exact address proof.
 
 The separately named positive and signed-affine packed8 and packed16 profiles
-preserve same-dtype bool/i8/u8 and i16/u16/f16/bf16 bits at ranks 1 through 4. One
+preserve same-dtype bool/i8/u8 and i16/u16/f16/bf16 bits at ranks 1 through 5. One
 invocation owns all four destination bytes or both destination halfwords,
 preventing concurrent read-modify-write races in raw `array<u32>` storage.
 Partial final words preserve every unrelated destination byte. The semantic
@@ -179,7 +179,7 @@ They perform no boolean canonicalization, arithmetic, or conversion, need no
 `shader-f16` feature, and make no widened-arithmetic claim.
 
 The separately named positive and signed-affine word64 profiles preserve
-same-dtype f64/i64/u64 bits at ranks 1 through 4. Each invocation copies one logical
+same-dtype f64/i64/u64 bits at ranks 1 through 5. Each invocation copies one logical
 element as two adjacent raw u32 words, so destination writes are disjoint. The
 separate signed-affine source profile uses the same nonnegative rebased byte
 address proof. The current WebGPU backend requires static launch, a
@@ -196,11 +196,11 @@ clamping, or ignored writes as semantics. Device execution validates storage,
 dispatch, workgroup, and binding limits before submission and reports separate
 pipeline, validation, memory, device-loss, and execution diagnostics.
 
-Required Chromium 148 on Apple Metal 3 passes 49 complete-destination cases
-through backend 3.2.0. Correctness artifact
-`e45a38b74648f0fa78a42cdd629527462057b19ba72f37d93ede27ffa8be8993`;
+Required Chromium 148 on Apple Metal 3 passes 55 complete-destination cases
+through backend 3.3.0. Correctness artifact
+`02fa8e42c657364383b624fc87a0d7b7f2a3618a8fc3421689b145c4aeab14b2`;
 case set
-`2a4ae1c056851af475fd7f1459b19ff68027bcb6984f66863c91e45edb385497`;
+`28e2c5e5cae79ff525606c5c8edcd702b6f26084015f55ef4e75c21f7288d48d`;
 device profile
 `9589abc8fafb412d83194febaf210f7f89da7a580bf20d3272e1eef9dcda2f66`.
 
