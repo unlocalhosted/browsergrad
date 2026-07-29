@@ -204,8 +204,9 @@ describe("canonical view-copy construction", () => {
         wire("6"),
         wire("7"),
         wire("8"),
+        wire("9"),
       ],
-      axes: [6, 5, 4, 3, 2, 1, 0],
+      axes: [7, 6, 5, 4, 3, 2, 1, 0],
       dtype: "f64",
     });
     expect(kernelArtifactPayload(artifacts.kernel).operations[0]?.dtype).toBe("f64");

@@ -467,7 +467,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.packed16@1",
       );
-      expect(prepared.backendVersion).toBe("3.4.0");
+      expect(prepared.backendVersion).toBe("3.5.0");
       expect(prepared.launch.dispatchCount).toEqual([5, 1, 1]);
       expect(prepared.program.wgsl).toContain(
         "fn copy_packed_element(linear_index: u32)",
@@ -545,7 +545,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.packed8@1",
       );
-      expect(prepared.backendVersion).toBe("3.4.0");
+      expect(prepared.backendVersion).toBe("3.5.0");
       expect(prepared.launch.dispatchCount).toEqual([3, 1, 1]);
       expect(prepared.program.wgsl).toContain(
         "let first_element_index: u32 = global_id.x * 4u;",
@@ -586,7 +586,7 @@ describe("semantic view-copy WGSL lowering", () => {
       expect(prepared.backendProfile).toBe(
         "browsergrad.webgpu.view-copy.word64@1",
       );
-      expect(prepared.backendVersion).toBe("3.4.0");
+      expect(prepared.backendVersion).toBe("3.5.0");
       expect(prepared.launch.dispatchCount).toEqual([6, 1, 1]);
       expect(prepared.program.wgsl).toContain(
         "destination_words[destination_word] = source_words[source_word];",
@@ -692,7 +692,7 @@ describe("semantic view-copy WGSL lowering", () => {
           dtype: testCase.dtype,
         });
         expect(prepared.backendProfile).toBe(testCase.backendProfile);
-        expect(prepared.backendVersion).toBe("3.4.0");
+        expect(prepared.backendVersion).toBe("3.5.0");
         expect(prepared.sourceLocationRange).toEqual(
           signed
             ? { minimum: -2n, maximum: 0n }
@@ -788,7 +788,7 @@ describe("semantic view-copy WGSL lowering", () => {
           dtype: testCase.dtype,
         });
         expect(prepared.backendProfile).toBe(testCase.backendProfile);
-        expect(prepared.backendVersion).toBe("3.4.0");
+        expect(prepared.backendVersion).toBe("3.5.0");
         expect(prepared.sourceLocationRange).toEqual(
           signed
             ? { minimum: -15n, maximum: 0n }
@@ -887,7 +887,7 @@ describe("semantic view-copy WGSL lowering", () => {
           dtype: testCase.dtype,
         });
         expect(prepared.backendProfile).toBe(testCase.backendProfile);
-        expect(prepared.backendVersion).toBe("3.4.0");
+        expect(prepared.backendVersion).toBe("3.5.0");
         expect(prepared.sourceLocationRange).toEqual(
           signed
             ? { minimum: -31n, maximum: 0n }
@@ -989,7 +989,7 @@ describe("semantic view-copy WGSL lowering", () => {
           dtype: testCase.dtype,
         });
         expect(prepared.backendProfile).toBe(testCase.backendProfile);
-        expect(prepared.backendVersion).toBe("3.4.0");
+        expect(prepared.backendVersion).toBe("3.5.0");
         expect(prepared.sourceLocationRange).toEqual(
           signed
             ? { minimum: -63n, maximum: 0n }
@@ -1005,6 +1005,111 @@ describe("semantic view-copy WGSL lowering", () => {
         );
         if (signed) {
           expect(prepared.program.wgsl).toContain("* -32i");
+        }
+      }
+    }
+  });
+
+  it("lowers rank-7 packed8, packed16, and word64 source addresses", async () => {
+    const cases = [
+      {
+        dtype: "i8" as const,
+        dtypeBytes: 1,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank7-packed8@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank7-packed8@1",
+        backendProfile: "browsergrad.webgpu.view-copy.packed8@1",
+        dispatchCount: 32,
+      },
+      {
+        dtype: "bf16" as const,
+        dtypeBytes: 2,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank7-packed16@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank7-packed16@1",
+        backendProfile: "browsergrad.webgpu.view-copy.packed16@1",
+        dispatchCount: 64,
+      },
+      {
+        dtype: "f64" as const,
+        dtypeBytes: 8,
+        positiveProfile:
+          "browsergrad.view-copy.positive-affine-rank7-word64@1",
+        signedProfile:
+          "browsergrad.view-copy.signed-affine-rank7-word64@1",
+        backendProfile: "browsergrad.webgpu.view-copy.word64@1",
+        dispatchCount: 128,
+      },
+    ];
+    for (const testCase of cases) {
+      for (const signed of [false, true]) {
+        const shape = [
+          constant("2"),
+          constant("2"),
+          constant("2"),
+          constant("2"),
+          constant("2"),
+          constant("2"),
+          constant("2"),
+        ] as const;
+        const layout = await verifiedLayout({
+          shape,
+          sourceLocation: signed
+            ? add(
+              multiply(coordinate(0), constant("-64")),
+              multiply(coordinate(1), constant("-32")),
+              multiply(coordinate(2), constant("-16")),
+              multiply(coordinate(3), constant("-8")),
+              multiply(coordinate(4), constant("-4")),
+              multiply(coordinate(5), constant("-2")),
+              multiply(coordinate(6), constant("-1")),
+            )
+            : add(
+              coordinate(0),
+              multiply(coordinate(1), constant("2")),
+              multiply(coordinate(2), constant("4")),
+              multiply(coordinate(3), constant("8")),
+              multiply(coordinate(4), constant("16")),
+              multiply(coordinate(5), constant("32")),
+              multiply(coordinate(6), constant("64")),
+            ),
+          ...(signed
+            ? {
+              sourceByteOffset: constant(String(testCase.dtypeBytes * 127)),
+            }
+            : {}),
+          sourceBytes: constant(String(testCase.dtypeBytes * 128)),
+          destinationBytes: constant(String(testCase.dtypeBytes * 128)),
+          dtype: testCase.dtype,
+        });
+        const prepared = await prepare(layout, await verifiedKernel(layout));
+
+        expect(prepared.semantic.portableProfile).toMatchObject({
+          profileId: signed
+            ? testCase.signedProfile
+            : testCase.positiveProfile,
+          rank: 7,
+          dtype: testCase.dtype,
+        });
+        expect(prepared.backendProfile).toBe(testCase.backendProfile);
+        expect(prepared.backendVersion).toBe("3.5.0");
+        expect(prepared.sourceLocationRange).toEqual(
+          signed
+            ? { minimum: -127n, maximum: 0n }
+            : { minimum: 0n, maximum: 127n },
+        );
+        expect(prepared.launch.dispatchCount).toEqual([
+          testCase.dispatchCount,
+          1,
+          1,
+        ]);
+        expect(prepared.program.wgsl).toContain(
+          "let coordinate_6: i32 = i32(rank7_remainder_4 % 2u);",
+        );
+        if (signed) {
+          expect(prepared.program.wgsl).toContain("* -64i");
         }
       }
     }
@@ -1064,7 +1169,7 @@ describe("semantic view-copy WGSL lowering", () => {
         dtype: testCase.dtype,
       });
       expect(prepared.backendProfile).toBe(testCase.backendProfile);
-      expect(prepared.backendVersion).toBe("3.4.0");
+      expect(prepared.backendVersion).toBe("3.5.0");
       expect(prepared.sourceLocationRange).toEqual({
         minimum: -5n,
         maximum: 0n,
