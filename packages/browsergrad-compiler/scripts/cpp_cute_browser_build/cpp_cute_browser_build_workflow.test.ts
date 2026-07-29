@@ -10,6 +10,7 @@ import {
   unwrapPreparedCppCuteBrowserBuildInputLock,
 } from "../../dist/cpp_cute_browser_build_lock.js";
 import comprehensiveVitestConfig from "./vitest.config.js";
+import evidenceInputVitestConfig from "./vitest.evidence-input.config.js";
 
 let workflow: string;
 let existingArtifactsWorkflow: string;
@@ -188,6 +189,28 @@ describe("Clang-Wasm evidence workflow", () => {
     expect(buildJob).not.toContain("needs: verification-boundary");
     expect(reproducibilityJob).toContain(
       "needs: [verification-boundary, build]",
+    );
+  });
+
+  it("keeps clean-build input validation independent of stale output evidence", () => {
+    const include = evidenceInputVitestConfig.test?.include;
+    expect(include).toContain(
+      "scripts/cpp_cute_browser_build/cpp_cute_browser_build_reproducibility.test.ts",
+    );
+    expect(include).toContain(
+      "scripts/cpp_cute_browser_build/cpp_cute_browser_wasm_review.test.ts",
+    );
+    expect(include).toContain(
+      "scripts/cpp_cute_browser_build/cpp_cute_browser_extractor_source.test.ts",
+    );
+    expect(include).not.toContain(
+      "scripts/cpp_cute_browser_build/cpp_cute_browser_external_evidence_exchange.test.ts",
+    );
+    expect(include).not.toContain(
+      "scripts/cpp_cute_browser_build/cpp_cute_browser_full_distribution_reproducibility.test.ts",
+    );
+    expect(include).not.toContain(
+      "scripts/cpp_cute_browser_build/cpp_cute_browser_strict_compile_observation_authoring.test.ts",
     );
   });
 
