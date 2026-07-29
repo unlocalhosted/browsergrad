@@ -198,7 +198,9 @@ under the same one-feedback-node bound. Older versions retain their exact rank
 limits. Version 1.16 extends only request-time rectangular dispatch to rank 5
 under the distinct rank-5 view-copy profile. Five positive bounded controls,
 their canonical axes, and the maximum product preserve the existing admission
-and fail-stop contracts; produced-resource rank 5 remains refused.
+and fail-stop contracts. Version 1.17 extends produced-resource rectangular
+dispatch to rank 5 through five distinct ordered extent sources under the same
+one-feedback-node bound. Older versions retain their exact rank limits.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -273,7 +275,8 @@ product. Version-1.15 reads four produced extents through the same ordered
 private-resource path and executes that identical rank-4 rectangle.
 Version-1.16 executes the exact selected rank-5 dense rectangle through the
 same generic coordinate-domain CPU path and reports all five extents plus
-their product.
+their product. Version-1.17 reads five produced extents through the same
+ordered private-resource path and executes that identical rank-5 rectangle.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -291,10 +294,11 @@ explicit bounded host readback/resubmission point for its GPU-produced
 predicate; versions 1.10 and 1.11 reuse that authority for one bounded
 GPU-produced loop count or dynamic-launch prefix, and version 1.13 reuses it
 for one rank-2/rank-3 produced rectangle. Version 1.15 extends that same
-single feedback lifecycle to one rank-4 produced rectangle. Neither adapter grants
+single feedback lifecycle to one rank-4 produced rectangle, and version 1.17
+extends it to one rank-5 produced rectangle. Neither adapter grants
 transport, topology, retries, event
 timestamps or external waits, repeated/device-side feedback,
-produced-resource rank-5 or rank-6-and-higher dynamic domains,
+rank-6-and-higher dynamic domains,
 worker-mesh, native-companion,
 performance, or release authority.
 

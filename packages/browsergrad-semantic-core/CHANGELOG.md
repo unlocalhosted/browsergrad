@@ -26,7 +26,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   incompatible bindings, and invalid all-reduce rank/numerical contracts; and
   fixes a fail-stop, no-partial-output-commit failure model without claiming
   execution, transport, topology, retries, or backend pipelines.
-- Additive host-graph versions 1.1 through 1.16 add exact whole-allocation
+- Additive host-graph versions 1.1 through 1.17 add exact whole-allocation
   copies, terminal fail-stop materialization, dependency-ordered completion
   events, bounded fixed-count repetition, captured-input u32 conditionals, and
   runtime-control u32 conditionals, one ordered temporary-resource u32
@@ -57,14 +57,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   produced-resource rectangles to rank 4 through the same bounded feedback
   authority. Version 1.16 extends request-time rectangles to rank 5 under the
   distinct rank-5 view-copy profile while retaining the exact version-1.15
-  produced-resource limit. No profile grants nested/device-side control,
-  produced-resource rank-5 or rank-6-and-higher dynamic domains, or repeated
-  feedback.
+  produced-resource limit. Version 1.17 extends produced-resource rectangles
+  to rank 5 through five ordered private extents and the same one-feedback
+  authority. No profile grants nested/device-side control, rank-6-and-higher
+  dynamic domains, or repeated feedback.
 - Authority-bound `browsergrad.host-graph.cpu-reference@1` preparation and
   execution for dispatches, all-reduces, copies, events, materialization,
   fixed/runtime/produced-resource repetition, bounded request-time and
   produced-resource linear dynamic dispatch, rank-2-through-rank-5
-  request-time and rank-2-through-rank-4 produced-resource rectangular dynamic
+  request-time or produced-resource rectangular dynamic
   dispatch, and bounded
   input/runtime-control/resource conditionals. The
   reference snapshots rank-local inputs and exact runtime controls into private

@@ -209,7 +209,10 @@ function resourceRectangularDynamicProgram(
   const producerIds = shape.map((_, axis) => `produce-extent-${axis}`);
   return {
     ...base,
-    version: { major: 1, minor: shape.length === 4 ? 15 : 13 },
+    version: {
+      major: 1,
+      minor: shape.length === 5 ? 17 : shape.length === 4 ? 15 : 13,
+    },
     resources: [
       ...base.resources,
       ...shape.flatMap((_, axis) => [
@@ -1042,11 +1045,12 @@ describe("semantic host-graph WebGPU preparation", () => {
     }
   });
 
-  it("prewarms one produced rank-2 through rank-4 rectangle with exact feedback budgets", async () => {
+  it("prewarms one produced rank-2 through rank-5 rectangle with exact feedback budgets", async () => {
     for (const shape of [
       [3, 4],
       [2, 3, 4],
       [2, 2, 3, 4],
+      [2, 2, 2, 3, 4],
     ] as const) {
       const artifacts = await rectangularIdentityArtifacts(shape);
       const graph = await verified(
@@ -1073,10 +1077,16 @@ describe("semantic host-graph WebGPU preparation", () => {
         resourceDynamicDispatchCount: 1,
         midGraphFeedbackCount: 1,
         runtimeControlIds: [],
-        plannedTransientGpuBytes:
-          String(elementCount * 12 + 16 + shape.length * 12),
-        plannedTransientHostBytes:
-          String(elementCount * 20 + 16 + shape.length * 16),
+        plannedTransientGpuBytes: String(
+          elementCount * 12 +
+            (shape.length === 5 ? 32 : 16) +
+            shape.length * 12,
+        ),
+        plannedTransientHostBytes: String(
+          elementCount * 20 +
+            (shape.length === 5 ? 32 : 16) +
+            shape.length * 16,
+        ),
       });
       expect(prepared.wgslModuleHashes).toHaveLength(2);
     }
