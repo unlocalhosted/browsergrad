@@ -73,11 +73,11 @@ describe("C++/CuTe production backend execution authority", () => {
       workerBundleSha256: fixture.producer.workerBundleSha256,
       webGpuDeviceProfileHash:
         fixture.convergence.webgpu.deviceProfileHashes[0],
-      exactCaseCount: 8,
+      exactCaseCount: 9,
       externallyRootedProducerTrusted: true,
       fullDistributedOutputSetReproducible: true,
       exactPrivateDistributionTreeVerified: true,
-      exactEightCaseBrowserWorkerCompilationObserved: true,
+      exactNineCaseBrowserWorkerCompilationObserved: true,
       exactCandidatesAuthorizedThroughSharedSeam: true,
       cpuReferenceConvergenceObservedForEveryCase: true,
       requiredRealWebGpuConvergenceObservedForEveryCase: true,

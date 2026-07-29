@@ -92,7 +92,7 @@ describe("real browser C++/CuTe compile matrix", () => {
       caseCount: 9,
       packageBinding: {
         compilerWorkerSha256:
-          "55de864a1962290ce2c75949b3d9673360b764a1323d0d9bed55f08e87b2298d",
+          "33db9ab814e6ac9204a147006cbca845b7917b635d3f59efb9d9ac8a796c7626",
         matrixSourceRevision: "a".repeat(40),
         verifierWorkerSha256:
           "3f41d964119c0dc56e1e01ff0aca20886e93c96e7343e4d49fc646b2dc90279c",

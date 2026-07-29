@@ -14,7 +14,7 @@ import {
   "../../src/cpp_cute_browser_exact_distribution_convergence.js";
 
 describe("package-pinned exact distribution convergence", () => {
-  it("admits the exact eight-case CPU/WebGPU matrix without widening authority", async () => {
+  it("admits the exact nine-case CPU/WebGPU matrix without widening authority", async () => {
     const bytes =
       cppCuteBrowserExactDistributionConvergenceResourceBytes();
     expect(bytes.byteLength).toBe(
@@ -30,7 +30,7 @@ describe("package-pinned exact distribution convergence", () => {
       authority:
         "package-pinned-local-engineering-exact-payload-convergence-only",
       matrixId:
-        "bg.cpp.browser-exact-distribution-convergence.sha256.12665a3d1f38689f9439f0aba2a6b4c87f42d28e021c5804a528b294f8f7fe31",
+        "bg.cpp.browser-exact-distribution-convergence.sha256.3e3c66fe9de9f74d8f6d0cc608cc996340a3b2aeaf66a8a580a82fe32f5f8ba3",
       sourceRevision:
         CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_SOURCE_REVISION,
       webgpu: {
@@ -41,7 +41,7 @@ describe("package-pinned exact distribution convergence", () => {
       exactPrivateDistributionTreeVerified: true,
       packagePinnedFullDistributionReproducibilityMatched: true,
       localEngineeringProducerAuthenticated: true,
-      exactEightCaseBrowserWorkerCompilationObserved: true,
+      exactNineCaseBrowserWorkerCompilationObserved: true,
       exactCandidatesAuthorizedThroughSharedSeam: true,
       cpuReferenceConvergenceObservedForEveryCase: true,
       requiredRealWebGpuConvergenceObservedForEveryCase: true,
@@ -53,9 +53,16 @@ describe("package-pinned exact distribution convergence", () => {
       backendExecutionAuthorityMinted: false,
       releaseReady: false,
     });
-    expect(authority.cases).toHaveLength(8);
+    expect(authority.cases).toHaveLength(9);
     expect(new Set(authority.cases.map((entry) =>
-      entry.candidateId)).size).toBe(8);
+      entry.candidateId)).size).toBe(9);
+    expect(authority.cases.at(-1)).toMatchObject({
+      caseId: "signed-rank2",
+      sourceSha256:
+        "1b7d54daae8b5339b8a9412a50355cf9917ebd5b7d568045c9c2260ead801d62",
+      dtype: "f32",
+      coordinateRank: 2,
+    });
     expect(authority.cases.every((entry) =>
       entry.cpuDestinationHash === entry.webGpuDestinationHash)).toBe(true);
     expect(() =>

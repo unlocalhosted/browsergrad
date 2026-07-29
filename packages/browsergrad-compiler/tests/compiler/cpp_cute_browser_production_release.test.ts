@@ -73,7 +73,7 @@ describe("C++/CuTe production release authority", () => {
       externallyRootedProducerTrusted: true,
       fullDistributedOutputSetReproducible: true,
       exactPrivateDistributionTreeVerified: true,
-      exactEightCaseBrowserWorkerCompilationObserved: true,
+      exactNineCaseBrowserWorkerCompilationObserved: true,
       exactCandidatesAuthorizedThroughSharedSeam: true,
       cpuReferenceConvergenceObservedForEveryCase: true,
       requiredRealWebGpuConvergenceObservedForEveryCase: true,

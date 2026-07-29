@@ -11,24 +11,26 @@ import {
   verifyCppCuteBrowserFullDistributionReproducibilityResource,
 } from "./cpp_cute_browser_full_distribution_reproducibility.js";
 import {
-  CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS,
+  CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS,
   cppCuteBrowserRealCompileCase,
 } from "./cpp_cute_browser_real_compile_cases.js";
+import {
+  CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_RESOURCE_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_RESOURCE_SHA256,
+  CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_SOURCE_REVISION,
+} from
+  "./resources/cpp_cute_browser_exact_distribution_convergence_identity_v1.js";
 import {
   CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_V1_RESOURCE,
   type CppCuteBrowserExactDistributionConvergenceV1Resource,
 } from
   "./resources/cpp_cute_browser_exact_distribution_convergence_v1.js";
 
-export const
-  CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_RESOURCE_SHA256 =
-    "c60b3dd770b3267633cda4ad6fe10995b6a237b83b4e9bd72fb0d1c5796759ea";
-export const
-  CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_RESOURCE_BYTE_LENGTH =
-    13_224;
-export const
-  CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_SOURCE_REVISION =
-    "8d7f27eb9a249d8277def3b401377c42e961b6c7";
+export {
+  CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_RESOURCE_BYTE_LENGTH,
+  CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_RESOURCE_SHA256,
+  CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_SOURCE_REVISION,
+};
 
 const MATRIX_HASH_DOMAIN =
   "browsergrad.compiler.cpp-cute.browser-exact-distribution-convergence-matrix.v1";
@@ -66,7 +68,7 @@ export interface VerifiedCppCuteBrowserExactDistributionConvergence {
   readonly exactPrivateDistributionTreeVerified: true;
   readonly packagePinnedFullDistributionReproducibilityMatched: true;
   readonly localEngineeringProducerAuthenticated: true;
-  readonly exactEightCaseBrowserWorkerCompilationObserved: true;
+  readonly exactNineCaseBrowserWorkerCompilationObserved: true;
   readonly exactCandidatesAuthorizedThroughSharedSeam: true;
   readonly cpuReferenceConvergenceObservedForEveryCase: true;
   readonly requiredRealWebGpuConvergenceObservedForEveryCase: true;
@@ -138,9 +140,9 @@ verifyCppCuteBrowserExactDistributionConvergenceResource(
       resource.authority !==
         "package-pinned-local-engineering-exact-payload-convergence-observation-only" ||
       resource.caseCount !==
-        CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.length ||
+        CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.length ||
       resource.cases.length !==
-        CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.length ||
+        CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.length ||
       resource.sourceRevision !==
         CPP_CUTE_BROWSER_EXACT_DISTRIBUTION_CONVERGENCE_SOURCE_REVISION ||
       !SOURCE_REVISION.test(resource.sourceRevision)) {
@@ -276,7 +278,7 @@ function requireCases(
     identityFields.map((field) => [field, new Set<string>()]),
   );
   for (const [index, caseId] of
-    CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.entries()) {
+    CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.entries()) {
     const observed = resource.cases[index];
     const expected = cppCuteBrowserRealCompileCase(caseId);
     if (observed === undefined ||
@@ -305,7 +307,7 @@ function requireCases(
   }
   if ([...identities.values()].some((values) =>
     values.size !==
-      CPP_CUTE_BROWSER_REAL_COMPILE_BASELINE_CASE_IDS.length)) {
+      CPP_CUTE_BROWSER_REAL_COMPILE_CASE_IDS.length)) {
     mismatch("$.cases", "case evidence reuses an opaque lineage identity");
   }
 }
@@ -317,7 +319,7 @@ function requireClaims(
   if (claims.exactPrivateDistributionTreeVerified !== true ||
       claims.packagePinnedFullDistributionReproducibilityMatched !== true ||
       claims.localEngineeringProducerAuthenticated !== true ||
-      claims.exactEightCaseBrowserWorkerCompilationObserved !== true ||
+      claims.exactNineCaseBrowserWorkerCompilationObserved !== true ||
       claims.exactCandidatesAuthorizedThroughSharedSeam !== true ||
       claims.cpuReferenceConvergenceObservedForEveryCase !== true ||
       claims.requiredRealWebGpuConvergenceObservedForEveryCase !== true ||

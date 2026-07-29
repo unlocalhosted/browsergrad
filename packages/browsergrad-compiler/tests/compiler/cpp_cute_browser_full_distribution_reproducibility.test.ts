@@ -41,17 +41,17 @@ describe("package-pinned full-distribution reproducibility", () => {
       buildInputLockResourceSha256:
         "b0021295d4b9295abc3d8ef90a84883f3deae430d97446e5166444d0d82f025d",
       reproducibilityId:
-        "bg.cpp.browser-full-distribution-reproducibility.sha256.434db589ba241435567cbba85c04bd89c390bc9231627036b38e9df2e72874ef",
+        "bg.cpp.browser-full-distribution-reproducibility.sha256.5543bed26d97d5b10498794ca2e1c1f47c17ebb0b7ac28d2a5814538031b80b3",
       deterministicMetadata: {
         profileHash:
-          "522b48056fc8ab48c9e917da55ccdcc2cb9ae6d9b5dc368316ad120a3caf813d",
+          "bef58d9cf127e542d473039269d83cb54269ed710bf144b053ea5da9a9fda2a3",
         profileSha256:
-          "a99115578dc80c7f31d038e4742854785cdd41050b6a3cd838f317d0dfb48170",
+          "79ea59b9a1fcfce14df17ebf22bd70691c195a15136adffd1a27d228a3f80958",
         profileByteLength: "7148",
         assetManifestId:
-          "bg.cpp.browser-assets.sha256.50209cbe94e14477bbb58f7c7ab73ae0617831662e1bd835dff1918c1b4177c5",
+          "bg.cpp.browser-assets.sha256.97ffd5434c8b8b88b1e461aab5285bd63ab512b339619568e0379184dff6e13b",
         buildSubjectId:
-          "bg.cpp.browser-build-subject.sha256.32b8ba90490cc919b5489854ad6aa47c629bfe3c820d43f2ab6ed22bce4f4502",
+          "bg.cpp.browser-build-subject.sha256.d819e4a96135c5fd3b9f60c58018368ef402523a52675f02584b6ae149d79d42",
       },
       outputCount: 25,
       deterministicSubjectCount: 24,

@@ -26,11 +26,13 @@ source normalizer. Package-pinned evidence covers unchanged C++17/CuTe f32
 rank-2/rank-3, positive strided-slice, and read-only broadcast view copies.
 Current extractor source also emits exact 32-bit `float`, `int`, and
 `unsigned int` ABI facts and lowers equal-rank 1–4 positive-affine views
-through semantic-core and the kernels `word32@2` CPU/WebGPU path. The expanded
-eight-case source matrix remains pre-release until its current two-clean-build
-Wasm is package-pinned and replayed in strict browser mode. External producer
-signing, header redistribution approval, and release authority remain separate
-requirements; successful local compilation does not imply any of them.
+plus a negative-stride rank-2 source through semantic-core and the kernels
+`word32@2` CPU/WebGPU path. Package-pinned evidence now binds all nine unchanged
+sources to the exact 25-file distribution and proves browser-Worker compilation,
+shared authorization, and bit-exact CPU/Apple-Metal WebGPU convergence with
+nonzero-offset canaries. External producer signing, header redistribution
+approval, and release authority remain separate requirements; successful local
+compilation does not imply any of them.
 
 Prepared CUDA-lite view-copy bindings can now be composed with
 `createCudaLiteViewCopyHostGraph()`. The compiler derives a bounded linear

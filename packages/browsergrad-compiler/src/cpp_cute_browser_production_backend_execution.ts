@@ -55,11 +55,11 @@ export interface VerifiedCppCuteBrowserProductionBackendExecution {
   readonly executionAssetSetSha256: string;
   readonly workerBundleSha256: string;
   readonly webGpuDeviceProfileHash: string;
-  readonly exactCaseCount: 8;
+  readonly exactCaseCount: 9;
   readonly externallyRootedProducerTrusted: true;
   readonly fullDistributedOutputSetReproducible: true;
   readonly exactPrivateDistributionTreeVerified: true;
-  readonly exactEightCaseBrowserWorkerCompilationObserved: true;
+  readonly exactNineCaseBrowserWorkerCompilationObserved: true;
   readonly exactCandidatesAuthorizedThroughSharedSeam: true;
   readonly cpuReferenceConvergenceObservedForEveryCase: true;
   readonly requiredRealWebGpuConvergenceObservedForEveryCase: true;
@@ -191,11 +191,11 @@ export async function authorizeCppCuteBrowserProductionBackendExecution(
     workerBundleSha256: producer.workerBundleSha256,
     webGpuDeviceProfileHash:
       convergence.webgpu.deviceProfileHashes[0] as string,
-    exactCaseCount: 8 as const,
+    exactCaseCount: 9 as const,
     externallyRootedProducerTrusted: true as const,
     fullDistributedOutputSetReproducible: true as const,
     exactPrivateDistributionTreeVerified: true as const,
-    exactEightCaseBrowserWorkerCompilationObserved: true as const,
+    exactNineCaseBrowserWorkerCompilationObserved: true as const,
     exactCandidatesAuthorizedThroughSharedSeam: true as const,
     cpuReferenceConvergenceObservedForEveryCase: true as const,
     requiredRealWebGpuConvergenceObservedForEveryCase: true as const,
@@ -296,7 +296,7 @@ function requireAuthorityLimits(
   if (convergence.exactPrivateDistributionTreeVerified !== true ||
       convergence.packagePinnedFullDistributionReproducibilityMatched !== true ||
       convergence.localEngineeringProducerAuthenticated !== true ||
-      convergence.exactEightCaseBrowserWorkerCompilationObserved !== true ||
+      convergence.exactNineCaseBrowserWorkerCompilationObserved !== true ||
       convergence.exactCandidatesAuthorizedThroughSharedSeam !== true ||
       convergence.cpuReferenceConvergenceObservedForEveryCase !== true ||
       convergence.requiredRealWebGpuConvergenceObservedForEveryCase !== true ||
@@ -307,7 +307,7 @@ function requireAuthorityLimits(
       convergence.distributionAuthorized !== false ||
       convergence.backendExecutionAuthorityMinted !== false ||
       convergence.releaseReady !== false ||
-      convergence.cases.length !== 8 ||
+      convergence.cases.length !== 9 ||
       convergence.webgpu.deviceProfileHashes.length !== 1) {
     binding(
       "$.convergence",

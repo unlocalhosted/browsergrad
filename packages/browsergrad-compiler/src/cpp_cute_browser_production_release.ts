@@ -53,7 +53,7 @@ export interface VerifiedCppCuteBrowserProductionRelease {
   readonly externallyRootedProducerTrusted: true;
   readonly fullDistributedOutputSetReproducible: true;
   readonly exactPrivateDistributionTreeVerified: true;
-  readonly exactEightCaseBrowserWorkerCompilationObserved: true;
+  readonly exactNineCaseBrowserWorkerCompilationObserved: true;
   readonly exactCandidatesAuthorizedThroughSharedSeam: true;
   readonly cpuReferenceConvergenceObservedForEveryCase: true;
   readonly requiredRealWebGpuConvergenceObservedForEveryCase: true;
@@ -197,7 +197,7 @@ export async function authorizeCppCuteBrowserProductionRelease(
     externallyRootedProducerTrusted: true as const,
     fullDistributedOutputSetReproducible: true as const,
     exactPrivateDistributionTreeVerified: true as const,
-    exactEightCaseBrowserWorkerCompilationObserved: true as const,
+    exactNineCaseBrowserWorkerCompilationObserved: true as const,
     exactCandidatesAuthorizedThroughSharedSeam: true as const,
     cpuReferenceConvergenceObservedForEveryCase: true as const,
     requiredRealWebGpuConvergenceObservedForEveryCase: true as const,
@@ -263,7 +263,7 @@ function requireAuthorityLimits(
   if (backend.externallyRootedProducerTrusted !== true ||
       backend.fullDistributedOutputSetReproducible !== true ||
       backend.exactPrivateDistributionTreeVerified !== true ||
-      backend.exactEightCaseBrowserWorkerCompilationObserved !== true ||
+      backend.exactNineCaseBrowserWorkerCompilationObserved !== true ||
       backend.exactCandidatesAuthorizedThroughSharedSeam !== true ||
       backend.cpuReferenceConvergenceObservedForEveryCase !== true ||
       backend.requiredRealWebGpuConvergenceObservedForEveryCase !== true ||
