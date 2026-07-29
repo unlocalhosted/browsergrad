@@ -1,7 +1,16 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { open } from "node:fs/promises";
-import { join, normalize } from "node:path/posix";
+import {
+  open,
+  realpath,
+  writeFile,
+} from "node:fs/promises";
+import {
+  join,
+  normalize,
+  resolve,
+} from "node:path/posix";
+import { pathToFileURL } from "node:url";
 
 import {
   canonicalJsonBytes,
@@ -9,6 +18,8 @@ import {
 } from "@unlocalhosted/browsergrad-semantic-core/schema";
 
 import {
+  cppCuteBrowserBuildInputLockResourceBytes,
+  decodeCppCuteBrowserBuildInputLock,
   unwrapPreparedCppCuteBrowserBuildInputLock,
 } from "../../dist/cpp_cute_browser_build_lock.js";
 import {
@@ -30,6 +41,9 @@ const EXPECTED_DETACHED_OUTPUT_PATH =
   "assets/browsergrad-cpp-cute/build-provenance.dsse.json";
 const EXPECTED_OUTPUT_COUNT = 25;
 const EXPECTED_DETERMINISTIC_SUBJECT_COUNT = 24;
+const MAX_OUTPUT_BYTE_LENGTH = 128 * 1024 * 1024;
+const MAX_TOTAL_BYTE_LENGTH = 512 * 1024 * 1024;
+const READ_BUFFER_BYTE_LENGTH = 256 * 1024;
 const REPRODUCIBILITY_AUTHORITIES = new WeakSet();
 
 export class CppCuteBrowserFullDistributionReproducibilityError extends Error {
@@ -39,6 +53,98 @@ export class CppCuteBrowserFullDistributionReproducibilityError extends Error {
     this.code = ERROR_CODE;
     this.path = path;
   }
+}
+
+export function parseCppCuteBrowserFullDistributionReproducibilityArguments(
+  argv,
+) {
+  const arguments_ = argv[0] === "--" ? argv.slice(1) : argv;
+  if (!Array.isArray(arguments_) || arguments_.length !== 3) {
+    invalid(
+      "$arguments",
+      "expected first root, second root, and evidence output",
+    );
+  }
+  const values = new Map();
+  for (const [index, argument] of arguments_.entries()) {
+    const match = /^--(first-output-root|second-output-root|evidence-output)=(.+)$/u
+      .exec(argument);
+    if (match === null || match[1] === undefined ||
+        match[2] === undefined || values.has(match[1])) {
+      invalid(
+        `$arguments[${index}]`,
+        "expected one unique supported --name=/absolute/path option",
+      );
+    }
+    values.set(match[1], absolutePath(match[2], `$arguments[${index}]`));
+  }
+  const firstOutputRoot = values.get("first-output-root");
+  const secondOutputRoot = values.get("second-output-root");
+  const evidenceOutput = values.get("evidence-output");
+  if (firstOutputRoot === undefined ||
+      secondOutputRoot === undefined ||
+      evidenceOutput === undefined) {
+    invalid(
+      "$arguments",
+      "first-output-root, second-output-root, and evidence-output are required",
+    );
+  }
+  if (pathsOverlap(firstOutputRoot, secondOutputRoot) ||
+      pathsOverlap(firstOutputRoot, evidenceOutput) ||
+      pathsOverlap(secondOutputRoot, evidenceOutput)) {
+    invalid("$arguments", "roots and evidence output must not overlap");
+  }
+  return Object.freeze({
+    firstOutputRoot,
+    secondOutputRoot,
+    evidenceOutput,
+  });
+}
+
+/**
+ * Discovers identities only for the closed current build-lock plan, then
+ * independently rehashes both exact trees through the normal verifier.
+ */
+export async function observeCppCuteBrowserFullDistributionReproducibility(
+  input,
+) {
+  const object = exactObject(
+    input,
+    ["firstOutputRoot", "secondOutputRoot"],
+    "$.input",
+  );
+  const firstOutputRoot = absolutePath(
+    object.firstOutputRoot,
+    "$.input.firstOutputRoot",
+  );
+  const secondOutputRoot = absolutePath(
+    object.secondOutputRoot,
+    "$.input.secondOutputRoot",
+  );
+  if (pathsOverlap(firstOutputRoot, secondOutputRoot)) {
+    invalid("$.input", "reproducibility roots must not overlap");
+  }
+  const buildInputLock = await decodeCppCuteBrowserBuildInputLock(
+    cppCuteBrowserBuildInputLockResourceBytes(),
+  );
+  const plan = exactOutputPlan(
+    unwrapPreparedCppCuteBrowserBuildInputLock(buildInputLock).lock,
+  );
+  const [firstExpectedOutputs, secondExpectedOutputs] = await Promise.all([
+    inspectPlannedOutputs(firstOutputRoot, plan, "$.input.firstOutputRoot"),
+    inspectPlannedOutputs(secondOutputRoot, plan, "$.input.secondOutputRoot"),
+  ]);
+  return verifyCppCuteBrowserFullDistributionReproducibility({
+    buildInputLock,
+    first: {
+      outputRoot: firstOutputRoot,
+      expectedOutputs: firstExpectedOutputs,
+    },
+    second: {
+      outputRoot: secondOutputRoot,
+      expectedOutputs: secondExpectedOutputs,
+    },
+  });
 }
 
 /**
@@ -269,6 +375,84 @@ function exactTreeInput(value, path) {
   });
 }
 
+async function inspectPlannedOutputs(outputRoot, plan, path) {
+  let canonicalRoot;
+  try {
+    canonicalRoot = await realpath(outputRoot);
+  } catch (cause) {
+    invalid(path, "distribution root is unavailable", { cause });
+  }
+  if (canonicalRoot !== outputRoot) {
+    invalid(path, "distribution root must use its canonical real path");
+  }
+  let total = 0;
+  const outputs = [];
+  for (const [index, planned] of plan.entries()) {
+    const outputPath = join(outputRoot, planned.path);
+    let handle;
+    try {
+      handle = await open(outputPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const before = await handle.stat({ bigint: true });
+      const byteLength = Number(before.size);
+      if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n ||
+          Number(before.mode & 0o222n) !== 0 ||
+          !Number.isSafeInteger(byteLength) || byteLength <= 0 ||
+          byteLength > MAX_OUTPUT_BYTE_LENGTH) {
+        invalid(
+          `${path}.outputs[${index}]`,
+          "planned output is not one bounded immutable file",
+        );
+      }
+      total += byteLength;
+      if (total > MAX_TOTAL_BYTE_LENGTH) {
+        invalid(path, "planned output tree exceeds aggregate byte bound");
+      }
+      const digest = createHash("sha256");
+      const buffer = Buffer.allocUnsafe(
+        Math.min(READ_BUFFER_BYTE_LENGTH, byteLength),
+      );
+      let offset = 0;
+      while (offset < byteLength) {
+        const request = Math.min(buffer.byteLength, byteLength - offset);
+        const { bytesRead } = await handle.read(buffer, 0, request, offset);
+        if (bytesRead <= 0) {
+          invalid(
+            `${path}.outputs[${index}]`,
+            "planned output changed while hashed",
+          );
+        }
+        digest.update(buffer.subarray(0, bytesRead));
+        offset += bytesRead;
+      }
+      const after = await handle.stat({ bigint: true });
+      if (!sameFileIdentity(before, after)) {
+        invalid(
+          `${path}.outputs[${index}]`,
+          "planned output identity changed while hashed",
+        );
+      }
+      outputs.push(Object.freeze({
+        outputPath: planned.path,
+        sha256: digest.digest("hex"),
+        byteLength: String(byteLength),
+      }));
+    } catch (cause) {
+      if (cause instanceof
+          CppCuteBrowserFullDistributionReproducibilityError) {
+        throw cause;
+      }
+      invalid(
+        `${path}.outputs[${index}]`,
+        "failed to inspect planned output",
+        { cause },
+      );
+    } finally {
+      await handle?.close();
+    }
+  }
+  return Object.freeze(outputs);
+}
+
 function exactOutputPlan(lock) {
   const plan = lock.body.recipe.distributedOutputPlan;
   if (plan.closure !== "exact-path-set-no-additional-distributed-files" ||
@@ -473,4 +657,48 @@ function invalid(path, message, options) {
     message,
     options,
   );
+}
+
+async function main() {
+  const options =
+    parseCppCuteBrowserFullDistributionReproducibilityArguments(
+      process.argv.slice(2),
+    );
+  const report =
+    await observeCppCuteBrowserFullDistributionReproducibility({
+      firstOutputRoot: options.firstOutputRoot,
+      secondOutputRoot: options.secondOutputRoot,
+    });
+  const bytes =
+    canonicalCppCuteBrowserFullDistributionReproducibilityBytes(report);
+  try {
+    await writeFile(options.evidenceOutput, bytes, {
+      flag: "wx",
+      mode: 0o400,
+    });
+  } catch (cause) {
+    invalid("$.evidenceOutput", "failed to persist exclusive evidence", {
+      cause,
+    });
+  }
+  process.stdout.write(`${JSON.stringify({
+    schema: report.schema,
+    version: report.version,
+    authority: report.authority,
+    evidenceOutput: options.evidenceOutput,
+    evidenceSha256: sha256(bytes),
+    evidenceByteLength: String(bytes.byteLength),
+    reproducibilityId: report.reproducibilityId,
+  })}\n`);
+}
+
+if (process.argv[1] !== undefined &&
+    import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch((cause) => {
+    const error = cause instanceof Error
+      ? cause
+      : new Error("unknown full-distribution reproducibility failure");
+    process.stderr.write(`${error.name}: ${error.message}\n`);
+    process.exitCode = 1;
+  });
 }

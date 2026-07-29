@@ -14,6 +14,12 @@ export class CppCuteBrowserFullDistributionReproducibilityError extends Error {
   readonly path: string;
 }
 
+export interface CppCuteBrowserFullDistributionReproducibilityArguments {
+  readonly firstOutputRoot: string;
+  readonly secondOutputRoot: string;
+  readonly evidenceOutput: string;
+}
+
 export interface CppCuteBrowserFullDistributionReproducibilityInputTree {
   readonly outputRoot: string;
   readonly expectedOutputs:
@@ -83,6 +89,17 @@ export function verifyCppCuteBrowserFullDistributionReproducibility(
     buildInputLock: PreparedCppCuteBrowserBuildInputLock;
     first: CppCuteBrowserFullDistributionReproducibilityInputTree;
     second: CppCuteBrowserFullDistributionReproducibilityInputTree;
+  }>,
+): Promise<Readonly<CppCuteBrowserFullDistributionReproducibility>>;
+
+export function parseCppCuteBrowserFullDistributionReproducibilityArguments(
+  argv: readonly string[],
+): Readonly<CppCuteBrowserFullDistributionReproducibilityArguments>;
+
+export function observeCppCuteBrowserFullDistributionReproducibility(
+  input: Readonly<{
+    firstOutputRoot: string;
+    secondOutputRoot: string;
   }>,
 ): Promise<Readonly<CppCuteBrowserFullDistributionReproducibility>>;
 

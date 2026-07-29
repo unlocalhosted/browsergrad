@@ -30,6 +30,8 @@ import {
 import {
   canonicalCppCuteBrowserFullDistributionReproducibilityBytes,
   CppCuteBrowserFullDistributionReproducibilityError,
+  observeCppCuteBrowserFullDistributionReproducibility,
+  parseCppCuteBrowserFullDistributionReproducibilityArguments,
   requireCppCuteBrowserFullDistributionReproducibilityAuthority,
   verifyCppCuteBrowserFullDistributionReproducibility,
 } from "./cpp_cute_browser_full_distribution_reproducibility.mjs";
@@ -61,6 +63,40 @@ afterEach(async () => {
 });
 
 describe("full browser C++/CuTe distribution reproducibility", () => {
+  it("accepts only two exact roots and one distinct evidence output", () => {
+    expect(
+      parseCppCuteBrowserFullDistributionReproducibilityArguments([
+        "--second-output-root=/private/tmp/second",
+        "--evidence-output=/private/tmp/evidence.json",
+        "--first-output-root=/private/tmp/first",
+      ]),
+    ).toEqual({
+      firstOutputRoot: "/private/tmp/first",
+      secondOutputRoot: "/private/tmp/second",
+      evidenceOutput: "/private/tmp/evidence.json",
+    });
+    for (const arguments_ of [
+      [],
+      ["--first-output-root=relative"],
+      [
+        "--first-output-root=/tmp/same",
+        "--second-output-root=/tmp/same",
+        "--evidence-output=/tmp/evidence",
+      ],
+      [
+        "--first-output-root=/tmp/first",
+        "--second-output-root=/tmp/second",
+        "--evidence-output=/tmp/first/evidence",
+      ],
+    ]) {
+      expect(() =>
+        parseCppCuteBrowserFullDistributionReproducibilityArguments(
+          arguments_,
+        ),
+      ).toThrow();
+    }
+  });
+
   it("reverifies all 25 outputs across two roots while separating detached evidence", async () => {
     const fixture = await createFixture();
     const first = await createDistributionTree(
@@ -123,6 +159,34 @@ describe("full browser C++/CuTe distribution reproducibility", () => {
         ...report,
       }),
     ).toThrow(CppCuteBrowserFullDistributionReproducibilityError);
+  });
+
+  it("discovers only current planned paths before independent exact-tree verification", async () => {
+    const fixture = await createFixture();
+    const first = await createDistributionTree(
+      "observe-first",
+      fixture,
+      fixture.syntax.envelope,
+    );
+    const second = await createDistributionTree(
+      "observe-second",
+      fixture,
+      envelopeWithSignatureByte(fixture.syntax.envelope, 11),
+    );
+
+    const report =
+      await observeCppCuteBrowserFullDistributionReproducibility({
+        firstOutputRoot: first.outputRoot,
+        secondOutputRoot: second.outputRoot,
+      });
+
+    expect(report.claims).toMatchObject({
+      exactBuildLockOutputPlanMatched: true,
+      exactOutputsRehashedInBothRoots: true,
+      deterministicSubjectsByteIdentical: true,
+      detachedEvidenceBuildSubjectMatched: true,
+      fullDistributedOutputSetReproducible: true,
+    });
   });
 
   it("rejects deterministic byte drift between the complete trees", async () => {
