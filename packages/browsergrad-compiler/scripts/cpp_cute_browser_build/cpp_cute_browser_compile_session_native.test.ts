@@ -526,7 +526,7 @@ async function compileAndRun(extraFlags: readonly string[]): Promise<void> {
     );
     expect(signedSemantics.sourceLayoutFact.cosize).toMatchObject({
       kind: "integer",
-      value: "-2",
+      value: "2",
     });
     expect(signedSemantics.sourceSpanElements).toBe(6n);
     expect(signedSemantics.destinationSpanElements).toBe(6n);

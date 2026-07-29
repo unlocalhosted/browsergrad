@@ -307,7 +307,7 @@ int main() {
   constexpr std::string_view positive_source_stride =
       "cute::Stride<cute::C<1>, cute::C<2>>";
   constexpr std::string_view signed_source_stride =
-      "cute::Stride<cute::C<-3>, cute::C<1>>";
+      "cute::Stride<cute::C<-1>, cute::C<2>>";
   const std::size_t signed_stride_begin =
       signed_view_copy_source.find(positive_source_stride);
   BG_CHECK(signed_stride_begin != std::string::npos);
@@ -339,10 +339,10 @@ int main() {
   const ViewCopyTensorTrace& signed_source_tensor =
       signed_review.view_copy_trace.tensors[0U];
   BG_CHECK(signed_source_tensor.resolved_static_affine_layout);
-  BG_CHECK(signed_source_tensor.cosize == 0);
+  BG_CHECK(signed_source_tensor.cosize == 4);
   BG_CHECK(signed_source_tensor.stride.elements.size() == 2U);
-  BG_CHECK(signed_source_tensor.stride.elements[0U].value == -3);
-  BG_CHECK(signed_source_tensor.stride.elements[1U].value == 1);
+  BG_CHECK(signed_source_tensor.stride.elements[0U].value == -1);
+  BG_CHECK(signed_source_tensor.stride.elements[1U].value == 2);
   BG_CHECK(
       signed_review.view_copy_trace.tensors[1U].cosize == 6);
   BG_CHECK(complete_frontend_work_invocation(1U));

@@ -372,15 +372,15 @@ ProducerReviewResult run_cpp_cute_producer_review(
       source.canonical_type =
           "cute::Tensor<const float *, "
           "cute::Layout<cute::Shape<cute::Int<3>, cute::Int<2>>, "
-          "cute::Stride<cute::Int<-2>, cute::Int<1>>>>";
+          "cute::Stride<cute::Int<-1>, cute::Int<3>>>>";
       source.layout_canonical_type =
           "cute::Layout<cute::Shape<cute::Int<3>, cute::Int<2>>, "
-          "cute::Stride<cute::Int<-2>, cute::Int<1>>>";
-      source.cosize = -2;
+          "cute::Stride<cute::Int<-1>, cute::Int<3>>>";
+      source.cosize = 2;
       source.stride = {
           true,
           0,
-          {{false, -2, {}}, {false, 1, {}}},
+          {{false, -1, {}}, {false, 3, {}}},
       };
     }
   } else if (g_producer_mode == "view-copy-semantic-failure") {

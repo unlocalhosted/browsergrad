@@ -14,7 +14,7 @@ import {
 const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
   schema: "browsergrad.compiler.cpp-cute.browser-build-input-lock",
   version: { major: 1, minor: 0 },
-  lockId: "bg.cpp.browser-build-input-lock.sha256.8d2703a462e9e0891909a65abf10e4348f5a94c24305711ae0f2581f89460ac8",
+  lockId: "bg.cpp.browser-build-input-lock.sha256.08ddf15cbd0e5600fd1ae9f935cc7e3552e0140b665138ccdcf6d0f837bcdc34",
   body: {
     scope: {
       productPath: "browser-local-clang-wasm",
@@ -253,7 +253,7 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
         },
       ],
       extractorSource: {
-        sourceSetSha256: "3e6553efe1f2c0c1b568222a438535ca724be1d9a8bbc5675b1b732618640e6f",
+        sourceSetSha256: "120cf4948cb27938c98836315e01375ba23f5ef7c8c3d037fb47d0d0d0601bee",
         hashDomain: "browsergrad.compiler.cpp-cute.browser-extractor-source-set.v1",
         files: [
           {
@@ -278,8 +278,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteArtifactWriter.cpp",
-            sha256: "e475300bb754b4a1413c52e294a4f6e4408f20d1e544bee9fed2490d73392dac",
-            byteLength: "79294",
+            sha256: "31d0a3251cc2701b2ee8f02b7478842540fe00f06f4db7c42ef22dd022cd85a0",
+            byteLength: "79306",
           },
           {
             path: "BrowserGradCppCuteArtifactWriter.h",
@@ -308,8 +308,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteClangAction.cpp",
-            sha256: "abf9ea9af8a2c4011ce4bf61dcef20804f941bf14556000520338373470183c3",
-            byteLength: "49640",
+            sha256: "a98273ca5a6f0d5fcece6e30219a097bc3d529cd3b57887c2550b897a995d73e",
+            byteLength: "49652",
           },
           {
             path: "BrowserGradCppCuteClangAction.h",
@@ -453,8 +453,8 @@ const CPP_CUTE_BROWSER_BUILD_INPUT_LOCK_V1_VALUE = {
           },
           {
             path: "BrowserGradCppCuteViewCopyArtifact.cpp",
-            sha256: "d02709fe4321cec723aad9355898f5e539efb4fd284e96cbaf824e65377187da",
-            byteLength: "51396",
+            sha256: "957703853e6ef4921c7c01524cd36ebf556cbf709240b13b1507e93cce944138",
+            byteLength: "51408",
           },
           {
             path: "BrowserGradCppCuteViewCopyArtifact.h",

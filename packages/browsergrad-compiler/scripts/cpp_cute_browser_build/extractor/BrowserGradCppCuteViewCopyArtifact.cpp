@@ -92,8 +92,8 @@ bool checked_multiply_nonnegative(const std::int64_t left,
   if (left < 0 ||
       (right > 0 &&
        left > std::numeric_limits<std::int64_t>::max() / right) ||
-      (right < 0 &&
-       left > std::numeric_limits<std::int64_t>::min() / right)) {
+      (right < 0 && left > 0 &&
+       right < std::numeric_limits<std::int64_t>::min() / left)) {
     return false;
   }
   output = left * right;
