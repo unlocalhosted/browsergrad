@@ -29,7 +29,7 @@ This checkpoint is informational. The rest of this document is normative; the
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch including exact shared-count fanout and exact two- and three-stage producer chains, rank-2-through-rank-8 request-time and produced-resource rectangular prefix dispatch including exact shared-rectangle fanout, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, fail-stop materialization, CPU oracle, all 13 built-in storage dtypes for exact same-dtype view-copy dispatch, authority-bound portable WebGPU execution, separately prepared device-bound pipeline authority, and one exact one-shot dedicated-browser-Worker transport have actual-device evidence; broader mixed/device-side feedback, worker meshes/cross-worker topology, arithmetic/collectives beyond the explicit 32-bit profiles, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch including exact shared-count fanout and exact two- and three-stage producer chains, rank-2-through-rank-8 request-time and produced-resource rectangular prefix dispatch including exact shared-rectangle fanout, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, fail-stop materialization, CPU oracle, all 13 built-in storage dtypes for exact same-dtype view-copy dispatch plus signed rank-8 layouts across every storage width, authority-bound portable WebGPU execution, separately prepared device-bound pipeline authority, and one exact one-shot dedicated-browser-Worker transport have actual-device evidence; broader mixed/device-side feedback, worker meshes/cross-worker topology, arithmetic/collectives beyond the explicit 32-bit profiles, and native companion evidence remain open. |
 
 Only `verified` means every declared exit criterion is complete. A closed
 profile does not imply broader dtype, layout, numerical, or backend coverage.
@@ -2736,9 +2736,9 @@ one/two-element three-dispatch produced-resource chains through three reported
 feedback stages, stable pipeline identity, distinct specialization, and three
 exact completions, and
 separately proves non-finite f32 and lost-device refusal.
-The required lane completes 64 CPU/WebGPU parity cases under backend 1.30.0;
+The required lane completes 78 CPU/WebGPU parity cases under backend 1.31.0;
 terminal correctness artifact
-`3f08099ff57fe925c35bb0cc37770612061be5bf0397bed79119a086802ecf0f`
+`6f3b93212af283771a84fea7fdba3cbd853966610da227da67b12464fb2eb08a`
 binds device profile
 `a72951410740a4adee212bba13ee44da16fdb9d6644d3b58ec38e0623f2c7b48`.
 
@@ -2800,6 +2800,10 @@ retaining each verified semantic dtype. Exact same-dtype view-copy dispatch now
 has CPU/WebGPU complete-output parity for bool, i8/u8, i16/u16, i32/u32,
 i64/u64, f16/bf16/f32/f64. Packed 8-bit, packed 16-bit, and two-word 64-bit
 profiles perform no conversion, boolean canonicalization, or arithmetic.
+Signed rank-8 reverse layouts for representative i8, f16, u32, and f64
+resources additionally prove that the graph composes the canonical maximum-rank
+signed profiles across 8-bit, 16-bit, 32-bit, and 64-bit storage rather than
+falling back to an identity-only dtype path.
 Collectives remain restricted to the separately declared f32/i32/u32
 numerical policies; storage coverage does not widen their semantics.
 

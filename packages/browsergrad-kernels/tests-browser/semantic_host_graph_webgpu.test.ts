@@ -19,11 +19,13 @@ import {
 } from "@unlocalhosted/browsergrad-semantic-core/graph";
 import {
   createVerifiedDensePermutationViewCopyArtifacts,
+  createVerifiedViewCopyArtifacts,
   type VerifiedViewCopyArtifacts,
 } from "@unlocalhosted/browsergrad-semantic-core/kernel";
 import {
   BUILTIN_DTYPES,
   type BuiltinDTypeId,
+  type DimExpr,
 } from "@unlocalhosted/browsergrad-semantic-core/layout";
 import {
   hashNamedComponents,
@@ -71,6 +73,10 @@ const CASE_IDS = Object.freeze([
   "i64-semantic-bit-copy",
   "u64-semantic-bit-copy",
   "f64-semantic-bit-copy",
+  "i8-signed-rank8-bit-copy",
+  "f16-signed-rank8-bit-copy",
+  "u32-signed-rank8-bit-copy",
+  "f64-signed-rank8-bit-copy",
   "f32-fixed-repeat-sum",
   "f32-runtime-repeat-zero",
   "f32-runtime-repeat-two",
@@ -337,6 +343,26 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
             0, 0, 0, 0, 0, 0, 0, 0x80,
           ]),
         ],
+      ),
+      prepareSignedRank8StorageCopyCase(
+        "i8-signed-rank8-bit-copy",
+        "i8",
+        0x11,
+      ),
+      prepareSignedRank8StorageCopyCase(
+        "f16-signed-rank8-bit-copy",
+        "f16",
+        0x33,
+      ),
+      prepareSignedRank8StorageCopyCase(
+        "u32-signed-rank8-bit-copy",
+        "u32",
+        0x55,
+      ),
+      prepareSignedRank8StorageCopyCase(
+        "f64-signed-rank8-bit-copy",
+        "f64",
+        0x77,
       ),
       prepareRepeatedCollectiveCase(),
       prepareRuntimeRepeatedCollectiveCase(
@@ -1300,6 +1326,96 @@ async function prepareStorageCopyCase(
   });
 }
 
+async function prepareSignedRank8StorageCopyCase(
+  caseId: string,
+  dtype: "i8" | "f16" | "u32" | "f64",
+  seed: number,
+): Promise<PreparedCase> {
+  const rank = 8;
+  const elementBytes = BUILTIN_DTYPES[dtype].storageBits / 8;
+  const byteLength = (2 ** rank) * elementBytes;
+  const values = Object.freeze([
+    patternedBytes(byteLength, seed),
+    patternedBytes(byteLength, seed ^ 0xff),
+  ]);
+  const artifacts = await createVerifiedSignedReverseViewCopyArtifacts(
+    dtype,
+    rank,
+  );
+  const graph = (await createVerifiedHostGraphArtifact(
+    storageCopyProgram(artifacts, dtype, byteLength),
+    artifactOptions(artifacts),
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(
+    graph,
+    artifactOptions(artifacts),
+  );
+  const inputs = Object.freeze(values.map((bytes, rankIndex) =>
+    input(rankIndex, bytes)));
+  return Object.freeze({
+    caseId,
+    artifacts,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: values.map((bytes) => Array.from(bytes)),
+    }),
+  });
+}
+
+async function createVerifiedSignedReverseViewCopyArtifacts(
+  dtype: "i8" | "f16" | "u32" | "f64",
+  rank: number,
+): Promise<VerifiedViewCopyArtifacts> {
+  const definition = BUILTIN_DTYPES[dtype];
+  const elementBytes = definition.storageBits / 8;
+  const elementCount = 2 ** rank;
+  const byteLength = elementCount * elementBytes;
+  const shape = () => Array.from(
+    { length: rank },
+    () => dimension(2),
+  );
+  const strides = (sign: 1 | -1) => Array.from(
+    { length: rank },
+    (_, axis) => dimension(sign * (2 ** (rank - axis - 1))),
+  );
+  const allocation = () => ({
+    byteLength: dimension(byteLength),
+    memorySpace: { kind: "global" as const },
+    alignmentBytes: definition.alignmentBytes,
+  });
+  return createVerifiedViewCopyArtifacts({
+    dtype,
+    symbols: [],
+    constraints: [],
+    source: {
+      layout: {
+        kind: "strided",
+        shape: shape(),
+        strides: strides(-1),
+      },
+      allocation: allocation(),
+      byteOffset: dimension(byteLength - elementBytes),
+      requiredAlignmentBytes: definition.alignmentBytes,
+    },
+    destination: {
+      layout: {
+        kind: "strided",
+        shape: shape(),
+        strides: strides(1),
+      },
+      allocation: allocation(),
+      byteOffset: dimension(0),
+      requiredAlignmentBytes: definition.alignmentBytes,
+    },
+    invalidSource: { kind: "reject" },
+  });
+}
+
 async function prepareRawCopyCase(): Promise<PreparedCase> {
   const caseId = "u8-whole-allocation-copy";
   const values = [
@@ -2131,7 +2247,7 @@ function collectiveProgram(
 
 function storageCopyProgram(
   artifacts: VerifiedViewCopyArtifacts,
-  dtype: Exclude<BuiltinDTypeId, "f32" | "i32" | "u32">,
+  dtype: BuiltinDTypeId,
   byteLength: number,
 ): HostGraphProgram {
   return {
@@ -3055,6 +3171,17 @@ function u32Bytes(values: readonly number[]): Uint8Array {
   values.forEach((value, index) =>
     view.setUint32(index * 4, value, true));
   return output;
+}
+
+function patternedBytes(byteLength: number, seed: number): Uint8Array {
+  return Uint8Array.from(
+    { length: byteLength },
+    (_, index) => (seed + (index * 37)) & 0xff,
+  );
+}
+
+function dimension(value: number): DimExpr {
+  return { kind: "const", value: parseWireI64(String(value)) };
 }
 
 function assertOutputEquality(

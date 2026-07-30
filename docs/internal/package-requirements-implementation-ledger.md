@@ -560,6 +560,7 @@ Their `verified` labels apply only to synthetic optional-lane contracts.
 | D-224 | 2026-07-30 | accepted | Add one generic `copyVerifiedArtifactWireBytes` boundary that copies the complete normalized canonical envelope of an opaque verifier-issued semantic artifact. The copy carries no in-memory authority; every receiving realm must decode and verify it again under its own schema authority before semantic preparation or execution. | Cross-realm transport needs stable bytes, but exposing payload-only objects would discard version, producer, extension, and artifact fields while structured-cloning an opaque authority would create a misleading forged object. One schema-level exporter preserves the existing wire contract for every artifact domain without adding per-domain serialization paths. |
 | D-225 | 2026-07-30 | accepted | Add `browsergrad.host-graph.browser-worker-transport@1` as one exact one-shot dedicated-browser-Worker topology. The package controller snapshots canonical artifact and input bytes, transfers only private buffers, binds one cryptographic request ID, enforces exact byte and wall-time limits, validates one closed terminal, and terminates the Worker for every outcome. The Worker re-verifies layout, kernel, and graph bytes under realm-local authority, owns its `GPUDevice`, and invokes the existing portable WebGPU graph executor. | This is the smallest honest transport slice and does not reinterpret host-graph semantics. A one-shot lifecycle gives timeout/cancellation fail-stop ownership and prevents stale terminals or post-failure reuse. Re-verification preserves the opaque-authority contract across realms. Keeping mesh/topology, collective transport, shared memory, retries, and native companions out of v1 avoids a false distributed-systems claim. |
 | D-226 | 2026-07-30 | accepted | Extend portable host-graph storage to every built-in semantic dtype for exact same-dtype view-copy dispatch while retaining backend-owned raw u32 resident buffers. Preserve the existing whole-word bound and attach f32/i32/u32 compatibility metadata only where the generic WGSL runner has a same-width typed-array representation. Do not widen collective arithmetic or reinterpret any semantic dtype. | Canonical packed8, packed16, word32, and word64 view-copy programs already bind raw u32 storage. The host graph's prior f32/i32/u32 admission check duplicated a narrower storage policy and blocked verified lowerings that the canonical backend already executes. One raw-word resident representation deepens the existing graph/view-copy seam without adding dtype-shaped kernels, conversions, or a second executor. |
+| D-227 | 2026-07-30 | accepted | Require host-graph actual-device evidence for signed rank-8 exact view-copy layouts over representative i8, f16, u32, and f64 resources. Construct all four through the public semantic artifact constructor and execute them through the unchanged canonical CPU and portable WebGPU graph paths. | Identity copies prove storage admission but not that the graph preserves maximum-rank signed layout meaning. One representative per 8-bit, 16-bit, 32-bit, and 64-bit storage schedule proves composition across the canonical lowering families without multiplying cases by dtype spelling or adding graph-local layout logic. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -8790,6 +8791,22 @@ whether any files may be left partially changed.
 - Collective arithmetic remains exactly f32/i32/u32 under its declared
   numerical policies. Packed/64-bit storage coverage grants no arithmetic,
   conversion, boolean-canonicalization, or wider collective claim.
+
+### 2026-07-30 — Gate 7 signed maximum-rank storage layouts
+
+- The required host-graph lane now constructs signed rank-8 reverse layouts
+  through `createVerifiedViewCopyArtifacts` for i8, f16, u32, and f64. These
+  four cases exercise the canonical packed8, packed16, word32, and word64
+  lowering schedules through the graph's normal artifact binding path.
+- Headed Chromium 148 on Apple Metal 3 bit-matches complete CPU/WebGPU outputs
+  for both ranks in all four cases. The lane grows from 74 to 78 cases under
+  backend 1.31 with correctness artifact
+  `6f3b93212af283771a84fea7fdba3cbd853966610da227da67b12464fb2eb08a`
+  and device profile
+  `a72951410740a4adee212bba13ee44da16fdb9d6644d3b58ec38e0623f2c7b48`.
+- This proves representative maximum-rank signed layout composition across
+  storage widths. It does not grant rank-9, signed-destination, conversion,
+  arithmetic, or wider collective semantics.
 
 ## Quick Resume Checklist
 

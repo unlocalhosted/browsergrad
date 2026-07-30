@@ -13,9 +13,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   words for every built-in semantic storage dtype. Exact same-dtype view-copy
   dispatch now covers bool, i8/u8, i16/u16, i32/u32, i64/u64,
   f16/bf16/f32/f64 without conversion, boolean canonicalization, or widened
-  arithmetic. Required real-device evidence expands from 64 to 74 complete
-  CPU/WebGPU output-parity cases. Collective arithmetic remains restricted to
-  the separately declared f32/i32/u32 policies.
+  arithmetic. Signed rank-8 reverse layouts additionally compose the canonical
+  8-bit, 16-bit, 32-bit, and 64-bit storage profiles through the graph backend.
+  Required real-device evidence expands from 64 to 78 complete CPU/WebGPU
+  output-parity cases. Collective arithmetic remains restricted to the
+  separately declared f32/i32/u32 policies.
 - Add the closed
   `browsergrad.host-graph.browser-worker-transport@1` one-shot dedicated
   module-Worker controller. It snapshots caller inputs and complete canonical
