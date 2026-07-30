@@ -8729,6 +8729,17 @@ whether any files may be left partially changed.
   nested/device-side branching, transport/topology, native companions, and
   stronger event profiles remain separate capabilities.
 
+### 2026-07-30 — Semantic-core intrinsic-poison harness isolation
+
+- Removed `Uint8Array.prototype.set` poisoning from an asynchronous attention
+  test because Vitest's fork transport can serialize while the awaited test is
+  active and legitimately needs that host intrinsic.
+- Preserved the security proof in a synchronous native-buffer test that
+  poisons the prototype only around the module-captured copy call and restores
+  it before any assertion, await, or harness message.
+- Four concurrent full semantic-core runs pass independently at 24 files/251
+  tests, alongside strict typecheck and source lint.
+
 ## Quick Resume Checklist
 
 1. Read this ledger, then the relevant gate and exit criteria in the normative

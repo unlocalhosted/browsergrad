@@ -205,20 +205,17 @@ describe("attention-forward CPU reference", () => {
     const originalFinite = Number.isFinite;
     const originalGetFloat32 = DataView.prototype.getFloat32;
     const originalSetFloat32 = DataView.prototype.setFloat32;
-    const originalUint8Set = Uint8Array.prototype.set;
     try {
       Math.fround = () => 123;
       Number.isFinite = () => false;
       DataView.prototype.getFloat32 = () => { throw new Error("poisoned getFloat32"); };
       DataView.prototype.setFloat32 = () => { throw new Error("poisoned setFloat32"); };
-      Uint8Array.prototype.set = () => { throw new Error("poisoned Uint8Array.set"); };
       await cpu.execute(buffers);
     } finally {
       Math.fround = originalFround;
       Number.isFinite = originalFinite;
       DataView.prototype.getFloat32 = originalGetFloat32;
       DataView.prototype.setFloat32 = originalSetFloat32;
-      Uint8Array.prototype.set = originalUint8Set;
     }
     expect(readF32(buffers.destination)).toEqual([4, 4, 4]);
   });
