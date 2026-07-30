@@ -78,7 +78,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.27.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.28.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -854,18 +854,48 @@ export async function prepareSemanticHostGraphWebGpu(
     const second = resourceDynamicDispatches[1];
     if (
       resourceDynamicDispatches.length !== 2 ||
-      first?.kind !== "linear-prefix" ||
-      second?.kind !== "linear-prefix" ||
+      first === undefined ||
+      second === undefined ||
+      first.kind !== second.kind ||
       first.selector.kind !== "resource" ||
-      second.selector.kind !== "resource" ||
-      first.selector.resourceId !== second.selector.resourceId ||
-      first.selector.rank !== second.selector.rank ||
-      first.maxElementCount !== second.maxElementCount
+      second.selector.kind !== "resource"
     ) {
       fail(
         "BG-WEBGPU-GRAPH-INTERNAL",
         "$.artifact",
         "verified resource feedback fanout contract diverged",
+      );
+    }
+    const secondRectangularSources = second.kind === "rectangular-prefix" &&
+        second.selector.kind === "resource"
+      ? second.selector.sources
+      : undefined;
+    const sharedSelection = first.kind === "linear-prefix" &&
+        second.kind === "linear-prefix"
+      ? first.selector.resourceId === second.selector.resourceId &&
+        first.selector.rank === second.selector.rank &&
+        first.maxElementCount === second.maxElementCount
+      : first.kind === "rectangular-prefix" &&
+          second.kind === "rectangular-prefix"
+        ? first.maxExtents.length === second.maxExtents.length &&
+          first.maxExtents.every((extent, index) =>
+            extent === second.maxExtents[index]) &&
+          secondRectangularSources !== undefined &&
+          first.selector.sources.length === secondRectangularSources.length &&
+          first.selector.sources.every((source, index) => {
+            const peer = secondRectangularSources[index];
+            return peer !== undefined &&
+              source.axis === peer.axis &&
+              source.resourceId === peer.resourceId &&
+              source.rank === peer.rank &&
+              source.maxExtent === peer.maxExtent;
+          })
+        : false;
+    if (!sharedSelection) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        "$.artifact",
+        "verified resource feedback fanout selection diverged",
       );
     }
   }

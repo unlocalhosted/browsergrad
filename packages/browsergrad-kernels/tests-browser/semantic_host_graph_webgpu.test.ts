@@ -104,6 +104,8 @@ const CASE_IDS = Object.freeze([
   "f32-resource-rectangular-dynamic-rank7-large",
   "f32-resource-rectangular-dynamic-rank8-small",
   "f32-resource-rectangular-dynamic-rank8-large",
+  "f32-resource-rectangular-fanout-rank8-small",
+  "f32-resource-rectangular-fanout-rank8-large",
   "u8-input-conditional-then",
   "u8-input-conditional-else",
   "u8-runtime-conditional-then",
@@ -438,6 +440,14 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         [2, 2, 2, 2, 2, 2, 3, 4],
         [2, 2, 2, 2, 2, 2, 3, 4],
       ),
+      prepareResourceRectangularDynamicFanoutCase(
+        "f32-resource-rectangular-fanout-rank8-small",
+        [1, 2, 1, 2, 1, 2, 2, 3],
+      ),
+      prepareResourceRectangularDynamicFanoutCase(
+        "f32-resource-rectangular-fanout-rank8-large",
+        [2, 2, 2, 2, 2, 2, 3, 4],
+      ),
       prepareConditionalRawCopyCase(
         "u8-input-conditional-then",
         1,
@@ -769,7 +779,7 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
     expect(unalignedResourceDynamic127?.expandedStepCount).toBe(4);
     expect(unalignedResourceDynamic65?.midGraphFeedbackCount).toBe(1);
     expect(unalignedResourceDynamic127?.midGraphFeedbackCount).toBe(1);
-    for (const rank of [2, 3, 4, 5] as const) {
+    for (const rank of [2, 3, 4, 5, 6, 7, 8] as const) {
       const small = completedCases.find(({ caseId }) =>
         caseId === `f32-rectangular-dynamic-rank${rank}-small`);
       const large = completedCases.find(({ caseId }) =>
@@ -798,6 +808,20 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       expect(resourceSmall?.midGraphFeedbackCount).toBe(1);
       expect(resourceLarge?.midGraphFeedbackCount).toBe(1);
     }
+    const smallRectangularFanout = completedCases.find(({ caseId }) =>
+      caseId === "f32-resource-rectangular-fanout-rank8-small");
+    const largeRectangularFanout = completedCases.find(({ caseId }) =>
+      caseId === "f32-resource-rectangular-fanout-rank8-large");
+    expect(smallRectangularFanout?.pipelineIdentityHash)
+      .toBe(largeRectangularFanout?.pipelineIdentityHash);
+    expect(smallRectangularFanout?.backendSpecializationHash)
+      .not.toBe(largeRectangularFanout?.backendSpecializationHash);
+    expect(smallRectangularFanout?.expandedStepCount).toBe(20);
+    expect(largeRectangularFanout?.expandedStepCount).toBe(20);
+    expect(smallRectangularFanout?.completedDynamicDispatches).toHaveLength(2);
+    expect(largeRectangularFanout?.completedDynamicDispatches).toHaveLength(2);
+    expect(smallRectangularFanout?.midGraphFeedbackCount).toBe(2);
+    expect(largeRectangularFanout?.midGraphFeedbackCount).toBe(2);
 
     stage = "resource-repeat-bound-refusal";
     const resourceRepeatCase = cases.find(({ caseId }) =>
@@ -1574,6 +1598,75 @@ async function prepareResourceRectangularDynamicDispatchCase(
   });
 }
 
+async function prepareResourceRectangularDynamicFanoutCase(
+  caseId:
+    | "f32-resource-rectangular-fanout-rank8-small"
+    | "f32-resource-rectangular-fanout-rank8-large",
+  logicalExtents: readonly [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ],
+): Promise<PreparedCase> {
+  const shape = [2, 2, 2, 2, 2, 2, 3, 4] as const;
+  const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
+    inputShape: shape.map((extent) => parseWireI64(String(extent))),
+    axes: shape.map((_, axis) => axis),
+    dtype: "f32",
+  });
+  const elementCount = shape.reduce(
+    (product, extent) => product * extent,
+    1,
+  );
+  const values = [
+    f32Bytes(Array.from(
+      { length: elementCount },
+      (_, index) => index + 0.25,
+    )),
+    f32Bytes(Array.from(
+      { length: elementCount },
+      (_, index) => -index - 0.5,
+    )),
+  ];
+  const graph = (await createVerifiedHostGraphArtifact(
+    resourceRectangularDynamicDispatchFanoutProgram(artifacts, shape),
+    artifactOptions(artifacts),
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(
+    graph,
+    { ...artifactOptions(artifacts), workgroupSize: 64 },
+  );
+  const inputs = Object.freeze([
+    ...values.map((bytes, rank) => input(rank, bytes)),
+    ...logicalExtents.flatMap((extent, axis) => [
+      namedInput(0, `extent-input-${axis}`, u32Bytes([extent])),
+      namedInput(1, `extent-input-${axis}`, u32Bytes([0])),
+    ]),
+  ]);
+  return Object.freeze({
+    caseId,
+    artifacts,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: inputs.map(({ rank, resourceId, bytes }) => ({
+        rank,
+        resourceId,
+        bytes: Array.from(bytes),
+      })),
+    }),
+  });
+}
+
 async function prepareConditionalRawCopyCase(
   caseId: "u8-input-conditional-then" | "u8-input-conditional-else",
   predicate: 0 | 1,
@@ -1910,6 +2003,72 @@ function resourceRectangularDynamicDispatchProgram(
           mode: "resource-u32-rectangular-prefix" as const,
         };
       }),
+    ],
+  };
+}
+
+function resourceRectangularDynamicDispatchFanoutProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+  shape: readonly [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ],
+): HostGraphProgram {
+  const base = resourceRectangularDynamicDispatchProgram(
+    artifacts,
+    shape,
+  );
+  const dynamic = base.nodes.find((node) =>
+    node.kind === "dynamic-dispatch");
+  if (
+    dynamic?.kind !== "dynamic-dispatch" ||
+    dynamic.mode !== "resource-u32-rectangular-prefix"
+  ) {
+    throw new Error("missing resource rectangular dynamic dispatch");
+  }
+  const byteLength = shape.reduce(
+    (product, extent) => product * extent,
+    1,
+  ) * 4;
+  return {
+    ...base,
+    version: { major: 1, minor: 25 },
+    resources: [
+      ...base.resources,
+      resource("fanout-output", "output", "f32", byteLength),
+    ],
+    nodes: [
+      ...base.nodes.filter((node) => node.kind !== "materialize"),
+      {
+        ...dynamic,
+        nodeId: "fanout",
+        dependsOn: [...dynamic.dependsOn],
+        dimensionBindings: { ...dynamic.dimensionBindings },
+        launchSources: dynamic.launchSources.map((source) => ({
+          ...source,
+        })),
+        maxExtents: [...dynamic.maxExtents],
+        bindings: dynamic.bindings.map((binding) => ({
+          ...binding,
+          graphResourceId: binding.graphResourceId === "output"
+            ? "fanout-output"
+            : binding.graphResourceId,
+        })),
+      },
+      ...base.nodes.filter((node) => node.kind === "materialize"),
+      {
+        nodeId: "materialize-fanout-output",
+        kind: "materialize",
+        dependsOn: ["fanout"],
+        resourceId: "fanout-output",
+        mode: "host-readback-after-graph-success",
+      },
     ],
   };
 }

@@ -421,6 +421,68 @@ function resourceRectangularDynamicProgram(
   };
 }
 
+function resourceRectangularDynamicFanoutProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+  shape: readonly number[],
+): HostGraphProgram {
+  const base = resourceRectangularDynamicProgram(artifacts, shape);
+  const dynamic = base.nodes.find((node) =>
+    node.kind === "dynamic-dispatch");
+  if (
+    dynamic?.kind !== "dynamic-dispatch" ||
+    dynamic.mode !== "resource-u32-rectangular-prefix"
+  ) {
+    throw new Error("missing resource rectangular dynamic dispatch");
+  }
+  const byteLength = shape.reduce(
+    (product, extent) => product * extent,
+    1,
+  ) * 4;
+  return {
+    ...base,
+    version: { major: 1, minor: 25 },
+    resources: [
+      ...base.resources,
+      {
+        resourceId: "fanout-output",
+        role: "output",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "f32",
+        byteLength: wire(String(byteLength)),
+        alignmentBytes: 4,
+      },
+    ],
+    nodes: [
+      ...base.nodes.filter((node) => node.kind !== "materialize"),
+      {
+        ...dynamic,
+        nodeId: "fanout-region",
+        dependsOn: [...dynamic.dependsOn],
+        dimensionBindings: { ...dynamic.dimensionBindings },
+        launchSources: dynamic.launchSources.map((source) => ({
+          ...source,
+        })),
+        maxExtents: [...dynamic.maxExtents],
+        bindings: dynamic.bindings.map((binding) => ({
+          ...binding,
+          graphResourceId: binding.graphResourceId === "output"
+            ? "fanout-output"
+            : binding.graphResourceId,
+        })),
+      },
+      ...base.nodes.filter((node) => node.kind === "materialize"),
+      {
+        nodeId: "materialize-fanout-output",
+        kind: "materialize",
+        dependsOn: ["fanout-region"],
+        resourceId: "fanout-output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function collectiveProgram(
   artifacts: VerifiedViewCopyArtifacts,
   dtype: "f32" | "i32" | "u32",
@@ -1700,6 +1762,97 @@ describe("host graph CPU reference", () => {
         rectangularExpected(values, testCase.shape, testCase.extents),
       );
     }
+
+    const shape = [2, 2, 2, 2, 2, 2, 3, 4] as const;
+    const extents = [1, 2, 1, 2, 1, 2, 2, 3] as const;
+    const artifacts = await rectangularArtifacts(shape);
+    const fanoutProgram = resourceRectangularDynamicFanoutProgram(
+      artifacts,
+      shape,
+    );
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...fanoutProgram,
+        version: { major: 1, minor: 24 },
+      },
+      artifactOptions(artifacts),
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-UNSUPPORTED-PROFILE" },
+    });
+    const mismatchedMaximum = {
+      ...fanoutProgram,
+      nodes: fanoutProgram.nodes.map((node) =>
+        node.kind === "dynamic-dispatch" &&
+          node.mode === "resource-u32-rectangular-prefix" &&
+          node.nodeId === "fanout-region"
+          ? {
+            ...node,
+            maxExtents: node.maxExtents.map((extent, axis) =>
+              axis === 0 ? wire("1") : extent),
+          }
+          : node),
+    } satisfies HostGraphProgram;
+    await expect(createVerifiedHostGraphArtifact(
+      mismatchedMaximum,
+      artifactOptions(artifacts),
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-INVALID-BINDING" },
+    });
+    const mismatchedSources = {
+      ...fanoutProgram,
+      nodes: fanoutProgram.nodes.map((node) =>
+        node.kind === "dynamic-dispatch" &&
+          node.mode === "resource-u32-rectangular-prefix" &&
+          node.nodeId === "fanout-region"
+          ? {
+            ...node,
+            launchSources: node.launchSources.map((source, axis) =>
+              axis < 2
+                ? {
+                  ...source,
+                  resourceId: `extent-${1 - axis}`,
+                }
+                : source),
+          }
+          : node),
+    } satisfies HostGraphProgram;
+    await expect(createVerifiedHostGraphArtifact(
+      mismatchedSources,
+      artifactOptions(artifacts),
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-INVALID-BINDING" },
+    });
+    const fanout = await prepareHostGraphCpu(
+      await verified(fanoutProgram, artifacts),
+      artifactOptions(artifacts),
+    );
+    const elementCount = shape.reduce(
+      (product, extent) => product * extent,
+      1,
+    );
+    const values = Array.from(
+      { length: elementCount },
+      (_, index) => index + 0.5,
+    );
+    const fanoutResult = await fanout.execute({
+      inputs: [
+        input(0, f32Bytes(values)),
+        ...extents.map((extent, axis) => ({
+          rank: wire("0"),
+          resourceId: `extent-input-${axis}`,
+          bytes: u32Bytes([extent]),
+        })),
+      ],
+    });
+    expect(fanout).toMatchObject({
+      dynamicDispatchCount: 2,
+      resourceDynamicDispatchCount: 2,
+    });
+    expect(fanoutResult.completedDynamicDispatches).toHaveLength(2);
+    expect(fanoutResult.outputs.map(({ bytes }) => readF32(bytes))).toEqual([
+      rectangularExpected(values, shape, extents),
+      rectangularExpected(values, shape, extents),
+    ]);
   });
 
   it("rejects produced rectangular extents before output publication", async () => {

@@ -273,6 +273,59 @@ function resourceRectangularDynamicProgram(
   };
 }
 
+function resourceRectangularDynamicFanoutProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+  shape: readonly number[],
+): HostGraphProgram {
+  const base = resourceRectangularDynamicProgram(artifacts, shape);
+  const dynamic = base.nodes.find((node) =>
+    node.kind === "dynamic-dispatch");
+  if (
+    dynamic?.kind !== "dynamic-dispatch" ||
+    dynamic.mode !== "resource-u32-rectangular-prefix"
+  ) {
+    throw new Error("missing resource rectangular dynamic dispatch");
+  }
+  const byteLength = String(
+    shape.reduce((product, extent) => product * extent, 1) * 4,
+  );
+  return {
+    ...base,
+    version: { major: 1, minor: 25 },
+    resources: [
+      ...base.resources,
+      resource("fanout-output", "output", "f32", byteLength),
+    ],
+    nodes: [
+      ...base.nodes.filter((node) => node.kind !== "materialize"),
+      {
+        ...dynamic,
+        nodeId: "fanout-region",
+        dependsOn: [...dynamic.dependsOn],
+        dimensionBindings: { ...dynamic.dimensionBindings },
+        launchSources: dynamic.launchSources.map((source) => ({
+          ...source,
+        })),
+        maxExtents: [...dynamic.maxExtents],
+        bindings: dynamic.bindings.map((binding) => ({
+          ...binding,
+          graphResourceId: binding.graphResourceId === "output"
+            ? "fanout-output"
+            : binding.graphResourceId,
+        })),
+      },
+      ...base.nodes.filter((node) => node.kind === "materialize"),
+      {
+        nodeId: "materialize-fanout-output",
+        kind: "materialize",
+        dependsOn: ["fanout-region"],
+        resourceId: "fanout-output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function resourceDynamicPipelineProgram(
   artifacts: VerifiedViewCopyArtifacts,
 ): HostGraphProgram {
@@ -1162,6 +1215,24 @@ describe("semantic host-graph WebGPU preparation", () => {
       });
       expect(prepared.wgslModuleHashes).toHaveLength(2);
     }
+
+    const shape = [2, 2, 2, 2, 2, 2, 3, 4] as const;
+    const artifacts = await rectangularIdentityArtifacts(shape);
+    const fanout = await prepareSemanticHostGraphWebGpu(
+      await verified(
+        resourceRectangularDynamicFanoutProgram(artifacts, shape),
+        artifacts,
+      ),
+      { ...artifactOptions(artifacts), workgroupSize: 64 },
+    );
+    expect(fanout).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 12,
+      dynamicDispatchCount: 2,
+      resourceDynamicDispatchCount: 2,
+      midGraphFeedbackCount: 2,
+      runtimeControlIds: [],
+    });
   });
 
   it("admits every rectangular workgroup dimension before GPU allocation", async () => {
