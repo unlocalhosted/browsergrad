@@ -22,6 +22,10 @@ import {
   type VerifiedViewCopyArtifacts,
 } from "@unlocalhosted/browsergrad-semantic-core/kernel";
 import {
+  BUILTIN_DTYPES,
+  type BuiltinDTypeId,
+} from "@unlocalhosted/browsergrad-semantic-core/layout";
+import {
   hashNamedComponents,
   parseWireI64,
   parseWireU64,
@@ -57,6 +61,16 @@ const CASE_IDS = Object.freeze([
   "i32-wrapping-sum",
   "u8-whole-allocation-copy",
   "u32-exact-max",
+  "bool-semantic-bit-copy",
+  "i8-semantic-bit-copy",
+  "u8-semantic-bit-copy",
+  "i16-semantic-bit-copy",
+  "u16-semantic-bit-copy",
+  "f16-semantic-bit-copy",
+  "bf16-semantic-bit-copy",
+  "i64-semantic-bit-copy",
+  "u64-semantic-bit-copy",
+  "f64-semantic-bit-copy",
   "f32-fixed-repeat-sum",
   "f32-runtime-repeat-zero",
   "f32-runtime-repeat-two",
@@ -224,6 +238,104 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         [
           u32Bytes([1, 0xffff_ffff]),
           u32Bytes([2, 5]),
+        ],
+      ),
+      prepareStorageCopyCase(
+        "bool-semantic-bit-copy",
+        "bool",
+        [
+          new Uint8Array([0, 1, 1, 0, 1, 0, 0, 1]),
+          new Uint8Array([1, 0, 0, 1, 0, 1, 1, 0]),
+        ],
+      ),
+      prepareStorageCopyCase(
+        "i8-semantic-bit-copy",
+        "i8",
+        [
+          new Uint8Array([0x80, 0xff, 0, 1, 2, 0x7f, 0x55, 0xaa]),
+          new Uint8Array([0x7f, 2, 1, 0, 0xff, 0x80, 0xaa, 0x55]),
+        ],
+      ),
+      prepareStorageCopyCase(
+        "u8-semantic-bit-copy",
+        "u8",
+        [
+          new Uint8Array([0, 1, 2, 3, 252, 253, 254, 255]),
+          new Uint8Array([255, 254, 253, 252, 3, 2, 1, 0]),
+        ],
+      ),
+      prepareStorageCopyCase(
+        "i16-semantic-bit-copy",
+        "i16",
+        [
+          new Uint8Array([0, 0x80, 0xff, 0xff, 0, 0, 0xff, 0x7f]),
+          new Uint8Array([0xff, 0x7f, 0, 0, 0xff, 0xff, 0, 0x80]),
+        ],
+      ),
+      prepareStorageCopyCase(
+        "u16-semantic-bit-copy",
+        "u16",
+        [
+          new Uint8Array([0, 0, 1, 0, 0xfe, 0xff, 0xff, 0xff]),
+          new Uint8Array([0xff, 0xff, 0xfe, 0xff, 1, 0, 0, 0]),
+        ],
+      ),
+      prepareStorageCopyCase(
+        "f16-semantic-bit-copy",
+        "f16",
+        [
+          new Uint8Array([0, 0x80, 0, 0x3c, 0, 0x7c, 1, 0x7e]),
+          new Uint8Array([1, 0x7e, 0, 0x7c, 0, 0x3c, 0, 0x80]),
+        ],
+      ),
+      prepareStorageCopyCase(
+        "bf16-semantic-bit-copy",
+        "bf16",
+        [
+          new Uint8Array([0, 0x80, 0x80, 0x3f, 0x80, 0x7f, 0xc1, 0x7f]),
+          new Uint8Array([0xc1, 0x7f, 0x80, 0x7f, 0x80, 0x3f, 0, 0x80]),
+        ],
+      ),
+      prepareStorageCopyCase(
+        "i64-semantic-bit-copy",
+        "i64",
+        [
+          new Uint8Array([
+            0, 0, 0, 0, 0, 0, 0, 0x80,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f,
+          ]),
+          new Uint8Array([
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f,
+            0, 0, 0, 0, 0, 0, 0, 0x80,
+          ]),
+        ],
+      ),
+      prepareStorageCopyCase(
+        "u64-semantic-bit-copy",
+        "u64",
+        [
+          new Uint8Array([
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          ]),
+          new Uint8Array([
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0, 0, 0, 0, 0, 0, 0, 0,
+          ]),
+        ],
+      ),
+      prepareStorageCopyCase(
+        "f64-semantic-bit-copy",
+        "f64",
+        [
+          new Uint8Array([
+            0, 0, 0, 0, 0, 0, 0, 0x80,
+            1, 0, 0, 0, 0, 0, 0xf8, 0x7f,
+          ]),
+          new Uint8Array([
+            1, 0, 0, 0, 0, 0, 0xf8, 0x7f,
+            0, 0, 0, 0, 0, 0, 0, 0x80,
+          ]),
         ],
       ),
       prepareRepeatedCollectiveCase(),
@@ -1139,6 +1251,55 @@ async function prepareCase(
   });
 }
 
+async function prepareStorageCopyCase(
+  caseId: string,
+  dtype: Exclude<BuiltinDTypeId, "f32" | "i32" | "u32">,
+  values: readonly [Uint8Array, Uint8Array],
+): Promise<PreparedCase> {
+  const definition = BUILTIN_DTYPES[dtype];
+  const elementBytes = definition.storageBits / 8;
+  if (
+    values[0].byteLength !== values[1].byteLength ||
+    values[0].byteLength % elementBytes !== 0
+  ) {
+    throw new Error(`invalid ${dtype} storage-copy fixture`);
+  }
+  const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
+    inputShape: [
+      parseWireI64(String(values[0].byteLength / elementBytes)),
+    ],
+    axes: [0],
+    dtype,
+  });
+  const graph = (await createVerifiedHostGraphArtifact(
+    storageCopyProgram(
+      artifacts,
+      dtype,
+      values[0].byteLength,
+    ),
+    artifactOptions(artifacts),
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(
+    graph,
+    artifactOptions(artifacts),
+  );
+  const inputs = Object.freeze(values.map((bytes, rank) =>
+    input(rank, bytes)));
+  return Object.freeze({
+    caseId,
+    artifacts,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: values.map((bytes) => Array.from(bytes)),
+    }),
+  });
+}
+
 async function prepareRawCopyCase(): Promise<PreparedCase> {
   const caseId = "u8-whole-allocation-copy";
   const values = [
@@ -1968,6 +2129,33 @@ function collectiveProgram(
   };
 }
 
+function storageCopyProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+  dtype: Exclude<BuiltinDTypeId, "f32" | "i32" | "u32">,
+  byteLength: number,
+): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 2 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire(2),
+    resources: [
+      resource("input", "input", dtype, byteLength),
+      resource("output", "output", dtype, byteLength),
+    ],
+    nodes: [
+      dispatch(artifacts),
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["copy"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function dynamicDispatchProgram(
   artifacts: VerifiedViewCopyArtifacts,
   maxElementCount = 2,
@@ -2779,7 +2967,7 @@ function resourceConditionalRawCopyProgram(): HostGraphProgram {
 function resource(
   resourceId: string,
   role: "input" | "temporary" | "output",
-  dtype: "f32" | "i32" | "u32",
+  dtype: BuiltinDTypeId,
   byteLength = 8,
 ) {
   return {
@@ -2791,7 +2979,7 @@ function resource(
       : "zero-fill" as const,
     dtype,
     byteLength: wire(byteLength),
-    alignmentBytes: 4,
+    alignmentBytes: BUILTIN_DTYPES[dtype].alignmentBytes,
   };
 }
 

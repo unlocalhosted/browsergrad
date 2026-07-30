@@ -559,6 +559,7 @@ Their `verified` labels apply only to synthetic optional-lane contracts.
 | D-223 | 2026-07-30 | accepted | Extend the exact sequential produced-resource profile to three stages as host-graph program version 1.27 while retaining exact 1.0-1.26 decoding and every older feedback limit. Admit exactly three top-level `resource-u32-prefix-elements` dispatches with distinct source resources only when their semantic writes form one root-to-middle-to-leaf producer chain; reject missing, forked, cyclic, extra, duplicate-source, mixed-mode, and pre-version profiles. CPU reads each private source at its ordered dispatch. Portable WebGPU reuses one generic staged executor to read, validate, specialize, and execute every exact prepared slot before the next distinct source becomes observable, while retaining one resident-buffer and fail-stop lifecycle. | A separately bounded third stage deepens the established semantic and execution seam without pretending to support arbitrary graphs, callbacks, device-side loops, or an unbounded feedback cycle. Exact chain shape and versioned node ceilings keep synchronization cost, work, pipeline identity, and failure ownership explicit. |
 | D-224 | 2026-07-30 | accepted | Add one generic `copyVerifiedArtifactWireBytes` boundary that copies the complete normalized canonical envelope of an opaque verifier-issued semantic artifact. The copy carries no in-memory authority; every receiving realm must decode and verify it again under its own schema authority before semantic preparation or execution. | Cross-realm transport needs stable bytes, but exposing payload-only objects would discard version, producer, extension, and artifact fields while structured-cloning an opaque authority would create a misleading forged object. One schema-level exporter preserves the existing wire contract for every artifact domain without adding per-domain serialization paths. |
 | D-225 | 2026-07-30 | accepted | Add `browsergrad.host-graph.browser-worker-transport@1` as one exact one-shot dedicated-browser-Worker topology. The package controller snapshots canonical artifact and input bytes, transfers only private buffers, binds one cryptographic request ID, enforces exact byte and wall-time limits, validates one closed terminal, and terminates the Worker for every outcome. The Worker re-verifies layout, kernel, and graph bytes under realm-local authority, owns its `GPUDevice`, and invokes the existing portable WebGPU graph executor. | This is the smallest honest transport slice and does not reinterpret host-graph semantics. A one-shot lifecycle gives timeout/cancellation fail-stop ownership and prevents stale terminals or post-failure reuse. Re-verification preserves the opaque-authority contract across realms. Keeping mesh/topology, collective transport, shared memory, retries, and native companions out of v1 avoids a false distributed-systems claim. |
+| D-226 | 2026-07-30 | accepted | Extend portable host-graph storage to every built-in semantic dtype for exact same-dtype view-copy dispatch while retaining backend-owned raw u32 resident buffers. Preserve the existing whole-word bound and attach f32/i32/u32 compatibility metadata only where the generic WGSL runner has a same-width typed-array representation. Do not widen collective arithmetic or reinterpret any semantic dtype. | Canonical packed8, packed16, word32, and word64 view-copy programs already bind raw u32 storage. The host graph's prior f32/i32/u32 admission check duplicated a narrower storage policy and blocked verified lowerings that the canonical backend already executes. One raw-word resident representation deepens the existing graph/view-copy seam without adding dtype-shaped kernels, conversions, or a second executor. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -8766,6 +8767,29 @@ whether any files may be left partially changed.
 - This is one dedicated Worker topology only. Worker meshes, cross-worker
   collectives/synchronization, retries, shared-memory transport, native
   companions, and broader mixed/device-side graph feedback remain open.
+
+### 2026-07-30 — Gate 7 all-storage-dtype semantic dispatch
+
+- WebGPU host-graph backend 1.31 removes the duplicated f32/i32/u32 storage
+  admission check. Every verified graph resource remains semantically typed
+  while the executor uses one backend-owned raw-u32 resident representation
+  already required by canonical packed8, packed16, word32, and word64
+  view-copy programs.
+- Required headed Chromium 148 on Apple Metal 3 passes ten new two-rank
+  complete-output CPU/WebGPU cases for bool, i8/u8, i16/u16, f16/bf16,
+  i64/u64, and f64. Together with existing f32/i32/u32 cases, exact semantic
+  dispatch now covers all 13 built-in storage dtypes without conversion or
+  arithmetic. The required host-graph suite expands from 64 to 74 cases.
+- Correctness artifact
+  `ad1f089e7f4d1b8e11ac3f7081937f21b140b2ab6dd0bebd571640df2cc05792`;
+  device profile
+  `a72951410740a4adee212bba13ee44da16fdb9d6644d3b58ec38e0623f2c7b48`.
+  The separately required Worker lane also passes backend 1.31 with
+  correctness artifact
+  `1453cb8a7f2fc3811c260e049ec09d8ff93af8cd29be8f536d6006fce8f5d4e5`.
+- Collective arithmetic remains exactly f32/i32/u32 under its declared
+  numerical policies. Packed/64-bit storage coverage grants no arithmetic,
+  conversion, boolean-canonicalization, or wider collective claim.
 
 ## Quick Resume Checklist
 

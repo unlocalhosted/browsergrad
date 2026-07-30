@@ -29,7 +29,7 @@ This checkpoint is informational. The rest of this document is normative; the
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch including exact shared-count fanout and exact two- and three-stage producer chains, rank-2-through-rank-8 request-time and produced-resource rectangular prefix dispatch including exact shared-rectangle fanout, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, separately prepared device-bound pipeline authority, and one exact one-shot dedicated-browser-Worker transport have actual-device evidence; broader mixed/device-side feedback, worker meshes/cross-worker topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch including exact shared-count fanout and exact two- and three-stage producer chains, rank-2-through-rank-8 request-time and produced-resource rectangular prefix dispatch including exact shared-rectangle fanout, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, fail-stop materialization, CPU oracle, all 13 built-in storage dtypes for exact same-dtype view-copy dispatch, authority-bound portable WebGPU execution, separately prepared device-bound pipeline authority, and one exact one-shot dedicated-browser-Worker transport have actual-device evidence; broader mixed/device-side feedback, worker meshes/cross-worker topology, arithmetic/collectives beyond the explicit 32-bit profiles, and native companion evidence remain open. |
 
 Only `verified` means every declared exit criterion is complete. A closed
 profile does not imply broader dtype, layout, numerical, or backend coverage.
@@ -2794,6 +2794,14 @@ Gate 7 remains `in progress`. Runtime controls are request-time host inputs,
 not GPU/backend-derived loop or launch counts.
 Current events do not claim timestamps, external waits, or cross-queue/cross-
 worker synchronization.
+
+Portable WebGPU backend 1.31 stores graph resources as raw u32 words while
+retaining each verified semantic dtype. Exact same-dtype view-copy dispatch now
+has CPU/WebGPU complete-output parity for bool, i8/u8, i16/u16, i32/u32,
+i64/u64, f16/bf16/f32/f64. Packed 8-bit, packed 16-bit, and two-word 64-bit
+profiles perform no conversion, boolean canonicalization, or arithmetic.
+Collectives remain restricted to the separately declared f32/i32/u32
+numerical policies; storage coverage does not widen their semantics.
 
 `browsergrad.host-graph.browser-worker-transport@1` is the first distinct
 browser transport product. One package-owned module Worker receives fresh

@@ -78,7 +78,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.30.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.31.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -2583,19 +2583,6 @@ function addResourceMetadata(
   names: Set<string>,
   metadata: Record<string, WgslStorageBufferMetadata>,
 ): void {
-  if (
-    resource.resource.dtype !== "f32" &&
-    resource.resource.dtype !== "i32" &&
-    resource.resource.dtype !== "u32"
-  ) {
-    fail(
-      "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
-      `$.resources.${resource.resource.resourceId}.dtype`,
-      `portable host-graph storage does not support ${
-        resource.resource.dtype
-      }`,
-    );
-  }
   if (resource.byteLength === 0 || resource.byteLength % 4 !== 0) {
     fail(
       "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
@@ -2604,9 +2591,17 @@ function addResourceMetadata(
     );
   }
   names.add(storageName);
+  const compatibleValueTypes =
+    resource.resource.dtype === "f32" ||
+      resource.resource.dtype === "i32" ||
+      resource.resource.dtype === "u32"
+      ? Object.freeze([resource.resource.dtype])
+      : undefined;
   metadata[storageName] = Object.freeze({
     valueType: "u32",
-    compatibleValueTypes: Object.freeze([resource.resource.dtype]),
+    ...(compatibleValueTypes === undefined
+      ? {}
+      : { compatibleValueTypes }),
   });
 }
 

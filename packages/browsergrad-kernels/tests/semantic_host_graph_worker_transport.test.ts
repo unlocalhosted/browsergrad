@@ -163,7 +163,7 @@ function success(
     outputs: [{ rank: wire(0), resourceId: "output", bytes }],
     trace: {
       profile: "browsergrad.host-graph.webgpu@1",
-      backendVersion: "1.30.0",
+      backendVersion: "1.31.0",
       graphSemanticHash: HASH,
       pipelineIdentityHash: HASH,
       backendSpecializationHash: HASH,
