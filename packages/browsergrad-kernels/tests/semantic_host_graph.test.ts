@@ -317,6 +317,52 @@ function resourceDynamicPipelineProgram(
   };
 }
 
+function resourceDynamicFanoutProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  const base = resourceDynamicPipelineProgram(artifacts);
+  const dynamic = base.nodes.find((node) =>
+    node.kind === "dynamic-dispatch");
+  if (
+    dynamic?.kind !== "dynamic-dispatch" ||
+    dynamic.mode !== "resource-u32-prefix-elements"
+  ) {
+    throw new Error("missing resource dynamic dispatch");
+  }
+  return {
+    ...base,
+    version: { major: 1, minor: 24 },
+    resources: [
+      ...base.resources,
+      resource("fanout-output", "output", "f32"),
+    ],
+    nodes: [
+      ...base.nodes.filter((node) => node.kind !== "materialize"),
+      {
+        ...dynamic,
+        nodeId: "fanout",
+        dependsOn: [...dynamic.dependsOn],
+        dimensionBindings: { ...dynamic.dimensionBindings },
+        launchSource: { ...dynamic.launchSource },
+        bindings: dynamic.bindings.map((binding) => ({
+          ...binding,
+          graphResourceId: binding.graphResourceId === "temporary"
+            ? "fanout-output"
+            : binding.graphResourceId,
+        })),
+      },
+      ...base.nodes.filter((node) => node.kind === "materialize"),
+      {
+        nodeId: "materialize-fanout-output",
+        kind: "materialize",
+        dependsOn: ["fanout"],
+        resourceId: "fanout-output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function collectiveProgram(
   artifacts: VerifiedViewCopyArtifacts,
   dtype: "f32" | "i32" | "u32",
@@ -1236,7 +1282,7 @@ describe("semantic host-graph WebGPU preparation", () => {
     expect(inputReads).toBe(0);
   });
 
-  it("prewarms one bounded version-1.11 produced-resource dynamic dispatch", async () => {
+  it("prewarms one produced dynamic dispatch and version-1.24 shared fanout", async () => {
     const artifacts = await identityArtifacts();
     const graph = await verified(
       resourceDynamicPipelineProgram(artifacts),
@@ -1257,6 +1303,19 @@ describe("semantic host-graph WebGPU preparation", () => {
       dynamicDispatchCount: 1,
       resourceDynamicDispatchCount: 1,
       midGraphFeedbackCount: 1,
+      runtimeControlIds: [],
+    });
+
+    const fanout = await prepareSemanticHostGraphWebGpu(
+      await verified(resourceDynamicFanoutProgram(artifacts), artifacts),
+      artifactOptions(artifacts),
+    );
+    expect(fanout).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 6,
+      dynamicDispatchCount: 2,
+      resourceDynamicDispatchCount: 2,
+      midGraphFeedbackCount: 2,
       runtimeControlIds: [],
     });
   });

@@ -206,6 +206,60 @@ function resourceDynamicPipelineProgram(
   };
 }
 
+function resourceDynamicFanoutProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  const base = resourceDynamicPipelineProgram(artifacts);
+  const dynamic = base.nodes.find((node) =>
+    node.kind === "dynamic-dispatch");
+  if (
+    dynamic?.kind !== "dynamic-dispatch" ||
+    dynamic.mode !== "resource-u32-prefix-elements"
+  ) {
+    throw new Error("missing resource dynamic dispatch");
+  }
+  return {
+    ...base,
+    version: { major: 1, minor: 24 },
+    resources: [
+      ...base.resources,
+      {
+        resourceId: "fanout-output",
+        role: "output",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "f32",
+        byteLength: wire("8"),
+        alignmentBytes: 4,
+      },
+    ],
+    nodes: [
+      ...base.nodes.filter((node) => node.kind !== "materialize"),
+      {
+        ...dynamic,
+        nodeId: "fanout",
+        dependsOn: [...dynamic.dependsOn],
+        dimensionBindings: { ...dynamic.dimensionBindings },
+        launchSource: { ...dynamic.launchSource },
+        bindings: dynamic.bindings.map((binding) => ({
+          ...binding,
+          graphResourceId: binding.graphResourceId === "temporary"
+            ? "fanout-output"
+            : binding.graphResourceId,
+        })),
+      },
+      ...base.nodes.filter((node) => node.kind === "materialize"),
+      {
+        nodeId: "materialize-fanout-output",
+        kind: "materialize",
+        dependsOn: ["fanout"],
+        resourceId: "fanout-output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function rectangularDynamicProgram(
   artifacts: VerifiedViewCopyArtifacts,
   shape: readonly number[],
@@ -1683,7 +1737,7 @@ describe("host graph CPU reference", () => {
     }
   });
 
-  it("executes one produced-resource dynamic dispatch prefix within its artifact bound", async () => {
+  it("executes one produced-resource dynamic prefix and exact shared fanout", async () => {
     const artifacts = await identityArtifacts();
     const graph = await verified(
       resourceDynamicPipelineProgram(artifacts),
@@ -1745,6 +1799,47 @@ describe("host graph CPU reference", () => {
         path: "$.nodes.first.launchSource",
       });
     }
+
+    const fanoutProgram = resourceDynamicFanoutProgram(artifacts);
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...fanoutProgram,
+        version: { major: 1, minor: 23 },
+      },
+      artifactOptions(artifacts),
+    )).rejects.toThrow("resource feedback node count exceeds 1");
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...fanoutProgram,
+        nodes: fanoutProgram.nodes.map((node) =>
+          node.kind === "dynamic-dispatch" && node.nodeId === "fanout"
+            ? { ...node, maxElementCount: wire("1") }
+            : node),
+      },
+      artifactOptions(artifacts),
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-INVALID-BINDING" },
+    });
+    const fanout = await prepareHostGraphCpu(
+      await verified(fanoutProgram, artifacts),
+      artifactOptions(artifacts),
+    );
+    expect(fanout).toMatchObject({
+      dynamicDispatchCount: 2,
+      resourceDynamicDispatchCount: 2,
+      runtimeControlIds: [],
+    });
+    const fanoutResult = await fanout.execute({
+      inputs: executionInputs(1),
+    });
+    expect(fanoutResult.completedDynamicDispatches).toEqual([
+      { nodeId: "fanout", elementCount: "1" },
+      { nodeId: "first", elementCount: "1" },
+    ]);
+    expect(fanoutResult.outputs.map(({ bytes }) => readF32(bytes))).toEqual([
+      [1.25, 0],
+      [1.25, 0],
+    ]);
   });
 
   it("rejects dynamic dispatch values before reading caller inputs", async () => {

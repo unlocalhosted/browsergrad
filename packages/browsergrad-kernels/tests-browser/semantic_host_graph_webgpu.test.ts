@@ -66,6 +66,8 @@ const CASE_IDS = Object.freeze([
   "f32-dynamic-dispatch-two",
   "f32-resource-dynamic-dispatch-one",
   "f32-resource-dynamic-dispatch-two",
+  "f32-resource-dynamic-fanout-one",
+  "f32-resource-dynamic-fanout-two",
   "f32-aligned-dynamic-dispatch-64",
   "f32-aligned-dynamic-dispatch-128",
   "f32-aligned-resource-dynamic-dispatch-64",
@@ -246,6 +248,14 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       ),
       prepareResourceDynamicDispatchCase(
         "f32-resource-dynamic-dispatch-two",
+        2,
+      ),
+      prepareResourceDynamicFanoutCase(
+        "f32-resource-dynamic-fanout-one",
+        1,
+      ),
+      prepareResourceDynamicFanoutCase(
+        "f32-resource-dynamic-fanout-two",
         2,
       ),
       prepareWideDynamicDispatchCase(
@@ -699,6 +709,18 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
     expect(twoResourceDynamicDispatch?.expandedStepCount).toBe(4);
     expect(oneResourceDynamicDispatch?.midGraphFeedbackCount).toBe(1);
     expect(twoResourceDynamicDispatch?.midGraphFeedbackCount).toBe(1);
+    const oneResourceDynamicFanout = completedCases.find(({ caseId }) =>
+      caseId === "f32-resource-dynamic-fanout-one");
+    const twoResourceDynamicFanout = completedCases.find(({ caseId }) =>
+      caseId === "f32-resource-dynamic-fanout-two");
+    expect(oneResourceDynamicFanout?.pipelineIdentityHash)
+      .toBe(twoResourceDynamicFanout?.pipelineIdentityHash);
+    expect(oneResourceDynamicFanout?.backendSpecializationHash)
+      .not.toBe(twoResourceDynamicFanout?.backendSpecializationHash);
+    expect(oneResourceDynamicFanout?.expandedStepCount).toBe(6);
+    expect(twoResourceDynamicFanout?.expandedStepCount).toBe(6);
+    expect(oneResourceDynamicFanout?.midGraphFeedbackCount).toBe(2);
+    expect(twoResourceDynamicFanout?.midGraphFeedbackCount).toBe(2);
     const alignedDynamic64 = completedCases.find(({ caseId }) =>
       caseId === "f32-aligned-dynamic-dispatch-64");
     const alignedDynamic128 = completedCases.find(({ caseId }) =>
@@ -1205,6 +1227,50 @@ async function prepareResourceDynamicDispatchCase(
   const values = [f32Bytes([1.25, -2.5]), f32Bytes([3.5, 4.75])];
   const graph = (await createVerifiedHostGraphArtifact(
     resourceDynamicDispatchProgram(artifacts),
+    artifactOptions(artifacts),
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(
+    graph,
+    { ...artifactOptions(artifacts), workgroupSize: 64 },
+  );
+  const inputs = Object.freeze([
+    ...values.map((bytes, rank) => input(rank, bytes)),
+    namedInput(0, "launch-input", u32Bytes([elementCount])),
+    namedInput(1, "launch-input", u32Bytes([0])),
+  ]);
+  return Object.freeze({
+    caseId,
+    artifacts,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: inputs.map(({ rank, resourceId, bytes }) => ({
+        rank,
+        resourceId,
+        bytes: Array.from(bytes),
+      })),
+    }),
+  });
+}
+
+async function prepareResourceDynamicFanoutCase(
+  caseId:
+    | "f32-resource-dynamic-fanout-one"
+    | "f32-resource-dynamic-fanout-two",
+  elementCount: 1 | 2,
+): Promise<PreparedCase> {
+  const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
+    inputShape: [parseWireI64("2")],
+    axes: [0],
+    dtype: "f32",
+  });
+  const values = [f32Bytes([1.25, -2.5]), f32Bytes([3.5, 4.75])];
+  const graph = (await createVerifiedHostGraphArtifact(
+    resourceDynamicDispatchFanoutProgram(artifacts),
     artifactOptions(artifacts),
   )).artifact;
   const prepared = await prepareSemanticHostGraphWebGpu(
@@ -1905,6 +1971,52 @@ function resourceDynamicDispatchProgram(
           mode: "resource-u32-prefix-elements" as const,
         };
       }),
+    ],
+  };
+}
+
+function resourceDynamicDispatchFanoutProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  const base = resourceDynamicDispatchProgram(artifacts);
+  const dynamic = base.nodes.find((node) =>
+    node.kind === "dynamic-dispatch");
+  if (
+    dynamic?.kind !== "dynamic-dispatch" ||
+    dynamic.mode !== "resource-u32-prefix-elements"
+  ) {
+    throw new Error("missing resource dynamic dispatch");
+  }
+  return {
+    ...base,
+    version: { major: 1, minor: 24 },
+    resources: [
+      ...base.resources,
+      resource("fanout-output", "output", "f32", 8),
+    ],
+    nodes: [
+      ...base.nodes.filter((node) => node.kind !== "materialize"),
+      {
+        ...dynamic,
+        nodeId: "fanout",
+        dependsOn: [...dynamic.dependsOn],
+        dimensionBindings: { ...dynamic.dimensionBindings },
+        launchSource: { ...dynamic.launchSource },
+        bindings: dynamic.bindings.map((binding) => ({
+          ...binding,
+          graphResourceId: binding.graphResourceId === "output"
+            ? "fanout-output"
+            : binding.graphResourceId,
+        })),
+      },
+      ...base.nodes.filter((node) => node.kind === "materialize"),
+      {
+        nodeId: "materialize-fanout-output",
+        kind: "materialize",
+        dependsOn: ["fanout"],
+        resourceId: "fanout-output",
+        mode: "host-readback-after-graph-success",
+      },
     ],
   };
 }

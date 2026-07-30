@@ -29,7 +29,7 @@ This checkpoint is informational. The rest of this document is normative; the
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch, rank-2-through-rank-8 request-time and produced-resource rectangular prefix dispatch, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, an at-most-one produced-resource feedback-node bound across conditional, repeat, and dynamic-dispatch control, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; repeated/device-side feedback, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch including exact shared-count two-dispatch fanout, rank-2-through-rank-8 request-time and produced-resource rectangular prefix dispatch, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, one aggregate feedback stage, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; repeated/device-side feedback, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every declared exit criterion is complete. A closed
 profile does not imply broader dtype, layout, numerical, or backend coverage.
@@ -187,9 +187,9 @@ portable implementation and exact-payload convergence exits already pass.
    observations and synthetic fixtures grant no production authority.
 
 Gate 7 covers bounded DAG request/resource repetition, request-time and
-produced-resource dispatch through rank 8, one feedback stage, and device-bound
-CPU/WebGPU pipelines. Repeated/device-side feedback, unbounded launches,
-transport/topology, worker
+produced-resource dispatch through rank 8, exact shared-count two-dispatch
+fanout in one feedback stage, and device-bound CPU/WebGPU pipelines.
+Repeated/device-side feedback, unbounded launches, transport/topology, worker
 meshes, and native systems remain open.
 
 ## Purpose
@@ -2494,11 +2494,18 @@ repeated feedback, or opaque callback. Program version 1.11 adds
 `launchSource` names the same exact rank-local ordered temporary-u32 class.
 One through a positive artifact maximum no larger than the verified semantic
 domain execute the exact logical prefix; zero and larger values fail closed.
-The dispatch cannot bind the captured launch source as data, and the
-graph-wide at-most-one produced-resource feedback bound spans conditionals,
-repeats, and dynamic dispatches. This is one bounded host-mediated
+The dispatch cannot bind the captured launch source as data, and versions
+through 1.23 retain a graph-wide at-most-one produced-resource feedback bound
+across conditionals, repeats, and dynamic dispatches. This is one bounded host-mediated
 GPU-produced launch prefix, not a device-side loop, arbitrary grid, repeated
-feedback, or source-shaped backend path. The authority-bound
+feedback, or source-shaped backend path. Program version 1.24 admits exactly
+two top-level linear-prefix resource dispatches only when both name the same
+ordered temporary-u32 source, rank, mode, and artifact maximum. One produced
+count fans out to both independently bound semantic dispatches through one
+aggregate feedback stage; conditionals, repeats, rectangular selectors,
+different sources or bounds, a third feedback node, and pre-version fanout
+fail closed. This is shared selection, not repeated or device-side feedback.
+The authority-bound
 `browsergrad.host-graph.cpu-reference@1` profile snapshots all
 rank-local inputs and the exact required runtime-control set, executes
 dispatches, arbitrary-byte copies, and finite
@@ -2676,6 +2683,8 @@ produced-resource f32 dynamic dispatches through one graph/pipeline identity,
 plus 64/128-element workgroup-64 request-time and produced-resource dynamic
 dispatches and 65/127-element workgroup-64 request-time and produced-resource
 dynamic dispatches whose tail guards prevent out-of-prefix access, and
+one/two-element shared-count two-dispatch fanout through one aggregate
+feedback stage and stable graph/pipeline identity, and
 small/full rank-2 `[3,4]` plus rank-3 `[2,3,4]` request-time rectangular
 dispatches through stable graph/pipeline identities, plus matching small/full
 produced-resource rank-2/rank-3 rectangles through one feedback stage, and
@@ -2699,9 +2708,9 @@ identity and distinct specialization, and
 matching small/full produced-resource rank-8 rectangles through the same
 one-feedback lifecycle, and
 separately proves non-finite f32 and lost-device refusal.
-The required lane completes 56 CPU/WebGPU parity cases under backend 1.26.0;
+The required lane completes 58 CPU/WebGPU parity cases under backend 1.27.0;
 terminal correctness artifact
-`86ce39dcb21e3845fa0ba7b818b8f9996bc981df93f4cd9cbe75d1f48b45229b`
+`7686a372f0d7859b52822ff9bf7343e94ef036869c7b6a35a4844bcb81bf2040`
 binds device profile
 `a72951410740a4adee212bba13ee44da16fdb9d6644d3b58ec38e0623f2c7b48`.
 
@@ -2745,8 +2754,8 @@ version-1.17 produced-resource rank-5, and version-1.18 request-time rank-6
 dispatch, version-1.19 produced-resource rank-6 dispatch, and version-1.20
 request-time rank-7 dispatch plus version-1.21 produced-resource rank-7
 dispatch, version-1.22 request-time rank-8 dispatch, and version-1.23
-produced-resource rank-8 dispatch are implemented
-under an at-most-one-feedback-node graph bound. No repeated or device-side
+produced-resource rank-8 dispatch plus version-1.24 shared-count two-dispatch
+linear fanout are implemented under one aggregate feedback stage. No repeated or device-side
 feedback, rank-9-and-higher dynamic domain,
 nested/device-side branching,
 transport/topology adapter, worker mesh, or native companion exists yet, so

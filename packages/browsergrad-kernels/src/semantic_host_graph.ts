@@ -78,7 +78,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.26.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.27.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -362,7 +362,8 @@ interface PreparedState {
   readonly resourceRepeat?: PreparedResourceRepeatPlan;
   readonly runtimeRepeatLimits: ReadonlyMap<string, number>;
   readonly dynamicDispatches: readonly PreparedDynamicDispatchPlan[];
-  readonly resourceDynamicDispatch?: PreparedDynamicDispatchPlan;
+  readonly resourceDynamicDispatches:
+    readonly PreparedDynamicDispatchPlan[];
   readonly dynamicDispatchLimits: ReadonlyMap<string, number>;
   readonly runtimeControlIds: readonly string[];
   readonly maximumCounts: Readonly<MutablePreparationCounts>;
@@ -531,7 +532,8 @@ interface SelectedExecution {
   readonly completedConditionals: readonly HostGraphConditionalCompletion[];
   readonly resourceConditional?: PreparedConditionalPlan;
   readonly resourceRepeat?: PreparedResourceRepeatPlan;
-  readonly resourceDynamicDispatch?: PreparedDynamicDispatchPlan;
+  readonly resourceDynamicDispatches:
+    readonly PreparedDynamicDispatchPlan[];
 }
 
 interface ExecutedGraph {
@@ -836,18 +838,36 @@ export async function prepareSemanticHostGraphWebGpu(
     );
   }
   const resourceDynamicDispatch = resourceDynamicDispatches[0];
-  if (
-    [
-      resourceConditional,
-      resourceRepeat,
-      resourceDynamicDispatch,
-    ].filter((item) => item !== undefined).length > 1
-  ) {
+  const resourceFeedbackCount =
+    resourceConditionals.length +
+    resourceRepeats.length +
+    resourceDynamicDispatches.length;
+  if (resourceFeedbackCount > 2) {
     fail(
       "BG-WEBGPU-GRAPH-INTERNAL",
       "$.artifact",
-      "verified graph contains more than one resource feedback node",
+      "verified graph contains more than two resource feedback nodes",
     );
+  }
+  if (resourceFeedbackCount === 2) {
+    const first = resourceDynamicDispatches[0];
+    const second = resourceDynamicDispatches[1];
+    if (
+      resourceDynamicDispatches.length !== 2 ||
+      first?.kind !== "linear-prefix" ||
+      second?.kind !== "linear-prefix" ||
+      first.selector.kind !== "resource" ||
+      second.selector.kind !== "resource" ||
+      first.selector.resourceId !== second.selector.resourceId ||
+      first.selector.rank !== second.selector.rank ||
+      first.maxElementCount !== second.maxElementCount
+    ) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        "$.artifact",
+        "verified resource feedback fanout contract diverged",
+      );
+    }
   }
   const feedbackBytes = resourceDynamicDispatch?.kind ===
       "rectangular-prefix"
@@ -1008,9 +1028,8 @@ export async function prepareSemanticHostGraphWebGpu(
       ? {}
       : { resourceConditional }),
     ...(resourceRepeat === undefined ? {} : { resourceRepeat }),
-    ...(resourceDynamicDispatch === undefined
-      ? {}
-      : { resourceDynamicDispatch }),
+    resourceDynamicDispatches:
+      Object.freeze([...resourceDynamicDispatches]),
     runtimeRepeats: Object.freeze([...runtimeRepeats]),
     runtimeRepeatLimits: runtimeRepeatControlLimits(runtimeRepeats),
     dynamicDispatches: Object.freeze([...dynamicDispatches]),
@@ -1717,7 +1736,7 @@ async function executeCapturedHostGraph(
   const execution = (
     selectedExecution.resourceConditional === undefined &&
       selectedExecution.resourceRepeat === undefined &&
-      selectedExecution.resourceDynamicDispatch === undefined
+      selectedExecution.resourceDynamicDispatches.length === 0
       ? executeGraph(
         device,
         gpu,
@@ -1968,9 +1987,7 @@ function selectConditionalExecution(
     ...(state.resourceRepeat === undefined
       ? {}
       : { resourceRepeat: state.resourceRepeat }),
-    ...(state.resourceDynamicDispatch === undefined
-      ? {}
-      : { resourceDynamicDispatch: state.resourceDynamicDispatch }),
+    resourceDynamicDispatches: state.resourceDynamicDispatches,
   });
 }
 
@@ -2931,7 +2948,7 @@ async function executeGraphWithResourceFeedback(
   pipelineSet: WgslPreparedPipelineSet,
   signal: AbortSignal | undefined,
 ): Promise<ExecutedGraph> {
-  if (selectedExecution.resourceDynamicDispatch !== undefined) {
+  if (selectedExecution.resourceDynamicDispatches.length > 0) {
     return executeGraphWithResourceDynamicDispatchFeedback(
       device,
       gpu,
@@ -3087,6 +3104,8 @@ async function executeGraphWithResourceFeedback(
         selectedExecution.completedDynamicDispatches,
       completedConditionals,
       resourceConditional: conditional,
+      resourceDynamicDispatches:
+        selectedExecution.resourceDynamicDispatches,
     });
     throwIfCancelled(signal);
     const result = await executeResidentGraphStage(
@@ -3115,10 +3134,11 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
   pipelineSet: WgslPreparedPipelineSet,
   signal: AbortSignal | undefined,
 ): Promise<ExecutedGraph> {
-  const dispatch = selectedExecution.resourceDynamicDispatch;
+  const dispatches = selectedExecution.resourceDynamicDispatches;
+  const firstDispatch = dispatches[0];
   if (
-    dispatch === undefined ||
-    dispatch.selector.kind !== "resource"
+    firstDispatch === undefined ||
+    firstDispatch.selector.kind !== "resource"
   ) {
     fail(
       "BG-WEBGPU-GRAPH-INTERNAL",
@@ -3132,14 +3152,14 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
     buffers,
   );
   try {
-    const feedbackSources = dispatch.kind === "linear-prefix"
+    const feedbackSources = firstDispatch.kind === "linear-prefix"
       ? [Object.freeze({
           axis: 0,
-          resourceId: dispatch.selector.resourceId,
-          rank: dispatch.selector.rank,
-          maxExtent: dispatch.maxElementCount,
+          resourceId: firstDispatch.selector.resourceId,
+          rank: firstDispatch.selector.rank,
+          maxExtent: firstDispatch.maxElementCount,
         })]
-      : dispatch.selector.sources;
+      : firstDispatch.selector.sources;
     const sourceStorageNames = feedbackSources.map((source, index) => {
       const sourcePlan = state.resourcesById.get(source.resourceId);
       const sourceStorageName = sourcePlan?.storageNames[source.rank];
@@ -3151,9 +3171,9 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
       ) {
         fail(
           "BG-WEBGPU-GRAPH-INTERNAL",
-          dispatch.kind === "linear-prefix"
-            ? `$.nodes.${dispatch.nodeId}.launchSource`
-            : `$.nodes.${dispatch.nodeId}.launchSources[${index}]`,
+          firstDispatch.kind === "linear-prefix"
+            ? `$.nodes.${firstDispatch.nodeId}.launchSource`
+            : `$.nodes.${firstDispatch.nodeId}.launchSources[${index}]`,
           "verified resource dynamic dispatch source storage disappeared",
         );
       }
@@ -3161,12 +3181,12 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
     });
     const selectedDispatchIndex =
       selectedExecution.pipelineStepIndices.indexOf(
-        dispatch.startStepIndex,
+        firstDispatch.startStepIndex,
       );
     if (selectedDispatchIndex < 0) {
       fail(
         "BG-WEBGPU-GRAPH-INTERNAL",
-        `$.nodes.${dispatch.nodeId}.launchSource`,
+        `$.nodes.${firstDispatch.nodeId}.launchSource`,
         "verified resource dynamic dispatch step disappeared after runtime selection",
       );
     }
@@ -3182,7 +3202,7 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
     if (prefixSteps.length === 0) {
       fail(
         "BG-WEBGPU-GRAPH-INTERNAL",
-        `$.nodes.${dispatch.nodeId}.launchSource`,
+        `$.nodes.${firstDispatch.nodeId}.launchSource`,
         "verified resource dynamic dispatch producer disappeared",
       );
     }
@@ -3203,78 +3223,123 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
       if (!(sourceValue instanceof Uint32Array) || sourceValue.length !== 1) {
         fail(
           "BG-WEBGPU-GRAPH-INTERNAL",
-          dispatch.kind === "linear-prefix"
-            ? `$.nodes.${dispatch.nodeId}.launchSource`
-            : `$.nodes.${dispatch.nodeId}.launchSources[${index}]`,
+          firstDispatch.kind === "linear-prefix"
+            ? `$.nodes.${firstDispatch.nodeId}.launchSource`
+            : `$.nodes.${firstDispatch.nodeId}.launchSources[${index}]`,
           "resource dynamic dispatch feedback returned an invalid u32 allocation",
         );
       }
       const value = sourceValue[0] as number;
-      const maximum = feedbackSources[index]?.maxExtent;
-      if (
-        maximum === undefined ||
-        value <= 0 ||
-        value > maximum
-      ) {
-        fail(
-          "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
-          dispatch.kind === "linear-prefix"
-            ? `$.nodes.${dispatch.nodeId}.launchSource`
-            : `$.nodes.${dispatch.nodeId}.launchSources[${index}]`,
-          dispatch.kind === "linear-prefix"
-            ? `produced resource dynamic dispatch count ${value} must be between one and its artifact bound ${maximum}`
-            : `produced rectangular dynamic dispatch extent ${value} must be between one and its artifact bound ${maximum}`,
-        );
-      }
       return value;
     });
-    const selection: DynamicLaunchSelection =
-      dispatch.kind === "linear-prefix"
-        ? Object.freeze({
-            kind: "linear-prefix" as const,
-            elementCount: producedExtents[0] as number,
-          })
-        : rectangularDynamicSelection(
-            producedExtents,
-            `$.nodes.${dispatch.nodeId}.launchSources`,
-          );
     const steps = [...selectedExecution.steps];
-    for (
-      let offset = 0;
-      offset < dispatch.stepCount;
-      offset += 1
-    ) {
-      const selectedIndex = selectedDispatchIndex + offset;
-      const step = steps[selectedIndex];
-      const pipelineIndex =
-        selectedExecution.pipelineStepIndices[selectedIndex];
-      if (
-        step === undefined ||
-        pipelineIndex !== dispatch.startStepIndex + offset
-      ) {
-        fail(
-          "BG-WEBGPU-GRAPH-INTERNAL",
-          `$.nodes.${dispatch.nodeId}`,
-          "resource dynamic dispatch rank step disappeared during feedback staging",
-        );
-      }
-      steps[selectedIndex] = dynamicDispatchStep(
-        step,
-        dispatch,
-        selection,
-      );
-    }
-    const completion = dynamicDispatchCompletion(
-      dispatch.nodeId,
-      selection,
-    );
     const completionsByNodeId = new Map(
       selectedExecution.completedDynamicDispatches.map((item) => [
         item.nodeId,
         item,
       ]),
     );
-    completionsByNodeId.set(dispatch.nodeId, completion);
+    for (const dispatch of dispatches) {
+      if (dispatch.selector.kind !== "resource") {
+        fail(
+          "BG-WEBGPU-GRAPH-INTERNAL",
+          `$.nodes.${dispatch.nodeId}`,
+          "resource feedback fanout lost a resource selector",
+        );
+      }
+      const sources = dispatch.kind === "linear-prefix"
+        ? [Object.freeze({
+            axis: 0,
+            resourceId: dispatch.selector.resourceId,
+            rank: dispatch.selector.rank,
+            maxExtent: dispatch.maxElementCount,
+          })]
+        : dispatch.selector.sources;
+      if (
+        sources.length !== feedbackSources.length ||
+        sources.some((source, index) => {
+          const first = feedbackSources[index];
+          return first === undefined ||
+            source.axis !== first.axis ||
+            source.resourceId !== first.resourceId ||
+            source.rank !== first.rank;
+        })
+      ) {
+        fail(
+          "BG-WEBGPU-GRAPH-INTERNAL",
+          `$.nodes.${dispatch.nodeId}`,
+          "resource feedback fanout source identity diverged",
+        );
+      }
+      for (const [index, value] of producedExtents.entries()) {
+        const maximum = sources[index]?.maxExtent;
+        if (
+          maximum === undefined ||
+          value <= 0 ||
+          value > maximum
+        ) {
+          fail(
+            "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
+            dispatch.kind === "linear-prefix"
+              ? `$.nodes.${dispatch.nodeId}.launchSource`
+              : `$.nodes.${dispatch.nodeId}.launchSources[${index}]`,
+            dispatch.kind === "linear-prefix"
+              ? `produced resource dynamic dispatch count ${value} must be between one and its artifact bound ${maximum}`
+              : `produced rectangular dynamic dispatch extent ${value} must be between one and its artifact bound ${maximum}`,
+          );
+        }
+      }
+      const selection: DynamicLaunchSelection =
+        dispatch.kind === "linear-prefix"
+          ? Object.freeze({
+              kind: "linear-prefix" as const,
+              elementCount: producedExtents[0] as number,
+            })
+          : rectangularDynamicSelection(
+              producedExtents,
+              `$.nodes.${dispatch.nodeId}.launchSources`,
+            );
+      const dispatchIndex =
+        selectedExecution.pipelineStepIndices.indexOf(
+          dispatch.startStepIndex,
+        );
+      if (dispatchIndex < 0) {
+        fail(
+          "BG-WEBGPU-GRAPH-INTERNAL",
+          `$.nodes.${dispatch.nodeId}`,
+          "resource dynamic dispatch step disappeared after runtime selection",
+        );
+      }
+      for (
+        let offset = 0;
+        offset < dispatch.stepCount;
+        offset += 1
+      ) {
+        const selectedIndex = dispatchIndex + offset;
+        const step = steps[selectedIndex];
+        const pipelineIndex =
+          selectedExecution.pipelineStepIndices[selectedIndex];
+        if (
+          step === undefined ||
+          pipelineIndex !== dispatch.startStepIndex + offset
+        ) {
+          fail(
+            "BG-WEBGPU-GRAPH-INTERNAL",
+            `$.nodes.${dispatch.nodeId}`,
+            "resource dynamic dispatch rank step disappeared during feedback staging",
+          );
+        }
+        steps[selectedIndex] = dynamicDispatchStep(
+          step,
+          dispatch,
+          selection,
+        );
+      }
+      completionsByNodeId.set(
+        dispatch.nodeId,
+        dynamicDispatchCompletion(dispatch.nodeId, selection),
+      );
+    }
     const completedDynamicDispatches = Object.freeze(
       state.topologicalNodeIds.flatMap((nodeId) => {
         const item = completionsByNodeId.get(nodeId);
@@ -3293,7 +3358,7 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
       completedRepeats: selectedExecution.completedRepeats,
       completedDynamicDispatches,
       completedConditionals: selectedExecution.completedConditionals,
-      resourceDynamicDispatch: dispatch,
+      resourceDynamicDispatches: dispatches,
     });
     throwIfCancelled(signal);
     const result = await executeResidentGraphStage(
@@ -3465,6 +3530,8 @@ async function executeGraphWithResourceRepeatFeedback(
         selectedExecution.completedDynamicDispatches,
       completedConditionals: selectedExecution.completedConditionals,
       resourceRepeat: repeat,
+      resourceDynamicDispatches:
+        selectedExecution.resourceDynamicDispatches,
     });
     throwIfCancelled(signal);
     const suffixSteps = finalSelection.steps.slice(selectedRepeatIndex);
