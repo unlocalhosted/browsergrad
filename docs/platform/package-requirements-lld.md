@@ -2558,9 +2558,12 @@ within the dispatch's artifact maximum. Program version 1.32 extends the same
 two-stage contract to one rank-2 `resource-u32-rectangular-prefix` dispatch.
 Both branches must guarantee-write both distinct extent sources after
 selection from a third predicate resource; every extent remains positive and
-within its artifact maximum. Missing or one-sided writes, shared sources,
-pre-version use, a third consumer, rank-3-or-higher branch-produced geometry,
-and every other mixed profile fail closed. This is one bounded
+within its artifact maximum. Program version 1.33 extends that same exact
+profile through ranks 3 to 8. The predicate and every extent source must be
+pairwise distinct, and both branches must guarantee-write every positive
+bounded extent before the dispatch. Missing or one-sided writes, shared
+sources, pre-version use, a third consumer, above-rank-8 branch-produced
+geometry, and every other mixed profile fail closed. This is one bounded
 branch-produced rectangle, not arbitrary geometry or device-side control.
 The authority-bound
 `browsergrad.host-graph.cpu-reference@1` profile snapshots all
