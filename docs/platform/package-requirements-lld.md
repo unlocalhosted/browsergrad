@@ -2828,6 +2828,13 @@ submission. Worker conformance v2 records correctness artifact
 `86ec30c8fbe73b451dda627950fcf41efb7c2bcf2be563785bec102b34b6bc77`
 under device profile
 `0436693df95430f4195cb27222e8ebca104c64b3b99ac27c24a5be5ec0f5bc06`.
+The lane emits exactly one validated `browsergrad.execution-evidence@1`
+terminal for pass, fail, or optional not-run. That terminal binds the closed
+four-case manifest and completion prefix, producer versions, the explicit
+bit-exact complete-output comparison policy, browser and Worker-device
+environment identity, per-case graph/backend/output/device digests, and the
+one-shot terminal/lifecycle invariants. A passed terminal requires all cases in
+order and one identical device profile across all four independent Workers.
 CI and npm staging retain this exact-commit required Worker lane separately
 from the existing in-realm graph and performance lanes.
 
