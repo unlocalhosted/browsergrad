@@ -262,6 +262,10 @@ extent source remains distinct from the predicate and every other extent, and
 both branches must guarantee-write all of them. Missing, disconnected, forked, cyclic, extra,
 duplicate-source, non-guaranteed, broader mixed-mode,
 pre-version, or above-version feedback profiles fail closed.
+Version 1.34 raises only the exact linear producer-chain ceiling from four to
+eight feedback nodes. Five through eight distinct launch sources must form one
+connected root-to-leaf producer chain; older versions retain their exact node
+ceilings.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -341,13 +345,15 @@ ordered private-resource path and executes that identical rank-5 rectangle.
 Versions 1.18 through 1.23 reuse those request-time and produced-resource CPU
 paths through rank 8. Versions 1.24/1.25 report both exact consumers of one
 shared selection, while versions 1.26 through 1.28 read and execute each
-distinct linear selection in producer-chain order. Version 1.29 reads one
+distinct linear selection in producer-chain order; version 1.34 extends that
+same loop through eight stages. Version 1.29 reads one
 private produced `u32` once, then applies it to both the conditional branch and
 bounded repeat count. Version 1.30 first reads the private produced predicate,
 executes its selected branch, then reads that branch's guaranteed distinct
 repeat count and executes the bounded repeat. Version 1.31 applies the same
 ordered branch-produced selection to one positive bounded linear dispatch.
-Version 1.32 applies it to two positive bounded rank-2 rectangle extents.
+Versions 1.32/1.33 apply it to positive bounded rank-2-through-rank-8
+rectangle extents.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -369,12 +375,14 @@ single feedback lifecycle to one rank-4 produced rectangle, and version 1.17
 extends it to one rank-5 produced rectangle. Versions 1.19/1.21/1.23 extend
 that aggregate lifecycle through rank 8; versions 1.24/1.25 fan one selection
 out to two consumers, and versions 1.26 through 1.28 execute exact two-,
-three-, or four-stage linear producer chains. Version 1.29 fans one produced
+three-, or four-stage linear producer chains. Version 1.34 extends the same
+generic connected-chain contract through eight stages. Version 1.29 fans one produced
 scalar out to one conditional and one repeat in the same feedback stage.
 Version 1.30 instead executes conditional selection and the branch-produced
 repeat count through two ordered feedback stages.
 Version 1.31 reuses those stages for one branch-produced linear launch count.
-Version 1.32 reuses them for one branch-produced rank-2 rectangular launch.
+Versions 1.32/1.33 reuse them for one branch-produced rank-2-through-rank-8
+rectangular launch.
 Neither adapter grants
 transport, topology, retries, event
 timestamps or external waits, broader mixed or device-side feedback,

@@ -111,6 +111,8 @@ const CASE_IDS = Object.freeze([
   "f32-three-stage-resource-feedback-two",
   "f32-four-stage-resource-feedback-one",
   "f32-four-stage-resource-feedback-two",
+  "f32-eight-stage-resource-feedback-one",
+  "f32-eight-stage-resource-feedback-two",
   "f32-aligned-dynamic-dispatch-64",
   "f32-aligned-dynamic-dispatch-128",
   "f32-aligned-resource-dynamic-dispatch-64",
@@ -495,6 +497,16 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         "f32-four-stage-resource-feedback-two",
         2,
         4,
+      ),
+      prepareSequentialResourceFeedbackCase(
+        "f32-eight-stage-resource-feedback-one",
+        1,
+        8,
+      ),
+      prepareSequentialResourceFeedbackCase(
+        "f32-eight-stage-resource-feedback-two",
+        2,
+        8,
       ),
       prepareWideDynamicDispatchCase(
         "f32-aligned-dynamic-dispatch-64",
@@ -1252,6 +1264,30 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       materializationCount: 1,
       midGraphFeedbackCount: 4,
       midGraphFeedbackStageCount: 4,
+    });
+    const oneEightStageFeedback = completedCases.find(({ caseId }) =>
+      caseId === "f32-eight-stage-resource-feedback-one");
+    const twoEightStageFeedback = completedCases.find(({ caseId }) =>
+      caseId === "f32-eight-stage-resource-feedback-two");
+    expect(oneEightStageFeedback?.pipelineIdentityHash)
+      .toBe(twoEightStageFeedback?.pipelineIdentityHash);
+    expect(oneEightStageFeedback?.backendSpecializationHash)
+      .not.toBe(twoEightStageFeedback?.backendSpecializationHash);
+    expect(oneEightStageFeedback).toMatchObject({
+      expandedStepCount: 9,
+      dispatchStepCount: 8,
+      copyStepCount: 1,
+      materializationCount: 1,
+      midGraphFeedbackCount: 8,
+      midGraphFeedbackStageCount: 8,
+    });
+    expect(twoEightStageFeedback).toMatchObject({
+      expandedStepCount: 9,
+      dispatchStepCount: 8,
+      copyStepCount: 1,
+      materializationCount: 1,
+      midGraphFeedbackCount: 8,
+      midGraphFeedbackStageCount: 8,
     });
     const alignedDynamic64 = completedCases.find(({ caseId }) =>
       caseId === "f32-aligned-dynamic-dispatch-64");
@@ -2149,9 +2185,11 @@ async function prepareSequentialResourceFeedbackCase(
     | "f32-three-stage-resource-feedback-one"
     | "f32-three-stage-resource-feedback-two"
     | "f32-four-stage-resource-feedback-one"
-    | "f32-four-stage-resource-feedback-two",
+    | "f32-four-stage-resource-feedback-two"
+    | "f32-eight-stage-resource-feedback-one"
+    | "f32-eight-stage-resource-feedback-two",
   elementCount: 1 | 2,
-  stageCount: 2 | 3 | 4 = 2,
+  stageCount: SequentialFeedbackStageCount = 2,
 ): Promise<PreparedCase> {
   const countArtifacts =
     await createVerifiedDensePermutationViewCopyArtifacts({
@@ -2181,14 +2219,10 @@ async function prepareSequentialResourceFeedbackCase(
   );
   const inputs = Object.freeze([
     namedInput(0, "launch-input", u32Bytes([1])),
-    ...[
-      "next-count-input",
-      "final-count-input",
-      "terminal-count-input",
-    ].slice(0, stageCount - 1).map((resourceId, index, stages) =>
+    ...sequentialFeedbackStages(stageCount).map((stage, index, stages) =>
       namedInput(
         0,
-        resourceId,
+        stage.inputResourceId,
         u32Bytes([
           index === stages.length - 1 ? elementCount : 1,
         ]),
@@ -3096,12 +3130,10 @@ function resourceDynamicDispatchFanoutProgram(
   };
 }
 
-function sequentialResourceDynamicDispatchProgram(
-  countArtifacts: VerifiedViewCopyArtifacts,
-  dataArtifacts: VerifiedViewCopyArtifacts,
-  stageCount: 2 | 3 | 4 = 2,
-): HostGraphProgram {
-  const stages = [
+type SequentialFeedbackStageCount = 2 | 3 | 4 | 5 | 6 | 7 | 8;
+
+function sequentialFeedbackStages(stageCount: SequentialFeedbackStageCount) {
+  const legacy = [
     {
       inputResourceId: "next-count-input",
       outputResourceId: "next-count",
@@ -3117,7 +3149,21 @@ function sequentialResourceDynamicDispatchProgram(
       outputResourceId: "terminal-count",
       nodeId: "produce-terminal-count",
     },
-  ].slice(0, stageCount - 1);
+  ] as const;
+  return Array.from({ length: stageCount - 1 }, (_, index) =>
+    legacy[index] ?? {
+      inputResourceId: `feedback-count-input-${index + 1}`,
+      outputResourceId: `feedback-count-${index + 1}`,
+      nodeId: `produce-feedback-count-${index + 1}`,
+    });
+}
+
+function sequentialResourceDynamicDispatchProgram(
+  countArtifacts: VerifiedViewCopyArtifacts,
+  dataArtifacts: VerifiedViewCopyArtifacts,
+  stageCount: SequentialFeedbackStageCount = 2,
+): HostGraphProgram {
+  const stages = sequentialFeedbackStages(stageCount);
   const countDispatches = stages.map((stage, index) => {
     const predecessor = stages[index - 1];
     return {
@@ -3154,7 +3200,13 @@ function sequentialResourceDynamicDispatchProgram(
     kind: "host-graph",
     version: {
       major: 1,
-      minor: stageCount === 2 ? 26 : stageCount === 3 ? 27 : 28,
+      minor: stageCount === 2
+        ? 26
+        : stageCount === 3
+          ? 27
+          : stageCount === 4
+            ? 28
+            : 34,
     },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire(1),

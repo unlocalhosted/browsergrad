@@ -261,12 +261,10 @@ function resourceDynamicFanoutProgram(
   };
 }
 
-function sequentialResourceDynamicProgram(
-  countArtifacts: VerifiedViewCopyArtifacts,
-  dataArtifacts: VerifiedViewCopyArtifacts,
-  stageCount: 2 | 3 | 4 = 2,
-): HostGraphProgram {
-  const stages = [
+type SequentialFeedbackStageCount = 2 | 3 | 4 | 5 | 6 | 7 | 8;
+
+function sequentialFeedbackStages(stageCount: SequentialFeedbackStageCount) {
+  const legacy = [
     {
       inputResourceId: "next-count-input",
       outputResourceId: "next-count",
@@ -282,7 +280,21 @@ function sequentialResourceDynamicProgram(
       outputResourceId: "terminal-count",
       nodeId: "produce-terminal-count",
     },
-  ].slice(0, stageCount - 1);
+  ] as const;
+  return Array.from({ length: stageCount - 1 }, (_, index) =>
+    legacy[index] ?? {
+      inputResourceId: `feedback-count-input-${index + 1}`,
+      outputResourceId: `feedback-count-${index + 1}`,
+      nodeId: `produce-feedback-count-${index + 1}`,
+    });
+}
+
+function sequentialResourceDynamicProgram(
+  countArtifacts: VerifiedViewCopyArtifacts,
+  dataArtifacts: VerifiedViewCopyArtifacts,
+  stageCount: SequentialFeedbackStageCount = 2,
+): HostGraphProgram {
+  const stages = sequentialFeedbackStages(stageCount);
   const countResources = stages.flatMap((stage) => [
     resource(stage.inputResourceId, "input", "u32", "4"),
     resource(stage.outputResourceId, "temporary", "u32", "4"),
@@ -323,7 +335,13 @@ function sequentialResourceDynamicProgram(
     kind: "host-graph",
     version: {
       major: 1,
-      minor: stageCount === 2 ? 26 : stageCount === 3 ? 27 : 28,
+      minor: stageCount === 2
+        ? 26
+        : stageCount === 3
+          ? 27
+          : stageCount === 4
+            ? 28
+            : 34,
     },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire("1"),
@@ -3241,6 +3259,67 @@ describe("host graph CPU reference", () => {
         { nodeId: "produce-next-count", elementCount: "1" },
         { nodeId: "produce-final-count", elementCount: "1" },
         { nodeId: "produce-terminal-count", elementCount: "1" },
+        {
+          nodeId: "copy-selected-prefix",
+          elementCount: String(selectedCount),
+        },
+      ]);
+      expect(readF32(result.outputs[0]!.bytes)).toEqual(
+        selectedCount === 1 ? [1.25, 0] : [1.25, -2.5],
+      );
+    }
+
+    const eightStageProgram = sequentialResourceDynamicProgram(
+      countArtifacts,
+      artifacts,
+      8,
+    );
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...eightStageProgram,
+        version: { major: 1, minor: 33 },
+      },
+      sequentialOptions,
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-RESOURCE-LIMIT" },
+    });
+    const eightStage = await prepareHostGraphCpu(
+      (await createVerifiedHostGraphArtifact(
+        eightStageProgram,
+        sequentialOptions,
+      )).artifact,
+      sequentialOptions,
+    );
+    expect(eightStage).toMatchObject({
+      dynamicDispatchCount: 8,
+      resourceDynamicDispatchCount: 8,
+    });
+    const eightStageSources = sequentialFeedbackStages(8);
+    for (const selectedCount of [1, 2]) {
+      const result = await eightStage.execute({
+        inputs: [
+          {
+            rank: wire("0"),
+            resourceId: "launch-input",
+            bytes: u32Bytes([1]),
+          },
+          ...eightStageSources.map((stage, index) => ({
+            rank: wire("0"),
+            resourceId: stage.inputResourceId,
+            bytes: u32Bytes([
+              index === eightStageSources.length - 1
+                ? selectedCount
+                : 1,
+            ]),
+          })),
+          input(0, f32Bytes([1.25, -2.5])),
+        ],
+      });
+      expect(result.completedDynamicDispatches).toEqual([
+        ...eightStageSources.map((stage) => ({
+          nodeId: stage.nodeId,
+          elementCount: "1",
+        })),
         {
           nodeId: "copy-selected-prefix",
           elementCount: String(selectedCount),

@@ -422,12 +422,10 @@ function resourceDynamicFanoutProgram(
   };
 }
 
-function sequentialResourceDynamicProgram(
-  countArtifacts: VerifiedViewCopyArtifacts,
-  dataArtifacts: VerifiedViewCopyArtifacts,
-  stageCount: 2 | 3 | 4 = 2,
-): HostGraphProgram {
-  const stages = [
+type SequentialFeedbackStageCount = 2 | 3 | 4 | 5 | 6 | 7 | 8;
+
+function sequentialFeedbackStages(stageCount: SequentialFeedbackStageCount) {
+  const legacy = [
     {
       inputResourceId: "next-count-input",
       outputResourceId: "next-count",
@@ -443,7 +441,21 @@ function sequentialResourceDynamicProgram(
       outputResourceId: "terminal-count",
       nodeId: "produce-terminal-count",
     },
-  ].slice(0, stageCount - 1);
+  ] as const;
+  return Array.from({ length: stageCount - 1 }, (_, index) =>
+    legacy[index] ?? {
+      inputResourceId: `feedback-count-input-${index + 1}`,
+      outputResourceId: `feedback-count-${index + 1}`,
+      nodeId: `produce-feedback-count-${index + 1}`,
+    });
+}
+
+function sequentialResourceDynamicProgram(
+  countArtifacts: VerifiedViewCopyArtifacts,
+  dataArtifacts: VerifiedViewCopyArtifacts,
+  stageCount: SequentialFeedbackStageCount = 2,
+): HostGraphProgram {
+  const stages = sequentialFeedbackStages(stageCount);
   const countDispatches = stages.map((stage, index) => {
     const predecessor = stages[index - 1];
     return {
@@ -480,7 +492,13 @@ function sequentialResourceDynamicProgram(
     kind: "host-graph",
     version: {
       major: 1,
-      minor: stageCount === 2 ? 26 : stageCount === 3 ? 27 : 28,
+      minor: stageCount === 2
+        ? 26
+        : stageCount === 3
+          ? 27
+          : stageCount === 4
+            ? 28
+            : 34,
     },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire("1"),
@@ -1697,6 +1715,28 @@ describe("semantic host-graph WebGPU preparation", () => {
       resourceDynamicDispatchCount: 4,
       midGraphFeedbackCount: 4,
       midGraphFeedbackStageCount: 4,
+      runtimeControlIds: [],
+    });
+
+    const eightStageGraph = (await createVerifiedHostGraphArtifact(
+      sequentialResourceDynamicProgram(countArtifacts, artifacts, 8),
+      sequentialOptions,
+    )).artifact;
+    const eightStage = await prepareSemanticHostGraphWebGpu(
+      eightStageGraph,
+      sequentialOptions,
+    );
+    expect(eightStage).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 10,
+      expandedStepCount: 9,
+      dispatchStepCount: 8,
+      copyStepCount: 1,
+      materializationCount: 1,
+      dynamicDispatchCount: 8,
+      resourceDynamicDispatchCount: 8,
+      midGraphFeedbackCount: 8,
+      midGraphFeedbackStageCount: 8,
       runtimeControlIds: [],
     });
   });

@@ -78,7 +78,7 @@ import {
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 33;
+export const HOST_GRAPH_ARTIFACT_MINOR = 34;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
@@ -94,7 +94,8 @@ const HOST_GRAPH_MAX_RANK_FIVE_RECTANGULAR_DYNAMIC_RANK = 5;
 const HOST_GRAPH_MAX_RANK_SIX_RECTANGULAR_DYNAMIC_RANK = 6;
 const HOST_GRAPH_MAX_RANK_SEVEN_RECTANGULAR_DYNAMIC_RANK = 7;
 export const HOST_GRAPH_MAX_RESOURCE_CONDITIONALS = 1;
-export const HOST_GRAPH_MAX_RESOURCE_FEEDBACK_NODES = 4;
+export const HOST_GRAPH_MAX_RESOURCE_FEEDBACK_NODES = 8;
+const HOST_GRAPH_MAX_FOUR_STAGE_RESOURCE_FEEDBACK_NODES = 4;
 const HOST_GRAPH_MAX_THREE_STAGE_RESOURCE_FEEDBACK_NODES = 3;
 const HOST_GRAPH_MAX_FANOUT_RESOURCE_FEEDBACK_NODES = 2;
 const HOST_GRAPH_MAX_LEGACY_RESOURCE_FEEDBACK_NODES = 1;
@@ -409,7 +410,7 @@ function parseProgram(
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 through 1.33 only",
+      "host graph program reader supports versions 1.0 through 1.34 only",
     );
   }
   const programMinor =
@@ -719,7 +720,7 @@ function parseNode(
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, version-1.10 resource repeat, version-1.11 resource dynamic dispatch, version-1.12 runtime rectangular dynamic dispatch, version-1.13 resource rectangular dynamic dispatch, version-1.14 request-time rank-4 rectangular dispatch, version-1.15 produced-resource rank-4 rectangular dispatch, version-1.16 request-time rank-5 rectangular dispatch, version-1.17 produced-resource rank-5 rectangular dispatch, version-1.18 request-time rank-6 rectangular dispatch, version-1.19 produced-resource rank-6 rectangular dispatch, version-1.20 request-time rank-7 rectangular dispatch, version-1.21 produced-resource rank-7 rectangular dispatch, version-1.22 request-time rank-8 rectangular dispatch, version-1.23 produced-resource rank-8 rectangular dispatch, version-1.24 shared produced-resource linear-dispatch fanout, version-1.25 shared produced-resource rectangular-dispatch fanout, version-1.26 two-stage produced-resource linear feedback, version-1.27 three-stage produced-resource linear feedback, version-1.28 four-stage produced-resource linear feedback, version-1.29 shared conditional/repeat feedback, version-1.30 sequential conditional-to-repeat feedback, version-1.31 sequential conditional-to-linear-dispatch feedback, version-1.32 sequential conditional-to-rank-2-rectangular-dispatch feedback, and version-1.33 sequential conditional-to-rank-3-through-rank-8-rectangular-dispatch feedback nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, version-1.10 resource repeat, version-1.11 resource dynamic dispatch, version-1.12 runtime rectangular dynamic dispatch, version-1.13 resource rectangular dynamic dispatch, version-1.14 request-time rank-4 rectangular dispatch, version-1.15 produced-resource rank-4 rectangular dispatch, version-1.16 request-time rank-5 rectangular dispatch, version-1.17 produced-resource rank-5 rectangular dispatch, version-1.18 request-time rank-6 rectangular dispatch, version-1.19 produced-resource rank-6 rectangular dispatch, version-1.20 request-time rank-7 rectangular dispatch, version-1.21 produced-resource rank-7 rectangular dispatch, version-1.22 request-time rank-8 rectangular dispatch, version-1.23 produced-resource rank-8 rectangular dispatch, version-1.24 shared produced-resource linear-dispatch fanout, version-1.25 shared produced-resource rectangular-dispatch fanout, version-1.26 two-stage produced-resource linear feedback, version-1.27 three-stage produced-resource linear feedback, version-1.28 four-stage produced-resource linear feedback, version-1.29 shared conditional/repeat feedback, version-1.30 sequential conditional-to-repeat feedback, version-1.31 sequential conditional-to-linear-dispatch feedback, version-1.32 sequential conditional-to-rank-2-rectangular-dispatch feedback, version-1.33 sequential conditional-to-rank-3-through-rank-8-rectangular-dispatch feedback, and version-1.34 five-through-eight-stage produced-resource linear feedback nodes",
   );
 }
 
@@ -2691,13 +2692,15 @@ function verifyResourceFeedbackBound(
   path: string,
   programMinor: HostGraphProgram["version"]["minor"],
 ): void {
-  const maximum = programMinor >= 28
+  const maximum = programMinor >= 34
     ? HOST_GRAPH_MAX_RESOURCE_FEEDBACK_NODES
-    : programMinor >= 27
-      ? HOST_GRAPH_MAX_THREE_STAGE_RESOURCE_FEEDBACK_NODES
-      : programMinor >= 24
-        ? HOST_GRAPH_MAX_FANOUT_RESOURCE_FEEDBACK_NODES
-        : HOST_GRAPH_MAX_LEGACY_RESOURCE_FEEDBACK_NODES;
+    : programMinor >= 28
+      ? HOST_GRAPH_MAX_FOUR_STAGE_RESOURCE_FEEDBACK_NODES
+      : programMinor >= 27
+        ? HOST_GRAPH_MAX_THREE_STAGE_RESOURCE_FEEDBACK_NODES
+        : programMinor >= 24
+          ? HOST_GRAPH_MAX_FANOUT_RESOURCE_FEEDBACK_NODES
+          : HOST_GRAPH_MAX_LEGACY_RESOURCE_FEEDBACK_NODES;
   if (count > maximum) {
     resource(
       path,
@@ -2899,20 +2902,22 @@ function verifyResourceFeedbackProfile(
     resourceConditionalCount !== 0 ||
     resourceRepeatCount !== 0 ||
     (
-      resourceDynamicDispatchCount !== 2 &&
-      resourceDynamicDispatchCount !== 3 &&
-      resourceDynamicDispatchCount !== 4
+      resourceDynamicDispatchCount < 2 ||
+      resourceDynamicDispatchCount >
+        HOST_GRAPH_MAX_RESOURCE_FEEDBACK_NODES
     ) ||
     dispatches.length !== resourceDynamicDispatchCount
   ) {
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.nodes",
-      "resource feedback profile requires exactly two, three, or four top-level resource-controlled dynamic dispatches",
+      "resource feedback profile requires between two and eight top-level resource-controlled dynamic dispatches",
     );
   }
   if (resourceDynamicDispatchCount >= 3) {
-    const requiredMinor = resourceDynamicDispatchCount === 4 ? 28 : 27;
+    const requiredMinor = resourceDynamicDispatchCount <= 4
+      ? resourceDynamicDispatchCount === 4 ? 28 : 27
+      : 34;
     const versionLabel = `version-1.${requiredMinor}`;
     if (program.version.minor < requiredMinor) {
       invalid(

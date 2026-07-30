@@ -78,7 +78,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.37.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.38.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -861,11 +861,11 @@ export async function prepareSemanticHostGraphWebGpu(
     resourceRepeats.length +
     resourceDynamicDispatches.length;
   let resourceFeedbackStageCount = resourceFeedbackCount === 0 ? 0 : 1;
-  if (resourceFeedbackCount > 4) {
+  if (resourceFeedbackCount > 8) {
     fail(
       "BG-WEBGPU-GRAPH-INTERNAL",
       "$.artifact",
-      "verified graph contains more than four resource feedback nodes",
+      "verified graph contains more than eight resource feedback nodes",
     );
   }
   if (resourceFeedbackCount >= 2) {
@@ -3950,9 +3950,8 @@ async function executeGraphWithSequentialResourceDynamicDispatchFeedback(
   const dispatches = selectedExecution.resourceDynamicDispatches;
   if (
     (
-      dispatches.length !== 2 &&
-      dispatches.length !== 3 &&
-      dispatches.length !== 4
+      dispatches.length < 2 ||
+      dispatches.length > 8
     ) ||
     dispatches.some((dispatch) =>
       !isPreparedResourceLinearDynamicDispatch(dispatch))
@@ -4112,11 +4111,12 @@ function resourceDynamicDispatchesFormSequentialStages(
   );
   if (
     (
-      dispatches.length !== 2 &&
-      dispatches.length !== 3 &&
-      dispatches.length !== 4
+      dispatches.length < 2 ||
+      dispatches.length > 8
     ) ||
-    programMinor < 24 + dispatches.length ||
+    programMinor < (
+      dispatches.length <= 4 ? 24 + dispatches.length : 34
+    ) ||
     linearDispatches.length !== dispatches.length
   ) {
     return false;

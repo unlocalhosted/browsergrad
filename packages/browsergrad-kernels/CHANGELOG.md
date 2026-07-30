@@ -9,6 +9,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- WebGPU host-graph backend 1.38 executes host-graph program version 1.34's
+  generic five-through-eight-stage produced-resource linear chains. The
+  verifier admits only one exact connected producer chain with distinct
+  sources, and the existing staged resident-buffer executor now scales to the
+  explicit eight-feedback-node ceiling without a stage-shaped path. Required
+  actual-device evidence expands from 90 to 92 complete CPU/WebGPU parity cases
+  with one/two-selection correctness artifact
+  `55c2ea89c19329ef4c522b46666402a65671abbb6b38555e09c0446a22808206`.
+  The separately required four-case Worker lane is repinned to backend 1.38
+  with artifact
+  `91b315f906cbc415b343388c0ee36d3f6a20aeb1957100e8208d5b1fcea2cedf`.
 - WebGPU host-graph backend 1.37 executes host-graph program version 1.33's
   exact sequential conditional-to-rank-3-through-rank-8-rectangular-dispatch
   profile. Both selected branches guarantee-write every distinct positive
