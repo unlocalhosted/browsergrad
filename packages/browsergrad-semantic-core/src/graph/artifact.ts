@@ -78,7 +78,7 @@ import {
 
 export const HOST_GRAPH_ARTIFACT_SCHEMA = "browsergrad.host-graph";
 export const HOST_GRAPH_ARTIFACT_MAJOR = 1;
-export const HOST_GRAPH_ARTIFACT_MINOR = 29;
+export const HOST_GRAPH_ARTIFACT_MINOR = 30;
 export const HOST_GRAPH_MAX_RESOURCES = 256;
 export const HOST_GRAPH_MAX_NODES = 256;
 export const HOST_GRAPH_MAX_EDGES = 4_096;
@@ -409,7 +409,7 @@ function parseProgram(
     invalid(
       GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
       "$.payload.program.version",
-      "host graph program reader supports versions 1.0 through 1.29 only",
+      "host graph program reader supports versions 1.0 through 1.30 only",
     );
   }
   const programMinor =
@@ -719,7 +719,7 @@ function parseNode(
   invalid(
     GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
     `${path}.kind`,
-    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, version-1.10 resource repeat, version-1.11 resource dynamic dispatch, version-1.12 runtime rectangular dynamic dispatch, version-1.13 resource rectangular dynamic dispatch, version-1.14 request-time rank-4 rectangular dispatch, version-1.15 produced-resource rank-4 rectangular dispatch, version-1.16 request-time rank-5 rectangular dispatch, version-1.17 produced-resource rank-5 rectangular dispatch, version-1.18 request-time rank-6 rectangular dispatch, version-1.19 produced-resource rank-6 rectangular dispatch, version-1.20 request-time rank-7 rectangular dispatch, version-1.21 produced-resource rank-7 rectangular dispatch, version-1.22 request-time rank-8 rectangular dispatch, version-1.23 produced-resource rank-8 rectangular dispatch, version-1.24 shared produced-resource linear-dispatch fanout, version-1.25 shared produced-resource rectangular-dispatch fanout, version-1.26 two-stage produced-resource linear feedback, version-1.27 three-stage produced-resource linear feedback, version-1.28 four-stage produced-resource linear feedback, and version-1.29 shared conditional/repeat feedback nodes",
+    "host graph profile supports dispatch, all-reduce, version-1.1 copy, version-1.2 materialize, version-1.3 event, version-1.4 fixed repeat, version-1.5 through 1.7 conditional, version-1.8 runtime repeat, version-1.9 dynamic dispatch, version-1.10 resource repeat, version-1.11 resource dynamic dispatch, version-1.12 runtime rectangular dynamic dispatch, version-1.13 resource rectangular dynamic dispatch, version-1.14 request-time rank-4 rectangular dispatch, version-1.15 produced-resource rank-4 rectangular dispatch, version-1.16 request-time rank-5 rectangular dispatch, version-1.17 produced-resource rank-5 rectangular dispatch, version-1.18 request-time rank-6 rectangular dispatch, version-1.19 produced-resource rank-6 rectangular dispatch, version-1.20 request-time rank-7 rectangular dispatch, version-1.21 produced-resource rank-7 rectangular dispatch, version-1.22 request-time rank-8 rectangular dispatch, version-1.23 produced-resource rank-8 rectangular dispatch, version-1.24 shared produced-resource linear-dispatch fanout, version-1.25 shared produced-resource rectangular-dispatch fanout, version-1.26 two-stage produced-resource linear feedback, version-1.27 three-stage produced-resource linear feedback, version-1.28 four-stage produced-resource linear feedback, version-1.29 shared conditional/repeat feedback, and version-1.30 sequential conditional-to-repeat feedback nodes",
   );
 }
 
@@ -2248,6 +2248,7 @@ function analyzeProgram(
     resourceRepeatCount,
     resourceDynamicDispatchCount,
     dispatchEffects,
+    conditionalEffects,
   );
   const topologicalNodeIds = topologicalOrder(program.nodes, nodes);
   const ancestors = dependencyAncestors(topologicalNodeIds, nodes);
@@ -2714,6 +2715,10 @@ function verifyResourceFeedbackProfile(
     HostGraphDispatchNode | HostGraphDynamicDispatchNode,
     readonly HostGraphResourceEffect[]
   >,
+  conditionalEffects: ReadonlyMap<
+    HostGraphConditionalNode,
+    readonly HostGraphResourceEffect[]
+  >,
 ): void {
   const feedbackCount =
     resourceConditionalCount +
@@ -2725,13 +2730,6 @@ function verifyResourceFeedbackProfile(
     resourceRepeatCount === 1 &&
     resourceDynamicDispatchCount === 0
   ) {
-    if (program.version.minor < 29) {
-      invalid(
-        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
-        "$.payload.program.nodes",
-        "shared conditional/repeat resource feedback requires host graph program version 1.29",
-      );
-    }
     const conditional = program.nodes.find((
       node,
     ): node is HostGraphResourceConditionalNode =>
@@ -2746,15 +2744,69 @@ function verifyResourceFeedbackProfile(
     );
     if (
       conditional === undefined ||
-      repeat === undefined ||
-      conditional.predicate.resourceId !==
-        repeat.iterationSource.resourceId ||
-      conditional.predicate.rank !== repeat.iterationSource.rank
+      repeat === undefined
+    ) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+        "$.payload.program.nodes",
+        "mixed resource feedback lost its conditional or repeat node",
+      );
+    }
+    const sharesSelection =
+      conditional.predicate.resourceId ===
+        repeat.iterationSource.resourceId &&
+      conditional.predicate.rank === repeat.iterationSource.rank;
+    if (sharesSelection) {
+      if (program.version.minor < 29) {
+        invalid(
+          GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+          "$.payload.program.nodes",
+          "shared conditional/repeat resource feedback requires host graph program version 1.29",
+        );
+      }
+      return;
+    }
+    if (
+      program.version.minor === 29 &&
+      conditional.predicate.resourceId ===
+        repeat.iterationSource.resourceId
     ) {
       invalid(
         GRAPH_DIAGNOSTIC_CODES.invalidBinding,
         "$.payload.program.nodes",
         "version-1.29 mixed resource feedback requires one exact shared conditional/repeat source and rank",
+      );
+    }
+    if (program.version.minor < 30) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.unsupportedProfile,
+        "$.payload.program.nodes",
+        "sequential conditional-to-repeat resource feedback requires host graph program version 1.30",
+      );
+    }
+    if (
+      conditional.predicate.resourceId ===
+        repeat.iterationSource.resourceId
+    ) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+        "$.payload.program.nodes",
+        "version-1.30 sequential conditional-to-repeat feedback requires distinct predicate and repeat-count resources",
+      );
+    }
+    const repeatSourceEffect = (conditionalEffects.get(conditional) ?? [])
+      .find((effect) =>
+        effect.resourceId === repeat.iterationSource.resourceId
+      );
+    if (
+      repeatSourceEffect === undefined ||
+      !writes(repeatSourceEffect.access) ||
+      repeatSourceEffect.guaranteesWrite !== true
+    ) {
+      invalid(
+        GRAPH_DIAGNOSTIC_CODES.invalidBinding,
+        "$.payload.program.nodes",
+        "version-1.30 sequential conditional-to-repeat feedback requires both conditional branches to guarantee-write the distinct repeat-count source",
       );
     }
     return;

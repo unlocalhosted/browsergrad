@@ -9,6 +9,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- WebGPU host-graph backend 1.34 executes host-graph program version 1.30's
+  exact sequential conditional-to-repeat feedback profile. One produced `u32`
+  selects a prewarmed branch; both branches guarantee-write one distinct
+  bounded repeat-count source, which is read only after the selected branch
+  executes. CPU and WebGPU preserve exact completion, resident-buffer,
+  two-stage feedback, and fail-stop behavior. Required actual-device evidence
+  expands from 82 to 84 complete CPU/WebGPU parity cases with correctness
+  artifact
+  `1960f84defe847f3ee35b925d18ff28d3561ff8d6322e5b72445b09ea53972f1`.
+  The separately required four-case Worker lane is repinned to backend 1.34
+  with artifact
+  `7015a08e8b3de8f4ceb57e1b0b41658cd9b0e540c40aee255ca55b578693616e`.
 - WebGPU host-graph backend 1.33 executes host-graph program version 1.29's
   exact shared conditional/repeat feedback profile. One ordered produced `u32`
   at one rank selects both a zero/nonzero branch and a bounded repeat count

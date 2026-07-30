@@ -135,6 +135,115 @@ export function sharedConditionalRepeatFeedbackProgram(): HostGraphProgram {
   };
 }
 
+export function sequentialConditionalRepeatFeedbackProgram(): HostGraphProgram {
+  const wire = (value: number) => parseWireU64(String(value));
+  const resource = (
+    resourceId: string,
+    role: "input" | "temporary" | "output",
+    dtype: "f32" | "u32",
+  ) => ({
+    resourceId,
+    role,
+    multiplicity: "per-rank" as const,
+    initialization: role === "input"
+      ? "external-input" as const
+      : "zero-fill" as const,
+    dtype,
+    byteLength: wire(4),
+    alignmentBytes: 4,
+  });
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 30 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire(2),
+    resources: [
+      resource("predicate-input", "input", "u32"),
+      resource("predicate", "temporary", "u32"),
+      resource("then-count-input", "input", "u32"),
+      resource("else-count-input", "input", "u32"),
+      resource("repeat-count", "temporary", "u32"),
+      resource("value-input", "input", "f32"),
+      resource("value-output", "output", "f32"),
+    ],
+    nodes: [
+      {
+        nodeId: "produce-predicate",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "predicate-input",
+        destinationResourceId: "predicate",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "initialize-value",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "value-input",
+        destinationResourceId: "value-output",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "choose-repeat-count",
+        kind: "conditional",
+        dependsOn: ["produce-predicate"],
+        predicate: {
+          resourceId: "predicate",
+          rank: wire(0),
+          mode: "u32-nonzero",
+        },
+        thenBody: [{
+          nodeId: "copy-then-count",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "then-count-input",
+          destinationResourceId: "repeat-count",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        elseBody: [{
+          nodeId: "copy-else-count",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "else-count-input",
+          destinationResourceId: "repeat-count",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        mode: "resource-u32-branch-sequential",
+      },
+      {
+        nodeId: "repeat-value",
+        kind: "repeat",
+        dependsOn: ["initialize-value", "choose-repeat-count"],
+        iterationSource: {
+          resourceId: "repeat-count",
+          rank: wire(0),
+          mode: "u32-count",
+        },
+        maxIterationCount: wire(2),
+        body: [{
+          nodeId: "sum-value",
+          kind: "all-reduce",
+          dependsOn: [],
+          resourceId: "value-output",
+          reduction: "sum",
+          dtype: "f32",
+          participants: [wire(0), wire(1)],
+          numericalPolicy: "rank-order-f32",
+          result: "replicated-to-all-participants",
+        }],
+        mode: "resource-u32-count-sequential",
+      },
+      {
+        nodeId: "materialize-value",
+        kind: "materialize",
+        dependsOn: ["repeat-value"],
+        resourceId: "value-output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 export async function createVerifiedSignedReverseViewCopyArtifacts(
   dtype: BuiltinDTypeId,
   rank: number,

@@ -935,6 +935,90 @@ function sharedConditionalRepeatFeedbackProgram(): HostGraphProgram {
   };
 }
 
+function sequentialConditionalRepeatFeedbackProgram(): HostGraphProgram {
+  const base = repeatedCollectiveProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 30 },
+    resources: [
+      ...base.resources,
+      resource("predicate-input", "input", "u32", "4"),
+      resource("predicate", "temporary", "u32", "4"),
+      resource("then-count-input", "input", "u32", "4"),
+      resource("else-count-input", "input", "u32", "4"),
+      resource("iteration-count", "temporary", "u32", "4"),
+    ],
+    nodes: [
+      {
+        nodeId: "produce-predicate",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "predicate-input",
+        destinationResourceId: "predicate",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      base.nodes[0]!,
+      {
+        nodeId: "choose-iteration-count",
+        kind: "conditional",
+        dependsOn: ["produce-predicate"],
+        predicate: {
+          resourceId: "predicate",
+          rank: wire("0"),
+          mode: "u32-nonzero",
+        },
+        thenBody: [{
+          nodeId: "copy-then-count",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "then-count-input",
+          destinationResourceId: "iteration-count",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        elseBody: [{
+          nodeId: "copy-else-count",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "else-count-input",
+          destinationResourceId: "iteration-count",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        mode: "resource-u32-branch-sequential",
+      },
+      {
+        nodeId: "repeat-reduction",
+        kind: "repeat",
+        dependsOn: ["initialize", "choose-iteration-count"],
+        iterationSource: {
+          resourceId: "iteration-count",
+          rank: wire("0"),
+          mode: "u32-count",
+        },
+        maxIterationCount: wire("2"),
+        body: [{
+          nodeId: "reduce-step",
+          kind: "all-reduce",
+          dependsOn: [],
+          resourceId: "output",
+          reduction: "sum",
+          dtype: "f32",
+          numericalPolicy: "rank-order-f32",
+          participants: [wire("0"), wire("1")],
+          result: "replicated-to-all-participants",
+        }],
+        mode: "resource-u32-count-sequential",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["repeat-reduction"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function conditionalRawCopyProgram(): HostGraphProgram {
   return {
     kind: "host-graph",
@@ -1698,6 +1782,96 @@ describe("host graph CPU reference", () => {
         selection === 0
           ? [[7, 17], [8, 18]]
           : [[9, 19], [10, 20]],
+      );
+    }
+  });
+
+  it("feeds a conditional-produced u32 into a later repeat", async () => {
+    const program = sequentialConditionalRepeatFeedbackProgram();
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...program,
+        version: { major: 1, minor: 29 },
+      },
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-UNSUPPORTED-PROFILE" },
+    });
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...program,
+        nodes: program.nodes.map((node) =>
+          node.kind === "conditional" &&
+            node.mode === "resource-u32-branch-sequential"
+            ? {
+              ...node,
+              elseBody: node.elseBody.map((bodyNode) =>
+                bodyNode.kind === "copy"
+                  ? { ...bodyNode, destinationResourceId: "predicate" }
+                  : bodyNode),
+            }
+            : node),
+      },
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-INVALID-BINDING" },
+    });
+    const graph = (await createVerifiedHostGraphArtifact(
+      program,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+    const executionInputs = (
+      predicate: 0 | 1,
+    ): HostGraphCpuInputBinding[] => [
+      input(0, f32Bytes([1, 2])),
+      input(1, f32Bytes([3, 4])),
+      ...[0, 1].flatMap((rank) => [
+        {
+          rank: wire(String(rank)),
+          resourceId: "predicate-input",
+          bytes: u32Bytes([rank === 0 ? predicate : 0]),
+        },
+        {
+          rank: wire(String(rank)),
+          resourceId: "then-count-input",
+          bytes: u32Bytes([rank === 0 ? 2 : 0]),
+        },
+        {
+          rank: wire(String(rank)),
+          resourceId: "else-count-input",
+          bytes: u32Bytes([0]),
+        },
+      ]),
+    ];
+
+    expect(prepared).toMatchObject({
+      resourceRepeatCount: 1,
+      resourceConditionalCount: 1,
+    });
+    for (const predicate of [0, 1] as const) {
+      const result = await prepared.execute({
+        inputs: executionInputs(predicate),
+      });
+      expect(result.completedConditionals).toEqual([{
+        nodeId: "choose-iteration-count",
+        selectedBranch: predicate === 0 ? "else" : "then",
+        bodyNodeIds: [
+          predicate === 0 ? "copy-else-count" : "copy-then-count",
+        ],
+      }]);
+      expect(result.completedRepeats).toEqual([{
+        nodeId: "repeat-reduction",
+        iterationCount: predicate === 0 ? "0" : "2",
+        bodyNodeIds: ["reduce-step"],
+      }]);
+      expect(result.outputs.map(({ bytes }) => readF32(bytes))).toEqual(
+        predicate === 0
+          ? [[1, 2], [3, 4]]
+          : [[8, 12], [8, 12]],
       );
     }
   });

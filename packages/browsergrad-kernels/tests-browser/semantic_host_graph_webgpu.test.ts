@@ -48,6 +48,7 @@ import {
 import {
   createVerifiedSignedReverseViewCopyArtifacts,
   patternedStorageBytes,
+  sequentialConditionalRepeatFeedbackProgram,
   sharedConditionalRepeatFeedbackProgram,
   singleViewCopyGraphProgram,
 } from "../tests/semantic_host_graph_fixtures";
@@ -88,6 +89,8 @@ const CASE_IDS = Object.freeze([
   "f32-resource-repeat-two",
   "f32-shared-conditional-repeat-zero",
   "f32-shared-conditional-repeat-two",
+  "f32-sequential-conditional-repeat-zero",
+  "f32-sequential-conditional-repeat-two",
   "f32-dynamic-dispatch-one",
   "f32-dynamic-dispatch-two",
   "f32-resource-dynamic-dispatch-one",
@@ -396,6 +399,14 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       prepareSharedConditionalRepeatCase(
         "f32-shared-conditional-repeat-two",
         2,
+      ),
+      prepareSequentialConditionalRepeatCase(
+        "f32-sequential-conditional-repeat-zero",
+        0,
+      ),
+      prepareSequentialConditionalRepeatCase(
+        "f32-sequential-conditional-repeat-two",
+        1,
       ),
       prepareDynamicDispatchCase(
         "f32-dynamic-dispatch-one",
@@ -927,6 +938,52 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       }],
       midGraphFeedbackCount: 2,
       midGraphFeedbackStageCount: 1,
+      collectiveReductionStepCount: 2,
+      collectiveReplicationStepCount: 2,
+    });
+    const zeroSequentialConditionalRepeat = completedCases.find(
+      ({ caseId }) =>
+        caseId === "f32-sequential-conditional-repeat-zero",
+    );
+    const twoSequentialConditionalRepeat = completedCases.find(
+      ({ caseId }) =>
+        caseId === "f32-sequential-conditional-repeat-two",
+    );
+    expect(zeroSequentialConditionalRepeat?.pipelineIdentityHash)
+      .toBe(twoSequentialConditionalRepeat?.pipelineIdentityHash);
+    expect(zeroSequentialConditionalRepeat?.backendSpecializationHash)
+      .not.toBe(twoSequentialConditionalRepeat?.backendSpecializationHash);
+    expect(zeroSequentialConditionalRepeat).toMatchObject({
+      expandedStepCount: 6,
+      copyStepCount: 6,
+      materializationCount: 1,
+      completedRepeats: [{
+        nodeId: "repeat-value",
+        iterationCount: wire(0),
+      }],
+      completedConditionals: [{
+        nodeId: "choose-repeat-count",
+        selectedBranch: "else",
+      }],
+      midGraphFeedbackCount: 2,
+      midGraphFeedbackStageCount: 2,
+      collectiveReductionStepCount: 0,
+      collectiveReplicationStepCount: 0,
+    });
+    expect(twoSequentialConditionalRepeat).toMatchObject({
+      expandedStepCount: 10,
+      copyStepCount: 6,
+      materializationCount: 1,
+      completedRepeats: [{
+        nodeId: "repeat-value",
+        iterationCount: wire(2),
+      }],
+      completedConditionals: [{
+        nodeId: "choose-repeat-count",
+        selectedBranch: "then",
+      }],
+      midGraphFeedbackCount: 2,
+      midGraphFeedbackStageCount: 2,
       collectiveReductionStepCount: 2,
       collectiveReplicationStepCount: 2,
     });
@@ -1616,6 +1673,48 @@ async function prepareSharedConditionalRepeatCase(
     namedInput(1, "then-input", new Uint8Array([10, 10, 10, 10])),
     namedInput(0, "else-input", new Uint8Array([7, 7, 7, 7])),
     namedInput(1, "else-input", new Uint8Array([8, 8, 8, 8])),
+  ]);
+  return Object.freeze({
+    caseId,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: inputs.map(({ rank, resourceId, bytes }) => ({
+        rank,
+        resourceId,
+        bytes: Array.from(bytes),
+      })),
+    }),
+  });
+}
+
+async function prepareSequentialConditionalRepeatCase(
+  caseId:
+    | "f32-sequential-conditional-repeat-zero"
+    | "f32-sequential-conditional-repeat-two",
+  predicate: 0 | 1,
+): Promise<PreparedCase> {
+  const graph = (await createVerifiedHostGraphArtifact(
+    sequentialConditionalRepeatFeedbackProgram(),
+    { kernelArtifacts: [], layoutArtifacts: [] },
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+    kernelArtifacts: [],
+    layoutArtifacts: [],
+  });
+  const inputs = Object.freeze([
+    namedInput(0, "predicate-input", u32Bytes([predicate])),
+    namedInput(1, "predicate-input", u32Bytes([0])),
+    namedInput(0, "then-count-input", u32Bytes([2])),
+    namedInput(1, "then-count-input", u32Bytes([0])),
+    namedInput(0, "else-count-input", u32Bytes([0])),
+    namedInput(1, "else-count-input", u32Bytes([0])),
+    namedInput(0, "value-input", f32Bytes([1])),
+    namedInput(1, "value-input", f32Bytes([2])),
   ]);
   return Object.freeze({
     caseId,
