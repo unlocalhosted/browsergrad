@@ -6,7 +6,7 @@
 - **Last updated:** 2026-07-30
 - **Historical handover:**
   [`package-requirements-handover-2026-07-17.md`](./package-requirements-handover-2026-07-17.md)
-- **Current implementation slice:** Gate 7 generic five-through-eight-stage resource feedback
+- **Current implementation slice:** Gate 7 declared-profile closure
 
 **Runtime boundary:** the portable product runs the Clang/extractor as Wasm in
 a browser Worker, then executes verified semantics through CPU or WebGPU. It
@@ -44,7 +44,7 @@ test does not make a gate verified unless every exit criterion is covered.
 | Gate 4 — tiled GEMM and schedule separation | `verified` | The initial closed portable profile separates canonical logical GEMM tile meaning from physical schedule artifacts and schedule specialization. It supports dense row-major 4-byte-aligned certified exact-input f32 only. Two derived schedules use scalar memory operations, one output per invocation, cooperative single-buffered workgroup staging, zero-filled boundary loads, suppressed boundary stores, and all-invocation uniform barriers. Compiler typed-artifact lowering converges on the same semantic constructor without claiming source-body equivalence. The kernels backend executes the exact certified snapshots after caller mutation and reports portable re-legalization plus bit-exact certified-input preservation. | None for the initial closed profile. General f32, additional dtypes/layouts/base offsets, resident-buffer provenance, vectorized/native MMA schedules, and source-produced schedule preservation require separately named future profiles and evidence. | Capability commits `2cb7cea3` through `fe5581d3`, with exact Worker repin `343523fe`; semantic-core 16 files/138 tests; kernels 18 files/147 tests plus 20 focused semantic-GEMM tests; compiler convergence tests and 96-file/1,602-test full suite; packed-release checks; required real-WebGPU irregular 17x23 by 23x19 execution under 8x8x8 and 16x16x16 schedules with complete byte equality. CI `29818182317` dedicated semantic-GEMM job passed. |
 | Gate 5 — tiled attention flagship | `verified` | The initial closed f32 profile owns frontend-neutral attention meaning, an independent online K/V-tile schedule, a schedule-independent CPU oracle, authority-bound specialization, exact scalar WGSL, and bounded host/WebGPU execution. The proved algorithm stages K/V cooperatively, carries online softmax across increasing tiles, excludes causal/tail keys before state updates, and uses uniform barriers. Required correctness and performance records are separate. | None for the initial closed profile. Additional dtypes/layouts, resident-buffer provenance, frontend schedule convergence, vectorized/native facilities, or a FlashAttention-v2 claim require separately named profiles and evidence. | Semantic-core 19 files/166 tests. Kernels passes 19 files/154 tests, build, Node/browser typecheck, lint, architecture, hostile binding/domain/authority/resource/device tests, and packed-release consumption. Required headed Chromium on Apple Metal 3 executes causal/non-causal `(B=1,H=2,Sq=9,Sk=11,D=4,Dv=6)` through 8x8 and 8x16 schedules with complete declared-policy CPU and cross-schedule comparison. A separate `(B=1,H=2,Sq=256,Sk=256,D=Dv=32)` host-API record uses 16 warmups and 20 alternating paired samples against `row-wise-online-softmax-baseline`; three final local runs observed candidate medians of 3.9–4.9 ms and baseline medians of 6.9–10.5 ms, retaining that variability without a superiority claim. Final local performance artifact `31d0656703465037204cec096a517ef20e9f28331868220f3c54c3c137c9bbf3` passed on headed Chromium/Apple Metal 3. Commit `f4e25d4f` passed eight-family CI `29824737993`; exact-commit correctness and performance release markers are both required. |
 | Gate 6 — framework convergence | `verified` | Thirty-six public operation records are retired from `CUSTOM` into typed IR with executable registry decisions. No advertised framework operation remains opaque; only the intentional user-authored WGSL extension stays opaque. JIT projects the same executable registry into detached JavaScript and framework-neutral platform records. Grad schema v2 has no remaining compatibility-debt behavior and generates a detached 22-record platform source from its frozen source- and fixture-bound eager inventory. Runtime generates all 53 requirement definitions, consumes complete provider-bound environments throughout readiness APIs, requires subject-bound lowering decisions for program support, and composes the generated Grad and JIT sources without importing either framework. Requirement, program, framework, and terminal-evidence facts remain distinct. Host-only typed operations explicitly refuse tensor-plan/WebGPU until their canonical portable lowerings exist. | None for the initial framework-convergence profile. New framework operations, dtype/layout contracts, or backend profiles require new executable contracts and regenerated support records; terminal execution evidence remains a separate authority. | ADR-0002 and ADR-0004 through ADR-0051; architecture freeze preserves the exact JIT partition, revised Grad contracts, byte-exact generated requirement, program-capability, and Grad platform registries, six direct resolution consumers, five resolution carriers, and architecture implementation/declaration parity. Node 25.9.0 passes Grad's 33 unit tests in 0.99 seconds and the seven-package build in 8.36 seconds; full JIT integration passes 55 files/336 tests and full Grad integration passes 59 files/362 tests. Semantic-core passes 21 files/174 tests, runtime passes 14 files/137 tests, the full compiler gate passes 96 files/1,602 tests plus parallel lanes, semantic architecture plus its 29-test mutation suite pass, and the release gate proves the packed 22-record Grad plus 36-record JIT runtime view. |
-| Gate 7 — host graphs and optional systems expansion | `in-progress` | Semantic-core verifies the bounded DAG, explicit resources/effects/hazards, collectives, copies, events, fail-stop materialization, fixed/runtime/produced-resource repetition, three predicate sources, request-time or produced-resource linear-prefix dispatch, shared selection fanout, rank-2-through-rank-8 request-time/produced-resource rectangles, shared rank-8 rectangle fanout, exact two-through-eight-stage producer chains, one exact shared produced-u32 conditional/repeat profile, and exact sequential conditional-to-repeat, conditional-to-linear-dispatch, and conditional-to-rank-2-through-rank-8-rectangular-dispatch profiles. CPU and portable WebGPU execute through private storage and one device-bound pipeline authority. Exact same-dtype dispatch covers all 13 built-in storage dtypes, with signed rank-8 composition across all four storage widths. The one-shot dedicated-browser-Worker transport re-verifies canonical bytes, owns its device, and preserves the same graph executor and fail-stop terminal contract. | Broader mixed or device-side feedback, nested/device-side branching, worker meshes/cross-worker synchronization, native companion profiles, broader collective arithmetic, and stronger event synchronization remain open. | Required headed Chromium passes 92 complete-output CPU/WebGPU parity cases under backend 1.38 with correctness artifact `55c2ea89c19329ef4c522b46666402a65671abbb6b38555e09c0446a22808206`. Separate Worker conformance v2 passes raw-u8, f32, signed-rank-8 i8, and signed-rank-8 f64 cases with artifact `91b315f906cbc415b343388c0ee36d3f6a20aeb1957100e8208d5b1fcea2cedf`. Its strict execution-evidence terminal closes the case manifest, environment identity, producer versions, comparison policy, output digests, per-Worker device agreement, and failure/not-run diagnostics; hostile lifecycle tests and the backend-1.20 prewarmed performance observation remain separate. |
+| Gate 7 — host graphs and optional systems expansion | `verified` | The declared profile closes the gate with explicit `fail-stop-no-partial-output-commit`, exact in-realm single-device execution, `single-dedicated-browser-worker` transport/topology, semantic preservation, bounded work/memory/control, and separate correctness/performance evidence. Semantic-core verifies the DAG, effects/hazards, copies/events/materialization, bounded repetition/dynamic dispatch, exact two-through-eight-stage chains, shared and sequential mixed feedback, and rank-2-through-rank-8 rectangles. CPU and portable WebGPU execute through private storage and device-bound pipeline authority. Exact same-dtype dispatch covers all 13 built-in storage dtypes with signed rank-8 composition across every storage width. The one-shot Worker re-verifies canonical bytes, owns its device, and preserves the same executor and terminal contract. | None for the declared profile. Broader mixed/device-side control, worker meshes/cross-worker synchronization, native companions, broader collective arithmetic, and stronger events require separately named future profiles and evidence. | Required headed Chromium passes 92 complete-output CPU/WebGPU parity cases under backend 1.38 with correctness artifact `55c2ea89c19329ef4c522b46666402a65671abbb6b38555e09c0446a22808206`. Separate Worker conformance v2 passes raw-u8, f32, signed-rank-8 i8, and signed-rank-8 f64 cases with artifact `91b315f906cbc415b343388c0ee36d3f6a20aeb1957100e8208d5b1fcea2cedf`. Its strict execution-evidence terminal closes the case manifest, environment identity, producer versions, comparison policy, output digests, per-Worker device agreement, and failure/not-run diagnostics. The separate backend-1.20 performance terminal remains observational. CI, release, and publish workflows run and retain all three lanes independently at the exact commit. |
 
 ## Active Slice
 
@@ -80,7 +80,7 @@ implemented. Kernels WGSL preparation and authority-bound host/WebGPU execution
 are implemented, with required causal/non-causal two-schedule correctness and a
 separate observational performance record against the frozen row-wise baseline
 on a named device/browser. Gate 6's initial framework-convergence profile is
-verified. Gate 7 is now the active software-owned slice. Its semantic/compiler
+verified. Gate 7's declared profile is also verified. Its semantic/compiler
 foundation, fail-stop CPU reference, portable WebGPU graph execution,
 whole-allocation copies, and explicit terminal materialization are implemented.
 Dependency-ordered completion events and bounded fixed-count repetition are
@@ -168,10 +168,12 @@ Version 1.34 raises only the exact connected linear-chain ceiling from four to
 eight resource-controlled dispatches while preserving every older bound.
 These profiles do not claim timestamps, external waits, a fifth, broader
 mixed or other feedback profile, device-side feedback, rank-9-and-higher domains,
-nested/device-side branching, or transport.
+nested/device-side branching, or transport/topology beyond the separately
+verified one-shot dedicated-browser-Worker profile.
 Separate device-bound pipeline authority is implemented and verified.
-Broader dtype/layout profiles remain independently named follow-on
-capabilities.
+Broader dtype/layout, topology, native, collective, event, or device-side
+control profiles remain independently named follow-on capabilities rather than
+unfinished claims inside this closed profile.
 
 ### Work in flight
 
@@ -591,6 +593,7 @@ Their `verified` labels apply only to synthetic optional-lane contracts.
 | D-234 | 2026-07-30 | accepted | Add the exact sequential conditional-to-rank-2-rectangular-dispatch profile as host-graph program version 1.32 while retaining exact 1.0-1.31 decoding and every older feedback limit. Admit one produced-resource conditional followed by one rank-2 `resource-u32-rectangular-prefix` dispatch only when the predicate and both extent sources are distinct and both branches guarantee-write both positive bounded extents. Reuse the shared conditional-prefix selector and generic resource-dispatch readback, validation, specialization, and completion path. Reject rank 3 or higher, missing branch writes, shared sources, a third consumer, pre-version use, and every other mixed profile. | This widens branch-produced work selection from one scalar count to exact multi-axis geometry without adding a rectangle-shaped executor. Two explicit feedback stages, effect-derived write proof, private resident buffers, maximum-prewarmed slots, and existing rectangular guards preserve correctness while keeping arbitrary geometry, callbacks, recompilation, and device-side flow outside the claim. |
 | D-235 | 2026-07-30 | accepted | Extend the exact sequential conditional-to-rectangular-dispatch profile through ranks 3 to 8 as host-graph program version 1.33 while retaining exact 1.0-1.32 decoding and every older rank limit. Admit the profile only when the predicate and every extent source are pairwise distinct and both branches guarantee-write every positive bounded extent. Reuse the shared conditional-prefix selector and generic resource-dispatch readback, validation, specialization, and completion path for every rank. Reject missing branch writes, shared sources, a third consumer, pre-version use, and every other mixed profile. | Maximum-rank branch-produced geometry proves that the semantic and execution seam scales by canonical rectangular meaning rather than rank-shaped handlers. The same two feedback stages, effect proof, private resident buffers, maximum-prewarmed slots, and generic rank-8 mapping preserve correctness without claiming arbitrary control graphs, callbacks, recompilation, or device-side flow. |
 | D-236 | 2026-07-30 | accepted | Raise the exact sequential produced-resource linear-chain ceiling from four to eight dispatches as host-graph program version 1.34 while retaining exact 1.0-1.33 decoding and every older feedback bound. Admit five through eight feedback nodes only when every launch source is distinct and the semantic producer relations form one connected root-to-leaf chain. Reuse the generic CPU loop and staged WebGPU resident-buffer executor, with an explicit eight-node cap. Reject missing, forked, cyclic, extra, duplicate-source, mixed-mode, pre-version, and ninth-consumer profiles. | One bounded maximum-stage capability proves the verifier and executors scale by semantic graph shape rather than another per-stage handler. Exact connectivity, explicit resource ceilings, prewarmed slots, ordered readback, and fail-stop publication keep work, synchronization, and failure ownership bounded without claiming arbitrary graphs, callbacks, device-side loops, or unbounded feedback. |
+| D-237 | 2026-07-30 | accepted | Close Gate 7 for its declared profile once the exit criterion is proved across four independent dimensions: `fail-stop-no-partial-output-commit`; exact in-realm single-device plus `single-dedicated-browser-worker` transport/topology; canonical semantic preservation through CPU/WebGPU/Worker authority; and retained required correctness plus separate observational performance evidence in CI, release, and publish workflows. Treat worker meshes, cross-worker synchronization, native companions, broader collectives/events, device-side control, and any wider mixed-feedback graph as new named profiles rather than unfinished scope inside this closure. | Gates close over explicit claims, not every imaginable future system. Keeping unimplemented topologies and semantics outside the verified profile prevents false breadth while allowing the substantial bounded host-graph product to reach an auditable release state. Existing hostile lifecycle, authority, device-loss, non-finite, snapshot, exact-output, and workflow-retention tests already enforce the performance, correctness, and security boundaries required by the exit. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -9042,6 +9045,31 @@ whether any files may be left partially changed.
 - Broader mixed profiles, device-side feedback, nested/device-side branching,
   worker meshes, native companions, and stronger event profiles remain separate.
 
+### 2026-07-30 — Gate 7 declared-profile closure
+
+- Gate 7 is `verified` for the explicitly declared bounded host-graph profile.
+  The failure contract is `fail-stop-no-partial-output-commit`; execution
+  topology is exact in-realm single-device WebGPU plus the separately named
+  one-shot `single-dedicated-browser-worker` transport.
+- Canonical semantic preservation is authority-bound across the semantic
+  verifier, private CPU oracle, device-bound WebGPU pipeline, and Worker-realm
+  re-verification. Unsupported breadth still fails at the semantic/profile
+  boundary rather than silently substituting behavior.
+- Required actual-device correctness closes 92 complete-output CPU/WebGPU
+  cases under backend 1.38 with artifact
+  `55c2ea89c19329ef4c522b46666402a65671abbb6b38555e09c0446a22808206`.
+  Required four-case Worker conformance closes artifact
+  `91b315f906cbc415b343388c0ee36d3f6a20aeb1957100e8208d5b1fcea2cedf`.
+  The separately retained backend-1.20 performance terminal remains
+  observational and makes no superiority claim.
+- CI `30514259617` passed all 16 jobs at commit `be96f02d`, including the
+  independently parallel host-graph correctness, Worker, and performance
+  lanes. Release and publish workflow structure requires and retains the same
+  exact-commit evidence before kernels publication.
+- Worker meshes, cross-worker synchronization, native companions, broader
+  collectives/events, device-side control, and wider mixed-feedback graphs are
+  future named profiles, not weakened or implicit claims in this closure.
+
 ## Quick Resume Checklist
 
 1. Read this ledger, then the relevant gate and exit criteria in the normative
@@ -9144,7 +9172,7 @@ support booleans. Broader dtype/layout coverage and new framework/backend
 profiles remain capability work, not unrecorded widening of this profile.
 Terminal execution evidence remains separately authoritative.
 
-Gate 7 is now the active software-owned slice. Its initial semantic artifact
+Gate 7's declared profile is verified. Its initial semantic artifact
 represents bounded multi-dispatch DAGs and explicit all-reduce meaning without
 claiming a backend. The compiler's first consumer composes already prepared
 view-copy bindings into that graph. The separately named authority-bound CPU
@@ -9235,10 +9263,10 @@ supports exact contiguous ranges, strictly increasing exact-slot selection,
 and explicit hot reuse without
 adding another graph path. A separate required fixed-repeat/unrolled
 performance record captures equal-work prewarmed authority-reuse behavior
-without a superiority or regression claim. The next software checkpoint is a
-separately bounded broader mixed-feedback profile or worker-mesh/native
-companion contract; cross-worker topology and stronger event profiles remain
-later independent capabilities.
+without a superiority or regression claim. Broader mixed feedback,
+worker-mesh/native companions, cross-worker topology, and stronger event
+profiles remain later independent capabilities; none is implicit in this
+closed profile.
 
 Install the production distribution-approval policy, issue the exact immutable
 request through the new exchange, and have the external reviewer sign only those
