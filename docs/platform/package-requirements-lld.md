@@ -29,7 +29,7 @@ This checkpoint is informational. The rest of this document is normative; the
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch including exact shared-count fanout and exact two- and three-stage producer chains, rank-2-through-rank-8 request-time and produced-resource rectangular prefix dispatch including exact shared-rectangle fanout, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, fail-stop materialization, CPU oracle, all 13 built-in storage dtypes for exact same-dtype view-copy dispatch plus signed rank-8 layouts across every storage width, authority-bound portable WebGPU execution, separately prepared device-bound pipeline authority, and one exact one-shot dedicated-browser-Worker transport have actual-device evidence; broader mixed/device-side feedback, worker meshes/cross-worker topology, arithmetic/collectives beyond the explicit 32-bit profiles, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch including exact shared-count fanout and exact two-, three-, and four-stage producer chains, rank-2-through-rank-8 request-time and produced-resource rectangular prefix dispatch including exact shared-rectangle fanout, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, fail-stop materialization, CPU oracle, all 13 built-in storage dtypes for exact same-dtype view-copy dispatch plus signed rank-8 layouts across every storage width, authority-bound portable WebGPU execution, separately prepared device-bound pipeline authority, and one exact one-shot dedicated-browser-Worker transport have actual-device evidence; broader mixed/device-side feedback, worker meshes/cross-worker topology, arithmetic/collectives beyond the explicit 32-bit profiles, and native companion evidence remain open. |
 
 Only `verified` means every declared exit criterion is complete. A closed
 profile does not imply broader dtype, layout, numerical, or backend coverage.
@@ -187,9 +187,9 @@ portable implementation and exact-payload convergence exits already pass.
    observations and synthetic fixtures grant no production authority.
 Gate 7 covers bounded DAG request/resource repetition, request-time and
 produced-resource dispatch through rank 8, exact shared linear or rectangular
-fanout in one feedback stage, exact two- and three-stage linear producer chains,
-device-bound CPU/WebGPU pipelines, and one bounded one-shot dedicated-browser-
-Worker transport. Broader mixed/device-side feedback, unbounded launches,
+fanout in one feedback stage, exact two-, three-, and four-stage linear producer
+chains, device-bound CPU/WebGPU pipelines, and one bounded one-shot dedicated-
+browser-Worker transport. Broader mixed/device-side feedback, unbounded launches,
 worker meshes, cross-worker topology, and native systems remain open.
 
 ## Purpose
@@ -2524,6 +2524,14 @@ pre-version use, a fourth feedback node, and mixed feedback modes fail closed.
 The three positive bounded selections execute through three ordered
 host-mediated stages under one fail-stop lifecycle; this is not an unbounded
 or device-side feedback cycle.
+Program version 1.28 extends that contract to exactly four linear resource
+dispatches with four distinct sources and three semantic producer relations.
+The verifier requires one connected root-to-leaf chain and rejects disconnected
+degree-equivalent cycles as well as missing, forked, cyclic, extra, duplicate-
+source, mixed-mode, and pre-version profiles. The four positive bounded
+selections execute through four ordered host-mediated stages under the same
+resident-buffer and fail-stop lifecycle; this remains neither an arbitrary nor
+a device-side feedback graph.
 The authority-bound
 `browsergrad.host-graph.cpu-reference@1` profile snapshots all
 rank-local inputs and the exact required runtime-control set, executes
@@ -2735,10 +2743,13 @@ and two exact completions, and
 one/two-element three-dispatch produced-resource chains through three reported
 feedback stages, stable pipeline identity, distinct specialization, and three
 exact completions, and
+one/two-element four-dispatch produced-resource chains through four reported
+feedback stages, stable pipeline identity, distinct specialization, and four
+exact completions, and
 separately proves non-finite f32 and lost-device refusal.
-The required lane completes 78 CPU/WebGPU parity cases under backend 1.31.0;
+The required lane completes 80 CPU/WebGPU parity cases under backend 1.32.0;
 terminal correctness artifact
-`6f3b93212af283771a84fea7fdba3cbd853966610da227da67b12464fb2eb08a`
+`e27040de4badadc0f8facfd2c862524f160249627a0cbe989c0f7261c0a5d30f`
 binds device profile
 `a72951410740a4adee212bba13ee44da16fdb9d6644d3b58ec38e0623f2c7b48`.
 
@@ -2786,7 +2797,8 @@ produced-resource rank-8 dispatch plus version-1.24 shared-count two-dispatch
 linear fanout and version-1.25 shared-rectangle two-dispatch fanout are
 implemented under one aggregate feedback stage. Version 1.26 adds one exact
 two-stage linear producer chain, and version 1.27 extends that exact chain to
-three stages. No fourth or mixed conditional/repeat/rectangular feedback stage,
+three stages. Version 1.28 extends the same exact connected-chain contract to
+four stages. No fifth or mixed conditional/repeat/rectangular feedback stage,
 device-side feedback, rank-9-and-higher dynamic domain,
 nested/device-side branching,
 transport/topology adapter, worker mesh, or native companion exists yet, so
@@ -2795,7 +2807,7 @@ not GPU/backend-derived loop or launch counts.
 Current events do not claim timestamps, external waits, or cross-queue/cross-
 worker synchronization.
 
-Portable WebGPU backend 1.31 stores graph resources as raw u32 words while
+Portable WebGPU backend 1.32 stores graph resources as raw u32 words while
 retaining each verified semantic dtype. Exact same-dtype view-copy dispatch now
 has CPU/WebGPU complete-output parity for bool, i8/u8, i16/u16, i32/u32,
 i64/u64, f16/bf16/f32/f64. Packed 8-bit, packed 16-bit, and two-word 64-bit
@@ -2825,7 +2837,7 @@ whole-allocation graph, a verified f32 semantic dispatch, and signed rank-8 i8
 and f64 semantic dispatches through four independent Workers. Every case proves
 caller mutation cannot alter admitted bytes and observes Worker-owned WebGPU
 submission. Worker conformance v2 records correctness artifact
-`86ec30c8fbe73b451dda627950fcf41efb7c2bcf2be563785bec102b34b6bc77`
+`3e0d6275ceee27546f85e49618f00ac42fd8ae8f4fa991ba230f3d8561f28afa`
 under device profile
 `0436693df95430f4195cb27222e8ebca104c64b3b99ac27c24a5be5ec0f5bc06`.
 The lane emits exactly one validated `browsergrad.execution-evidence@1`

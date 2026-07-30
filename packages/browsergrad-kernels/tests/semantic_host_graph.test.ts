@@ -419,51 +419,72 @@ function resourceDynamicFanoutProgram(
 function sequentialResourceDynamicProgram(
   countArtifacts: VerifiedViewCopyArtifacts,
   dataArtifacts: VerifiedViewCopyArtifacts,
-  stageCount: 2 | 3 = 2,
+  stageCount: 2 | 3 | 4 = 2,
 ): HostGraphProgram {
-  const finalCountDispatches = stageCount === 3
-    ? [{
-        nodeId: "produce-final-count",
-        kind: "dynamic-dispatch" as const,
-        dependsOn: ["produce-next-count"],
-        semanticArtifactHash: countArtifacts.kernelSemanticHash,
-        entrypointId: countArtifacts.operationId,
-        dimensionBindings: {},
-        bindings: [
-          {
-            semanticResourceId: countArtifacts.source.viewId,
-            graphResourceId: "final-count-input",
-          },
-          {
-            semanticResourceId: countArtifacts.destination.viewId,
-            graphResourceId: "final-count",
-          },
-        ],
-        launchSource: {
-          resourceId: "next-count",
-          rank: wire("0"),
-          mode: "u32-prefix-element-count" as const,
+  const stages = [
+    {
+      inputResourceId: "next-count-input",
+      outputResourceId: "next-count",
+      nodeId: "produce-next-count",
+    },
+    {
+      inputResourceId: "final-count-input",
+      outputResourceId: "final-count",
+      nodeId: "produce-final-count",
+    },
+    {
+      inputResourceId: "terminal-count-input",
+      outputResourceId: "terminal-count",
+      nodeId: "produce-terminal-count",
+    },
+  ].slice(0, stageCount - 1);
+  const countDispatches = stages.map((stage, index) => {
+    const predecessor = stages[index - 1];
+    return {
+      nodeId: stage.nodeId,
+      kind: "dynamic-dispatch" as const,
+      dependsOn: [
+        predecessor?.nodeId ?? "produce-launch-count",
+      ],
+      semanticArtifactHash: countArtifacts.kernelSemanticHash,
+      entrypointId: countArtifacts.operationId,
+      dimensionBindings: {},
+      bindings: [
+        {
+          semanticResourceId: countArtifacts.source.viewId,
+          graphResourceId: stage.inputResourceId,
         },
-        maxElementCount: wire("1"),
-        mode: "resource-u32-prefix-elements" as const,
-      }]
-    : [];
+        {
+          semanticResourceId: countArtifacts.destination.viewId,
+          graphResourceId: stage.outputResourceId,
+        },
+      ],
+      launchSource: {
+        resourceId:
+          predecessor?.outputResourceId ?? "launch-count",
+        rank: wire("0"),
+        mode: "u32-prefix-element-count" as const,
+      },
+      maxElementCount: wire("1"),
+      mode: "resource-u32-prefix-elements" as const,
+    };
+  });
+  const finalStage = stages.at(-1)!;
   return {
     kind: "host-graph",
-    version: { major: 1, minor: stageCount === 2 ? 26 : 27 },
+    version: {
+      major: 1,
+      minor: stageCount === 2 ? 26 : stageCount === 3 ? 27 : 28,
+    },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire("1"),
     resources: [
       resource("launch-input", "input", "u32", "4"),
       resource("launch-count", "temporary", "u32", "4"),
-      resource("next-count-input", "input", "u32", "4"),
-      resource("next-count", "temporary", "u32", "4"),
-      ...(stageCount === 3
-        ? [
-            resource("final-count-input", "input", "u32", "4"),
-            resource("final-count", "temporary", "u32", "4"),
-          ]
-        : []),
+      ...stages.flatMap((stage) => [
+        resource(stage.inputResourceId, "input", "u32", "4"),
+        resource(stage.outputResourceId, "temporary", "u32", "4"),
+      ]),
       resource("input", "input", "f32"),
       resource("output", "output", "f32"),
     ],
@@ -476,38 +497,11 @@ function sequentialResourceDynamicProgram(
         destinationResourceId: "launch-count",
         mode: "whole-allocation-bytes-per-rank",
       },
-      {
-        nodeId: "produce-next-count",
-        kind: "dynamic-dispatch",
-        dependsOn: ["produce-launch-count"],
-        semanticArtifactHash: countArtifacts.kernelSemanticHash,
-        entrypointId: countArtifacts.operationId,
-        dimensionBindings: {},
-        bindings: [
-          {
-            semanticResourceId: countArtifacts.source.viewId,
-            graphResourceId: "next-count-input",
-          },
-          {
-            semanticResourceId: countArtifacts.destination.viewId,
-            graphResourceId: "next-count",
-          },
-        ],
-        launchSource: {
-          resourceId: "launch-count",
-          rank: wire("0"),
-          mode: "u32-prefix-element-count",
-        },
-        maxElementCount: wire("1"),
-        mode: "resource-u32-prefix-elements",
-      },
-      ...finalCountDispatches,
+      ...countDispatches,
       {
         nodeId: "copy-selected-prefix",
         kind: "dynamic-dispatch",
-        dependsOn: [
-          stageCount === 3 ? "produce-final-count" : "produce-next-count",
-        ],
+        dependsOn: [finalStage.nodeId],
         semanticArtifactHash: dataArtifacts.kernelSemanticHash,
         entrypointId: dataArtifacts.operationId,
         dimensionBindings: {},
@@ -522,7 +516,7 @@ function sequentialResourceDynamicProgram(
           },
         ],
         launchSource: {
-          resourceId: stageCount === 3 ? "final-count" : "next-count",
+          resourceId: finalStage.outputResourceId,
           rank: wire("0"),
           mode: "u32-prefix-element-count",
         },
@@ -1562,6 +1556,28 @@ describe("semantic host-graph WebGPU preparation", () => {
       resourceDynamicDispatchCount: 3,
       midGraphFeedbackCount: 3,
       midGraphFeedbackStageCount: 3,
+      runtimeControlIds: [],
+    });
+
+    const fourStageGraph = (await createVerifiedHostGraphArtifact(
+      sequentialResourceDynamicProgram(countArtifacts, artifacts, 4),
+      sequentialOptions,
+    )).artifact;
+    const fourStage = await prepareSemanticHostGraphWebGpu(
+      fourStageGraph,
+      sequentialOptions,
+    );
+    expect(fourStage).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 6,
+      expandedStepCount: 5,
+      dispatchStepCount: 4,
+      copyStepCount: 1,
+      materializationCount: 1,
+      dynamicDispatchCount: 4,
+      resourceDynamicDispatchCount: 4,
+      midGraphFeedbackCount: 4,
+      midGraphFeedbackStageCount: 4,
       runtimeControlIds: [],
     });
   });

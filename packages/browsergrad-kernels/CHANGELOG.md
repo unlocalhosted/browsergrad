@@ -9,6 +9,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- WebGPU host-graph backend 1.32 executes host-graph program version 1.28's
+  exact four-stage produced-resource linear chain. The semantic verifier accepts
+  four distinct sources only when three producer relations form one connected
+  chain; the CPU and WebGPU paths read and execute each bounded selection in
+  order under one fail-stop lifecycle. Required actual-device evidence expands
+  from 78 to 80 complete CPU/WebGPU parity cases with correctness artifact
+  `e27040de4badadc0f8facfd2c862524f160249627a0cbe989c0f7261c0a5d30f`.
+  The separately required four-case Worker lane is repinned to backend 1.32
+  with artifact
+  `3e0d6275ceee27546f85e49618f00ac42fd8ae8f4fa991ba230f3d8561f28afa`.
 - WebGPU host-graph backend 1.31 stores verified graph resources as raw u32
   words for every built-in semantic storage dtype. Exact same-dtype view-copy
   dispatch now covers bool, i8/u8, i16/u16, i32/u32, i64/u64,

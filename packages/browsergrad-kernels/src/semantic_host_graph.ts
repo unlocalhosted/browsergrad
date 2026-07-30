@@ -78,7 +78,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.31.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.32.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -861,11 +861,11 @@ export async function prepareSemanticHostGraphWebGpu(
     resourceRepeats.length +
     resourceDynamicDispatches.length;
   let resourceFeedbackStageCount = resourceFeedbackCount === 0 ? 0 : 1;
-  if (resourceFeedbackCount > 3) {
+  if (resourceFeedbackCount > 4) {
     fail(
       "BG-WEBGPU-GRAPH-INTERNAL",
       "$.artifact",
-      "verified graph contains more than three resource feedback nodes",
+      "verified graph contains more than four resource feedback nodes",
     );
   }
   if (resourceFeedbackCount >= 2) {
@@ -3340,7 +3340,11 @@ async function executeGraphWithSequentialResourceDynamicDispatchFeedback(
 ): Promise<ExecutedGraph> {
   const dispatches = selectedExecution.resourceDynamicDispatches;
   if (
-    (dispatches.length !== 2 && dispatches.length !== 3) ||
+    (
+      dispatches.length !== 2 &&
+      dispatches.length !== 3 &&
+      dispatches.length !== 4
+    ) ||
     dispatches.some((dispatch) =>
       !isPreparedResourceLinearDynamicDispatch(dispatch))
   ) {
@@ -3498,8 +3502,12 @@ function resourceDynamicDispatchesFormSequentialStages(
     isPreparedResourceLinearDynamicDispatch,
   );
   if (
-    (dispatches.length !== 2 && dispatches.length !== 3) ||
-    programMinor < (dispatches.length === 2 ? 26 : 27) ||
+    (
+      dispatches.length !== 2 &&
+      dispatches.length !== 3 &&
+      dispatches.length !== 4
+    ) ||
+    programMinor < 24 + dispatches.length ||
     linearDispatches.length !== dispatches.length
   ) {
     return false;

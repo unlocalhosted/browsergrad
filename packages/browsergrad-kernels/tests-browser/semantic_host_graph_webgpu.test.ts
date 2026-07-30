@@ -95,6 +95,8 @@ const CASE_IDS = Object.freeze([
   "f32-sequential-resource-feedback-two",
   "f32-three-stage-resource-feedback-one",
   "f32-three-stage-resource-feedback-two",
+  "f32-four-stage-resource-feedback-one",
+  "f32-four-stage-resource-feedback-two",
   "f32-aligned-dynamic-dispatch-64",
   "f32-aligned-dynamic-dispatch-128",
   "f32-aligned-resource-dynamic-dispatch-64",
@@ -425,6 +427,16 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         "f32-three-stage-resource-feedback-two",
         2,
         3,
+      ),
+      prepareSequentialResourceFeedbackCase(
+        "f32-four-stage-resource-feedback-one",
+        1,
+        4,
+      ),
+      prepareSequentialResourceFeedbackCase(
+        "f32-four-stage-resource-feedback-two",
+        2,
+        4,
       ),
       prepareWideDynamicDispatchCase(
         "f32-aligned-dynamic-dispatch-64",
@@ -948,6 +960,30 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       materializationCount: 1,
       midGraphFeedbackCount: 3,
       midGraphFeedbackStageCount: 3,
+    });
+    const oneFourStageFeedback = completedCases.find(({ caseId }) =>
+      caseId === "f32-four-stage-resource-feedback-one");
+    const twoFourStageFeedback = completedCases.find(({ caseId }) =>
+      caseId === "f32-four-stage-resource-feedback-two");
+    expect(oneFourStageFeedback?.pipelineIdentityHash)
+      .toBe(twoFourStageFeedback?.pipelineIdentityHash);
+    expect(oneFourStageFeedback?.backendSpecializationHash)
+      .not.toBe(twoFourStageFeedback?.backendSpecializationHash);
+    expect(oneFourStageFeedback).toMatchObject({
+      expandedStepCount: 5,
+      dispatchStepCount: 4,
+      copyStepCount: 1,
+      materializationCount: 1,
+      midGraphFeedbackCount: 4,
+      midGraphFeedbackStageCount: 4,
+    });
+    expect(twoFourStageFeedback).toMatchObject({
+      expandedStepCount: 5,
+      dispatchStepCount: 4,
+      copyStepCount: 1,
+      materializationCount: 1,
+      midGraphFeedbackCount: 4,
+      midGraphFeedbackStageCount: 4,
     });
     const alignedDynamic64 = completedCases.find(({ caseId }) =>
       caseId === "f32-aligned-dynamic-dispatch-64");
@@ -1640,9 +1676,11 @@ async function prepareSequentialResourceFeedbackCase(
     | "f32-sequential-resource-feedback-one"
     | "f32-sequential-resource-feedback-two"
     | "f32-three-stage-resource-feedback-one"
-    | "f32-three-stage-resource-feedback-two",
+    | "f32-three-stage-resource-feedback-two"
+    | "f32-four-stage-resource-feedback-one"
+    | "f32-four-stage-resource-feedback-two",
   elementCount: 1 | 2,
-  stageCount: 2 | 3 = 2,
+  stageCount: 2 | 3 | 4 = 2,
 ): Promise<PreparedCase> {
   const countArtifacts =
     await createVerifiedDensePermutationViewCopyArtifacts({
@@ -1672,14 +1710,18 @@ async function prepareSequentialResourceFeedbackCase(
   );
   const inputs = Object.freeze([
     namedInput(0, "launch-input", u32Bytes([1])),
-    namedInput(
-      0,
+    ...[
       "next-count-input",
-      u32Bytes([stageCount === 2 ? elementCount : 1]),
-    ),
-    ...(stageCount === 3
-      ? [namedInput(0, "final-count-input", u32Bytes([elementCount]))]
-      : []),
+      "final-count-input",
+      "terminal-count-input",
+    ].slice(0, stageCount - 1).map((resourceId, index, stages) =>
+      namedInput(
+        0,
+        resourceId,
+        u32Bytes([
+          index === stages.length - 1 ? elementCount : 1,
+        ]),
+      )),
     input(0, f32Bytes([1.25, -2.5])),
   ]);
   return Object.freeze({
@@ -2586,51 +2628,72 @@ function resourceDynamicDispatchFanoutProgram(
 function sequentialResourceDynamicDispatchProgram(
   countArtifacts: VerifiedViewCopyArtifacts,
   dataArtifacts: VerifiedViewCopyArtifacts,
-  stageCount: 2 | 3 = 2,
+  stageCount: 2 | 3 | 4 = 2,
 ): HostGraphProgram {
-  const finalCountDispatches = stageCount === 3
-    ? [{
-        nodeId: "produce-final-count",
-        kind: "dynamic-dispatch" as const,
-        dependsOn: ["produce-next-count"],
-        semanticArtifactHash: countArtifacts.kernelSemanticHash,
-        entrypointId: countArtifacts.operationId,
-        dimensionBindings: {},
-        bindings: [
-          {
-            semanticResourceId: countArtifacts.source.viewId,
-            graphResourceId: "final-count-input",
-          },
-          {
-            semanticResourceId: countArtifacts.destination.viewId,
-            graphResourceId: "final-count",
-          },
-        ],
-        launchSource: {
-          resourceId: "next-count",
-          rank: wire(0),
-          mode: "u32-prefix-element-count" as const,
+  const stages = [
+    {
+      inputResourceId: "next-count-input",
+      outputResourceId: "next-count",
+      nodeId: "produce-next-count",
+    },
+    {
+      inputResourceId: "final-count-input",
+      outputResourceId: "final-count",
+      nodeId: "produce-final-count",
+    },
+    {
+      inputResourceId: "terminal-count-input",
+      outputResourceId: "terminal-count",
+      nodeId: "produce-terminal-count",
+    },
+  ].slice(0, stageCount - 1);
+  const countDispatches = stages.map((stage, index) => {
+    const predecessor = stages[index - 1];
+    return {
+      nodeId: stage.nodeId,
+      kind: "dynamic-dispatch" as const,
+      dependsOn: [
+        predecessor?.nodeId ?? "produce-launch-count",
+      ],
+      semanticArtifactHash: countArtifacts.kernelSemanticHash,
+      entrypointId: countArtifacts.operationId,
+      dimensionBindings: {},
+      bindings: [
+        {
+          semanticResourceId: countArtifacts.source.viewId,
+          graphResourceId: stage.inputResourceId,
         },
-        maxElementCount: wire(1),
-        mode: "resource-u32-prefix-elements" as const,
-      }]
-    : [];
+        {
+          semanticResourceId: countArtifacts.destination.viewId,
+          graphResourceId: stage.outputResourceId,
+        },
+      ],
+      launchSource: {
+        resourceId:
+          predecessor?.outputResourceId ?? "launch-count",
+        rank: wire(0),
+        mode: "u32-prefix-element-count" as const,
+      },
+      maxElementCount: wire(1),
+      mode: "resource-u32-prefix-elements" as const,
+    };
+  });
+  const finalStage = stages.at(-1)!;
   return {
     kind: "host-graph",
-    version: { major: 1, minor: stageCount === 2 ? 26 : 27 },
+    version: {
+      major: 1,
+      minor: stageCount === 2 ? 26 : stageCount === 3 ? 27 : 28,
+    },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire(1),
     resources: [
       resource("launch-input", "input", "u32", 4),
       resource("launch-count", "temporary", "u32", 4),
-      resource("next-count-input", "input", "u32", 4),
-      resource("next-count", "temporary", "u32", 4),
-      ...(stageCount === 3
-        ? [
-            resource("final-count-input", "input", "u32", 4),
-            resource("final-count", "temporary", "u32", 4),
-          ]
-        : []),
+      ...stages.flatMap((stage) => [
+        resource(stage.inputResourceId, "input", "u32", 4),
+        resource(stage.outputResourceId, "temporary", "u32", 4),
+      ]),
       resource("input", "input", "f32", 8),
       resource("output", "output", "f32", 8),
     ],
@@ -2643,38 +2706,11 @@ function sequentialResourceDynamicDispatchProgram(
         destinationResourceId: "launch-count",
         mode: "whole-allocation-bytes-per-rank",
       },
-      {
-        nodeId: "produce-next-count",
-        kind: "dynamic-dispatch",
-        dependsOn: ["produce-launch-count"],
-        semanticArtifactHash: countArtifacts.kernelSemanticHash,
-        entrypointId: countArtifacts.operationId,
-        dimensionBindings: {},
-        bindings: [
-          {
-            semanticResourceId: countArtifacts.source.viewId,
-            graphResourceId: "next-count-input",
-          },
-          {
-            semanticResourceId: countArtifacts.destination.viewId,
-            graphResourceId: "next-count",
-          },
-        ],
-        launchSource: {
-          resourceId: "launch-count",
-          rank: wire(0),
-          mode: "u32-prefix-element-count",
-        },
-        maxElementCount: wire(1),
-        mode: "resource-u32-prefix-elements",
-      },
-      ...finalCountDispatches,
+      ...countDispatches,
       {
         nodeId: "copy-selected-prefix",
         kind: "dynamic-dispatch",
-        dependsOn: [
-          stageCount === 3 ? "produce-final-count" : "produce-next-count",
-        ],
+        dependsOn: [finalStage.nodeId],
         semanticArtifactHash: dataArtifacts.kernelSemanticHash,
         entrypointId: dataArtifacts.operationId,
         dimensionBindings: {},
@@ -2689,7 +2725,7 @@ function sequentialResourceDynamicDispatchProgram(
           },
         ],
         launchSource: {
-          resourceId: stageCount === 3 ? "final-count" : "next-count",
+          resourceId: finalStage.outputResourceId,
           rank: wire(0),
           mode: "u32-prefix-element-count",
         },

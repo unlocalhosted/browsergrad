@@ -52,6 +52,7 @@ function resource(
   resourceId: string,
   role: "input" | "temporary" | "output",
   dtype: "f32" | "i32" | "u32",
+  byteLength = "8",
 ) {
   return {
     resourceId,
@@ -61,7 +62,7 @@ function resource(
       ? "external-input" as const
       : "zero-fill" as const,
     dtype,
-    byteLength: wire("8"),
+    byteLength: wire(byteLength),
     alignmentBytes: 4,
   };
 }
@@ -263,60 +264,67 @@ function resourceDynamicFanoutProgram(
 function sequentialResourceDynamicProgram(
   countArtifacts: VerifiedViewCopyArtifacts,
   dataArtifacts: VerifiedViewCopyArtifacts,
-  stageCount: 2 | 3 = 2,
+  stageCount: 2 | 3 | 4 = 2,
 ): HostGraphProgram {
-  const finalCountResources = stageCount === 3
-    ? [
+  const stages = [
+    {
+      inputResourceId: "next-count-input",
+      outputResourceId: "next-count",
+      nodeId: "produce-next-count",
+    },
+    {
+      inputResourceId: "final-count-input",
+      outputResourceId: "final-count",
+      nodeId: "produce-final-count",
+    },
+    {
+      inputResourceId: "terminal-count-input",
+      outputResourceId: "terminal-count",
+      nodeId: "produce-terminal-count",
+    },
+  ].slice(0, stageCount - 1);
+  const countResources = stages.flatMap((stage) => [
+    resource(stage.inputResourceId, "input", "u32", "4"),
+    resource(stage.outputResourceId, "temporary", "u32", "4"),
+  ]);
+  const countDispatches = stages.map((stage, index) => {
+    const predecessor = stages[index - 1];
+    return {
+      nodeId: stage.nodeId,
+      kind: "dynamic-dispatch" as const,
+      dependsOn: [
+        predecessor?.nodeId ?? "produce-launch-count",
+      ],
+      semanticArtifactHash: countArtifacts.kernelSemanticHash,
+      entrypointId: countArtifacts.operationId,
+      dimensionBindings: {},
+      bindings: [
         {
-          resourceId: "final-count-input",
-          role: "input" as const,
-          multiplicity: "per-rank" as const,
-          initialization: "external-input" as const,
-          dtype: "u32" as const,
-          byteLength: wire("4"),
-          alignmentBytes: 4,
+          semanticResourceId: countArtifacts.source.viewId,
+          graphResourceId: stage.inputResourceId,
         },
         {
-          resourceId: "final-count",
-          role: "temporary" as const,
-          multiplicity: "per-rank" as const,
-          initialization: "zero-fill" as const,
-          dtype: "u32" as const,
-          byteLength: wire("4"),
-          alignmentBytes: 4,
+          semanticResourceId: countArtifacts.destination.viewId,
+          graphResourceId: stage.outputResourceId,
         },
-      ]
-    : [];
-  const finalCountDispatches = stageCount === 3
-    ? [{
-        nodeId: "produce-final-count",
-        kind: "dynamic-dispatch" as const,
-        dependsOn: ["produce-next-count"],
-        semanticArtifactHash: countArtifacts.kernelSemanticHash,
-        entrypointId: countArtifacts.operationId,
-        dimensionBindings: {},
-        bindings: [
-          {
-            semanticResourceId: countArtifacts.source.viewId,
-            graphResourceId: "final-count-input",
-          },
-          {
-            semanticResourceId: countArtifacts.destination.viewId,
-            graphResourceId: "final-count",
-          },
-        ],
-        launchSource: {
-          resourceId: "next-count",
-          rank: wire("0"),
-          mode: "u32-prefix-element-count" as const,
-        },
-        maxElementCount: wire("1"),
-        mode: "resource-u32-prefix-elements" as const,
-      }]
-    : [];
+      ],
+      launchSource: {
+        resourceId:
+          predecessor?.outputResourceId ?? "launch-count",
+        rank: wire("0"),
+        mode: "u32-prefix-element-count" as const,
+      },
+      maxElementCount: wire("1"),
+      mode: "resource-u32-prefix-elements" as const,
+    };
+  });
+  const finalStage = stages.at(-1)!;
   return {
     kind: "host-graph",
-    version: { major: 1, minor: stageCount === 2 ? 26 : 27 },
+    version: {
+      major: 1,
+      minor: stageCount === 2 ? 26 : stageCount === 3 ? 27 : 28,
+    },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire("1"),
     resources: [
@@ -338,25 +346,7 @@ function sequentialResourceDynamicProgram(
         byteLength: wire("4"),
         alignmentBytes: 4,
       },
-      {
-        resourceId: "next-count-input",
-        role: "input",
-        multiplicity: "per-rank",
-        initialization: "external-input",
-        dtype: "u32",
-        byteLength: wire("4"),
-        alignmentBytes: 4,
-      },
-      {
-        resourceId: "next-count",
-        role: "temporary",
-        multiplicity: "per-rank",
-        initialization: "zero-fill",
-        dtype: "u32",
-        byteLength: wire("4"),
-        alignmentBytes: 4,
-      },
-      ...finalCountResources,
+      ...countResources,
       {
         resourceId: "input",
         role: "input",
@@ -385,38 +375,11 @@ function sequentialResourceDynamicProgram(
         destinationResourceId: "launch-count",
         mode: "whole-allocation-bytes-per-rank",
       },
-      {
-        nodeId: "produce-next-count",
-        kind: "dynamic-dispatch",
-        dependsOn: ["produce-launch-count"],
-        semanticArtifactHash: countArtifacts.kernelSemanticHash,
-        entrypointId: countArtifacts.operationId,
-        dimensionBindings: {},
-        bindings: [
-          {
-            semanticResourceId: countArtifacts.source.viewId,
-            graphResourceId: "next-count-input",
-          },
-          {
-            semanticResourceId: countArtifacts.destination.viewId,
-            graphResourceId: "next-count",
-          },
-        ],
-        launchSource: {
-          resourceId: "launch-count",
-          rank: wire("0"),
-          mode: "u32-prefix-element-count",
-        },
-        maxElementCount: wire("1"),
-        mode: "resource-u32-prefix-elements",
-      },
-      ...finalCountDispatches,
+      ...countDispatches,
       {
         nodeId: "copy-selected-prefix",
         kind: "dynamic-dispatch",
-        dependsOn: [
-          stageCount === 3 ? "produce-final-count" : "produce-next-count",
-        ],
+        dependsOn: [finalStage.nodeId],
         semanticArtifactHash: dataArtifacts.kernelSemanticHash,
         entrypointId: dataArtifacts.operationId,
         dimensionBindings: {},
@@ -431,7 +394,7 @@ function sequentialResourceDynamicProgram(
           },
         ],
         launchSource: {
-          resourceId: stageCount === 3 ? "final-count" : "next-count",
+          resourceId: finalStage.outputResourceId,
           rank: wire("0"),
           mode: "u32-prefix-element-count",
         },
@@ -2347,6 +2310,105 @@ describe("host graph CPU reference", () => {
       expect(result.completedDynamicDispatches).toEqual([
         { nodeId: "produce-next-count", elementCount: "1" },
         { nodeId: "produce-final-count", elementCount: "1" },
+        {
+          nodeId: "copy-selected-prefix",
+          elementCount: String(selectedCount),
+        },
+      ]);
+      expect(readF32(result.outputs[0]!.bytes)).toEqual(
+        selectedCount === 1 ? [1.25, 0] : [1.25, -2.5],
+      );
+    }
+
+    const fourStageProgram = sequentialResourceDynamicProgram(
+      countArtifacts,
+      artifacts,
+      4,
+    );
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...fourStageProgram,
+        version: { major: 1, minor: 27 },
+      },
+      sequentialOptions,
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-RESOURCE-LIMIT" },
+    });
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...fourStageProgram,
+        nodes: fourStageProgram.nodes.map((node) => {
+          if (
+            node.kind !== "dynamic-dispatch" ||
+            node.mode !== "resource-u32-prefix-elements" ||
+            (
+              node.nodeId !== "produce-next-count" &&
+              node.nodeId !== "produce-terminal-count"
+            )
+          ) {
+            return node;
+          }
+          return {
+            ...node,
+            bindings: node.bindings.map((binding) =>
+              binding.semanticResourceId ===
+                  countArtifacts.destination.viewId
+                ? {
+                    ...binding,
+                    graphResourceId:
+                      node.nodeId === "produce-next-count"
+                        ? "terminal-count"
+                        : "next-count",
+                  }
+                : binding),
+          };
+        }),
+      },
+      sequentialOptions,
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-INVALID-BINDING" },
+    });
+    const fourStage = await prepareHostGraphCpu(
+      (await createVerifiedHostGraphArtifact(
+        fourStageProgram,
+        sequentialOptions,
+      )).artifact,
+      sequentialOptions,
+    );
+    expect(fourStage).toMatchObject({
+      dynamicDispatchCount: 4,
+      resourceDynamicDispatchCount: 4,
+    });
+    for (const selectedCount of [1, 2]) {
+      const result = await fourStage.execute({
+        inputs: [
+          {
+            rank: wire("0"),
+            resourceId: "launch-input",
+            bytes: u32Bytes([1]),
+          },
+          {
+            rank: wire("0"),
+            resourceId: "next-count-input",
+            bytes: u32Bytes([1]),
+          },
+          {
+            rank: wire("0"),
+            resourceId: "final-count-input",
+            bytes: u32Bytes([1]),
+          },
+          {
+            rank: wire("0"),
+            resourceId: "terminal-count-input",
+            bytes: u32Bytes([selectedCount]),
+          },
+          input(0, f32Bytes([1.25, -2.5])),
+        ],
+      });
+      expect(result.completedDynamicDispatches).toEqual([
+        { nodeId: "produce-next-count", elementCount: "1" },
+        { nodeId: "produce-final-count", elementCount: "1" },
+        { nodeId: "produce-terminal-count", elementCount: "1" },
         {
           nodeId: "copy-selected-prefix",
           elementCount: String(selectedCount),
