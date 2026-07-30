@@ -50,6 +50,8 @@ export interface VerifiedCppCuteBrowserProductionRelease {
   readonly headerDistributionResourceSha256: string;
   readonly headerDistributionReproducibilityId: string;
   readonly headerDistributionOutputVerificationId: string;
+  readonly producerReviewerIdentitySeparationVerified: true;
+  readonly producerReviewerKeySeparationVerified: true;
   readonly externallyRootedProducerTrusted: true;
   readonly fullDistributedOutputSetReproducible: true;
   readonly exactPrivateDistributionTreeVerified: true;
@@ -116,13 +118,17 @@ export async function authorizeCppCuteBrowserProductionRelease(
     distributionApproval,
     backendRecord.fullDistribution.deterministicMetadata,
   );
+  requireProducerReviewerSeparation(
+    backendExecution,
+    distributionApproval,
+  );
   throwIfAborted(signal);
 
   let authorityHash: string;
   try {
     authorityHash = await hashCanonicalJson({
       domain:
-        "browsergrad.compiler.cpp-cute.browser-production-release.v1",
+        "browsergrad.compiler.cpp-cute.browser-production-release.v2",
       backendExecutionAuthorityId:
         backendExecution.backendExecutionAuthorityId,
       producerEvidenceId: backendExecution.producerEvidenceId,
@@ -143,6 +149,8 @@ export async function authorizeCppCuteBrowserProductionRelease(
       distributionReviewSubjectId: distributionApproval.reviewSubjectId,
       reviewerId: distributionApproval.reviewerId,
       reviewerKeyId: distributionApproval.keyId,
+      producerReviewerIdentitySeparationVerified: true,
+      producerReviewerKeySeparationVerified: true,
       headerDistributionResourceSha256:
         distributionApproval.headerDistributionResourceSha256,
       headerDistributionReproducibilityId:
@@ -187,6 +195,8 @@ export async function authorizeCppCuteBrowserProductionRelease(
     distributionApprovalPolicyId: distributionApproval.policyId,
     reviewerId: distributionApproval.reviewerId,
     reviewerKeyId: distributionApproval.keyId,
+    producerReviewerIdentitySeparationVerified: true as const,
+    producerReviewerKeySeparationVerified: true as const,
     distributionReviewSubjectId: distributionApproval.reviewSubjectId,
     headerDistributionResourceSha256:
       distributionApproval.headerDistributionResourceSha256,
@@ -337,6 +347,24 @@ function requireExactDistributionBinding(
     binding(
       "$.distributionApproval.headerDistributionOutputVerificationId",
       "distribution approval does not cover the exact reproduced header outputs",
+    );
+  }
+}
+
+function requireProducerReviewerSeparation(
+  backend: VerifiedCppCuteBrowserProductionBackendExecution,
+  approval: VerifiedCppCuteBrowserDistributionApproval,
+): void {
+  if (backend.builderId === approval.reviewerId) {
+    binding(
+      "$.distributionApproval.reviewerId",
+      "distribution reviewer identity must differ from the build producer identity",
+    );
+  }
+  if (backend.producerKeyId === approval.keyId) {
+    binding(
+      "$.distributionApproval.keyId",
+      "distribution reviewer key must differ from the build producer key",
     );
   }
 }

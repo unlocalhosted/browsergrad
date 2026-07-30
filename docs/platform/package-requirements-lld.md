@@ -25,7 +25,7 @@ This checkpoint is informational. The rest of this document is normative; the
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
 | 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. Additive exact-storage profiles cover bool/i8/u8 packed8, i16/u16/f16/bf16 packed16, f32/i32/u32 word32, and f64/i64/u64 word64 ranks 1–8; every width admits separately identified signed-affine source maps without conflating storage copy with value semantics or arithmetic support. |
-| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict nine-case Worker matrix including unchanged signed-rank-2 CuTe source, signed-source-aware authorized Artifact V3 lowering, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-clobber producer/reviewer exchange, and unified in-process backend/final-release composition are package-pinned. The declared portable implementation exit now passes; externally rooted producer and distribution-review evidence plus actual production issuance remain open. |
+| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict nine-case Worker matrix including unchanged signed-rank-2 CuTe source, signed-source-aware authorized Artifact V3 lowering, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-clobber producer/reviewer exchange, and unified in-process backend/final-release composition are package-pinned. Final release rejects an identical producer/reviewer identity or public-key hash. The declared portable implementation exit now passes; externally rooted producer and distribution-review evidence plus actual production issuance remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
@@ -41,8 +41,8 @@ The 90-minute build is no longer an engineering iteration loop:
 - `verify:changed` is the default compiler edit loop and routes changes to owners.
 - `verify:browser-clang-wasm:fast` builds the compiler package, verifies the
   exact build lock, both zero-import Worker bundles, the strict matrix
-  projection, and exact-distribution convergence; its 104 files/823 tests take
-  14.72 seconds. The complete 106-file/1,660-test suite takes 14.50 seconds.
+  projection, and exact-distribution convergence; its 104 files/825 tests take
+  15.13 seconds. The complete 106-file/1,660-test suite takes 11.03 seconds.
 - The 19-file/177-test evidence-input suite takes 15.87 seconds and runs concurrently.
 - The required native boundary is one isolated prerequisite: 13 files/34 tests
   pass with nine platform skips in 78.87 seconds. Every behavioral native child
@@ -109,8 +109,9 @@ substitute for those independent authorities.
 The no-clobber producer/reviewer exchange accepts no private key, rebinds exact
 immutable requests and returned envelopes, and persists no reusable authority.
 Its final mode re-verifies both responses, admits package-pinned distribution
-and convergence resources, and composes backend plus release before process
-exit. A closed authoring boundary rederives the exact convergence resource from
+and convergence resources, rejects exact producer/reviewer identity or
+public-key reuse, and composes backend plus release before process exit. A
+closed authoring boundary rederives the exact convergence resource from
 the current distribution and nine-case observation, admits one real
 non-software WebGPU profile, and rejects stale identities. The observation
 keeps reusable authority and `releaseReady` false; only external evidence can
@@ -181,16 +182,15 @@ portable implementation and exact-payload convergence exits already pass.
    and an externally issued exact-build statement for the exact build subject.
 2. A production approval policy admits an externally controlled reviewer key,
    and the package verifier accepts an external decision over the exact current
-   header distribution. Package-generated material cannot self-approve it.
+   header distribution. Its exact reviewer identity and public-key hash must
+   differ from the producer coordinates. Package-generated material cannot
+   self-approve it.
 3. Run the unified host operation against those exact external responses so
    backend/final-release authority is minted in one process. Serialized
    observations and synthetic fixtures grant no production authority.
-The declared Gate 7 profile is verified for bounded DAG request/resource
-repetition, request-time and produced-resource dispatch through rank 8, exact
-shared linear or rectangular fanout, exact two-through-eight-stage linear
-chains, one shared conditional/repeat stage, two-stage conditional-to-repeat/linear-dispatch/rank-2-through-rank-8-rectangle chains, device-bound CPU/WebGPU pipelines, and one one-shot dedicated-browser-Worker transport.
-Broader mixed/device-side feedback, unbounded launches, worker meshes, cross-worker
-topology, and native systems require separate future profiles, not this closure.
+Gate 7's declared bounded host-graph, CPU/WebGPU, and one-shot Worker profile
+is verified. Broader control, topology, and native systems require separate
+future profiles, not this closure.
 
 ## Purpose
 
@@ -1016,6 +1016,11 @@ provenance MUST verify a signature or an equivalent allowlisted attestation.
 The trust root and signer policy MUST be admitted independently of the
 manifest or statement being authenticated; a manifest-selected key can prove
 only cryptographic consistency, never producer trust by itself.
+Final production release MUST enforce exact separation of duties: the admitted
+distribution reviewer identity MUST differ from the admitted build-producer
+identity, and its public-key hash MUST differ from the producer key. Distinct
+strings and keys are necessary software checks, not proof that either principal
+is externally controlled or legally independent.
 
 The compiler service or WASM frontend MUST treat input as untrusted. It MUST
 use an allowlisted virtual filesystem, bounded preprocessing/template work,

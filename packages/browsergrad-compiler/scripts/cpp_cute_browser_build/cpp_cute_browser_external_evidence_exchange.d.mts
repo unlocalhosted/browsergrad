@@ -279,6 +279,8 @@ export interface CppCuteBrowserProductionReleaseObservationRecord {
     distributionApprovalPolicyId: string;
     reviewerId: string;
     reviewerKeyId: string;
+    producerReviewerIdentitySeparationVerified: true;
+    producerReviewerKeySeparationVerified: true;
     distributionReviewSubjectId: string;
     headerDistributionResourceSha256: string;
     headerDistributionReproducibilityId: string;

@@ -70,6 +70,8 @@ describe("C++/CuTe production release authority", () => {
         fixture.approval.headerDistributionReproducibilityId,
       headerDistributionOutputVerificationId:
         fixture.approval.headerDistributionOutputVerificationId,
+      producerReviewerIdentitySeparationVerified: true,
+      producerReviewerKeySeparationVerified: true,
       externallyRootedProducerTrusted: true,
       fullDistributedOutputSetReproducible: true,
       exactPrivateDistributionTreeVerified: true,

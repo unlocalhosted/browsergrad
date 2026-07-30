@@ -962,6 +962,10 @@ function productionReleaseProjection(release) {
       release.distributionApprovalPolicyId,
     reviewerId: release.reviewerId,
     reviewerKeyId: release.reviewerKeyId,
+    producerReviewerIdentitySeparationVerified:
+      release.producerReviewerIdentitySeparationVerified,
+    producerReviewerKeySeparationVerified:
+      release.producerReviewerKeySeparationVerified,
     distributionReviewSubjectId:
       release.distributionReviewSubjectId,
     headerDistributionResourceSha256:

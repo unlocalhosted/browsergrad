@@ -97,6 +97,14 @@ interface DistributionExchangeFixture {
   }>;
 }
 
+interface DistributionExchangeFixtureOptions {
+  readonly reviewerId?: string;
+  readonly signer?: Readonly<{
+    privateKey: CryptoKey;
+    spkiDerBase64: string;
+  }>;
+}
+
 interface ProductionReleaseExchangeFixture {
   readonly root: string;
   readonly producer: CurrentPayloadExternallyRootedProducerFixture;
@@ -621,62 +629,16 @@ describe("browser distribution approval exchange", () => {
 describe("browser production release exchange", () => {
   it("re-verifies both external responses and composes final release authority in one process", async () => {
     const fixture = await createProductionReleaseExchangeFixture("verify");
-    const producerRequestPath = join(
-      fixture.root,
-      "producer-signing-request.json",
-    );
-    const producerEnvelopePath = join(
-      fixture.root,
-      "producer-provenance.dsse.json",
-    );
-    const approvalRequestPath = join(
-      fixture.root,
-      "approval-signing-request.json",
-    );
-    const approvalEnvelopePath = join(
-      fixture.root,
-      "approval.dsse.json",
-    );
+    const evidence = await createProductionReleaseEvidenceFiles(fixture);
     const outputPath = join(fixture.root, "production-release-observation.json");
-    const producerRequestResult =
-      await runCppCuteBrowserExternalEvidenceExchange(
-        productionProducerSigningRequestArguments(
-          fixture,
-          producerRequestPath,
-        ),
-      );
-    const producerRequest = producerRequestResult.record as
-      CppCuteBrowserBuildProvenanceSigningRequestRecord;
-    await writeImmutable(
-      producerEnvelopePath,
-      canonicalJsonBytes(await signRequestWithKey(
-        producerRequest,
-        fixture.producer.privateKey,
-      )),
-    );
-    const approvalRequestResult =
-      await runCppCuteBrowserExternalEvidenceExchange(
-        distributionSigningRequestArguments(
-          fixture.approval,
-          approvalRequestPath,
-        ),
-      );
-    const approvalRequest = approvalRequestResult.record as
-      CppCuteBrowserDistributionApprovalSigningRequestRecord;
-    await writeImmutable(
-      approvalEnvelopePath,
-      canonicalJsonBytes(
-        await signDistributionRequest(approvalRequest, fixture.approval),
-      ),
-    );
 
     const verified = await runCppCuteBrowserExternalEvidenceExchange(
       productionReleaseVerificationArguments(
         fixture,
-        producerRequestPath,
-        producerEnvelopePath,
-        approvalRequestPath,
-        approvalEnvelopePath,
+        evidence.producerRequestPath,
+        evidence.producerEnvelopePath,
+        evidence.approvalRequestPath,
+        evidence.approvalEnvelopePath,
         outputPath,
       ),
     );
@@ -700,6 +662,8 @@ describe("browser production release exchange", () => {
           expect.stringMatching(
             /^bg\.cpp\.browser-production-backend-execution\.sha256\.[0-9a-f]{64}$/u,
           ),
+        producerReviewerIdentitySeparationVerified: true,
+        producerReviewerKeySeparationVerified: true,
       },
       observed: {
         producerSignatureVerified: true,
@@ -732,10 +696,10 @@ describe("browser production release exchange", () => {
     await expect(runCppCuteBrowserExternalEvidenceExchange(
       productionReleaseVerificationArguments(
         fixture,
-        producerRequestPath,
-        producerEnvelopePath,
-        approvalRequestPath,
-        approvalEnvelopePath,
+        evidence.producerRequestPath,
+        evidence.producerEnvelopePath,
+        evidence.approvalRequestPath,
+        evidence.approvalEnvelopePath,
         outputPath,
       ),
     )).rejects.toMatchObject({
@@ -744,6 +708,40 @@ describe("browser production release exchange", () => {
       path: "$.arguments.output",
     });
   });
+
+  it.each([
+    {
+      relationship: "same-identity" as const,
+      path: "$.distributionApproval.reviewerId",
+    },
+    {
+      relationship: "same-key" as const,
+      path: "$.distributionApproval.keyId",
+    },
+  ])(
+    "rejects a distribution reviewer with the producer's $relationship",
+    async ({ relationship, path }) => {
+      const fixture = await createProductionReleaseExchangeFixture(
+        `separation-${relationship}`,
+        relationship,
+      );
+      const evidence = await createProductionReleaseEvidenceFiles(fixture);
+
+      await expect(runCppCuteBrowserExternalEvidenceExchange(
+        productionReleaseVerificationArguments(
+          fixture,
+          evidence.producerRequestPath,
+          evidence.producerEnvelopePath,
+          evidence.approvalRequestPath,
+          evidence.approvalEnvelopePath,
+          join(fixture.root, "production-release-observation.json"),
+        ),
+      )).rejects.toMatchObject({
+        code: "BG-COMPILER-CPP-CUTE-BROWSER-PRODUCTION-RELEASE-BINDING",
+        path,
+      });
+    },
+  );
 });
 
 async function createExchangeFixture(name: string): Promise<ExchangeFixture> {
@@ -790,21 +788,34 @@ async function createExchangeFixture(name: string): Promise<ExchangeFixture> {
 
 async function createDistributionExchangeFixture(
   name: string,
+  options: DistributionExchangeFixtureOptions = {},
 ): Promise<DistributionExchangeFixture> {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), `browsergrad-distribution-${name}-`)),
   );
   temporaryRoots.push(root);
-  const reviewerId =
+  const reviewerId = options.reviewerId ??
     "https://reviewers.browsergrad.dev/header-distribution-test";
-  const keyPair = await crypto.subtle.generateKey(
-    { name: "ECDSA", namedCurve: "P-256" },
-    true,
-    ["sign", "verify"],
-  );
-  const spki = new Uint8Array(
-    await crypto.subtle.exportKey("spki", keyPair.publicKey),
-  );
+  const generatedKeyPair = options.signer === undefined
+    ? await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" },
+      true,
+      ["sign", "verify"],
+    )
+    : undefined;
+  const privateKey = options.signer?.privateKey ??
+    generatedKeyPair?.privateKey;
+  if (privateKey === undefined) {
+    throw new Error("distribution approval fixture has no private key");
+  }
+  const spki = options.signer === undefined
+    ? new Uint8Array(
+      await crypto.subtle.exportKey(
+        "spki",
+        (generatedKeyPair as CryptoKeyPair).publicKey,
+      ),
+    )
+    : Uint8Array.from(Buffer.from(options.signer.spkiDerBase64, "base64"));
   const keyId = `sha256:${await sha256Hex(spki)}`;
   const trustStoreInput = {
     schema: CPP_CUTE_FRONTEND_TRUST_STORE_SCHEMA,
@@ -847,7 +858,7 @@ async function createDistributionExchangeFixture(
   ]);
   return {
     root,
-    privateKey: keyPair.privateKey,
+    privateKey,
     reviewerId,
     keyId,
     paths,
@@ -856,6 +867,8 @@ async function createDistributionExchangeFixture(
 
 async function createProductionReleaseExchangeFixture(
   name: string,
+  approvalRelationship:
+    "separate" | "same-identity" | "same-key" = "separate",
 ): Promise<ProductionReleaseExchangeFixture> {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), `browsergrad-release-${name}-`)),
@@ -865,10 +878,25 @@ async function createProductionReleaseExchangeFixture(
     await verifyCppCuteBrowserFullDistributionReproducibilityResource(
       cppCuteBrowserFullDistributionReproducibilityResourceBytes(),
     );
-  const [producer, approval] = await Promise.all([
-    createCurrentPayloadExternallyRootedProducerFixture(fullDistribution),
-    createDistributionExchangeFixture(`${name}-approval`),
-  ]);
+  const producer =
+    await createCurrentPayloadExternallyRootedProducerFixture(fullDistribution);
+  const producerTrustKey = producer.trustStoreInput.keys[0];
+  if (producerTrustKey === undefined) {
+    throw new Error("producer fixture has no trust key");
+  }
+  const approval = await createDistributionExchangeFixture(
+    `${name}-approval`,
+    approvalRelationship === "same-identity"
+      ? { reviewerId: producer.builderId }
+      : approvalRelationship === "same-key"
+      ? {
+        signer: {
+          privateKey: producer.privateKey,
+          spkiDerBase64: producerTrustKey.spkiDerBase64,
+        },
+      }
+      : {},
+  );
   const paths = {
     profile: join(root, "profile.json"),
     assetManifest: join(root, "asset-manifest.json"),
@@ -908,6 +936,66 @@ async function createProductionReleaseExchangeFixture(
     ),
   ]);
   return { root, producer, approval, paths };
+}
+
+async function createProductionReleaseEvidenceFiles(
+  fixture: ProductionReleaseExchangeFixture,
+): Promise<Readonly<{
+  producerRequestPath: string;
+  producerEnvelopePath: string;
+  approvalRequestPath: string;
+  approvalEnvelopePath: string;
+}>> {
+  const producerRequestPath = join(
+    fixture.root,
+    "producer-signing-request.json",
+  );
+  const producerEnvelopePath = join(
+    fixture.root,
+    "producer-provenance.dsse.json",
+  );
+  const approvalRequestPath = join(
+    fixture.root,
+    "approval-signing-request.json",
+  );
+  const approvalEnvelopePath = join(fixture.root, "approval.dsse.json");
+  const producerRequestResult =
+    await runCppCuteBrowserExternalEvidenceExchange(
+      productionProducerSigningRequestArguments(
+        fixture,
+        producerRequestPath,
+      ),
+    );
+  const producerRequest = producerRequestResult.record as
+    CppCuteBrowserBuildProvenanceSigningRequestRecord;
+  await writeImmutable(
+    producerEnvelopePath,
+    canonicalJsonBytes(await signRequestWithKey(
+      producerRequest,
+      fixture.producer.privateKey,
+    )),
+  );
+  const approvalRequestResult =
+    await runCppCuteBrowserExternalEvidenceExchange(
+      distributionSigningRequestArguments(
+        fixture.approval,
+        approvalRequestPath,
+      ),
+    );
+  const approvalRequest = approvalRequestResult.record as
+    CppCuteBrowserDistributionApprovalSigningRequestRecord;
+  await writeImmutable(
+    approvalEnvelopePath,
+    canonicalJsonBytes(
+      await signDistributionRequest(approvalRequest, fixture.approval),
+    ),
+  );
+  return Object.freeze({
+    producerRequestPath,
+    producerEnvelopePath,
+    approvalRequestPath,
+    approvalEnvelopePath,
+  });
 }
 
 function signingRequestArguments(
