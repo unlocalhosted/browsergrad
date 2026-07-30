@@ -884,6 +884,57 @@ function resourceRepeatedCollectiveProgram(): HostGraphProgram {
   };
 }
 
+function sharedConditionalRepeatFeedbackProgram(): HostGraphProgram {
+  const base = resourceRepeatedCollectiveProgram();
+  return {
+    ...base,
+    version: { major: 1, minor: 29 },
+    resources: [
+      ...base.resources,
+      resource("then-input", "input", "u32"),
+      resource("else-input", "input", "u32"),
+      resource("branch-output", "output", "u32"),
+    ],
+    nodes: [
+      ...base.nodes,
+      {
+        nodeId: "choose-branch",
+        kind: "conditional",
+        dependsOn: ["produce-iteration-count"],
+        predicate: {
+          resourceId: "iteration-count",
+          rank: wire("0"),
+          mode: "u32-nonzero",
+        },
+        thenBody: [{
+          nodeId: "copy-then",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "then-input",
+          destinationResourceId: "branch-output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        elseBody: [{
+          nodeId: "copy-else",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "else-input",
+          destinationResourceId: "branch-output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        mode: "resource-u32-branch-sequential",
+      },
+      {
+        nodeId: "materialize-branch-output",
+        kind: "materialize",
+        dependsOn: ["choose-branch"],
+        resourceId: "branch-output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function conditionalRawCopyProgram(): HostGraphProgram {
   return {
     kind: "host-graph",
@@ -1543,6 +1594,112 @@ describe("host graph CPU reference", () => {
       code: "BG-GRAPH-CPU-RESOURCE-LIMIT",
       path: "$.nodes.repeat-reduction.iterationSource",
     });
+  });
+
+  it("shares one produced u32 across a conditional and repeat", async () => {
+    const program = sharedConditionalRepeatFeedbackProgram();
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...program,
+        version: { major: 1, minor: 28 },
+      },
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-UNSUPPORTED-PROFILE" },
+    });
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...program,
+        nodes: program.nodes.map((node) =>
+          node.kind === "conditional" &&
+            node.mode === "resource-u32-branch-sequential"
+            ? {
+              ...node,
+              predicate: {
+                ...node.predicate,
+                rank: wire("1"),
+              },
+            }
+            : node),
+      },
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-INVALID-BINDING" },
+    });
+    const graph = (await createVerifiedHostGraphArtifact(
+      program,
+      { kernelArtifacts: [], layoutArtifacts: [] },
+    )).artifact;
+    const prepared = await prepareHostGraphCpu(graph, {
+      kernelArtifacts: [],
+      layoutArtifacts: [],
+    });
+    const executionInputs = (
+      selection: 0 | 2,
+    ): HostGraphCpuInputBinding[] => [
+      input(0, f32Bytes([1, 2])),
+      input(1, f32Bytes([3, 4])),
+      {
+        rank: wire("0"),
+        resourceId: "iteration-input",
+        bytes: u32Bytes([selection]),
+      },
+      {
+        rank: wire("1"),
+        resourceId: "iteration-input",
+        bytes: u32Bytes([0]),
+      },
+      ...[0, 1].flatMap((rank) => [
+        {
+          rank: wire(String(rank)),
+          resourceId: "then-input",
+          bytes: u32Bytes([9 + rank, 19 + rank]),
+        },
+        {
+          rank: wire(String(rank)),
+          resourceId: "else-input",
+          bytes: u32Bytes([7 + rank, 17 + rank]),
+        },
+      ]),
+    ];
+
+    expect(prepared).toMatchObject({
+      resourceRepeatCount: 1,
+      resourceConditionalCount: 1,
+    });
+    for (const selection of [0, 2] as const) {
+      const result = await prepared.execute({
+        inputs: executionInputs(selection),
+      });
+      expect(result.completedRepeats).toEqual([{
+        nodeId: "repeat-reduction",
+        iterationCount: String(selection),
+        bodyNodeIds: ["reduce-step"],
+      }]);
+      expect(result.completedConditionals).toEqual([{
+        nodeId: "choose-branch",
+        selectedBranch: selection === 0 ? "else" : "then",
+        bodyNodeIds: [
+          selection === 0 ? "copy-else" : "copy-then",
+        ],
+      }]);
+      const valueOutputs = result.outputs
+        .filter(({ resourceId }) => resourceId === "output")
+        .map(({ bytes }) => readF32(bytes));
+      expect(valueOutputs).toEqual(
+        selection === 0
+          ? [[1, 2], [3, 4]]
+          : [[8, 12], [8, 12]],
+      );
+      const branchOutputs = result.outputs
+        .filter(({ resourceId }) => resourceId === "branch-output")
+        .map(({ bytes }) => readU32(bytes));
+      expect(branchOutputs).toEqual(
+        selection === 0
+          ? [[7, 17], [8, 18]]
+          : [[9, 19], [10, 20]],
+      );
+    }
   });
 
   it("reports completion events only with a successful whole-graph result", async () => {

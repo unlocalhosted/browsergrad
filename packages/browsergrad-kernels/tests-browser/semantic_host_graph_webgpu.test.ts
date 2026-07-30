@@ -48,6 +48,7 @@ import {
 import {
   createVerifiedSignedReverseViewCopyArtifacts,
   patternedStorageBytes,
+  sharedConditionalRepeatFeedbackProgram,
   singleViewCopyGraphProgram,
 } from "../tests/semantic_host_graph_fixtures";
 
@@ -85,6 +86,8 @@ const CASE_IDS = Object.freeze([
   "f32-runtime-repeat-two",
   "f32-resource-repeat-zero",
   "f32-resource-repeat-two",
+  "f32-shared-conditional-repeat-zero",
+  "f32-shared-conditional-repeat-two",
   "f32-dynamic-dispatch-one",
   "f32-dynamic-dispatch-two",
   "f32-resource-dynamic-dispatch-one",
@@ -384,6 +387,14 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       ),
       prepareResourceRepeatedCollectiveCase(
         "f32-resource-repeat-two",
+        2,
+      ),
+      prepareSharedConditionalRepeatCase(
+        "f32-shared-conditional-repeat-zero",
+        0,
+      ),
+      prepareSharedConditionalRepeatCase(
+        "f32-shared-conditional-repeat-two",
         2,
       ),
       prepareDynamicDispatchCase(
@@ -877,6 +888,48 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
     expect(twoResourceRepeat?.expandedStepCount).toBe(8);
     expect(zeroResourceRepeat?.midGraphFeedbackCount).toBe(1);
     expect(twoResourceRepeat?.midGraphFeedbackCount).toBe(1);
+    const zeroSharedConditionalRepeat = completedCases.find(({ caseId }) =>
+      caseId === "f32-shared-conditional-repeat-zero");
+    const twoSharedConditionalRepeat = completedCases.find(({ caseId }) =>
+      caseId === "f32-shared-conditional-repeat-two");
+    expect(zeroSharedConditionalRepeat?.pipelineIdentityHash)
+      .toBe(twoSharedConditionalRepeat?.pipelineIdentityHash);
+    expect(zeroSharedConditionalRepeat?.backendSpecializationHash)
+      .not.toBe(twoSharedConditionalRepeat?.backendSpecializationHash);
+    expect(zeroSharedConditionalRepeat).toMatchObject({
+      expandedStepCount: 6,
+      copyStepCount: 6,
+      materializationCount: 2,
+      completedRepeats: [{
+        nodeId: "repeat-value",
+        iterationCount: wire(0),
+      }],
+      completedConditionals: [{
+        nodeId: "choose-branch",
+        selectedBranch: "else",
+      }],
+      midGraphFeedbackCount: 2,
+      midGraphFeedbackStageCount: 1,
+      collectiveReductionStepCount: 0,
+      collectiveReplicationStepCount: 0,
+    });
+    expect(twoSharedConditionalRepeat).toMatchObject({
+      expandedStepCount: 10,
+      copyStepCount: 6,
+      materializationCount: 2,
+      completedRepeats: [{
+        nodeId: "repeat-value",
+        iterationCount: wire(2),
+      }],
+      completedConditionals: [{
+        nodeId: "choose-branch",
+        selectedBranch: "then",
+      }],
+      midGraphFeedbackCount: 2,
+      midGraphFeedbackStageCount: 1,
+      collectiveReductionStepCount: 2,
+      collectiveReplicationStepCount: 2,
+    });
     const oneDynamicDispatch = completedCases.find(({ caseId }) =>
       caseId === "f32-dynamic-dispatch-one");
     const twoDynamicDispatch = completedCases.find(({ caseId }) =>
@@ -1521,6 +1574,48 @@ async function prepareResourceRepeatedCollectiveCase(
       u32Bytes([iterationCount]),
     ),
     namedInput(1, "iteration-input", u32Bytes([0])),
+  ]);
+  return Object.freeze({
+    caseId,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: inputs.map(({ rank, resourceId, bytes }) => ({
+        rank,
+        resourceId,
+        bytes: Array.from(bytes),
+      })),
+    }),
+  });
+}
+
+async function prepareSharedConditionalRepeatCase(
+  caseId:
+    | "f32-shared-conditional-repeat-zero"
+    | "f32-shared-conditional-repeat-two",
+  selection: 0 | 2,
+): Promise<PreparedCase> {
+  const graph = (await createVerifiedHostGraphArtifact(
+    sharedConditionalRepeatFeedbackProgram(),
+    { kernelArtifacts: [], layoutArtifacts: [] },
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(graph, {
+    kernelArtifacts: [],
+    layoutArtifacts: [],
+  });
+  const inputs = Object.freeze([
+    namedInput(0, "selection-input", u32Bytes([selection])),
+    namedInput(1, "selection-input", u32Bytes([0])),
+    namedInput(0, "value-input", f32Bytes([1])),
+    namedInput(1, "value-input", f32Bytes([2])),
+    namedInput(0, "then-input", new Uint8Array([9, 9, 9, 9])),
+    namedInput(1, "then-input", new Uint8Array([10, 10, 10, 10])),
+    namedInput(0, "else-input", new Uint8Array([7, 7, 7, 7])),
+    namedInput(1, "else-input", new Uint8Array([8, 8, 8, 8])),
   ]);
   return Object.freeze({
     caseId,

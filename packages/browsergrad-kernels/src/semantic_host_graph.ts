@@ -78,7 +78,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.32.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.33.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -869,37 +869,50 @@ export async function prepareSemanticHostGraphWebGpu(
     );
   }
   if (resourceFeedbackCount >= 2) {
-    const first = resourceDynamicDispatches[0];
-    const second = resourceDynamicDispatches[1];
-    if (
-      resourceDynamicDispatches.length !== resourceFeedbackCount ||
-      first === undefined ||
-      second === undefined ||
-      resourceDynamicDispatches.some((dispatch) =>
-        dispatch.selector.kind !== "resource")
-    ) {
-      fail(
-        "BG-WEBGPU-GRAPH-INTERNAL",
-        "$.artifact",
-        "verified resource feedback contract diverged",
+    const sharedConditionalRepeatSelection =
+      payload.program.version.minor >= 29 &&
+      resourceFeedbackCount === 2 &&
+      resourceConditional?.predicate.kind === "resource" &&
+      resourceRepeat !== undefined &&
+      resourceDynamicDispatches.length === 0 &&
+      resourceConditional.predicate.resourceId ===
+        resourceRepeat.resourceId &&
+      resourceConditional.predicate.rank === resourceRepeat.rank;
+    if (sharedConditionalRepeatSelection) {
+      resourceFeedbackStageCount = 1;
+    } else {
+      const first = resourceDynamicDispatches[0];
+      const second = resourceDynamicDispatches[1];
+      if (
+        resourceDynamicDispatches.length !== resourceFeedbackCount ||
+        first === undefined ||
+        second === undefined ||
+        resourceDynamicDispatches.some((dispatch) =>
+          dispatch.selector.kind !== "resource")
+      ) {
+        fail(
+          "BG-WEBGPU-GRAPH-INTERNAL",
+          "$.artifact",
+          "verified resource feedback contract diverged",
+        );
+      }
+      const sharedSelection =
+        resourceDynamicDispatches.length === 2 &&
+        resourceDynamicDispatchesShareSelection(first, second);
+      const sequentialSelection = resourceDynamicDispatchesFormSequentialStages(
+        resourceDynamicDispatches,
+        payload.program.version.minor,
       );
-    }
-    const sharedSelection =
-      resourceDynamicDispatches.length === 2 &&
-      resourceDynamicDispatchesShareSelection(first, second);
-    const sequentialSelection = resourceDynamicDispatchesFormSequentialStages(
-      resourceDynamicDispatches,
-      payload.program.version.minor,
-    );
-    if (!sharedSelection && !sequentialSelection) {
-      fail(
-        "BG-WEBGPU-GRAPH-INTERNAL",
-        "$.artifact",
-        "verified resource feedback profile diverged",
-      );
-    }
-    if (sequentialSelection) {
-      resourceFeedbackStageCount = resourceDynamicDispatches.length;
+      if (!sharedSelection && !sequentialSelection) {
+        fail(
+          "BG-WEBGPU-GRAPH-INTERNAL",
+          "$.artifact",
+          "verified resource feedback profile diverged",
+        );
+      }
+      if (sequentialSelection) {
+        resourceFeedbackStageCount = resourceDynamicDispatches.length;
+      }
     }
   }
   const feedbackBytes = resourceDynamicDispatch?.kind ===
@@ -2977,6 +2990,21 @@ async function executeGraphWithResourceFeedback(
   pipelineSet: WgslPreparedPipelineSet,
   signal: AbortSignal | undefined,
 ): Promise<ExecutedGraph> {
+  if (
+    selectedExecution.resourceConditional !== undefined &&
+    selectedExecution.resourceRepeat !== undefined &&
+    selectedExecution.resourceDynamicDispatches.length === 0
+  ) {
+    return executeGraphWithSharedConditionalRepeatFeedback(
+      device,
+      gpu,
+      state,
+      selectedExecution,
+      buffers,
+      pipelineSet,
+      signal,
+    );
+  }
   if (selectedExecution.resourceDynamicDispatches.length > 0) {
     return executeGraphWithResourceDynamicDispatchFeedback(
       device,
@@ -3082,60 +3110,12 @@ async function executeGraphWithResourceFeedback(
         "resource conditional feedback returned an invalid u32 allocation",
       );
     }
-    const selectedBranch = predicateValue[0] === 0
-      ? "else" as const
-      : "then" as const;
-    const branch = selectedBranch === "then"
-      ? conditional.thenBranch
-      : conditional.elseBranch;
-    const steps = [...selectedExecution.steps];
-    steps.splice(
-      selectedConditionalIndex,
-      conditional.stepCount,
-      ...branch.steps,
+    const finalSelection = selectResourceConditionalExecution(
+      state,
+      selectedExecution,
+      conditional,
+      predicateValue[0] as number,
     );
-    const completion = Object.freeze({
-      nodeId: conditional.nodeId,
-      selectedBranch,
-      bodyNodeIds: branch.bodyNodeIds,
-    });
-    const completedByNodeId = new Map(
-      selectedExecution.completedConditionals.map((item) => [
-        item.nodeId,
-        item,
-      ]),
-    );
-    completedByNodeId.set(conditional.nodeId, completion);
-    const completedConditionals = Object.freeze(
-      state.conditionals.map((item) => {
-        const completed = completedByNodeId.get(item.nodeId);
-        if (completed === undefined) {
-          fail(
-            "BG-WEBGPU-GRAPH-INTERNAL",
-            `$.nodes.${item.nodeId}`,
-            "conditional completion disappeared during feedback staging",
-          );
-        }
-        return completed;
-      }),
-    );
-    const finalSelection = Object.freeze({
-      steps: Object.freeze(steps),
-      pipelineStepIndices: selectedExecution.pipelineStepIndices,
-      dispatchStepCount: selectedExecution.dispatchStepCount,
-      copyStepCount: selectedExecution.copyStepCount,
-      collectiveReductionStepCount:
-        selectedExecution.collectiveReductionStepCount,
-      collectiveReplicationStepCount:
-        selectedExecution.collectiveReplicationStepCount,
-      completedRepeats: selectedExecution.completedRepeats,
-      completedDynamicDispatches:
-        selectedExecution.completedDynamicDispatches,
-      completedConditionals,
-      resourceConditional: conditional,
-      resourceDynamicDispatches:
-        selectedExecution.resourceDynamicDispatches,
-    });
     throwIfCancelled(signal);
     const result = await executeResidentGraphStage(
       device,
@@ -3152,6 +3132,291 @@ async function executeGraphWithResourceFeedback(
   } finally {
     destroyResidentGraphBuffers(residents);
   }
+}
+
+async function executeGraphWithSharedConditionalRepeatFeedback(
+  device: KernelDevice,
+  gpu: GPUDevice,
+  state: PreparedState,
+  selectedExecution: SelectedExecution,
+  buffers: Readonly<Record<string, WgslTypedArray>>,
+  pipelineSet: WgslPreparedPipelineSet,
+  signal: AbortSignal | undefined,
+): Promise<ExecutedGraph> {
+  const conditional = selectedExecution.resourceConditional;
+  const repeat = selectedExecution.resourceRepeat;
+  if (
+    conditional?.predicate.kind !== "resource" ||
+    repeat === undefined ||
+    conditional.predicate.resourceId !== repeat.resourceId ||
+    conditional.predicate.rank !== repeat.rank
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      "$.feedback",
+      "shared conditional/repeat feedback lost its verified selection",
+    );
+  }
+  const residents = await createResidentGraphBuffers(
+    device,
+    gpu,
+    buffers,
+  );
+  try {
+    const sourcePlan = state.resourcesById.get(repeat.resourceId);
+    const sourceStorageName = sourcePlan?.storageNames[repeat.rank];
+    if (
+      sourcePlan === undefined ||
+      sourceStorageName === undefined ||
+      sourcePlan.byteLength !== 4 ||
+      residents[sourceStorageName] === undefined
+    ) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        "$.feedback.selection",
+        "verified shared conditional/repeat source storage disappeared",
+      );
+    }
+    const conditionalIndex =
+      selectedExecution.pipelineStepIndices.indexOf(
+        conditional.startStepIndex,
+      );
+    const repeatIndex = selectedExecution.pipelineStepIndices.indexOf(
+      repeat.startStepIndex,
+    );
+    if (conditionalIndex < 0 || repeatIndex < 0) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        "$.feedback.selection",
+        "verified shared conditional/repeat step disappeared",
+      );
+    }
+    const firstFeedbackIndex = Math.min(conditionalIndex, repeatIndex);
+    const prefixSteps = selectedExecution.steps.slice(
+      0,
+      firstFeedbackIndex,
+    );
+    const prefixPipelineStepIndices =
+      selectedExecution.pipelineStepIndices.slice(
+        0,
+        firstFeedbackIndex,
+      );
+    if (prefixSteps.length === 0) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        "$.feedback.selection",
+        "verified shared conditional/repeat producer disappeared",
+      );
+    }
+    const prefix = await executeResidentGraphStage(
+      device,
+      gpu,
+      state,
+      prefixSteps,
+      residents,
+      pipelineSet,
+      prefixPipelineStepIndices,
+      [sourceStorageName],
+      "$.feedback.prefix",
+    );
+    throwIfCancelled(signal);
+    const sourceValue = prefix.buffers[sourceStorageName];
+    if (!(sourceValue instanceof Uint32Array) || sourceValue.length !== 1) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        "$.feedback.selection",
+        "shared conditional/repeat feedback returned an invalid u32 allocation",
+      );
+    }
+    const selection = sourceValue[0] as number;
+    const conditionalSelection = selectResourceConditionalExecution(
+      state,
+      selectedExecution,
+      conditional,
+      selection,
+    );
+    const finalSelection = selectResourceRepeatExecution(
+      state,
+      conditionalSelection,
+      repeat,
+      selection,
+    );
+    throwIfCancelled(signal);
+    const firstFeedbackPipelineIndex = Math.min(
+      conditional.startStepIndex,
+      repeat.startStepIndex,
+    );
+    const suffixIndex = finalSelection.pipelineStepIndices.findIndex(
+      (pipelineIndex) => pipelineIndex >= firstFeedbackPipelineIndex,
+    );
+    const result = suffixIndex < 0
+      ? await readResidentGraphBuffers(
+        device,
+        gpu,
+        residents,
+        state.readbackStorageNames,
+        "$.feedback.suffix",
+      )
+      : await executeResidentGraphStage(
+        device,
+        gpu,
+        state,
+        finalSelection.steps.slice(suffixIndex),
+        residents,
+        pipelineSet,
+        finalSelection.pipelineStepIndices.slice(suffixIndex),
+        state.readbackStorageNames,
+        "$.feedback.suffix",
+      );
+    return Object.freeze({ result, selectedExecution: finalSelection });
+  } finally {
+    destroyResidentGraphBuffers(residents);
+  }
+}
+
+function selectResourceConditionalExecution(
+  state: PreparedState,
+  selectedExecution: SelectedExecution,
+  conditional: PreparedConditionalPlan,
+  predicateValue: number,
+): SelectedExecution {
+  const selectedConditionalIndex =
+    selectedExecution.pipelineStepIndices.indexOf(
+      conditional.startStepIndex,
+    );
+  if (selectedConditionalIndex < 0) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${conditional.nodeId}.predicate`,
+      "verified resource conditional step disappeared during feedback selection",
+    );
+  }
+  const selectedBranch = predicateValue === 0
+    ? "else" as const
+    : "then" as const;
+  const branch = selectedBranch === "then"
+    ? conditional.thenBranch
+    : conditional.elseBranch;
+  const steps = [...selectedExecution.steps];
+  steps.splice(
+    selectedConditionalIndex,
+    conditional.stepCount,
+    ...branch.steps,
+  );
+  const completionsByNodeId = new Map(
+    selectedExecution.completedConditionals.map((item) => [
+      item.nodeId,
+      item,
+    ]),
+  );
+  completionsByNodeId.set(conditional.nodeId, Object.freeze({
+    nodeId: conditional.nodeId,
+    selectedBranch,
+    bodyNodeIds: branch.bodyNodeIds,
+  }));
+  const completedConditionals = Object.freeze(
+    state.conditionals.map((item) => {
+      const completed = completionsByNodeId.get(item.nodeId);
+      if (completed === undefined) {
+        fail(
+          "BG-WEBGPU-GRAPH-INTERNAL",
+          `$.nodes.${item.nodeId}`,
+          "conditional completion disappeared during feedback selection",
+        );
+      }
+      return completed;
+    }),
+  );
+  return Object.freeze({
+    ...selectedExecution,
+    steps: Object.freeze(steps),
+    completedConditionals,
+    resourceConditional: conditional,
+  });
+}
+
+function selectResourceRepeatExecution(
+  state: PreparedState,
+  selectedExecution: SelectedExecution,
+  repeat: PreparedResourceRepeatPlan,
+  iterationCount: number,
+): SelectedExecution {
+  if (iterationCount > repeat.maxIterationCount) {
+    fail(
+      "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
+      `$.nodes.${repeat.nodeId}.iterationSource`,
+      `produced resource repeat count ${iterationCount} exceeds its artifact bound ${repeat.maxIterationCount}`,
+    );
+  }
+  const selectedRepeatIndex =
+    selectedExecution.pipelineStepIndices.indexOf(
+      repeat.startStepIndex,
+    );
+  if (selectedRepeatIndex < 0) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${repeat.nodeId}.iterationSource`,
+      "verified resource repeat step disappeared during feedback selection",
+    );
+  }
+  const maximumRepeatEnd = repeat.startStepIndex +
+    (repeat.maxIterationCount * repeat.stepCountPerIteration);
+  const selectedRepeatEnd = selectedRepeatIndex +
+    (iterationCount * repeat.stepCountPerIteration);
+  let afterMaximumIndex = selectedExecution.pipelineStepIndices.findIndex(
+    (pipelineIndex, selectedIndex) =>
+      selectedIndex >= selectedRepeatIndex &&
+      pipelineIndex >= maximumRepeatEnd,
+  );
+  if (afterMaximumIndex < 0) {
+    afterMaximumIndex = selectedExecution.steps.length;
+  }
+  const steps = Object.freeze([
+    ...selectedExecution.steps.slice(0, selectedRepeatEnd),
+    ...selectedExecution.steps.slice(afterMaximumIndex),
+  ]);
+  const pipelineStepIndices = Object.freeze([
+    ...selectedExecution.pipelineStepIndices.slice(0, selectedRepeatEnd),
+    ...selectedExecution.pipelineStepIndices.slice(afterMaximumIndex),
+  ]);
+  const skippedIterations =
+    repeat.maxIterationCount - iterationCount;
+  const completionsByNodeId = new Map(
+    selectedExecution.completedRepeats.map((item) => [
+      item.nodeId,
+      item,
+    ]),
+  );
+  completionsByNodeId.set(repeat.nodeId, Object.freeze({
+    nodeId: repeat.nodeId,
+    iterationCount: encodeWireU64(BigInt(iterationCount)),
+    bodyNodeIds: repeat.bodyNodeIds,
+  }));
+  const completedRepeats = Object.freeze(
+    state.topologicalNodeIds.flatMap((nodeId) => {
+      const completed = completionsByNodeId.get(nodeId);
+      return completed === undefined ? [] : [completed];
+    }),
+  );
+  return Object.freeze({
+    ...selectedExecution,
+    steps,
+    pipelineStepIndices,
+    dispatchStepCount:
+      selectedExecution.dispatchStepCount -
+      (repeat.countsPerIteration.dispatch * skippedIterations),
+    copyStepCount:
+      selectedExecution.copyStepCount -
+      (repeat.countsPerIteration.copy * skippedIterations),
+    collectiveReductionStepCount:
+      selectedExecution.collectiveReductionStepCount -
+      (repeat.countsPerIteration.reduction * skippedIterations),
+    collectiveReplicationStepCount:
+      selectedExecution.collectiveReplicationStepCount -
+      (repeat.countsPerIteration.replication * skippedIterations),
+    completedRepeats,
+    resourceRepeat: repeat,
+  });
 }
 
 async function executeGraphWithResourceDynamicDispatchFeedback(
@@ -3742,76 +4007,12 @@ async function executeGraphWithResourceRepeatFeedback(
       );
     }
     const iterationCount = sourceValue[0] as number;
-    if (iterationCount > repeat.maxIterationCount) {
-      fail(
-        "BG-WEBGPU-GRAPH-RESOURCE-LIMIT",
-        `$.nodes.${repeat.nodeId}.iterationSource`,
-        `produced resource repeat count ${iterationCount} exceeds its artifact bound ${repeat.maxIterationCount}`,
-      );
-    }
-    const maximumRepeatEnd = repeat.startStepIndex +
-      (repeat.maxIterationCount * repeat.stepCountPerIteration);
-    const selectedRepeatEnd = selectedRepeatIndex +
-      (iterationCount * repeat.stepCountPerIteration);
-    let afterMaximumIndex = selectedExecution.pipelineStepIndices.findIndex(
-      (pipelineIndex, selectedIndex) =>
-        selectedIndex >= selectedRepeatIndex &&
-        pipelineIndex >= maximumRepeatEnd,
+    const finalSelection = selectResourceRepeatExecution(
+      state,
+      selectedExecution,
+      repeat,
+      iterationCount,
     );
-    if (afterMaximumIndex < 0) {
-      afterMaximumIndex = selectedExecution.steps.length;
-    }
-    const steps = Object.freeze([
-      ...selectedExecution.steps.slice(0, selectedRepeatEnd),
-      ...selectedExecution.steps.slice(afterMaximumIndex),
-    ]);
-    const pipelineStepIndices = Object.freeze([
-      ...selectedExecution.pipelineStepIndices.slice(0, selectedRepeatEnd),
-      ...selectedExecution.pipelineStepIndices.slice(afterMaximumIndex),
-    ]);
-    const skippedIterations =
-      repeat.maxIterationCount - iterationCount;
-    const completion = Object.freeze({
-      nodeId: repeat.nodeId,
-      iterationCount: encodeWireU64(BigInt(iterationCount)),
-      bodyNodeIds: repeat.bodyNodeIds,
-    });
-    const completionsByNodeId = new Map(
-      selectedExecution.completedRepeats.map((item) => [
-        item.nodeId,
-        item,
-      ]),
-    );
-    completionsByNodeId.set(repeat.nodeId, completion);
-    const completedRepeats = Object.freeze(
-      state.topologicalNodeIds.flatMap((nodeId) => {
-        const item = completionsByNodeId.get(nodeId);
-        return item === undefined ? [] : [item];
-      }),
-    );
-    const finalSelection = Object.freeze({
-      steps,
-      pipelineStepIndices,
-      dispatchStepCount:
-        selectedExecution.dispatchStepCount -
-        (repeat.countsPerIteration.dispatch * skippedIterations),
-      copyStepCount:
-        selectedExecution.copyStepCount -
-        (repeat.countsPerIteration.copy * skippedIterations),
-      collectiveReductionStepCount:
-        selectedExecution.collectiveReductionStepCount -
-        (repeat.countsPerIteration.reduction * skippedIterations),
-      collectiveReplicationStepCount:
-        selectedExecution.collectiveReplicationStepCount -
-        (repeat.countsPerIteration.replication * skippedIterations),
-      completedRepeats,
-      completedDynamicDispatches:
-        selectedExecution.completedDynamicDispatches,
-      completedConditionals: selectedExecution.completedConditionals,
-      resourceRepeat: repeat,
-      resourceDynamicDispatches:
-        selectedExecution.resourceDynamicDispatches,
-    });
     throwIfCancelled(signal);
     const suffixSteps = finalSelection.steps.slice(selectedRepeatIndex);
     const suffixPipelineStepIndices =

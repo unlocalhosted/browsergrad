@@ -9,6 +9,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- WebGPU host-graph backend 1.33 executes host-graph program version 1.29's
+  exact shared conditional/repeat feedback profile. One ordered produced `u32`
+  at one rank selects both a zero/nonzero branch and a bounded repeat count
+  after one readback, while CPU and WebGPU retain exact completion, output,
+  resident-buffer, and fail-stop behavior. Required actual-device evidence
+  expands from 80 to 82 complete CPU/WebGPU parity cases with correctness
+  artifact
+  `7c4c42d6aaa502373d3f2e24f144d1d8f6bb0fb466ffa41249ccefe20aa6ad19`.
+  The separately required four-case Worker lane is repinned to backend 1.33
+  with artifact
+  `63451914d93adcf5583838155bf3d72ba4fa44ca5de7654bf906ba4097b30206`.
 - WebGPU host-graph backend 1.32 executes host-graph program version 1.28's
   exact four-stage produced-resource linear chain. The semantic verifier accepts
   four distinct sources only when three producer relations form one connected

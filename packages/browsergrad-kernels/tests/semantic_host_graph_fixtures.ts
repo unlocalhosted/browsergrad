@@ -19,6 +19,122 @@ import {
 
 const MAX_FIXTURE_BYTES = 1_048_576;
 
+export function sharedConditionalRepeatFeedbackProgram(): HostGraphProgram {
+  const wire = (value: number) => parseWireU64(String(value));
+  const resource = (
+    resourceId: string,
+    role: "input" | "temporary" | "output",
+    dtype: "f32" | "u32" | "u8",
+  ) => ({
+    resourceId,
+    role,
+    multiplicity: "per-rank" as const,
+    initialization: role === "input"
+      ? "external-input" as const
+      : "zero-fill" as const,
+    dtype,
+    byteLength: wire(4),
+    alignmentBytes: dtype === "u8" ? 1 : 4,
+  });
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 29 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire(2),
+    resources: [
+      resource("selection-input", "input", "u32"),
+      resource("selection", "temporary", "u32"),
+      resource("value-input", "input", "f32"),
+      resource("value-output", "output", "f32"),
+      resource("then-input", "input", "u8"),
+      resource("else-input", "input", "u8"),
+      resource("branch-output", "output", "u8"),
+    ],
+    nodes: [
+      {
+        nodeId: "produce-selection",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "selection-input",
+        destinationResourceId: "selection",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "initialize-value",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "value-input",
+        destinationResourceId: "value-output",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "repeat-value",
+        kind: "repeat",
+        dependsOn: ["initialize-value", "produce-selection"],
+        iterationSource: {
+          resourceId: "selection",
+          rank: wire(0),
+          mode: "u32-count",
+        },
+        maxIterationCount: wire(2),
+        body: [{
+          nodeId: "sum-value",
+          kind: "all-reduce",
+          dependsOn: [],
+          resourceId: "value-output",
+          reduction: "sum",
+          dtype: "f32",
+          participants: [wire(0), wire(1)],
+          numericalPolicy: "rank-order-f32",
+          result: "replicated-to-all-participants",
+        }],
+        mode: "resource-u32-count-sequential",
+      },
+      {
+        nodeId: "choose-branch",
+        kind: "conditional",
+        dependsOn: ["produce-selection"],
+        predicate: {
+          resourceId: "selection",
+          rank: wire(0),
+          mode: "u32-nonzero",
+        },
+        thenBody: [{
+          nodeId: "copy-then",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "then-input",
+          destinationResourceId: "branch-output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        elseBody: [{
+          nodeId: "copy-else",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "else-input",
+          destinationResourceId: "branch-output",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        mode: "resource-u32-branch-sequential",
+      },
+      {
+        nodeId: "materialize-value",
+        kind: "materialize",
+        dependsOn: ["repeat-value"],
+        resourceId: "value-output",
+        mode: "host-readback-after-graph-success",
+      },
+      {
+        nodeId: "materialize-branch",
+        kind: "materialize",
+        dependsOn: ["choose-branch"],
+        resourceId: "branch-output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 export async function createVerifiedSignedReverseViewCopyArtifacts(
   dtype: BuiltinDTypeId,
   rank: number,

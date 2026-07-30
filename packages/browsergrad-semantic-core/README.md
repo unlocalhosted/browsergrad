@@ -245,9 +245,12 @@ dispatch semantically produces the second source. Version 1.27 admits three
 distinct sources only when two semantic producer relations form one exact
 root-to-middle-to-leaf chain. Version 1.28 extends the same contract to four
 distinct sources and three producer relations, using a connected exact-chain
-check rather than a source-count shortcut. Missing, disconnected, forked,
-cyclic, extra, duplicate-source, mixed-mode, pre-version, or above-version
-feedback profiles fail closed.
+check rather than a source-count shortcut. Version 1.29 separately admits one
+produced `u32` source shared by exactly one conditional and one bounded repeat
+at the same rank; both selections occur after one ordered producer and through
+one aggregate feedback stage. Missing, disconnected, forked, cyclic, extra,
+duplicate-source, broader mixed-mode, pre-version, or above-version feedback
+profiles fail closed.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -327,7 +330,9 @@ ordered private-resource path and executes that identical rank-5 rectangle.
 Versions 1.18 through 1.23 reuse those request-time and produced-resource CPU
 paths through rank 8. Versions 1.24/1.25 report both exact consumers of one
 shared selection, while versions 1.26 through 1.28 read and execute each
-distinct linear selection in producer-chain order.
+distinct linear selection in producer-chain order. Version 1.29 reads one
+private produced `u32` once, then applies it to both the conditional branch and
+bounded repeat count.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -349,9 +354,11 @@ single feedback lifecycle to one rank-4 produced rectangle, and version 1.17
 extends it to one rank-5 produced rectangle. Versions 1.19/1.21/1.23 extend
 that aggregate lifecycle through rank 8; versions 1.24/1.25 fan one selection
 out to two consumers, and versions 1.26 through 1.28 execute exact two-,
-three-, or four-stage linear producer chains. Neither adapter grants
+three-, or four-stage linear producer chains. Version 1.29 fans one produced
+scalar out to one conditional and one repeat in the same feedback stage.
+Neither adapter grants
 transport, topology, retries, event
-timestamps or external waits, mixed/device-side feedback,
+timestamps or external waits, broader/sequential mixed or device-side feedback,
 rank-9-and-higher dynamic domains,
 worker-mesh, native-companion,
 performance, or release authority.
