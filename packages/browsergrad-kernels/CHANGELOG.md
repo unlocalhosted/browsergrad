@@ -25,9 +25,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   inside the Worker realm, acquires a Worker-owned `GPUDevice`, executes through
   the canonical WebGPU host-graph backend, validates one request-bound terminal,
   and terminates on success, failure, timeout, or cancellation. Required
-  real-browser evidence covers raw-u8 and verified-f32 graphs. This profile
-  grants no worker-mesh, cross-worker synchronization, retry, or native
-  transport claim.
+  real-browser evidence covers raw-u8 and verified-f32 graphs plus signed
+  rank-8 i8 and f64 semantic graphs, with shared bounded fixture construction
+  across the in-realm and Worker lanes. This profile grants no worker-mesh,
+  cross-worker synchronization, retry, or native transport claim.
 - Semantic view-copy WebGPU backend 2.4 executes the distinct semantic-core
   signed-affine rank-1 word32 profile through the same canonical signed-i32
   interval/address lowerer. Required real-device evidence expands to 20

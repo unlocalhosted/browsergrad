@@ -2820,12 +2820,16 @@ strict terminal validation, unconditional Worker termination, and no failed exec
 transport, retry, shared-memory, cross-worker synchronization, or native
 companion claim.
 
-Required headed Chromium evidence on Apple Metal 3 executes both a raw-u8
-whole-allocation graph and a verified f32 semantic dispatch through independent
-Workers, proves caller mutation cannot alter admitted bytes, and observes
-Worker-owned WebGPU submission. CI and npm staging retain an exact-commit
-required Worker lane separately from the existing in-realm graph and
-performance lanes.
+Required headed Chromium evidence on Apple Metal 3 executes a raw-u8
+whole-allocation graph, a verified f32 semantic dispatch, and signed rank-8 i8
+and f64 semantic dispatches through four independent Workers. Every case proves
+caller mutation cannot alter admitted bytes and observes Worker-owned WebGPU
+submission. Worker conformance v2 records correctness artifact
+`86ec30c8fbe73b451dda627950fcf41efb7c2bcf2be563785bec102b34b6bc77`
+under device profile
+`0436693df95430f4195cb27222e8ebca104c64b3b99ac27c24a5be5ec0f5bc06`.
+CI and npm staging retain this exact-commit required Worker lane separately
+from the existing in-realm graph and performance lanes.
 
 ## Proof Matrix and Release Gates
 

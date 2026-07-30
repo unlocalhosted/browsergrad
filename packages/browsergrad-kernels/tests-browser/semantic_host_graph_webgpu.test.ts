@@ -19,13 +19,11 @@ import {
 } from "@unlocalhosted/browsergrad-semantic-core/graph";
 import {
   createVerifiedDensePermutationViewCopyArtifacts,
-  createVerifiedViewCopyArtifacts,
   type VerifiedViewCopyArtifacts,
 } from "@unlocalhosted/browsergrad-semantic-core/kernel";
 import {
   BUILTIN_DTYPES,
   type BuiltinDTypeId,
-  type DimExpr,
 } from "@unlocalhosted/browsergrad-semantic-core/layout";
 import {
   hashNamedComponents,
@@ -47,6 +45,11 @@ import {
   type SemanticHostGraphWebGpuControlBinding,
   type SemanticHostGraphWebGpuInputBinding,
 } from "../src/semantic_host_graph";
+import {
+  createVerifiedSignedReverseViewCopyArtifacts,
+  patternedStorageBytes,
+  singleViewCopyGraphProgram,
+} from "../tests/semantic_host_graph_fixtures";
 
 declare const __BG_KERNELS_VERSION__: string;
 declare const __BG_SEMANTIC_CORE_VERSION__: string;
@@ -1335,15 +1338,15 @@ async function prepareSignedRank8StorageCopyCase(
   const elementBytes = BUILTIN_DTYPES[dtype].storageBits / 8;
   const byteLength = (2 ** rank) * elementBytes;
   const values = Object.freeze([
-    patternedBytes(byteLength, seed),
-    patternedBytes(byteLength, seed ^ 0xff),
+    patternedStorageBytes(byteLength, seed),
+    patternedStorageBytes(byteLength, seed ^ 0xff),
   ]);
   const artifacts = await createVerifiedSignedReverseViewCopyArtifacts(
     dtype,
     rank,
   );
   const graph = (await createVerifiedHostGraphArtifact(
-    storageCopyProgram(artifacts, dtype, byteLength),
+    singleViewCopyGraphProgram(artifacts, dtype, byteLength, 2),
     artifactOptions(artifacts),
   )).artifact;
   const prepared = await prepareSemanticHostGraphWebGpu(
@@ -1364,55 +1367,6 @@ async function prepareSignedRank8StorageCopyCase(
       modules: prepared.wgslModuleHashes,
       inputs: values.map((bytes) => Array.from(bytes)),
     }),
-  });
-}
-
-async function createVerifiedSignedReverseViewCopyArtifacts(
-  dtype: "i8" | "f16" | "u32" | "f64",
-  rank: number,
-): Promise<VerifiedViewCopyArtifacts> {
-  const definition = BUILTIN_DTYPES[dtype];
-  const elementBytes = definition.storageBits / 8;
-  const elementCount = 2 ** rank;
-  const byteLength = elementCount * elementBytes;
-  const shape = () => Array.from(
-    { length: rank },
-    () => dimension(2),
-  );
-  const strides = (sign: 1 | -1) => Array.from(
-    { length: rank },
-    (_, axis) => dimension(sign * (2 ** (rank - axis - 1))),
-  );
-  const allocation = () => ({
-    byteLength: dimension(byteLength),
-    memorySpace: { kind: "global" as const },
-    alignmentBytes: definition.alignmentBytes,
-  });
-  return createVerifiedViewCopyArtifacts({
-    dtype,
-    symbols: [],
-    constraints: [],
-    source: {
-      layout: {
-        kind: "strided",
-        shape: shape(),
-        strides: strides(-1),
-      },
-      allocation: allocation(),
-      byteOffset: dimension(byteLength - elementBytes),
-      requiredAlignmentBytes: definition.alignmentBytes,
-    },
-    destination: {
-      layout: {
-        kind: "strided",
-        shape: shape(),
-        strides: strides(1),
-      },
-      allocation: allocation(),
-      byteOffset: dimension(0),
-      requiredAlignmentBytes: definition.alignmentBytes,
-    },
-    invalidSource: { kind: "reject" },
   });
 }
 
@@ -3171,17 +3125,6 @@ function u32Bytes(values: readonly number[]): Uint8Array {
   values.forEach((value, index) =>
     view.setUint32(index * 4, value, true));
   return output;
-}
-
-function patternedBytes(byteLength: number, seed: number): Uint8Array {
-  return Uint8Array.from(
-    { length: byteLength },
-    (_, index) => (seed + (index * 37)) & 0xff,
-  );
-}
-
-function dimension(value: number): DimExpr {
-  return { kind: "const", value: parseWireI64(String(value)) };
 }
 
 function assertOutputEquality(

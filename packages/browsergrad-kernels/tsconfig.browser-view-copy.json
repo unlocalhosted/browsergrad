@@ -4,6 +4,7 @@
     "src",
     "tests-browser/semantic_view_copy_webgpu.test.ts",
     "tests-browser/semantic_host_graph_webgpu.test.ts",
+    "tests/semantic_host_graph_fixtures.ts",
     "tests-browser/semantic_host_graph_worker_webgpu.test.ts",
     "tests-browser/semantic_gemm_webgpu.test.ts",
     "tests-browser/semantic_attention_webgpu.test.ts",

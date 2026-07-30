@@ -10,8 +10,10 @@ import {
 } from "@unlocalhosted/browsergrad-semantic-core/graph";
 import {
   createVerifiedDensePermutationViewCopyArtifacts,
-  type VerifiedViewCopyArtifacts,
 } from "@unlocalhosted/browsergrad-semantic-core/kernel";
+import {
+  BUILTIN_DTYPES,
+} from "@unlocalhosted/browsergrad-semantic-core/layout";
 import {
   parseWireI64,
   parseWireU64,
@@ -23,7 +25,14 @@ import {
   SEMANTIC_HOST_GRAPH_BROWSER_WORKER_TRANSPORT_PROTOCOL,
   SemanticHostGraphBrowserWorkerReportedError,
   executeSemanticHostGraphBrowserWorker,
+  type SemanticHostGraphBrowserWorkerExecutionResult,
 } from "../src/semantic_host_graph_worker";
+import {
+  createVerifiedSignedReverseViewCopyArtifacts,
+  patternedStorageBytes,
+  reverseStorageElements,
+  singleViewCopyGraphProgram,
+} from "../tests/semantic_host_graph_fixtures";
 
 const wire = (value: number): WireU64 => parseWireU64(String(value));
 
@@ -76,7 +85,7 @@ it("re-verifies and executes host graphs in one-shot WebGPU Workers", async (con
         dtype: "f32",
       });
     const semanticGraph = (await createVerifiedHostGraphArtifact(
-      semanticCopyProgram(artifacts),
+      singleViewCopyGraphProgram(artifacts, "f32", 16, 1),
       {
         kernelArtifacts: [artifacts.kernel],
         layoutArtifacts: [artifacts.layout],
@@ -116,32 +125,61 @@ it("re-verifies and executes host graphs in one-shot WebGPU Workers", async (con
     });
     expect(semanticResult.transportTrace.artifactByteLength)
       .toBeGreaterThan(rawResult.transportTrace.artifactByteLength);
-    const deviceProfileHash = await hashNamedComponents({
-      device: semanticResult.backendTrace.device as unknown as JsonValue,
-    });
+    const i8SignedResult = await executeSignedStorageWorkerCase(
+      "i8",
+      0x21,
+    );
+    const f64SignedResult = await executeSignedStorageWorkerCase(
+      "f64",
+      0x43,
+    );
+    const results = [
+      rawResult,
+      semanticResult,
+      i8SignedResult,
+      f64SignedResult,
+    ] as const;
+    const deviceProfileHashes = await Promise.all(results.map((result) =>
+      hashNamedComponents({
+        device: result.backendTrace.device as unknown as JsonValue,
+      })));
+    expect(new Set(deviceProfileHashes).size).toBe(1);
+    const deviceProfileHash = deviceProfileHashes[0]!;
     const correctnessArtifact = await hashNamedComponents({
       profile: SEMANTIC_HOST_GRAPH_BROWSER_WORKER_TRANSPORT_PROTOCOL,
+      caseIds: [
+        "raw-u8-whole-allocation",
+        "f32-identity-view-copy",
+        "i8-signed-rank8-view-copy",
+        "f64-signed-rank8-view-copy",
+      ],
       graphSemanticHashes: [
         rawResult.backendTrace.graphSemanticHash,
         semanticResult.backendTrace.graphSemanticHash,
+        i8SignedResult.backendTrace.graphSemanticHash,
+        f64SignedResult.backendTrace.graphSemanticHash,
       ],
       backendSpecializationHashes: [
         rawResult.backendTrace.backendSpecializationHash,
         semanticResult.backendTrace.backendSpecializationHash,
+        i8SignedResult.backendTrace.backendSpecializationHash,
+        f64SignedResult.backendTrace.backendSpecializationHash,
       ],
       outputs: [
         Array.from(rawResult.outputs[0]!.bytes),
         Array.from(semanticResult.outputs[0]!.bytes),
+        Array.from(i8SignedResult.outputs[0]!.bytes),
+        Array.from(f64SignedResult.outputs[0]!.bytes),
       ],
       deviceProfileHash,
     });
     console.warn(
       "[browsergrad-semantic-host-graph-worker-evidence]",
       JSON.stringify({
-        suiteId: "browsergrad.kernels.semantic-host-graph.worker-conformance@1",
+        suiteId: "browsergrad.kernels.semantic-host-graph.worker-conformance@2",
         profile: SEMANTIC_HOST_GRAPH_BROWSER_WORKER_TRANSPORT_PROTOCOL,
         topology: "single-dedicated-browser-worker",
-        caseCount: 2,
+        caseCount: 4,
         correctnessArtifact,
         deviceProfileHash,
         outcome: "passed",
@@ -159,6 +197,58 @@ it("re-verifies and executes host graphs in one-shot WebGPU Workers", async (con
     throw cause;
   }
 });
+
+async function executeSignedStorageWorkerCase(
+  dtype: "i8" | "f64",
+  seed: number,
+): Promise<SemanticHostGraphBrowserWorkerExecutionResult> {
+  const rank = 8;
+  const byteLength = (2 ** rank) *
+    (BUILTIN_DTYPES[dtype].storageBits / 8);
+  const artifacts = await createVerifiedSignedReverseViewCopyArtifacts(
+    dtype,
+    rank,
+  );
+  const graph = (await createVerifiedHostGraphArtifact(
+    singleViewCopyGraphProgram(artifacts, dtype, byteLength, 1),
+    {
+      kernelArtifacts: [artifacts.kernel],
+      layoutArtifacts: [artifacts.layout],
+    },
+  )).artifact;
+  const bytes = patternedStorageBytes(byteLength, seed);
+  const expected = reverseStorageElements(
+    bytes,
+    BUILTIN_DTYPES[dtype].storageBits / 8,
+  );
+  const pending = executeSemanticHostGraphBrowserWorker({
+    graphArtifact: graph,
+    kernelArtifacts: [artifacts.kernel],
+    layoutArtifacts: [artifacts.layout],
+    request: {
+      inputs: [{ rank: wire(0), resourceId: "input", bytes }],
+    },
+  });
+  bytes.fill(seed ^ 0xff);
+  const result = await pending;
+  expect(result.outputs).toHaveLength(1);
+  expect(result.outputs[0]?.bytes).toEqual(expected);
+  expect(result.backendTrace).toMatchObject({
+    submitted: true,
+    dispatchStepCount: 1,
+    materializationCount: 1,
+  });
+  expect(result.transportTrace).toMatchObject({
+    profile: SEMANTIC_HOST_GRAPH_BROWSER_WORKER_TRANSPORT_PROTOCOL,
+    topology: "single-dedicated-browser-worker",
+    acceptedTerminalMessages: 1,
+    workerExecutionObserved: true,
+    workerLifecycle: "one-shot-terminated",
+    inputByteLength: byteLength,
+    outputByteLength: byteLength,
+  });
+  return result;
+}
 
 function rawCopyProgram(): HostGraphProgram {
   return {
@@ -190,52 +280,10 @@ function rawCopyProgram(): HostGraphProgram {
   };
 }
 
-function semanticCopyProgram(
-  artifacts: VerifiedViewCopyArtifacts,
-): HostGraphProgram {
-  return {
-    kind: "host-graph",
-    version: { major: 1, minor: 2 },
-    failureModel: "fail-stop-no-partial-output-commit",
-    rankCount: wire(1),
-    resources: [
-      resource("input", "input", "f32", 16, 4),
-      resource("output", "output", "f32", 16, 4),
-    ],
-    nodes: [
-      {
-        nodeId: "copy",
-        kind: "dispatch",
-        dependsOn: [],
-        semanticArtifactHash: artifacts.kernelSemanticHash,
-        entrypointId: artifacts.operationId,
-        dimensionBindings: {},
-        bindings: [
-          {
-            semanticResourceId: artifacts.source.viewId,
-            graphResourceId: "input",
-          },
-          {
-            semanticResourceId: artifacts.destination.viewId,
-            graphResourceId: "output",
-          },
-        ],
-      },
-      {
-        nodeId: "materialize",
-        kind: "materialize",
-        dependsOn: ["copy"],
-        resourceId: "output",
-        mode: "host-readback-after-graph-success",
-      },
-    ],
-  };
-}
-
 function resource(
   resourceId: string,
   role: "input" | "output",
-  dtype: "u8" | "f32",
+  dtype: "u8",
   byteLength: number,
   alignmentBytes: number,
 ) {
