@@ -1108,6 +1108,99 @@ function sequentialConditionalDynamicDispatchProgram(
   };
 }
 
+function sequentialConditionalRectangularDispatchProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+  shape: readonly number[] = [2, 3],
+): HostGraphProgram {
+  const byteLength = shape.reduce(
+    (product, extent) => product * extent,
+    1,
+  ) * 4;
+  const branchCopies = (
+    branch: "then" | "else",
+  ) => shape.map((_, axis) => ({
+    nodeId: `copy-${branch}-extent-${axis}`,
+    kind: "copy" as const,
+    dependsOn: axis === 0 ? [] : [`copy-${branch}-extent-${axis - 1}`],
+    sourceResourceId: `${branch}-extent-input-${axis}`,
+    destinationResourceId: `extent-${axis}`,
+    mode: "whole-allocation-bytes-per-rank" as const,
+  }));
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 32 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire("1"),
+    resources: [
+      resource("predicate-input", "input", "u32", "4"),
+      resource("predicate", "temporary", "u32", "4"),
+      ...shape.flatMap((_, axis) => [
+        resource(`then-extent-input-${axis}`, "input", "u32", "4"),
+        resource(`else-extent-input-${axis}`, "input", "u32", "4"),
+        resource(`extent-${axis}`, "temporary", "u32", "4"),
+      ]),
+      resource("input", "input", "f32", String(byteLength)),
+      resource("output", "output", "f32", String(byteLength)),
+    ],
+    nodes: [
+      {
+        nodeId: "produce-predicate",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "predicate-input",
+        destinationResourceId: "predicate",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "choose-launch-extents",
+        kind: "conditional",
+        dependsOn: ["produce-predicate"],
+        predicate: {
+          resourceId: "predicate",
+          rank: wire("0"),
+          mode: "u32-nonzero",
+        },
+        thenBody: branchCopies("then"),
+        elseBody: branchCopies("else"),
+        mode: "resource-u32-branch-sequential",
+      },
+      {
+        nodeId: "copy-selected-rectangle",
+        kind: "dynamic-dispatch",
+        dependsOn: ["choose-launch-extents"],
+        semanticArtifactHash: artifacts.kernelSemanticHash,
+        entrypointId: artifacts.operationId,
+        dimensionBindings: {},
+        bindings: [
+          {
+            semanticResourceId: artifacts.source.viewId,
+            graphResourceId: "input",
+          },
+          {
+            semanticResourceId: artifacts.destination.viewId,
+            graphResourceId: "output",
+          },
+        ],
+        launchSources: shape.map((_, axis) => ({
+          axis,
+          resourceId: `extent-${axis}`,
+          rank: wire("0"),
+          mode: "u32-prefix-extent" as const,
+        })),
+        maxExtents: shape.map((extent) => wire(String(extent))),
+        mode: "resource-u32-rectangular-prefix",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["copy-selected-rectangle"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function conditionalRawCopyProgram(): HostGraphProgram {
   return {
     kind: "host-graph",
@@ -2082,6 +2175,134 @@ describe("host graph CPU reference", () => {
         predicate === 0 ? [5, 0] : [5, 6],
       ]);
     }
+  });
+
+  it("feeds conditional-produced extents into a rectangular dispatch", async () => {
+    const shape = [2, 3] as const;
+    const artifacts = await rectangularArtifacts(shape);
+    const options = artifactOptions(artifacts);
+    const program =
+      sequentialConditionalRectangularDispatchProgram(artifacts);
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...program,
+        version: { major: 1, minor: 31 },
+      },
+      options,
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-UNSUPPORTED-PROFILE" },
+    });
+    const rankThreeShape = [2, 2, 3] as const;
+    const rankThreeArtifacts = await rectangularArtifacts(rankThreeShape);
+    await expect(createVerifiedHostGraphArtifact(
+      sequentialConditionalRectangularDispatchProgram(
+        rankThreeArtifacts,
+        rankThreeShape,
+      ),
+      artifactOptions(rankThreeArtifacts),
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-UNSUPPORTED-PROFILE" },
+    });
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...program,
+        nodes: program.nodes.map((node) =>
+          node.kind === "conditional" &&
+            node.mode === "resource-u32-branch-sequential"
+            ? {
+              ...node,
+              elseBody: node.elseBody.map((bodyNode) =>
+                bodyNode.nodeId === "copy-else-extent-1" &&
+                  bodyNode.kind === "copy"
+                  ? { ...bodyNode, destinationResourceId: "extent-0" }
+                  : bodyNode),
+            }
+            : node),
+      },
+      options,
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-INVALID-BINDING" },
+    });
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...program,
+        nodes: program.nodes.map((node) =>
+          node.kind === "dynamic-dispatch" &&
+            node.mode === "resource-u32-rectangular-prefix"
+            ? {
+              ...node,
+              launchSources: node.launchSources.map((source) =>
+                source.axis === 0
+                  ? { ...source, resourceId: "predicate" }
+                  : source),
+            }
+            : node),
+      },
+      options,
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-INVALID-BINDING" },
+    });
+    const graph = (await createVerifiedHostGraphArtifact(
+      program,
+      options,
+    )).artifact;
+    const prepared = await prepareHostGraphCpu(graph, options);
+    const values = [1, 2, 3, 4, 5, 6];
+    const executionInputs = (
+      predicate: 0 | 1,
+      thenExtents: readonly [number, number] = [2, 3],
+    ): HostGraphCpuInputBinding[] => [
+      {
+        rank: wire("0"),
+        resourceId: "predicate-input",
+        bytes: u32Bytes([predicate]),
+      },
+      ...thenExtents.map((extent, axis) => ({
+        rank: wire("0"),
+        resourceId: `then-extent-input-${axis}`,
+        bytes: u32Bytes([extent]),
+      })),
+      ...[1, 2].map((extent, axis) => ({
+        rank: wire("0"),
+        resourceId: `else-extent-input-${axis}`,
+        bytes: u32Bytes([extent]),
+      })),
+      input(0, f32Bytes(values)),
+    ];
+
+    expect(prepared).toMatchObject({
+      resourceConditionalCount: 1,
+      resourceDynamicDispatchCount: 1,
+    });
+    for (const predicate of [0, 1] as const) {
+      const extents = predicate === 0 ? [1, 2] as const : shape;
+      const branch = predicate === 0 ? "else" : "then";
+      const result = await prepared.execute({
+        inputs: executionInputs(predicate),
+      });
+      expect(result.completedConditionals).toEqual([{
+        nodeId: "choose-launch-extents",
+        selectedBranch: branch,
+        bodyNodeIds: [
+          `copy-${branch}-extent-0`,
+          `copy-${branch}-extent-1`,
+        ],
+      }]);
+      expect(result.completedDynamicDispatches).toEqual([{
+        nodeId: "copy-selected-rectangle",
+        logicalExtents: extents.map(String),
+        elementCount: String(extents[0] * extents[1]),
+      }]);
+      expect(readF32(result.outputs[0]!.bytes)).toEqual(
+        rectangularExpected(values, shape, extents),
+      );
+    }
+    await expect(prepared.execute({
+      inputs: executionInputs(1, [3, 3]),
+    })).rejects.toMatchObject({
+      code: "BG-GRAPH-CPU-RESOURCE-LIMIT",
+      path: "$.nodes.copy-selected-rectangle.launchSources[0]",
+    });
   });
 
   it("reports completion events only with a successful whole-graph result", async () => {

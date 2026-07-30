@@ -78,7 +78,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.35.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.36.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -886,16 +886,30 @@ export async function prepareSemanticHostGraphWebGpu(
       resourceDynamicDispatches.length === 0 &&
       resourceConditional.predicate.resourceId !==
         resourceRepeat.resourceId;
+    const conditionalPredicateResourceId =
+      resourceConditional?.predicate.kind === "resource"
+        ? resourceConditional.predicate.resourceId
+        : undefined;
     const sequentialConditionalDispatchSelection =
-      payload.program.version.minor >= 31 &&
       resourceFeedbackCount === 2 &&
-      resourceConditional?.predicate.kind === "resource" &&
+      conditionalPredicateResourceId !== undefined &&
       resourceRepeat === undefined &&
       resourceDynamicDispatches.length === 1 &&
       resourceDynamicDispatch !== undefined &&
-      isPreparedResourceLinearDynamicDispatch(resourceDynamicDispatch) &&
-      resourceConditional.predicate.resourceId !==
-        resourceDynamicDispatch.selector.resourceId;
+      resourceDynamicDispatch.selector.kind === "resource" &&
+      (
+        (
+          resourceDynamicDispatch.kind === "linear-prefix" &&
+          payload.program.version.minor >= 31
+        ) ||
+        (
+          resourceDynamicDispatch.kind === "rectangular-prefix" &&
+          payload.program.version.minor >= 32
+        )
+      ) &&
+      resourceDynamicFeedbackSources(resourceDynamicDispatch).every(
+        (source) => conditionalPredicateResourceId !== source.resourceId,
+      );
     if (sharedConditionalRepeatSelection) {
       resourceFeedbackStageCount = 1;
     } else if (sequentialConditionalRepeatSelection) {
@@ -3483,16 +3497,21 @@ async function executeGraphWithSequentialConditionalDynamicDispatchFeedback(
 ): Promise<ExecutedGraph> {
   const conditional = selectedExecution.resourceConditional;
   const dispatch = selectedExecution.resourceDynamicDispatches[0];
+  const conditionalPredicateResourceId =
+    conditional?.predicate.kind === "resource"
+      ? conditional.predicate.resourceId
+      : undefined;
   if (
-    conditional?.predicate.kind !== "resource" ||
+    conditionalPredicateResourceId === undefined ||
     dispatch === undefined ||
-    !isPreparedResourceLinearDynamicDispatch(dispatch) ||
-    conditional.predicate.resourceId === dispatch.selector.resourceId
+    dispatch.selector.kind !== "resource" ||
+    resourceDynamicFeedbackSources(dispatch).some((source) =>
+      conditionalPredicateResourceId === source.resourceId)
   ) {
     fail(
       "BG-WEBGPU-GRAPH-INTERNAL",
       "$.feedback",
-      "sequential conditional/dispatch feedback lost its verified sources",
+      "sequential conditional/dispatch feedback lost its verified distinct sources",
     );
   }
   const residents = await createResidentGraphBuffers(

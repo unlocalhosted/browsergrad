@@ -49,6 +49,7 @@ import {
   createVerifiedSignedReverseViewCopyArtifacts,
   patternedStorageBytes,
   sequentialConditionalDynamicDispatchProgram,
+  sequentialConditionalRectangularDispatchProgram,
   sequentialConditionalRepeatFeedbackProgram,
   sharedConditionalRepeatFeedbackProgram,
   singleViewCopyGraphProgram,
@@ -94,6 +95,8 @@ const CASE_IDS = Object.freeze([
   "f32-sequential-conditional-repeat-two",
   "f32-sequential-conditional-dispatch-one",
   "f32-sequential-conditional-dispatch-two",
+  "f32-sequential-conditional-rectangle-small",
+  "f32-sequential-conditional-rectangle-full",
   "f32-dynamic-dispatch-one",
   "f32-dynamic-dispatch-two",
   "f32-resource-dynamic-dispatch-one",
@@ -417,6 +420,14 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       ),
       prepareSequentialConditionalDispatchCase(
         "f32-sequential-conditional-dispatch-two",
+        1,
+      ),
+      prepareSequentialConditionalRectangleCase(
+        "f32-sequential-conditional-rectangle-small",
+        0,
+      ),
+      prepareSequentialConditionalRectangleCase(
+        "f32-sequential-conditional-rectangle-full",
         1,
       ),
       prepareDynamicDispatchCase(
@@ -1037,6 +1048,46 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       }],
       completedConditionals: [{
         nodeId: "choose-launch-count",
+        selectedBranch: "then",
+      }],
+      midGraphFeedbackCount: 2,
+      midGraphFeedbackStageCount: 2,
+    });
+    const smallSequentialConditionalRectangle = completedCases.find(
+      ({ caseId }) =>
+        caseId === "f32-sequential-conditional-rectangle-small",
+    );
+    const fullSequentialConditionalRectangle = completedCases.find(
+      ({ caseId }) =>
+        caseId === "f32-sequential-conditional-rectangle-full",
+    );
+    expect(smallSequentialConditionalRectangle?.pipelineIdentityHash)
+      .toBe(fullSequentialConditionalRectangle?.pipelineIdentityHash);
+    expect(smallSequentialConditionalRectangle?.backendSpecializationHash)
+      .not.toBe(
+        fullSequentialConditionalRectangle?.backendSpecializationHash,
+      );
+    expect(smallSequentialConditionalRectangle).toMatchObject({
+      completedDynamicDispatches: [{
+        nodeId: "copy-selected-rectangle",
+        logicalExtents: [wire(1), wire(2)],
+        elementCount: wire(2),
+      }],
+      completedConditionals: [{
+        nodeId: "choose-launch-extents",
+        selectedBranch: "else",
+      }],
+      midGraphFeedbackCount: 2,
+      midGraphFeedbackStageCount: 2,
+    });
+    expect(fullSequentialConditionalRectangle).toMatchObject({
+      completedDynamicDispatches: [{
+        nodeId: "copy-selected-rectangle",
+        logicalExtents: [wire(2), wire(3)],
+        elementCount: wire(6),
+      }],
+      completedConditionals: [{
+        nodeId: "choose-launch-extents",
         selectedBranch: "then",
       }],
       midGraphFeedbackCount: 2,
@@ -1813,6 +1864,52 @@ async function prepareSequentialConditionalDispatchCase(
     namedInput(0, "then-count-input", u32Bytes([2])),
     namedInput(0, "else-count-input", u32Bytes([1])),
     namedInput(0, "value-input", f32Bytes([5, 6])),
+  ]);
+  return Object.freeze({
+    caseId,
+    artifacts,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: inputs.map(({ rank, resourceId, bytes }) => ({
+        rank,
+        resourceId,
+        bytes: Array.from(bytes),
+      })),
+    }),
+  });
+}
+
+async function prepareSequentialConditionalRectangleCase(
+  caseId:
+    | "f32-sequential-conditional-rectangle-small"
+    | "f32-sequential-conditional-rectangle-full",
+  predicate: 0 | 1,
+): Promise<PreparedCase> {
+  const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
+    inputShape: [parseWireI64("2"), parseWireI64("3")],
+    axes: [0, 1],
+    dtype: "f32",
+  });
+  const graph = (await createVerifiedHostGraphArtifact(
+    sequentialConditionalRectangularDispatchProgram(artifacts),
+    artifactOptions(artifacts),
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(
+    graph,
+    artifactOptions(artifacts),
+  );
+  const inputs = Object.freeze([
+    namedInput(0, "predicate-input", u32Bytes([predicate])),
+    namedInput(0, "then-extent-input-0", u32Bytes([2])),
+    namedInput(0, "then-extent-input-1", u32Bytes([3])),
+    namedInput(0, "else-extent-input-0", u32Bytes([1])),
+    namedInput(0, "else-extent-input-1", u32Bytes([2])),
+    namedInput(0, "value-input", f32Bytes([1, 2, 3, 4, 5, 6])),
   ]);
   return Object.freeze({
     caseId,

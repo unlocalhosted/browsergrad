@@ -25,6 +25,7 @@ import {
 import type { KernelDevice } from "../src/types";
 import {
   sequentialConditionalDynamicDispatchProgram,
+  sequentialConditionalRectangularDispatchProgram,
   sequentialConditionalRepeatFeedbackProgram,
   sharedConditionalRepeatFeedbackProgram,
 } from "./semantic_host_graph_fixtures";
@@ -1158,6 +1159,30 @@ describe("semantic host-graph WebGPU preparation", () => {
       expandedStepCount: 3,
       dispatchStepCount: 1,
       copyStepCount: 2,
+      materializationCount: 1,
+      dynamicDispatchCount: 1,
+      resourceDynamicDispatchCount: 1,
+      conditionalCount: 1,
+      resourceConditionalCount: 1,
+      midGraphFeedbackCount: 2,
+      midGraphFeedbackStageCount: 2,
+    });
+  });
+
+  it("prewarms sequential conditional-to-rectangle feedback stages", async () => {
+    const artifacts = await rectangularIdentityArtifacts([2, 3]);
+    const graph = (await createVerifiedHostGraphArtifact(
+      sequentialConditionalRectangularDispatchProgram(artifacts),
+      artifactOptions(artifacts),
+    )).artifact;
+    const prepared = await prepareSemanticHostGraphWebGpu(
+      graph,
+      artifactOptions(artifacts),
+    );
+
+    expect(prepared).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 4,
       materializationCount: 1,
       dynamicDispatchCount: 1,
       resourceDynamicDispatchCount: 1,

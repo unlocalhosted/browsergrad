@@ -350,6 +350,112 @@ export function sequentialConditionalDynamicDispatchProgram(
   };
 }
 
+export function sequentialConditionalRectangularDispatchProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  const wire = (value: number) => parseWireU64(String(value));
+  const shape = [2, 3] as const;
+  const resource = (
+    resourceId: string,
+    role: "input" | "temporary" | "output",
+    dtype: "f32" | "u32",
+    byteLength = 4,
+  ) => ({
+    resourceId,
+    role,
+    multiplicity: "per-rank" as const,
+    initialization: role === "input"
+      ? "external-input" as const
+      : "zero-fill" as const,
+    dtype,
+    byteLength: wire(byteLength),
+    alignmentBytes: 4,
+  });
+  const branchCopies = (
+    branch: "then" | "else",
+  ) => shape.map((_, axis) => ({
+    nodeId: `copy-${branch}-extent-${axis}`,
+    kind: "copy" as const,
+    dependsOn: axis === 0 ? [] : [`copy-${branch}-extent-${axis - 1}`],
+    sourceResourceId: `${branch}-extent-input-${axis}`,
+    destinationResourceId: `extent-${axis}`,
+    mode: "whole-allocation-bytes-per-rank" as const,
+  }));
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 32 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire(1),
+    resources: [
+      resource("predicate-input", "input", "u32"),
+      resource("predicate", "temporary", "u32"),
+      ...shape.flatMap((_, axis) => [
+        resource(`then-extent-input-${axis}`, "input", "u32"),
+        resource(`else-extent-input-${axis}`, "input", "u32"),
+        resource(`extent-${axis}`, "temporary", "u32"),
+      ]),
+      resource("value-input", "input", "f32", 24),
+      resource("value-output", "output", "f32", 24),
+    ],
+    nodes: [
+      {
+        nodeId: "produce-predicate",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "predicate-input",
+        destinationResourceId: "predicate",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "choose-launch-extents",
+        kind: "conditional",
+        dependsOn: ["produce-predicate"],
+        predicate: {
+          resourceId: "predicate",
+          rank: wire(0),
+          mode: "u32-nonzero",
+        },
+        thenBody: branchCopies("then"),
+        elseBody: branchCopies("else"),
+        mode: "resource-u32-branch-sequential",
+      },
+      {
+        nodeId: "copy-selected-rectangle",
+        kind: "dynamic-dispatch",
+        dependsOn: ["choose-launch-extents"],
+        semanticArtifactHash: artifacts.kernelSemanticHash,
+        entrypointId: artifacts.operationId,
+        dimensionBindings: {},
+        bindings: [
+          {
+            semanticResourceId: artifacts.source.viewId,
+            graphResourceId: "value-input",
+          },
+          {
+            semanticResourceId: artifacts.destination.viewId,
+            graphResourceId: "value-output",
+          },
+        ],
+        launchSources: shape.map((_, axis) => ({
+          axis,
+          resourceId: `extent-${axis}`,
+          rank: wire(0),
+          mode: "u32-prefix-extent" as const,
+        })),
+        maxExtents: shape.map((extent) => wire(extent)),
+        mode: "resource-u32-rectangular-prefix",
+      },
+      {
+        nodeId: "materialize-value",
+        kind: "materialize",
+        dependsOn: ["copy-selected-rectangle"],
+        resourceId: "value-output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 export async function createVerifiedSignedReverseViewCopyArtifacts(
   dtype: BuiltinDTypeId,
   rank: number,

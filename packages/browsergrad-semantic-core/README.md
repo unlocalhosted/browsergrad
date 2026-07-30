@@ -253,8 +253,11 @@ both branches of one produced-resource conditional must guarantee-write one
 distinct bounded-repeat count source, which the later repeat consumes only
 after branch execution. Version 1.31 admits the equivalent exact
 conditional-to-linear-dispatch chain when both branches guarantee-write one
-distinct positive bounded launch-count source. Missing, disconnected, forked,
-cyclic, extra, duplicate-source, non-guaranteed, broader mixed-mode,
+distinct positive bounded launch-count source. Version 1.32 extends that same
+two-stage contract to one rank-2 rectangular dispatch: both branches must
+guarantee-write both distinct positive bounded extent sources after selecting
+from a third predicate resource. Missing, disconnected, forked, cyclic, extra,
+duplicate-source, non-guaranteed, broader mixed-mode,
 pre-version, or above-version feedback profiles fail closed.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
@@ -341,6 +344,7 @@ bounded repeat count. Version 1.30 first reads the private produced predicate,
 executes its selected branch, then reads that branch's guaranteed distinct
 repeat count and executes the bounded repeat. Version 1.31 applies the same
 ordered branch-produced selection to one positive bounded linear dispatch.
+Version 1.32 applies it to two positive bounded rank-2 rectangle extents.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -367,6 +371,7 @@ scalar out to one conditional and one repeat in the same feedback stage.
 Version 1.30 instead executes conditional selection and the branch-produced
 repeat count through two ordered feedback stages.
 Version 1.31 reuses those stages for one branch-produced linear launch count.
+Version 1.32 reuses them for one branch-produced rank-2 rectangular launch.
 Neither adapter grants
 transport, topology, retries, event
 timestamps or external waits, broader mixed or device-side feedback,
