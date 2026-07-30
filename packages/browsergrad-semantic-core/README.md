@@ -234,6 +234,17 @@ their canonical axes, and the maximum product preserve the existing admission
 and fail-stop contracts. Version 1.17 extends produced-resource rectangular
 dispatch to rank 5 through five distinct ordered extent sources under the same
 one-feedback-node bound. Older versions retain their exact rank limits.
+Versions 1.18/1.19, 1.20/1.21, and 1.22/1.23 extend the same paired
+request-time/produced-resource rectangular profiles through ranks 6, 7, and 8
+without changing older rank limits. Version 1.24 admits exactly two linear
+produced-resource dispatches sharing one exact selection; version 1.25 admits
+the equivalent exact shared rectangular selection. Both fanout profiles use
+two semantic consumers but one feedback stage. Version 1.26 instead admits
+exactly two distinct linear launch-source resources when the first selected
+dispatch semantically produces the second source. Version 1.27 admits three
+distinct sources only when two semantic producer relations form one exact
+root-to-middle-to-leaf chain. Missing, forked, cyclic, extra, duplicate-source,
+mixed-mode, pre-version, or above-version feedback profiles fail closed.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -310,6 +321,10 @@ Version-1.16 executes the exact selected rank-5 dense rectangle through the
 same generic coordinate-domain CPU path and reports all five extents plus
 their product. Version-1.17 reads five produced extents through the same
 ordered private-resource path and executes that identical rank-5 rectangle.
+Versions 1.18 through 1.23 reuse those request-time and produced-resource CPU
+paths through rank 8. Versions 1.24/1.25 report both exact consumers of one
+shared selection, while versions 1.26/1.27 read and execute each distinct
+linear selection in producer-chain order.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -328,10 +343,13 @@ predicate; versions 1.10 and 1.11 reuse that authority for one bounded
 GPU-produced loop count or dynamic-launch prefix, and version 1.13 reuses it
 for one rank-2/rank-3 produced rectangle. Version 1.15 extends that same
 single feedback lifecycle to one rank-4 produced rectangle, and version 1.17
-extends it to one rank-5 produced rectangle. Neither adapter grants
+extends it to one rank-5 produced rectangle. Versions 1.19/1.21/1.23 extend
+that aggregate lifecycle through rank 8; versions 1.24/1.25 fan one selection
+out to two consumers, and versions 1.26/1.27 execute exact two- or three-stage
+linear producer chains. Neither adapter grants
 transport, topology, retries, event
-timestamps or external waits, repeated/device-side feedback,
-rank-6-and-higher dynamic domains,
+timestamps or external waits, mixed/device-side feedback,
+rank-9-and-higher dynamic domains,
 worker-mesh, native-companion,
 performance, or release authority.
 

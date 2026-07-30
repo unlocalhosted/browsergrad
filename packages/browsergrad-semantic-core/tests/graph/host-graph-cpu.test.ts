@@ -263,10 +263,60 @@ function resourceDynamicFanoutProgram(
 function sequentialResourceDynamicProgram(
   countArtifacts: VerifiedViewCopyArtifacts,
   dataArtifacts: VerifiedViewCopyArtifacts,
+  stageCount: 2 | 3 = 2,
 ): HostGraphProgram {
+  const finalCountResources = stageCount === 3
+    ? [
+        {
+          resourceId: "final-count-input",
+          role: "input" as const,
+          multiplicity: "per-rank" as const,
+          initialization: "external-input" as const,
+          dtype: "u32" as const,
+          byteLength: wire("4"),
+          alignmentBytes: 4,
+        },
+        {
+          resourceId: "final-count",
+          role: "temporary" as const,
+          multiplicity: "per-rank" as const,
+          initialization: "zero-fill" as const,
+          dtype: "u32" as const,
+          byteLength: wire("4"),
+          alignmentBytes: 4,
+        },
+      ]
+    : [];
+  const finalCountDispatches = stageCount === 3
+    ? [{
+        nodeId: "produce-final-count",
+        kind: "dynamic-dispatch" as const,
+        dependsOn: ["produce-next-count"],
+        semanticArtifactHash: countArtifacts.kernelSemanticHash,
+        entrypointId: countArtifacts.operationId,
+        dimensionBindings: {},
+        bindings: [
+          {
+            semanticResourceId: countArtifacts.source.viewId,
+            graphResourceId: "final-count-input",
+          },
+          {
+            semanticResourceId: countArtifacts.destination.viewId,
+            graphResourceId: "final-count",
+          },
+        ],
+        launchSource: {
+          resourceId: "next-count",
+          rank: wire("0"),
+          mode: "u32-prefix-element-count" as const,
+        },
+        maxElementCount: wire("1"),
+        mode: "resource-u32-prefix-elements" as const,
+      }]
+    : [];
   return {
     kind: "host-graph",
-    version: { major: 1, minor: 26 },
+    version: { major: 1, minor: stageCount === 2 ? 26 : 27 },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire("1"),
     resources: [
@@ -306,6 +356,7 @@ function sequentialResourceDynamicProgram(
         byteLength: wire("4"),
         alignmentBytes: 4,
       },
+      ...finalCountResources,
       {
         resourceId: "input",
         role: "input",
@@ -359,10 +410,13 @@ function sequentialResourceDynamicProgram(
         maxElementCount: wire("1"),
         mode: "resource-u32-prefix-elements",
       },
+      ...finalCountDispatches,
       {
         nodeId: "copy-selected-prefix",
         kind: "dynamic-dispatch",
-        dependsOn: ["produce-next-count"],
+        dependsOn: [
+          stageCount === 3 ? "produce-final-count" : "produce-next-count",
+        ],
         semanticArtifactHash: dataArtifacts.kernelSemanticHash,
         entrypointId: dataArtifacts.operationId,
         dimensionBindings: {},
@@ -377,7 +431,7 @@ function sequentialResourceDynamicProgram(
           },
         ],
         launchSource: {
-          resourceId: "next-count",
+          resourceId: stageCount === 3 ? "final-count" : "next-count",
           rank: wire("0"),
           mode: "u32-prefix-element-count",
         },
@@ -2214,6 +2268,85 @@ describe("host graph CPU reference", () => {
       });
       expect(result.completedDynamicDispatches).toEqual([
         { nodeId: "produce-next-count", elementCount: "1" },
+        {
+          nodeId: "copy-selected-prefix",
+          elementCount: String(selectedCount),
+        },
+      ]);
+      expect(readF32(result.outputs[0]!.bytes)).toEqual(
+        selectedCount === 1 ? [1.25, 0] : [1.25, -2.5],
+      );
+    }
+
+    const threeStageProgram = sequentialResourceDynamicProgram(
+      countArtifacts,
+      artifacts,
+      3,
+    );
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...threeStageProgram,
+        version: { major: 1, minor: 26 },
+      },
+      sequentialOptions,
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-RESOURCE-LIMIT" },
+    });
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...threeStageProgram,
+        nodes: threeStageProgram.nodes.map((node) =>
+          node.kind === "dynamic-dispatch" &&
+            node.nodeId === "copy-selected-prefix" &&
+            node.mode === "resource-u32-prefix-elements"
+            ? {
+              ...node,
+              launchSource: {
+                ...node.launchSource,
+                resourceId: "next-count",
+              },
+            }
+            : node),
+      },
+      sequentialOptions,
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-INVALID-BINDING" },
+    });
+    const threeStage = await prepareHostGraphCpu(
+      (await createVerifiedHostGraphArtifact(
+        threeStageProgram,
+        sequentialOptions,
+      )).artifact,
+      sequentialOptions,
+    );
+    expect(threeStage).toMatchObject({
+      dynamicDispatchCount: 3,
+      resourceDynamicDispatchCount: 3,
+    });
+    for (const selectedCount of [1, 2]) {
+      const result = await threeStage.execute({
+        inputs: [
+          {
+            rank: wire("0"),
+            resourceId: "launch-input",
+            bytes: u32Bytes([1]),
+          },
+          {
+            rank: wire("0"),
+            resourceId: "next-count-input",
+            bytes: u32Bytes([1]),
+          },
+          {
+            rank: wire("0"),
+            resourceId: "final-count-input",
+            bytes: u32Bytes([selectedCount]),
+          },
+          input(0, f32Bytes([1.25, -2.5])),
+        ],
+      });
+      expect(result.completedDynamicDispatches).toEqual([
+        { nodeId: "produce-next-count", elementCount: "1" },
+        { nodeId: "produce-final-count", elementCount: "1" },
         {
           nodeId: "copy-selected-prefix",
           elementCount: String(selectedCount),

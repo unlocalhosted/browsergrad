@@ -29,7 +29,7 @@ This checkpoint is informational. The rest of this document is normative; the
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch including exact shared-count fanout and one exact two-stage producer chain, rank-2-through-rank-8 request-time and produced-resource rectangular prefix dispatch including exact shared-rectangle fanout, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; broader repeated/device-side feedback, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch including exact shared-count fanout and exact two- and three-stage producer chains, rank-2-through-rank-8 request-time and produced-resource rectangular prefix dispatch including exact shared-rectangle fanout, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; broader mixed/device-side feedback, transport/topology, and native companion evidence remain open. |
 
 Only `verified` means every declared exit criterion is complete. A closed
 profile does not imply broader dtype, layout, numerical, or backend coverage.
@@ -188,8 +188,8 @@ portable implementation and exact-payload convergence exits already pass.
 
 Gate 7 covers bounded DAG request/resource repetition, request-time and
 produced-resource dispatch through rank 8, exact shared linear or rectangular
-fanout in one feedback stage, one exact two-stage linear producer chain, and
-device-bound CPU/WebGPU pipelines. Broader repeated/device-side feedback,
+fanout in one feedback stage, exact two- and three-stage linear producer chains,
+and device-bound CPU/WebGPU pipelines. Broader mixed/device-side feedback,
 unbounded launches, transport/topology, worker meshes, and native systems remain open.
 
 ## Purpose
@@ -2517,6 +2517,13 @@ consumer's distinct positive bounded selection is read. A missing producer
 relation, pre-version use, a third feedback node, or mixing with conditional,
 repeat, or rectangular feedback fails closed. This is two bounded
 host-mediated stages, not a device-side loop or general feedback cycle.
+Program version 1.27 admits exactly three linear resource dispatches with
+three distinct launch-source resources only when their semantic writes form
+one exact producer chain. Missing, forked, cyclic, or extra producer relations,
+pre-version use, a fourth feedback node, and mixed feedback modes fail closed.
+The three positive bounded selections execute through three ordered
+host-mediated stages under one fail-stop lifecycle; this is not an unbounded
+or device-side feedback cycle.
 The authority-bound
 `browsergrad.host-graph.cpu-reference@1` profile snapshots all
 rank-local inputs and the exact required runtime-control set, executes
@@ -2725,10 +2732,13 @@ specialization, two exact completions, and two materialized outputs, and
 one/two-element dependent produced-resource linear dispatch through two
 reported feedback stages, stable pipeline identity, distinct specialization,
 and two exact completions, and
+one/two-element three-dispatch produced-resource chains through three reported
+feedback stages, stable pipeline identity, distinct specialization, and three
+exact completions, and
 separately proves non-finite f32 and lost-device refusal.
-The required lane completes 62 CPU/WebGPU parity cases under backend 1.29.0;
+The required lane completes 64 CPU/WebGPU parity cases under backend 1.30.0;
 terminal correctness artifact
-`959a6ada1766957d9d259e18aae6307ae02658b818761147993324983378bdb7`
+`3f08099ff57fe925c35bb0cc37770612061be5bf0397bed79119a086802ecf0f`
 binds device profile
 `a72951410740a4adee212bba13ee44da16fdb9d6644d3b58ec38e0623f2c7b48`.
 
@@ -2775,8 +2785,9 @@ dispatch, version-1.22 request-time rank-8 dispatch, and version-1.23
 produced-resource rank-8 dispatch plus version-1.24 shared-count two-dispatch
 linear fanout and version-1.25 shared-rectangle two-dispatch fanout are
 implemented under one aggregate feedback stage. Version 1.26 adds one exact
-two-stage linear producer chain. No third feedback stage, repeated conditional,
-repeat, or rectangular feedback, device-side feedback, rank-9-and-higher dynamic domain,
+two-stage linear producer chain, and version 1.27 extends that exact chain to
+three stages. No fourth or mixed conditional/repeat/rectangular feedback stage,
+device-side feedback, rank-9-and-higher dynamic domain,
 nested/device-side branching,
 transport/topology adapter, worker mesh, or native companion exists yet, so
 Gate 7 remains `in progress`. Runtime controls are request-time host inputs,

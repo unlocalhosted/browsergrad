@@ -78,7 +78,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.29.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.30.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -481,6 +481,15 @@ type PreparedDynamicDispatchPlan =
   | PreparedLinearDynamicDispatchPlan
   | PreparedRectangularDynamicDispatchPlan;
 
+type PreparedResourceLinearDynamicDispatchPlan =
+  PreparedLinearDynamicDispatchPlan & Readonly<{
+    selector: Readonly<{
+      kind: "resource";
+      resourceId: string;
+      rank: number;
+    }>;
+  }>;
+
 type DynamicLaunchSelection =
   | Readonly<{
       readonly kind: "linear-prefix";
@@ -852,40 +861,36 @@ export async function prepareSemanticHostGraphWebGpu(
     resourceRepeats.length +
     resourceDynamicDispatches.length;
   let resourceFeedbackStageCount = resourceFeedbackCount === 0 ? 0 : 1;
-  if (resourceFeedbackCount > 2) {
+  if (resourceFeedbackCount > 3) {
     fail(
       "BG-WEBGPU-GRAPH-INTERNAL",
       "$.artifact",
-      "verified graph contains more than two resource feedback nodes",
+      "verified graph contains more than three resource feedback nodes",
     );
   }
-  if (resourceFeedbackCount === 2) {
+  if (resourceFeedbackCount >= 2) {
     const first = resourceDynamicDispatches[0];
     const second = resourceDynamicDispatches[1];
     if (
-      resourceDynamicDispatches.length !== 2 ||
+      resourceDynamicDispatches.length !== resourceFeedbackCount ||
       first === undefined ||
       second === undefined ||
-      first.kind !== second.kind ||
-      first.selector.kind !== "resource" ||
-      second.selector.kind !== "resource"
+      resourceDynamicDispatches.some((dispatch) =>
+        dispatch.selector.kind !== "resource")
     ) {
       fail(
         "BG-WEBGPU-GRAPH-INTERNAL",
         "$.artifact",
-        "verified resource feedback fanout contract diverged",
+        "verified resource feedback contract diverged",
       );
     }
-    const sharedSelection = resourceDynamicDispatchesShareSelection(
-      first,
-      second,
+    const sharedSelection =
+      resourceDynamicDispatches.length === 2 &&
+      resourceDynamicDispatchesShareSelection(first, second);
+    const sequentialSelection = resourceDynamicDispatchesFormSequentialStages(
+      resourceDynamicDispatches,
+      payload.program.version.minor,
     );
-    const sequentialSelection =
-      payload.program.version.minor >= 26 &&
-      first.kind === "linear-prefix" &&
-      second.kind === "linear-prefix" &&
-      first.startStepIndex < second.startStepIndex &&
-      first.selector.resourceId !== second.selector.resourceId;
     if (!sharedSelection && !sequentialSelection) {
       fail(
         "BG-WEBGPU-GRAPH-INTERNAL",
@@ -893,7 +898,9 @@ export async function prepareSemanticHostGraphWebGpu(
         "verified resource feedback profile diverged",
       );
     }
-    if (sequentialSelection) resourceFeedbackStageCount = 2;
+    if (sequentialSelection) {
+      resourceFeedbackStageCount = resourceDynamicDispatches.length;
+    }
   }
   const feedbackBytes = resourceDynamicDispatch?.kind ===
       "rectangular-prefix"
@@ -3163,12 +3170,15 @@ async function executeGraphWithResourceDynamicDispatchFeedback(
 ): Promise<ExecutedGraph> {
   const dispatches = selectedExecution.resourceDynamicDispatches;
   if (
-    dispatches.length === 2 &&
+    dispatches.length >= 2 &&
     dispatches[0] !== undefined &&
     dispatches[1] !== undefined &&
-    !resourceDynamicDispatchesShareSelection(
-      dispatches[0],
-      dispatches[1],
+    (
+      dispatches.length !== 2 ||
+      !resourceDynamicDispatchesShareSelection(
+        dispatches[0],
+        dispatches[1],
+      )
     )
   ) {
     return executeGraphWithSequentialResourceDynamicDispatchFeedback(
@@ -3335,10 +3345,9 @@ async function executeGraphWithSequentialResourceDynamicDispatchFeedback(
 ): Promise<ExecutedGraph> {
   const dispatches = selectedExecution.resourceDynamicDispatches;
   if (
-    dispatches.length !== 2 ||
+    (dispatches.length !== 2 && dispatches.length !== 3) ||
     dispatches.some((dispatch) =>
-      dispatch.kind !== "linear-prefix" ||
-      dispatch.selector.kind !== "resource")
+      !isPreparedResourceLinearDynamicDispatch(dispatch))
   ) {
     fail(
       "BG-WEBGPU-GRAPH-INTERNAL",
@@ -3484,6 +3493,37 @@ function resourceDynamicDispatchesShareSelection(
       source.rank === peer.rank &&
       source.maxExtent === peer.maxExtent;
   });
+}
+
+function resourceDynamicDispatchesFormSequentialStages(
+  dispatches: readonly PreparedDynamicDispatchPlan[],
+  programMinor: number,
+): boolean {
+  const linearDispatches = dispatches.filter(
+    isPreparedResourceLinearDynamicDispatch,
+  );
+  if (
+    (dispatches.length !== 2 && dispatches.length !== 3) ||
+    programMinor < (dispatches.length === 2 ? 26 : 27) ||
+    linearDispatches.length !== dispatches.length
+  ) {
+    return false;
+  }
+  const sourceResourceIds = linearDispatches.map((dispatch) =>
+    dispatch.selector.resourceId);
+  return new Set(sourceResourceIds).size === linearDispatches.length &&
+    linearDispatches.every((dispatch, index) =>
+      index === 0 ||
+      dispatch.startStepIndex >
+        (linearDispatches[index - 1]?.startStepIndex ?? Number.MAX_SAFE_INTEGER)
+    );
+}
+
+function isPreparedResourceLinearDynamicDispatch(
+  dispatch: PreparedDynamicDispatchPlan,
+): dispatch is PreparedResourceLinearDynamicDispatchPlan {
+  return dispatch.kind === "linear-prefix" &&
+    dispatch.selector.kind === "resource";
 }
 
 function resourceDynamicFeedbackSources(
