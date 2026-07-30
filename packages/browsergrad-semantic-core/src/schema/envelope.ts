@@ -1,3 +1,4 @@
+import { canonicalJsonBytes } from "./canonical-json.js";
 import { SCHEMA_DIAGNOSTIC_CODES, schemaError } from "./diagnostics.js";
 import { assertJsonValue, deepFreezeJson, isJsonObject, type JsonObject, type JsonValue } from "./json.js";
 import type { DecodeLimits } from "./limits.js";
@@ -131,6 +132,20 @@ export function verifyWireArtifact<T extends JsonValue>(
   authority: object,
 ): VerifiedArtifact<T> {
   return new VerifiedArtifactValue(validateWireEnvelope(value, options), authority) as unknown as VerifiedArtifact<T>;
+}
+
+/**
+ * Copies one verifier-issued artifact into its complete canonical wire form.
+ *
+ * The opaque in-memory authority is deliberately not transferable between
+ * realms. A receiver must decode and verify these bytes again with its own
+ * schema authority before semantic preparation or execution.
+ */
+export function copyVerifiedArtifactWireBytes(
+  artifact: VerifiedArtifact<JsonValue>,
+  options: { readonly limits?: Partial<DecodeLimits> } = {},
+): Uint8Array {
+  return canonicalJsonBytes(unwrapVerifiedArtifact(artifact), options);
 }
 
 /** @internal Package hashing and verified evaluators only. */

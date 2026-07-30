@@ -9,6 +9,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Add `copyVerifiedArtifactWireBytes` as the authority-safe cross-realm
+  boundary for every semantic artifact. It returns fresh complete canonical
+  envelope bytes; receivers must decode and verify them again because opaque
+  in-memory verifier authority is never transferable.
 - Add the distinct
   `browsergrad.view-copy.signed-affine-rank1-word32@1` portable profile for
   exact same-dtype f32/i32/u32 rank-1 source reversals. This completes signed

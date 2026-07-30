@@ -60,6 +60,7 @@ export {
 } from "./schema/hash.js";
 export { parseFloatBits, type FloatBitDType, type FloatBits } from "./schema/float-bits.js";
 export {
+  copyVerifiedArtifactWireBytes,
   validateWireEnvelope,
   type EnvelopeValidationOptions,
   type VerifiedArtifact,

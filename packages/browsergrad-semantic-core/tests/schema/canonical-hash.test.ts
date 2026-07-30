@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   canonicalizeJson,
   compareCanonicalStrings,
+  copyVerifiedArtifactWireBytes,
+  decodeWireJson,
   derivePureValueId,
   deriveScopedEntityId,
   hashNamedComponents,
@@ -70,6 +72,27 @@ describe("canonical JSON and hashing", () => {
 
     expect(await hashSemanticArtifact(first)).toBe(await hashSemanticArtifact(second));
     expect(await hashSemanticArtifact(first)).not.toBe(await hashSemanticArtifact(changed));
+  });
+
+  it("copies complete canonical wire bytes without transferring verifier authority", () => {
+    const artifact = envelope('{"version":{"minor":0,"major":1},"schema":"browsergrad.layout","requiredExtensions":[],"producer":{"version":"1","id":"tests"},"payload":{"shape":[2,3]},"artifactId":"wire-a"}');
+    const first = copyVerifiedArtifactWireBytes(artifact);
+    const second = copyVerifiedArtifactWireBytes(artifact);
+
+    expect(new TextDecoder().decode(first)).toBe(
+      '{"artifactId":"wire-a","payload":{"shape":[2,3]},"producer":{"id":"tests","version":"1"},"requiredExtensions":[],"schema":"browsergrad.layout","version":{"major":1,"minor":0}}',
+    );
+    expect(second).not.toBe(first);
+    first[0] = 0;
+    expect(decodeWireJson(second)).toMatchObject({
+      artifactId: "wire-a",
+      payload: { shape: [2, 3] },
+    });
+    expect(() =>
+      copyVerifiedArtifactWireBytes(
+        decodeWireJson(second) as unknown as VerifiedArtifact<JsonValue>,
+      )
+    ).toThrow(/BG-SCHEMA-UNVERIFIED-ARTIFACT/u);
   });
 
   it("keeps identical entity content distinct by scoped canonical position", async () => {
