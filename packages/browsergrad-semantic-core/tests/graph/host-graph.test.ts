@@ -2200,7 +2200,7 @@ describe("host graph artifact", () => {
 
   it("rejects copy version, mode, resource, dtype, and hazard drift", async () => {
     const future = clone(copyProgram());
-    future.version.minor = 33 as unknown as typeof future.version.minor;
+    future.version.minor = 34 as unknown as typeof future.version.minor;
     expect((await diagnostic(() => createVerifiedHostGraphArtifact(
       future,
       { kernelArtifacts: [], layoutArtifacts: [] },

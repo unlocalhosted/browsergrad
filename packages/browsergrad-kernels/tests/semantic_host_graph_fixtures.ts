@@ -352,9 +352,22 @@ export function sequentialConditionalDynamicDispatchProgram(
 
 export function sequentialConditionalRectangularDispatchProgram(
   artifacts: VerifiedViewCopyArtifacts,
+  shape: readonly number[] = [2, 3],
 ): HostGraphProgram {
   const wire = (value: number) => parseWireU64(String(value));
-  const shape = [2, 3] as const;
+  if (
+    shape.length < 2 ||
+    shape.length > 8 ||
+    shape.some((extent) => !Number.isSafeInteger(extent) || extent <= 0)
+  ) {
+    throw new Error(
+      "conditional rectangular fixture requires rank 2 through 8 positive safe extents",
+    );
+  }
+  const byteLength = shape.reduce(
+    (product, extent) => product * extent,
+    1,
+  ) * 4;
   const resource = (
     resourceId: string,
     role: "input" | "temporary" | "output",
@@ -383,7 +396,7 @@ export function sequentialConditionalRectangularDispatchProgram(
   }));
   return {
     kind: "host-graph",
-    version: { major: 1, minor: 32 },
+    version: { major: 1, minor: shape.length === 2 ? 32 : 33 },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire(1),
     resources: [
@@ -394,8 +407,8 @@ export function sequentialConditionalRectangularDispatchProgram(
         resource(`else-extent-input-${axis}`, "input", "u32"),
         resource(`extent-${axis}`, "temporary", "u32"),
       ]),
-      resource("value-input", "input", "f32", 24),
-      resource("value-output", "output", "f32", 24),
+      resource("value-input", "input", "f32", byteLength),
+      resource("value-output", "output", "f32", byteLength),
     ],
     nodes: [
       {

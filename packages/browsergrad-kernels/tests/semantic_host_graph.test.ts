@@ -1169,28 +1169,34 @@ describe("semantic host-graph WebGPU preparation", () => {
     });
   });
 
-  it("prewarms sequential conditional-to-rectangle feedback stages", async () => {
-    const artifacts = await rectangularIdentityArtifacts([2, 3]);
-    const graph = (await createVerifiedHostGraphArtifact(
-      sequentialConditionalRectangularDispatchProgram(artifacts),
-      artifactOptions(artifacts),
-    )).artifact;
-    const prepared = await prepareSemanticHostGraphWebGpu(
-      graph,
-      artifactOptions(artifacts),
-    );
+  it("prewarms rank-2 and rank-8 conditional rectangles generically", async () => {
+    const shapes = [
+      [2, 3],
+      [2, 2, 2, 2, 2, 2, 3, 4],
+    ] as const;
+    for (const shape of shapes) {
+      const artifacts = await rectangularIdentityArtifacts(shape);
+      const graph = (await createVerifiedHostGraphArtifact(
+        sequentialConditionalRectangularDispatchProgram(artifacts, shape),
+        artifactOptions(artifacts),
+      )).artifact;
+      const prepared = await prepareSemanticHostGraphWebGpu(
+        graph,
+        artifactOptions(artifacts),
+      );
 
-    expect(prepared).toMatchObject({
-      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
-      nodeCount: 4,
-      materializationCount: 1,
-      dynamicDispatchCount: 1,
-      resourceDynamicDispatchCount: 1,
-      conditionalCount: 1,
-      resourceConditionalCount: 1,
-      midGraphFeedbackCount: 2,
-      midGraphFeedbackStageCount: 2,
-    });
+      expect(prepared).toMatchObject({
+        backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+        nodeCount: 4,
+        materializationCount: 1,
+        dynamicDispatchCount: 1,
+        resourceDynamicDispatchCount: 1,
+        conditionalCount: 1,
+        resourceConditionalCount: 1,
+        midGraphFeedbackCount: 2,
+        midGraphFeedbackStageCount: 2,
+      });
+    }
   });
 
   it("retains version-1.3 completion events without an extra GPU step", async () => {

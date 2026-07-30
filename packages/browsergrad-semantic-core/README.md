@@ -256,7 +256,10 @@ conditional-to-linear-dispatch chain when both branches guarantee-write one
 distinct positive bounded launch-count source. Version 1.32 extends that same
 two-stage contract to one rank-2 rectangular dispatch: both branches must
 guarantee-write both distinct positive bounded extent sources after selecting
-from a third predicate resource. Missing, disconnected, forked, cyclic, extra,
+from a third predicate resource. Version 1.33 extends the same exact contract
+through ranks 3 to 8 while retaining version 1.32's rank-2 ceiling. Every
+extent source remains distinct from the predicate and every other extent, and
+both branches must guarantee-write all of them. Missing, disconnected, forked, cyclic, extra,
 duplicate-source, non-guaranteed, broader mixed-mode,
 pre-version, or above-version feedback profiles fail closed.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte

@@ -9,6 +9,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- WebGPU host-graph backend 1.37 executes host-graph program version 1.33's
+  exact sequential conditional-to-rank-3-through-rank-8-rectangular-dispatch
+  profile. Both selected branches guarantee-write every distinct positive
+  bounded extent source. The same shared conditional-prefix selector and
+  generic resource-dispatch specialization used by rank 2 execute all higher
+  ranks without a rank-shaped executor. Required actual-device evidence
+  expands from 88 to 90 complete CPU/WebGPU parity cases with maximum-rank
+  small/full correctness artifact
+  `7aed748d3ebda3ecd49a522311fa2856fc0962cc7e52027b19fa397e465ddf77`.
+  The separately required four-case Worker lane is repinned to backend 1.37
+  with artifact
+  `0160d1919bac516edd4da6818092327a2c1d232a96cc0e4e2a8459b66e8cf2c0`.
 - WebGPU host-graph backend 1.36 executes host-graph program version 1.32's
   exact sequential conditional-to-rank-2-rectangular-dispatch profile. One
   produced `u32` selects a prewarmed branch; both branches guarantee-write two
