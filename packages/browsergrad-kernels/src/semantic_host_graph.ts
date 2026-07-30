@@ -78,7 +78,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.24.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.25.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -2678,11 +2678,11 @@ function dynamicLaunch(
     return frozenLaunch(selection.elementCount);
   }
   const extents = selection.logicalExtents;
-  if (extents.length < 2 || extents.length > 7) {
+  if (extents.length < 2 || extents.length > 8) {
     fail(
       "BG-WEBGPU-GRAPH-INTERNAL",
       "$.dynamicDispatch.logicalExtents",
-      "rectangular dynamic launch rank must be between two and seven",
+      "rectangular dynamic launch rank must be between two and eight",
     );
   }
   const lastAxis = extents.length - 1;
@@ -2705,11 +2705,11 @@ function rectangularDynamicSelection(
   DynamicLaunchSelection,
   { readonly kind: "rectangular-prefix" }
 > {
-  if (extents.length < 2 || extents.length > 7) {
+  if (extents.length < 2 || extents.length > 8) {
     fail(
       "BG-WEBGPU-GRAPH-UNSUPPORTED-PROFILE",
       path,
-      "portable rectangular dynamic launch supports ranks two through seven",
+      "portable rectangular dynamic launch supports ranks two through eight",
     );
   }
   let elementCount = 1n;

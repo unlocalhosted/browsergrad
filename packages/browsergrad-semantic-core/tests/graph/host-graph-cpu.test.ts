@@ -218,15 +218,17 @@ function rectangularDynamicProgram(
     kind: "host-graph",
     version: {
       major: 1,
-      minor: shape.length === 7
-        ? 20
-        : shape.length === 6
-          ? 18
-          : shape.length === 5
-            ? 16
-            : shape.length === 4
-              ? 14
-              : 12,
+      minor: shape.length === 8
+        ? 22
+        : shape.length === 7
+          ? 20
+          : shape.length === 6
+            ? 18
+            : shape.length === 5
+              ? 16
+              : shape.length === 4
+                ? 14
+                : 12,
     },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire("1"),
@@ -1422,7 +1424,7 @@ describe("host graph CPU reference", () => {
     expect(readF32(result.outputs[0]!.bytes)).toEqual([1.25, 0]);
   });
 
-  it("executes and reports exact rank-2 through rank-7 request-time rectangular prefixes", async () => {
+  it("executes and reports exact rank-2 through rank-8 request-time rectangular prefixes", async () => {
     const cases = [
       {
         shape: [3, 4],
@@ -1447,6 +1449,10 @@ describe("host graph CPU reference", () => {
       {
         shape: [2, 2, 2, 2, 2, 3, 4],
         extents: [1, 2, 1, 2, 1, 2, 3],
+      },
+      {
+        shape: [2, 2, 2, 2, 2, 2, 3, 4],
+        extents: [1, 2, 1, 2, 1, 2, 2, 3],
       },
     ] as const;
     for (const testCase of cases) {
@@ -1501,13 +1507,13 @@ describe("host graph CPU reference", () => {
     }
   });
 
-  it("keeps request-time rank 7 separate from produced-resource versioning", async () => {
-    const shape = [2, 2, 2, 2, 2, 3, 4] as const;
+  it("keeps request-time rank 8 separate from produced-resource versioning", async () => {
+    const shape = [2, 2, 2, 2, 2, 2, 3, 4] as const;
     const artifacts = await rectangularArtifacts(shape);
     const current = rectangularDynamicProgram(artifacts, shape);
     const legacy = {
       ...current,
-      version: { major: 1 as const, minor: 19 as const },
+      version: { major: 1 as const, minor: 21 as const },
     };
 
     await expect(createVerifiedHostGraphArtifact(
@@ -1519,7 +1525,7 @@ describe("host graph CPU reference", () => {
 
     const resource = {
       ...resourceRectangularDynamicProgram(artifacts, shape),
-      version: { major: 1 as const, minor: 20 as const },
+      version: { major: 1 as const, minor: 22 as const },
     };
     await expect(createVerifiedHostGraphArtifact(
       resource,

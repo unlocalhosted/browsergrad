@@ -86,6 +86,8 @@ const CASE_IDS = Object.freeze([
   "f32-rectangular-dynamic-rank6-large",
   "f32-rectangular-dynamic-rank7-small",
   "f32-rectangular-dynamic-rank7-large",
+  "f32-rectangular-dynamic-rank8-small",
+  "f32-rectangular-dynamic-rank8-large",
   "f32-resource-rectangular-dynamic-rank2-small",
   "f32-resource-rectangular-dynamic-rank2-large",
   "f32-resource-rectangular-dynamic-rank3-small",
@@ -343,6 +345,16 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
         "f32-rectangular-dynamic-rank7-large",
         [2, 2, 2, 2, 2, 3, 4],
         [2, 2, 2, 2, 2, 3, 4],
+      ),
+      prepareRectangularDynamicDispatchCase(
+        "f32-rectangular-dynamic-rank8-small",
+        [2, 2, 2, 2, 2, 2, 3, 4],
+        [1, 2, 1, 2, 1, 2, 2, 3],
+      ),
+      prepareRectangularDynamicDispatchCase(
+        "f32-rectangular-dynamic-rank8-large",
+        [2, 2, 2, 2, 2, 2, 3, 4],
+        [2, 2, 2, 2, 2, 2, 3, 4],
       ),
       prepareResourceRectangularDynamicDispatchCase(
         "f32-resource-rectangular-dynamic-rank2-small",
@@ -1292,21 +1304,43 @@ async function prepareRectangularDynamicDispatchCase(
     | "f32-rectangular-dynamic-rank6-small"
     | "f32-rectangular-dynamic-rank6-large"
     | "f32-rectangular-dynamic-rank7-small"
-    | "f32-rectangular-dynamic-rank7-large",
+    | "f32-rectangular-dynamic-rank7-large"
+    | "f32-rectangular-dynamic-rank8-small"
+    | "f32-rectangular-dynamic-rank8-large",
   shape:
     | readonly [number, number]
     | readonly [number, number, number]
     | readonly [number, number, number, number]
     | readonly [number, number, number, number, number]
     | readonly [number, number, number, number, number, number]
-    | readonly [number, number, number, number, number, number, number],
+    | readonly [number, number, number, number, number, number, number]
+    | readonly [
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+    ],
   logicalExtents:
     | readonly [number, number]
     | readonly [number, number, number]
     | readonly [number, number, number, number]
     | readonly [number, number, number, number, number]
     | readonly [number, number, number, number, number, number]
-    | readonly [number, number, number, number, number, number, number],
+    | readonly [number, number, number, number, number, number, number]
+    | readonly [
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+    ],
 ): Promise<PreparedCase> {
   const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
     inputShape: shape.map((extent) => parseWireI64(String(extent))),
@@ -1640,7 +1674,17 @@ function rectangularDynamicDispatchProgram(
     | readonly [number, number, number, number]
     | readonly [number, number, number, number, number]
     | readonly [number, number, number, number, number, number]
-    | readonly [number, number, number, number, number, number, number],
+    | readonly [number, number, number, number, number, number, number]
+    | readonly [
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+      number,
+    ],
 ): HostGraphProgram {
   const staticDispatch = dispatch(artifacts);
   const elementCount = shape.reduce(
@@ -1651,15 +1695,17 @@ function rectangularDynamicDispatchProgram(
     kind: "host-graph",
     version: {
       major: 1,
-      minor: shape.length === 7
-        ? 20
-        : shape.length === 6
-          ? 18
-          : shape.length === 5
-            ? 16
-            : shape.length === 4
-              ? 14
-              : 12,
+      minor: shape.length === 8
+        ? 22
+        : shape.length === 7
+          ? 20
+          : shape.length === 6
+            ? 18
+            : shape.length === 5
+              ? 16
+              : shape.length === 4
+                ? 14
+                : 12,
     },
     failureModel: "fail-stop-no-partial-output-commit",
     rankCount: wire(2),

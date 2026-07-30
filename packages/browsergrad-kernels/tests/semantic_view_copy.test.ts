@@ -253,7 +253,7 @@ describe("semantic view-copy WGSL lowering", () => {
     expect(dynamic.launch.dispatchCount).toEqual([65, 1, 1]);
   });
 
-  it("lowers rank-2 through rank-7 rectangular guards before semantic evaluation", async () => {
+  it("lowers rank-2 through rank-8 rectangular guards before semantic evaluation", async () => {
     for (const shape of [
       [constant("3"), constant("4")],
       [constant("2"), constant("3"), constant("4")],
@@ -282,18 +282,18 @@ describe("semantic view-copy WGSL lowering", () => {
         constant("3"),
         constant("4"),
       ],
+      [
+        constant("2"),
+        constant("2"),
+        constant("2"),
+        constant("2"),
+        constant("2"),
+        constant("2"),
+        constant("3"),
+        constant("4"),
+      ],
     ] as const) {
-      const elementCount = shape.length === 2
-        ? 12
-        : shape.length === 3
-          ? 24
-          : shape.length === 4
-            ? 48
-            : shape.length === 5
-              ? 96
-              : shape.length === 6
-                ? 192
-                : 384;
+      const elementCount = 12 * (2 ** (shape.length - 2));
       const layout = await verifiedLayout({
         shape,
         sourceLocation: rowMajor(shape),
@@ -319,19 +319,11 @@ describe("semantic view-copy WGSL lowering", () => {
         byteLength: shape.length >= 5 ? 32 : 16,
         binding: 2,
       });
-      expect(dynamic.launch.dispatchCount).toEqual(
-        shape.length === 2
-          ? [4, 3, 1]
-          : shape.length === 3
-            ? [4, 3, 2]
-            : shape.length === 4
-              ? [4, 3, 4]
-              : shape.length === 5
-                ? [4, 3, 8]
-                : shape.length === 6
-                  ? [4, 3, 16]
-                  : [4, 3, 32],
-      );
+      expect(dynamic.launch.dispatchCount).toEqual([
+        4,
+        3,
+        2 ** (shape.length - 2),
+      ]);
       expect(dynamic.program.wgsl).toContain(
         "global_id.x >= bg_dynamic_region.extent_",
       );
@@ -381,6 +373,16 @@ describe("semantic view-copy WGSL lowering", () => {
         );
         expect(dynamic.program.wgsl).toContain(
           "rank7_dynamic_remainder_2 % bg_dynamic_region.extent_4",
+        );
+      } else if (shape.length === 8) {
+        expect(dynamic.program.wgsl).toContain(
+          "(bg_dynamic_region.extent_0 * bg_dynamic_region.extent_1 * bg_dynamic_region.extent_2 * bg_dynamic_region.extent_3 * bg_dynamic_region.extent_4 * bg_dynamic_region.extent_5)",
+        );
+        expect(dynamic.program.wgsl).toContain(
+          "global_id.z / rank8_dynamic_stride_0",
+        );
+        expect(dynamic.program.wgsl).toContain(
+          "rank8_dynamic_remainder_3 % bg_dynamic_region.extent_5",
         );
       }
       const guardIndex = dynamic.program.wgsl.indexOf(

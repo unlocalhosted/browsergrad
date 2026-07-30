@@ -312,10 +312,10 @@ function emitLaunchPrelude(
   readonly body: readonly string[];
 }> {
   if (mode === "runtime-rectangular-prefix") {
-    if (shape.length < 2 || shape.length > 7) {
+    if (shape.length < 2 || shape.length > 8) {
       return unsupported(
         "$.shape",
-        "rectangular dynamic WGSL launch supports semantic ranks 2 through 7 only",
+        "rectangular dynamic WGSL launch supports semantic ranks 2 through 8 only",
       );
     }
     const staticExtents = shape.map((extent, axis) =>
