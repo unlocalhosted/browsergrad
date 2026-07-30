@@ -244,6 +244,112 @@ export function sequentialConditionalRepeatFeedbackProgram(): HostGraphProgram {
   };
 }
 
+export function sequentialConditionalDynamicDispatchProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  const wire = (value: number) => parseWireU64(String(value));
+  const resource = (
+    resourceId: string,
+    role: "input" | "temporary" | "output",
+    dtype: "f32" | "u32",
+    byteLength = 4,
+  ) => ({
+    resourceId,
+    role,
+    multiplicity: "per-rank" as const,
+    initialization: role === "input"
+      ? "external-input" as const
+      : "zero-fill" as const,
+    dtype,
+    byteLength: wire(byteLength),
+    alignmentBytes: 4,
+  });
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 31 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire(1),
+    resources: [
+      resource("predicate-input", "input", "u32"),
+      resource("predicate", "temporary", "u32"),
+      resource("then-count-input", "input", "u32"),
+      resource("else-count-input", "input", "u32"),
+      resource("launch-count", "temporary", "u32"),
+      resource("value-input", "input", "f32", 8),
+      resource("value-output", "output", "f32", 8),
+    ],
+    nodes: [
+      {
+        nodeId: "produce-predicate",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "predicate-input",
+        destinationResourceId: "predicate",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "choose-launch-count",
+        kind: "conditional",
+        dependsOn: ["produce-predicate"],
+        predicate: {
+          resourceId: "predicate",
+          rank: wire(0),
+          mode: "u32-nonzero",
+        },
+        thenBody: [{
+          nodeId: "copy-then-count",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "then-count-input",
+          destinationResourceId: "launch-count",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        elseBody: [{
+          nodeId: "copy-else-count",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "else-count-input",
+          destinationResourceId: "launch-count",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        mode: "resource-u32-branch-sequential",
+      },
+      {
+        nodeId: "copy-selected-prefix",
+        kind: "dynamic-dispatch",
+        dependsOn: ["choose-launch-count"],
+        semanticArtifactHash: artifacts.kernelSemanticHash,
+        entrypointId: artifacts.operationId,
+        dimensionBindings: {},
+        bindings: [
+          {
+            semanticResourceId: artifacts.source.viewId,
+            graphResourceId: "value-input",
+          },
+          {
+            semanticResourceId: artifacts.destination.viewId,
+            graphResourceId: "value-output",
+          },
+        ],
+        launchSource: {
+          resourceId: "launch-count",
+          rank: wire(0),
+          mode: "u32-prefix-element-count",
+        },
+        maxElementCount: wire(2),
+        mode: "resource-u32-prefix-elements",
+      },
+      {
+        nodeId: "materialize-value",
+        kind: "materialize",
+        dependsOn: ["copy-selected-prefix"],
+        resourceId: "value-output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 export async function createVerifiedSignedReverseViewCopyArtifacts(
   dtype: BuiltinDTypeId,
   rank: number,

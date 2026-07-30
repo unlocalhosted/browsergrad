@@ -1019,6 +1019,95 @@ function sequentialConditionalRepeatFeedbackProgram(): HostGraphProgram {
   };
 }
 
+function sequentialConditionalDynamicDispatchProgram(
+  artifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 31 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire("1"),
+    resources: [
+      resource("predicate-input", "input", "u32", "4"),
+      resource("predicate", "temporary", "u32", "4"),
+      resource("then-count-input", "input", "u32", "4"),
+      resource("else-count-input", "input", "u32", "4"),
+      resource("launch-count", "temporary", "u32", "4"),
+      resource("input", "input", "f32"),
+      resource("output", "output", "f32"),
+    ],
+    nodes: [
+      {
+        nodeId: "produce-predicate",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "predicate-input",
+        destinationResourceId: "predicate",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "choose-launch-count",
+        kind: "conditional",
+        dependsOn: ["produce-predicate"],
+        predicate: {
+          resourceId: "predicate",
+          rank: wire("0"),
+          mode: "u32-nonzero",
+        },
+        thenBody: [{
+          nodeId: "copy-then-count",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "then-count-input",
+          destinationResourceId: "launch-count",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        elseBody: [{
+          nodeId: "copy-else-count",
+          kind: "copy",
+          dependsOn: [],
+          sourceResourceId: "else-count-input",
+          destinationResourceId: "launch-count",
+          mode: "whole-allocation-bytes-per-rank",
+        }],
+        mode: "resource-u32-branch-sequential",
+      },
+      {
+        nodeId: "copy-selected-prefix",
+        kind: "dynamic-dispatch",
+        dependsOn: ["choose-launch-count"],
+        semanticArtifactHash: artifacts.kernelSemanticHash,
+        entrypointId: artifacts.operationId,
+        dimensionBindings: {},
+        bindings: [
+          {
+            semanticResourceId: artifacts.source.viewId,
+            graphResourceId: "input",
+          },
+          {
+            semanticResourceId: artifacts.destination.viewId,
+            graphResourceId: "output",
+          },
+        ],
+        launchSource: {
+          resourceId: "launch-count",
+          rank: wire("0"),
+          mode: "u32-prefix-element-count",
+        },
+        maxElementCount: wire("2"),
+        mode: "resource-u32-prefix-elements",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["copy-selected-prefix"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function conditionalRawCopyProgram(): HostGraphProgram {
   return {
     kind: "host-graph",
@@ -1873,6 +1962,125 @@ describe("host graph CPU reference", () => {
           ? [[1, 2], [3, 4]]
           : [[8, 12], [8, 12]],
       );
+    }
+  });
+
+  it("feeds a conditional-produced u32 into a linear dispatch", async () => {
+    const artifacts = await identityArtifacts();
+    const options = artifactOptions(artifacts);
+    const program = sequentialConditionalDynamicDispatchProgram(artifacts);
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...program,
+        version: { major: 1, minor: 30 },
+      },
+      options,
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-UNSUPPORTED-PROFILE" },
+    });
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...program,
+        nodes: program.nodes.map((node) =>
+          node.kind === "conditional" &&
+            node.mode === "resource-u32-branch-sequential"
+            ? {
+              ...node,
+              elseBody: node.elseBody.map((bodyNode) =>
+                bodyNode.kind === "copy"
+                  ? { ...bodyNode, destinationResourceId: "predicate" }
+                  : bodyNode),
+            }
+            : node),
+      },
+      options,
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-INVALID-BINDING" },
+    });
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...program,
+        nodes: program.nodes.map((node) => {
+          if (
+            node.kind === "conditional" &&
+            node.mode === "resource-u32-branch-sequential"
+          ) {
+            return {
+              ...node,
+              thenBody: node.thenBody.map((bodyNode) =>
+                bodyNode.kind === "copy"
+                  ? { ...bodyNode, destinationResourceId: "predicate" }
+                  : bodyNode),
+              elseBody: node.elseBody.map((bodyNode) =>
+                bodyNode.kind === "copy"
+                  ? { ...bodyNode, destinationResourceId: "predicate" }
+                  : bodyNode),
+            };
+          }
+          return node.kind === "dynamic-dispatch" &&
+              node.mode === "resource-u32-prefix-elements"
+            ? {
+              ...node,
+              launchSource: {
+                ...node.launchSource,
+                resourceId: "predicate",
+              },
+            }
+            : node;
+        }),
+      },
+      options,
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-INVALID-BINDING" },
+    });
+    const graph = (await createVerifiedHostGraphArtifact(
+      program,
+      options,
+    )).artifact;
+    const prepared = await prepareHostGraphCpu(graph, options);
+    const executionInputs = (
+      predicate: 0 | 1,
+    ): HostGraphCpuInputBinding[] => [
+      {
+        rank: wire("0"),
+        resourceId: "predicate-input",
+        bytes: u32Bytes([predicate]),
+      },
+      {
+        rank: wire("0"),
+        resourceId: "then-count-input",
+        bytes: u32Bytes([2]),
+      },
+      {
+        rank: wire("0"),
+        resourceId: "else-count-input",
+        bytes: u32Bytes([1]),
+      },
+      input(0, f32Bytes([5, 6])),
+    ];
+
+    expect(prepared).toMatchObject({
+      resourceConditionalCount: 1,
+      resourceDynamicDispatchCount: 1,
+    });
+    for (const predicate of [0, 1] as const) {
+      const result = await prepared.execute({
+        inputs: executionInputs(predicate),
+      });
+      expect(result.completedConditionals).toEqual([{
+        nodeId: "choose-launch-count",
+        selectedBranch: predicate === 0 ? "else" : "then",
+        bodyNodeIds: [
+          predicate === 0 ? "copy-else-count" : "copy-then-count",
+        ],
+      }]);
+      expect(result.completedDynamicDispatches).toEqual([{
+        nodeId: "copy-selected-prefix",
+        elementCount: predicate === 0 ? "1" : "2",
+      }]);
+      expect(result.outputs.map(({ bytes }) => readF32(bytes))).toEqual([
+        predicate === 0 ? [5, 0] : [5, 6],
+      ]);
     }
   });
 

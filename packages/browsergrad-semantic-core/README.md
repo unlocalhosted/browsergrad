@@ -251,9 +251,11 @@ at the same rank; both selections occur after one ordered producer and through
 one aggregate feedback stage. Version 1.30 admits one sequential mixed profile:
 both branches of one produced-resource conditional must guarantee-write one
 distinct bounded-repeat count source, which the later repeat consumes only
-after branch execution. Missing, disconnected, forked, cyclic, extra,
-duplicate-source, non-guaranteed, broader mixed-mode, pre-version, or
-above-version feedback profiles fail closed.
+after branch execution. Version 1.31 admits the equivalent exact
+conditional-to-linear-dispatch chain when both branches guarantee-write one
+distinct positive bounded launch-count source. Missing, disconnected, forked,
+cyclic, extra, duplicate-source, non-guaranteed, broader mixed-mode,
+pre-version, or above-version feedback profiles fail closed.
 Each resource carries per-rank multiplicity, exact dtype, allocation byte
 length, alignment, and input/temporary/output role. Input resources require
 external bytes; temporary and output resources are deterministically
@@ -337,7 +339,8 @@ distinct linear selection in producer-chain order. Version 1.29 reads one
 private produced `u32` once, then applies it to both the conditional branch and
 bounded repeat count. Version 1.30 first reads the private produced predicate,
 executes its selected branch, then reads that branch's guaranteed distinct
-repeat count and executes the bounded repeat.
+repeat count and executes the bounded repeat. Version 1.31 applies the same
+ordered branch-produced selection to one positive bounded linear dispatch.
 It enforces aggregate working-memory, element-operation, preparation-time, and
 execution-time ceilings plus native cancellation. F32 collectives reduce
 finite values in ascending participant-rank order, rounding after every sum;
@@ -363,6 +366,7 @@ three-, or four-stage linear producer chains. Version 1.29 fans one produced
 scalar out to one conditional and one repeat in the same feedback stage.
 Version 1.30 instead executes conditional selection and the branch-produced
 repeat count through two ordered feedback stages.
+Version 1.31 reuses those stages for one branch-produced linear launch count.
 Neither adapter grants
 transport, topology, retries, event
 timestamps or external waits, broader mixed or device-side feedback,

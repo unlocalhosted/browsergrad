@@ -78,7 +78,7 @@ export const SEMANTIC_HOST_GRAPH_WEBGPU_PROFILE =
   "browsergrad.host-graph.webgpu@1" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_PIPELINE_PROFILE =
   "browsergrad.host-graph.webgpu-pipeline@1" as const;
-export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.34.0" as const;
+export const SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION = "1.35.0" as const;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_EXPANDED_STEPS = 16_384;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_WORKING_BYTES = 1_073_741_824;
 export const SEMANTIC_HOST_GRAPH_WEBGPU_MAX_PREPARATION_MS = 300_000;
@@ -886,9 +886,21 @@ export async function prepareSemanticHostGraphWebGpu(
       resourceDynamicDispatches.length === 0 &&
       resourceConditional.predicate.resourceId !==
         resourceRepeat.resourceId;
+    const sequentialConditionalDispatchSelection =
+      payload.program.version.minor >= 31 &&
+      resourceFeedbackCount === 2 &&
+      resourceConditional?.predicate.kind === "resource" &&
+      resourceRepeat === undefined &&
+      resourceDynamicDispatches.length === 1 &&
+      resourceDynamicDispatch !== undefined &&
+      isPreparedResourceLinearDynamicDispatch(resourceDynamicDispatch) &&
+      resourceConditional.predicate.resourceId !==
+        resourceDynamicDispatch.selector.resourceId;
     if (sharedConditionalRepeatSelection) {
       resourceFeedbackStageCount = 1;
     } else if (sequentialConditionalRepeatSelection) {
+      resourceFeedbackStageCount = 2;
+    } else if (sequentialConditionalDispatchSelection) {
       resourceFeedbackStageCount = 2;
     } else {
       const first = resourceDynamicDispatches[0];
@@ -3030,6 +3042,21 @@ async function executeGraphWithResourceFeedback(
       );
   }
   if (selectedExecution.resourceDynamicDispatches.length > 0) {
+    if (
+      selectedExecution.resourceConditional !== undefined &&
+      selectedExecution.resourceRepeat === undefined &&
+      selectedExecution.resourceDynamicDispatches.length === 1
+    ) {
+      return executeGraphWithSequentialConditionalDynamicDispatchFeedback(
+        device,
+        gpu,
+        state,
+        selectedExecution,
+        buffers,
+        pipelineSet,
+        signal,
+      );
+    }
     return executeGraphWithResourceDynamicDispatchFeedback(
       device,
       gpu,
@@ -3051,104 +3078,34 @@ async function executeGraphWithResourceFeedback(
       signal,
     );
   }
-  const conditional = selectedExecution.resourceConditional;
-  if (
-    conditional === undefined ||
-    conditional.predicate.kind !== "resource"
-  ) {
-    fail(
-      "BG-WEBGPU-GRAPH-INTERNAL",
-      "$.feedback",
-      "resource feedback execution lost its verified conditional",
-    );
-  }
   const residents = await createResidentGraphBuffers(
     device,
     gpu,
     buffers,
   );
   try {
-    const predicatePlan = state.resourcesById.get(
-      conditional.predicate.resourceId,
-    );
-    const predicateStorageName = predicatePlan?.storageNames[
-      conditional.predicate.rank
-    ];
-    if (
-      predicatePlan === undefined ||
-      predicateStorageName === undefined ||
-      predicatePlan.byteLength !== 4 ||
-      residents[predicateStorageName] === undefined
-    ) {
-      fail(
-        "BG-WEBGPU-GRAPH-INTERNAL",
-        `$.nodes.${conditional.nodeId}.predicate`,
-        "verified resource conditional storage disappeared",
-      );
-    }
-    const selectedConditionalIndex =
-      selectedExecution.pipelineStepIndices.indexOf(
-        conditional.startStepIndex,
-      );
-    if (selectedConditionalIndex < 0) {
-      fail(
-        "BG-WEBGPU-GRAPH-INTERNAL",
-        `$.nodes.${conditional.nodeId}.predicate`,
-        "verified resource conditional step disappeared after runtime selection",
-      );
-    }
-    const prefixSteps = selectedExecution.steps.slice(
-      0,
-      selectedConditionalIndex,
-    );
-    const prefixPipelineStepIndices =
-      selectedExecution.pipelineStepIndices.slice(
-        0,
-        selectedConditionalIndex,
-      );
-    if (prefixSteps.length === 0) {
-      fail(
-        "BG-WEBGPU-GRAPH-INTERNAL",
-        `$.nodes.${conditional.nodeId}.predicate`,
-        "verified resource conditional producer disappeared",
-      );
-    }
-    const prefix = await executeResidentGraphStage(
+    const {
+      conditionalIndex,
+      selection: finalSelection,
+    } = await executeResourceConditionalPrefix(
       device,
       gpu,
       state,
-      prefixSteps,
+      selectedExecution,
       residents,
       pipelineSet,
-      prefixPipelineStepIndices,
-      [predicateStorageName],
+      signal,
       "$.feedback.prefix",
-    );
-    throwIfCancelled(signal);
-    const predicateValue = prefix.buffers[predicateStorageName];
-    if (!(predicateValue instanceof Uint32Array) ||
-        predicateValue.length !== 1) {
-      fail(
-        "BG-WEBGPU-GRAPH-INTERNAL",
-        `$.nodes.${conditional.nodeId}.predicate`,
-        "resource conditional feedback returned an invalid u32 allocation",
-      );
-    }
-    const finalSelection = selectResourceConditionalExecution(
-      state,
-      selectedExecution,
-      conditional,
-      predicateValue[0] as number,
     );
     throwIfCancelled(signal);
     const result = await executeResidentGraphStage(
       device,
       gpu,
       state,
-      finalSelection.steps.slice(selectedConditionalIndex),
+      finalSelection.steps.slice(conditionalIndex),
       residents,
       pipelineSet,
-      finalSelection.pipelineStepIndices.slice(selectedConditionalIndex),
+      finalSelection.pipelineStepIndices.slice(conditionalIndex),
       state.readbackStorageNames,
       "$.feedback.suffix",
     );
@@ -3298,6 +3255,100 @@ async function executeGraphWithSharedConditionalRepeatFeedback(
   }
 }
 
+async function executeResourceConditionalPrefix(
+  device: KernelDevice,
+  gpu: GPUDevice,
+  state: PreparedState,
+  selectedExecution: SelectedExecution,
+  residents: Readonly<Record<string, WgslResidentBuffer>>,
+  pipelineSet: WgslPreparedPipelineSet,
+  signal: AbortSignal | undefined,
+  stagePath: string,
+): Promise<{
+  readonly conditionalIndex: number;
+  readonly selection: SelectedExecution;
+}> {
+  const conditional = selectedExecution.resourceConditional;
+  if (
+    conditional === undefined ||
+    conditional.predicate.kind !== "resource"
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      "$.feedback",
+      "resource feedback execution lost its verified conditional",
+    );
+  }
+  const predicatePlan = state.resourcesById.get(
+    conditional.predicate.resourceId,
+  );
+  const predicateStorageName = predicatePlan?.storageNames[
+    conditional.predicate.rank
+  ];
+  if (
+    predicatePlan === undefined ||
+    predicateStorageName === undefined ||
+    predicatePlan.byteLength !== 4 ||
+    residents[predicateStorageName] === undefined
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${conditional.nodeId}.predicate`,
+      "verified resource conditional storage disappeared",
+    );
+  }
+  const conditionalIndex = selectedExecution.pipelineStepIndices.indexOf(
+    conditional.startStepIndex,
+  );
+  if (conditionalIndex < 0) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${conditional.nodeId}.predicate`,
+      "verified resource conditional step disappeared after runtime selection",
+    );
+  }
+  const prefixSteps = selectedExecution.steps.slice(0, conditionalIndex);
+  const prefixPipelineStepIndices =
+    selectedExecution.pipelineStepIndices.slice(0, conditionalIndex);
+  if (prefixSteps.length === 0) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${conditional.nodeId}.predicate`,
+      "verified resource conditional producer disappeared",
+    );
+  }
+  const prefix = await executeResidentGraphStage(
+    device,
+    gpu,
+    state,
+    prefixSteps,
+    residents,
+    pipelineSet,
+    prefixPipelineStepIndices,
+    [predicateStorageName],
+    stagePath,
+  );
+  throwIfCancelled(signal);
+  const predicateValue = prefix.buffers[predicateStorageName];
+  if (!(predicateValue instanceof Uint32Array) ||
+      predicateValue.length !== 1) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      `$.nodes.${conditional.nodeId}.predicate`,
+      "resource conditional feedback returned an invalid u32 allocation",
+    );
+  }
+  return Object.freeze({
+    conditionalIndex,
+    selection: selectResourceConditionalExecution(
+      state,
+      selectedExecution,
+      conditional,
+      predicateValue[0] as number,
+    ),
+  });
+}
+
 async function executeGraphWithSequentialConditionalRepeatFeedback(
   device: KernelDevice,
   gpu: GPUDevice,
@@ -3326,19 +3377,9 @@ async function executeGraphWithSequentialConditionalRepeatFeedback(
     buffers,
   );
   try {
-    const predicatePlan = state.resourcesById.get(
-      conditional.predicate.resourceId,
-    );
-    const predicateStorageName = predicatePlan?.storageNames[
-      conditional.predicate.rank
-    ];
     const repeatPlan = state.resourcesById.get(repeat.resourceId);
     const repeatStorageName = repeatPlan?.storageNames[repeat.rank];
     if (
-      predicatePlan === undefined ||
-      predicateStorageName === undefined ||
-      predicatePlan.byteLength !== 4 ||
-      residents[predicateStorageName] === undefined ||
       repeatPlan === undefined ||
       repeatStorageName === undefined ||
       repeatPlan.byteLength !== 4 ||
@@ -3350,53 +3391,18 @@ async function executeGraphWithSequentialConditionalRepeatFeedback(
         "verified sequential conditional/repeat source storage disappeared",
       );
     }
-    const conditionalIndex =
-      selectedExecution.pipelineStepIndices.indexOf(
-        conditional.startStepIndex,
-      );
-    if (conditionalIndex < 0) {
-      fail(
-        "BG-WEBGPU-GRAPH-INTERNAL",
-        "$.feedback.selection",
-        "verified sequential conditional step disappeared",
-      );
-    }
-    const prefixSteps = selectedExecution.steps.slice(0, conditionalIndex);
-    const prefixPipelineStepIndices =
-      selectedExecution.pipelineStepIndices.slice(0, conditionalIndex);
-    if (prefixSteps.length === 0) {
-      fail(
-        "BG-WEBGPU-GRAPH-INTERNAL",
-        "$.feedback.selection",
-        "verified sequential conditional producer disappeared",
-      );
-    }
-    const prefix = await executeResidentGraphStage(
+    const {
+      conditionalIndex,
+      selection: conditionalSelection,
+    } = await executeResourceConditionalPrefix(
       device,
       gpu,
       state,
-      prefixSteps,
+      selectedExecution,
       residents,
       pipelineSet,
-      prefixPipelineStepIndices,
-      [predicateStorageName],
+      signal,
       "$.feedback.predicate",
-    );
-    throwIfCancelled(signal);
-    const predicateValue = prefix.buffers[predicateStorageName];
-    if (!(predicateValue instanceof Uint32Array) ||
-        predicateValue.length !== 1) {
-      fail(
-        "BG-WEBGPU-GRAPH-INTERNAL",
-        "$.feedback.selection",
-        "sequential conditional feedback returned an invalid u32 allocation",
-      );
-    }
-    const conditionalSelection = selectResourceConditionalExecution(
-      state,
-      selectedExecution,
-      conditional,
-      predicateValue[0] as number,
     );
     const repeatIndex = conditionalSelection.pipelineStepIndices.indexOf(
       repeat.startStepIndex,
@@ -3460,6 +3466,133 @@ async function executeGraphWithSequentialConditionalRepeatFeedback(
         state.readbackStorageNames,
         "$.feedback.suffix",
       );
+    return Object.freeze({ result, selectedExecution: finalSelection });
+  } finally {
+    destroyResidentGraphBuffers(residents);
+  }
+}
+
+async function executeGraphWithSequentialConditionalDynamicDispatchFeedback(
+  device: KernelDevice,
+  gpu: GPUDevice,
+  state: PreparedState,
+  selectedExecution: SelectedExecution,
+  buffers: Readonly<Record<string, WgslTypedArray>>,
+  pipelineSet: WgslPreparedPipelineSet,
+  signal: AbortSignal | undefined,
+): Promise<ExecutedGraph> {
+  const conditional = selectedExecution.resourceConditional;
+  const dispatch = selectedExecution.resourceDynamicDispatches[0];
+  if (
+    conditional?.predicate.kind !== "resource" ||
+    dispatch === undefined ||
+    !isPreparedResourceLinearDynamicDispatch(dispatch) ||
+    conditional.predicate.resourceId === dispatch.selector.resourceId
+  ) {
+    fail(
+      "BG-WEBGPU-GRAPH-INTERNAL",
+      "$.feedback",
+      "sequential conditional/dispatch feedback lost its verified sources",
+    );
+  }
+  const residents = await createResidentGraphBuffers(
+    device,
+    gpu,
+    buffers,
+  );
+  try {
+    const sources = resourceDynamicFeedbackSources(dispatch);
+    const sourceStorageNames = resourceDynamicSourceStorageNames(
+      dispatch,
+      sources,
+      state,
+      residents,
+    );
+    const {
+      conditionalIndex,
+      selection: conditionalSelection,
+    } = await executeResourceConditionalPrefix(
+      device,
+      gpu,
+      state,
+      selectedExecution,
+      residents,
+      pipelineSet,
+      signal,
+      "$.feedback.predicate",
+    );
+    const dispatchIndex = conditionalSelection.pipelineStepIndices.indexOf(
+      dispatch.startStepIndex,
+    );
+    if (dispatchIndex <= conditionalIndex) {
+      fail(
+        "BG-WEBGPU-GRAPH-INTERNAL",
+        "$.feedback.selection",
+        "verified sequential dynamic dispatch does not follow its conditional producer",
+      );
+    }
+    const middle = await executeResidentGraphStage(
+      device,
+      gpu,
+      state,
+      conditionalSelection.steps.slice(conditionalIndex, dispatchIndex),
+      residents,
+      pipelineSet,
+      conditionalSelection.pipelineStepIndices.slice(
+        conditionalIndex,
+        dispatchIndex,
+      ),
+      sourceStorageNames,
+      "$.feedback.launch-count",
+    );
+    throwIfCancelled(signal);
+    const dynamicSelection = resourceDynamicSelectionFromReadback(
+      dispatch,
+      sources,
+      sourceStorageNames,
+      middle.buffers,
+    );
+    const steps = [...conditionalSelection.steps];
+    specializeResourceDynamicDispatch(
+      steps,
+      conditionalSelection.pipelineStepIndices,
+      dispatch,
+      dynamicSelection,
+    );
+    const completionsByNodeId = new Map(
+      conditionalSelection.completedDynamicDispatches.map((item) => [
+        item.nodeId,
+        item,
+      ]),
+    );
+    completionsByNodeId.set(
+      dispatch.nodeId,
+      dynamicDispatchCompletion(dispatch.nodeId, dynamicSelection),
+    );
+    const completedDynamicDispatches = Object.freeze(
+      state.topologicalNodeIds.flatMap((nodeId) => {
+        const completed = completionsByNodeId.get(nodeId);
+        return completed === undefined ? [] : [completed];
+      }),
+    );
+    const finalSelection: SelectedExecution = Object.freeze({
+      ...conditionalSelection,
+      steps: Object.freeze(steps),
+      completedDynamicDispatches,
+      resourceDynamicDispatches: Object.freeze([dispatch]),
+    });
+    throwIfCancelled(signal);
+    const result = await executeResidentGraphStage(
+      device,
+      gpu,
+      state,
+      finalSelection.steps.slice(dispatchIndex),
+      residents,
+      pipelineSet,
+      finalSelection.pipelineStepIndices.slice(dispatchIndex),
+      state.readbackStorageNames,
+      "$.feedback.suffix",
+    );
     return Object.freeze({ result, selectedExecution: finalSelection });
   } finally {
     destroyResidentGraphBuffers(residents);

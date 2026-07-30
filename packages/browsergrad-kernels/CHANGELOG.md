@@ -9,6 +9,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- WebGPU host-graph backend 1.35 executes host-graph program version 1.31's
+  exact sequential conditional-to-linear-dispatch feedback profile. One
+  produced `u32` selects a prewarmed branch; both branches guarantee-write one
+  distinct positive bounded launch count, which is read only after branch
+  execution. Shared conditional-prefix selection now serves standalone and
+  sequential consumers. Required actual-device evidence expands from 84 to 86
+  complete CPU/WebGPU parity cases with correctness artifact
+  `76c9d52ef7eec1601b120fb23fd24f058f2dc1795b4a453959415a30bb5081d8`.
+  The separately required four-case Worker lane is repinned to backend 1.35
+  with artifact
+  `e83b5f505d544f2e70bbb958ab917a46fed6a9c56dfc80a5b6a54397c81c446c`.
 - WebGPU host-graph backend 1.34 executes host-graph program version 1.30's
   exact sequential conditional-to-repeat feedback profile. One produced `u32`
   selects a prewarmed branch; both branches guarantee-write one distinct
