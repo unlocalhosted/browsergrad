@@ -6,6 +6,7 @@ import {
   estimateAttentionMemory,
   emitCuda1DProgramWgsl,
   emitKernel1DProgramWgsl,
+  executeSemanticHostGraphBrowserWorker,
   kernels,
   KernelError,
   reference,
@@ -71,6 +72,7 @@ describe("public surface", () => {
     expect(typeof runSemanticAttentionWebGpu).toBe("function");
     expect(typeof runSemanticGemmWebGpu).toBe("function");
     expect(typeof runPreparedSemanticGemmResident).toBe("function");
+    expect(typeof executeSemanticHostGraphBrowserWorker).toBe("function");
   });
 
   it("kernels bundle exposes the v0 op set", () => {

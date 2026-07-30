@@ -1,6 +1,6 @@
 # CI — build + test on every push and pull request.
 #
-# Eleven job families, run in parallel:
+# Twelve job families, run in parallel:
 #   1. surface — fast `vitest run` on each package (~5s wall-clock each)
 #   2. compiler-native — the required LLVM/Clang harness, isolated from the
 #      ordinary Node-24 surface so neither lane queues behind the other.
@@ -12,14 +12,16 @@
 #      isolated lane so it does not extend the broad browser critical path.
 #   6. semantic-host-graph-webgpu — required static-DAG dispatch/collective
 #      evidence isolated from the broad browser critical path.
-#   7. semantic-host-graph-performance-webgpu — observational fixed-repeat
+#   7. semantic-host-graph-worker-webgpu — required one-shot dedicated Worker
+#      transport and Worker-owned WebGPU execution evidence.
+#   8. semantic-host-graph-performance-webgpu — observational fixed-repeat
 #      versus equivalent unrolled host-API timing, isolated from correctness.
-#   8. real-world-audits — one full-corpus compile/codegen audit lane.
-#   9. semantic-attention-webgpu — required causal/non-causal block-tiled
+#   9. real-world-audits — one full-corpus compile/codegen audit lane.
+#  10. semantic-attention-webgpu — required causal/non-causal block-tiled
 #      attention evidence, isolated from the broad browser lane.
-#  10. semantic-attention-performance-webgpu — observational block-tiled versus
+#  11. semantic-attention-performance-webgpu — observational block-tiled versus
 #      row-wise host-API timing, isolated from correctness and broad browser work.
-#  11. browser-real-world — source and dist CUDA browser gates on separate
+#  12. browser-real-world — source and dist CUDA browser gates on separate
 #      runners, each retaining full fixture and auto-corpus execution coverage.
 #
 # Build matrix:
@@ -198,6 +200,7 @@ jobs:
           pnpm --filter @unlocalhosted/browsergrad-kernels exec vitest run
           --config vitest.browser.config.ts
           --exclude tests-browser/semantic_host_graph_webgpu.test.ts
+          --exclude tests-browser/semantic_host_graph_worker_webgpu.test.ts
           --exclude tests-browser/semantic_host_graph_performance_webgpu.test.ts
           --exclude tests-browser/semantic_gemm_webgpu.test.ts
           --exclude tests-browser/semantic_attention_webgpu.test.ts
@@ -246,6 +249,45 @@ jobs:
         with:
           name: semantic-host-graph-webgpu-evidence-${{ github.sha }}
           path: semantic-host-graph-webgpu-evidence.log
+          if-no-files-found: error
+
+  semantic-host-graph-worker-webgpu:
+    name: Required semantic host-graph Worker WebGPU evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BG_BROWSER_HEADLESS: '1'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build semantic host-graph Worker dependency closure
+        run: |
+          pnpm --filter @unlocalhosted/browsergrad-semantic-core build
+          pnpm --filter @unlocalhosted/browsergrad-kernels build
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @unlocalhosted/browsergrad-kernels exec playwright install --with-deps chromium
+
+      - name: Run required one-shot Worker host-graph evidence
+        run: |
+          set -o pipefail
+          pnpm --filter @unlocalhosted/browsergrad-kernels test:browser:semantic-host-graph-worker:required 2>&1 | tee semantic-host-graph-worker-webgpu-evidence.log
+
+      - name: Retain semantic host-graph Worker WebGPU evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semantic-host-graph-worker-webgpu-evidence-${{ github.sha }}
+          path: semantic-host-graph-worker-webgpu-evidence.log
           if-no-files-found: error
 
   semantic-host-graph-performance-webgpu:

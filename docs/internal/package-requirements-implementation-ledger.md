@@ -558,6 +558,7 @@ Their `verified` labels apply only to synthetic optional-lane contracts.
 | D-222 | 2026-07-30 | accepted | Add one exact sequential produced-resource feedback profile as host-graph program version 1.26 while retaining exact 1.0-1.25 decoding and every older feedback limit. Admit exactly two top-level `resource-u32-prefix-elements` dispatches with distinct sources only when one dispatch semantically writes the other's source; forbid missing or bidirectional producer relations, conditional/repeat/rectangular combinations, and a third node. CPU reads each private source only when its ordered dispatch executes. Portable WebGPU reads and validates the first u32 after its producer prefix, substitutes and executes that exact prepared dispatch, then reads and validates the distinct u32 it produced, substitutes the dependent dispatch, and executes the suffix over the same resident buffers. Report feedback-node and feedback-stage counts separately and bind both into pipeline identity. | This is the smallest honest repeated host-mediated feedback contract: the second selection cannot exist until the first selected dispatch completes. Exact producer dependence, two stages, prewarmed slots, private resident buffers, and one fail-stop lifecycle prevent an unnecessary aggregate read, callback, recompilation path, unbounded cycle, or false device-side claim while exposing the synchronization cost explicitly. |
 | D-223 | 2026-07-30 | accepted | Extend the exact sequential produced-resource profile to three stages as host-graph program version 1.27 while retaining exact 1.0-1.26 decoding and every older feedback limit. Admit exactly three top-level `resource-u32-prefix-elements` dispatches with distinct source resources only when their semantic writes form one root-to-middle-to-leaf producer chain; reject missing, forked, cyclic, extra, duplicate-source, mixed-mode, and pre-version profiles. CPU reads each private source at its ordered dispatch. Portable WebGPU reuses one generic staged executor to read, validate, specialize, and execute every exact prepared slot before the next distinct source becomes observable, while retaining one resident-buffer and fail-stop lifecycle. | A separately bounded third stage deepens the established semantic and execution seam without pretending to support arbitrary graphs, callbacks, device-side loops, or an unbounded feedback cycle. Exact chain shape and versioned node ceilings keep synchronization cost, work, pipeline identity, and failure ownership explicit. |
 | D-224 | 2026-07-30 | accepted | Add one generic `copyVerifiedArtifactWireBytes` boundary that copies the complete normalized canonical envelope of an opaque verifier-issued semantic artifact. The copy carries no in-memory authority; every receiving realm must decode and verify it again under its own schema authority before semantic preparation or execution. | Cross-realm transport needs stable bytes, but exposing payload-only objects would discard version, producer, extension, and artifact fields while structured-cloning an opaque authority would create a misleading forged object. One schema-level exporter preserves the existing wire contract for every artifact domain without adding per-domain serialization paths. |
+| D-225 | 2026-07-30 | accepted | Add `browsergrad.host-graph.browser-worker-transport@1` as one exact one-shot dedicated-browser-Worker topology. The package controller snapshots canonical artifact and input bytes, transfers only private buffers, binds one cryptographic request ID, enforces exact byte and wall-time limits, validates one closed terminal, and terminates the Worker for every outcome. The Worker re-verifies layout, kernel, and graph bytes under realm-local authority, owns its `GPUDevice`, and invokes the existing portable WebGPU graph executor. | This is the smallest honest transport slice and does not reinterpret host-graph semantics. A one-shot lifecycle gives timeout/cancellation fail-stop ownership and prevents stale terminals or post-failure reuse. Re-verification preserves the opaque-authority contract across realms. Keeping mesh/topology, collective transport, shared memory, retries, and native companions out of v1 avoids a false distributed-systems claim. |
 
 Provisional decisions MUST be accepted, replaced, or rejected before the
 affected implementation slice is marked complete.
@@ -8740,6 +8741,31 @@ whether any files may be left partially changed.
   it before any assertion, await, or harness message.
 - Four concurrent full semantic-core runs pass independently at 24 files/251
   tests, alongside strict typecheck and source lint.
+
+### 2026-07-30 — Gate 7 one-shot browser Worker transport
+
+- `browsergrad.host-graph.browser-worker-transport@1` now carries complete
+  canonical graph/layout/kernel envelopes and private input snapshots into one
+  package-owned module Worker, where every artifact is re-verified before the
+  existing portable WebGPU graph executor acquires a Worker-owned device.
+- The controller binds one cryptographic request ID, closed request/terminal
+  records, 64 MiB artifact and 256 MiB input/output ceilings, a five-minute
+  hard wall-time ceiling, caller cancellation, exactly one accepted terminal,
+  and unconditional one-shot termination. Unit tests cover mutation snapshots,
+  forged authority, stale/extended terminals, Worker failure projection,
+  timeout, and cancellation.
+- Required headed Chromium on Apple Metal 3 passes raw-u8 copy and verified-f32
+  semantic-dispatch graphs in independent Workers. Correctness artifact
+  `89cd5e967b229cf1ea88cb230ac5a4739551033c152da3e160d361d3bd38c5d3`;
+  Worker device profile
+  `0436693df95430f4195cb27222e8ebca104c64b3b99ac27c24a5be5ec0f5bc06`.
+- Kernels passes 22 files/212 tests, strict source/browser typecheck, build,
+  lint, architecture, and diff checks. CI, release, publish, packed-export, and
+  exact-commit npm staging contracts now include a separately retained
+  required Worker lane.
+- This is one dedicated Worker topology only. Worker meshes, cross-worker
+  collectives/synchronization, retries, shared-memory transport, native
+  companions, and broader mixed/device-side graph feedback remain open.
 
 ## Quick Resume Checklist
 

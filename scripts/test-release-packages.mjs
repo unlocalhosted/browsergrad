@@ -204,7 +204,7 @@ try {
   const semanticGraph = await import(pathToFileURL(join(semanticCore, "dist/graph.js")));
   const semanticRequirement = await import(pathToFileURL(join(semanticCore, "dist/requirement.js")));
   const semanticCapability = await import(pathToFileURL(join(semanticCore, "dist/capability.js")));
-  for (const exportName of ["canonicalizeJson", "hashSemanticArtifact", "SCHEDULE_DIAGNOSTIC_CODES", "validateWireEnvelope"]) {
+  for (const exportName of ["canonicalizeJson", "copyVerifiedArtifactWireBytes", "hashSemanticArtifact", "SCHEDULE_DIAGNOSTIC_CODES", "validateWireEnvelope"]) {
     assert(exportName in semanticSchema, `semantic-core schema export missing ${exportName}`);
   }
   for (const exportName of ["normalizeLayoutExpr", "traceViewCoordinate", "verifyLayoutArtifact"]) {
@@ -620,7 +620,7 @@ try {
     semanticCoreRange === workspaceSemanticCoreVersion,
     `kernels package semantic-core dependency should be ${workspaceSemanticCoreVersion}, got ${semanticCoreRange}`,
   );
-  for (const subpath of ["./wgsl_program", "./float16", "./cuda_concepts", "./cuda_program", "./rubric", "./semantic_view_copy", "./semantic_host_graph", "./semantic_gemm", "./semantic_attention"]) {
+  for (const subpath of ["./wgsl_program", "./float16", "./cuda_concepts", "./cuda_program", "./rubric", "./semantic_view_copy", "./semantic_host_graph", "./semantic_host_graph_worker", "./semantic_gemm", "./semantic_attention"]) {
     assert(kernelsPkg.exports?.[subpath], `kernels package missing export ${subpath}`);
   }
   for (const file of [
@@ -628,6 +628,9 @@ try {
     "dist/semantic_view_copy.d.ts",
     "dist/semantic_host_graph.js",
     "dist/semantic_host_graph.d.ts",
+    "dist/semantic_host_graph_worker.js",
+    "dist/semantic_host_graph_worker.d.ts",
+    "dist/semantic_host_graph_worker_module.js",
     "dist/semantic_gemm.js",
     "dist/semantic_gemm.d.ts",
     "dist/semantic_attention.js",
@@ -671,6 +674,7 @@ try {
     "runSemanticHostGraphWebGpuPipeline",
     "destroySemanticHostGraphWebGpuPipeline",
     "runSemanticHostGraphWebGpu",
+    "executeSemanticHostGraphBrowserWorker",
     "prepareSemanticGemmWgsl",
     "runSemanticGemmWebGpu",
     "prepareSemanticAttentionWgsl",
@@ -687,6 +691,7 @@ try {
     ["rubric", "createKernelRubric"],
     ["semantic_view_copy", "prepareSemanticViewCopyWgsl"],
     ["semantic_host_graph", "prepareSemanticHostGraphWebGpu"],
+    ["semantic_host_graph_worker", "executeSemanticHostGraphBrowserWorker"],
     ["semantic_gemm", "prepareSemanticGemmWgsl"],
     ["semantic_attention", "prepareSemanticAttentionWgsl"],
   ]) {
@@ -1180,6 +1185,7 @@ try {
   );
   for (const [workflowName, workflow] of [["release", releaseWorkflow], ["publish", publishWorkflow]]) {
     assertSemanticHostGraphEvidenceWorkflowOrder(workflowName, workflow);
+    assertSemanticHostGraphWorkerEvidenceWorkflowOrder(workflowName, workflow);
     assertSemanticHostGraphPerformanceEvidenceWorkflowOrder(workflowName, workflow);
     assertSemanticGemmEvidenceWorkflowOrder(workflowName, workflow);
     assertSemanticAttentionEvidenceWorkflowOrder(workflowName, workflow);
@@ -1206,11 +1212,15 @@ try {
   const hostGraphPerformanceCiStart = ciWorkflow.indexOf(
     "\n  semantic-host-graph-performance-webgpu:\n",
   );
-  const hostGraphCiEnd = hostGraphPerformanceCiStart;
+  const hostGraphWorkerCiStart = ciWorkflow.indexOf(
+    "\n  semantic-host-graph-worker-webgpu:\n",
+  );
+  const hostGraphCiEnd = hostGraphWorkerCiStart;
   assert(
     hostGraphCiStart >= 0
       && hostGraphCiEnd > hostGraphCiStart
-      && ciWorkflow.includes("--exclude tests-browser/semantic_host_graph_webgpu.test.ts"),
+      && ciWorkflow.includes("--exclude tests-browser/semantic_host_graph_webgpu.test.ts")
+      && ciWorkflow.includes("--exclude tests-browser/semantic_host_graph_worker_webgpu.test.ts"),
     "CI must isolate semantic host-graph evidence from the broad browser lane",
   );
   const hostGraphCiJob = ciWorkflow.slice(hostGraphCiStart, hostGraphCiEnd);
@@ -1219,6 +1229,22 @@ try {
       && hostGraphCiJob.includes("semantic-host-graph-webgpu-evidence-${{ github.sha }}")
       && !/^    needs:/mu.test(hostGraphCiJob),
     "CI semantic host-graph evidence must be required, retained, and independently parallel",
+  );
+  const hostGraphWorkerCiJob = ciWorkflow.slice(
+    hostGraphWorkerCiStart,
+    hostGraphPerformanceCiStart,
+  );
+  assert(
+    hostGraphWorkerCiStart >= 0
+      && hostGraphPerformanceCiStart > hostGraphWorkerCiStart
+      && hostGraphWorkerCiJob.includes(
+        "test:browser:semantic-host-graph-worker:required",
+      )
+      && hostGraphWorkerCiJob.includes(
+        "semantic-host-graph-worker-webgpu-evidence-${{ github.sha }}",
+      )
+      && !/^    needs:/mu.test(hostGraphWorkerCiJob),
+    "CI semantic host-graph Worker evidence must be required, retained, and independently parallel",
   );
   const hostGraphPerformanceCiEnd = ciWorkflow.indexOf(
     "\n  semantic-gemm-webgpu:\n",
@@ -1636,6 +1662,9 @@ import {
   runSemanticHostGraphWebGpuPipeline,
 } from "@unlocalhosted/browsergrad-kernels/semantic_host_graph";
 import {
+  executeSemanticHostGraphBrowserWorker,
+} from "@unlocalhosted/browsergrad-kernels/semantic_host_graph_worker";
+import {
   compileCudaLiteKernelWithLayoutBindings,
   compileCudaLiteKernelWithViewCopyBinding,
   createCudaLiteViewCopyHostGraph,
@@ -1654,6 +1683,7 @@ const artifacts = await createVerifiedDensePermutationViewCopyArtifacts({
   layoutArtifactId: "transpose-layout",
   kernelArtifactId: "transpose-kernel",
 });
+if (typeof executeSemanticHostGraphBrowserWorker !== "function") throw new Error("fresh consumer lost semantic host-graph Worker transport");
 if (densePermutationFixtures.schema !== "browsergrad.semantic-core.dense-permutation-view-copy-fixtures" || densePermutationFixtures.cases.length !== 2) throw new Error("fresh consumer lost the versioned dense-permutation fixture export");
 const { layout, kernel, operationId } = artifacts;
 const payload = layoutArtifactPayload(layout);
@@ -2221,6 +2251,26 @@ function assertSemanticHostGraphEvidenceWorkflowOrder(workflowName, workflow) {
     artifact: "semantic-host-graph-webgpu-evidence-${{ github.sha }}",
     evidenceEnvironment:
       "BG_REQUIRED_SEMANTIC_HOST_GRAPH_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}",
+  });
+}
+
+function assertSemanticHostGraphWorkerEvidenceWorkflowOrder(workflowName, workflow) {
+  assertKernelsSemanticEvidenceWorkflowOrder(workflowName, workflow, {
+    label: "semantic host graph Worker",
+    releaseEvidence:
+      "Required semantic host-graph Worker WebGPU gate (kernels release)",
+    releaseUpload:
+      "Retain semantic host-graph Worker WebGPU evidence (kernels release)",
+    publishEvidence:
+      "Run required semantic host-graph Worker WebGPU gate",
+    publishUpload:
+      "Retain semantic host-graph Worker WebGPU evidence",
+    command: "test:browser:semantic-host-graph-worker:required",
+    log: "semantic-host-graph-worker-webgpu-evidence.log",
+    artifact:
+      "semantic-host-graph-worker-webgpu-evidence-${{ github.sha }}",
+    evidenceEnvironment:
+      "BG_REQUIRED_SEMANTIC_HOST_GRAPH_WORKER_WEBGPU_EVIDENCE_COMMIT: ${{ github.sha }}",
   });
 }
 

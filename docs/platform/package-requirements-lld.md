@@ -29,7 +29,7 @@ This checkpoint is informational. The rest of this document is normative; the
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
-| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch including exact shared-count fanout and exact two- and three-stage producer chains, rank-2-through-rank-8 request-time and produced-resource rectangular prefix dispatch including exact shared-rectangle fanout, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, and separately prepared device-bound pipeline authority have exact f32/i32/u32 plus raw-u8 actual-device parity and a separate prewarmed fixed-repeat/unrolled performance observation; broader mixed/device-side feedback, transport/topology, and native companion evidence remain open. |
+| 7 — host graphs and optional systems | in progress | The verified DAG, compiler pipeline consumer, whole-allocation copies, dependency-ordered completion events, bounded fixed-count, request-time u32-count, and one produced-resource u32-count repetition, bounded positive request-time or produced-resource arbitrary one-dimensional prefix dispatch including exact shared-count fanout and exact two- and three-stage producer chains, rank-2-through-rank-8 request-time and produced-resource rectangular prefix dispatch including exact shared-rectangle fanout, captured-input and runtime-control u32 conditionals, one produced-resource u32 conditional, fail-stop materialization, CPU oracle, authority-bound portable WebGPU executor, separately prepared device-bound pipeline authority, and one exact one-shot dedicated-browser-Worker transport have actual-device evidence; broader mixed/device-side feedback, worker meshes/cross-worker topology, and native companion evidence remain open. |
 
 Only `verified` means every declared exit criterion is complete. A closed
 profile does not imply broader dtype, layout, numerical, or backend coverage.
@@ -185,12 +185,12 @@ portable implementation and exact-payload convergence exits already pass.
 3. Run the unified host operation against those exact external responses so
    backend/final-release authority is minted in one process. Serialized
    observations and synthetic fixtures grant no production authority.
-
 Gate 7 covers bounded DAG request/resource repetition, request-time and
 produced-resource dispatch through rank 8, exact shared linear or rectangular
 fanout in one feedback stage, exact two- and three-stage linear producer chains,
-and device-bound CPU/WebGPU pipelines. Broader mixed/device-side feedback,
-unbounded launches, transport/topology, worker meshes, and native systems remain open.
+device-bound CPU/WebGPU pipelines, and one bounded one-shot dedicated-browser-
+Worker transport. Broader mixed/device-side feedback, unbounded launches,
+worker meshes, cross-worker topology, and native systems remain open.
 
 ## Purpose
 
@@ -2794,6 +2794,26 @@ Gate 7 remains `in progress`. Runtime controls are request-time host inputs,
 not GPU/backend-derived loop or launch counts.
 Current events do not claim timestamps, external waits, or cross-queue/cross-
 worker synchronization.
+
+`browsergrad.host-graph.browser-worker-transport@1` is the first distinct
+browser transport product. One package-owned module Worker receives fresh
+canonical graph/layout/kernel envelope bytes and private input-byte snapshots,
+re-verifies every artifact under Worker-realm authority, acquires and owns its
+own `GPUDevice`, delegates to the canonical portable WebGPU graph executor, and
+returns only complete materialized outputs plus the backend trace. The protocol
+is a closed one-shot request/terminal exchange with an unguessable request ID,
+explicit artifact/input/output and wall-time limits, caller cancellation,
+strict terminal validation, unconditional Worker termination, and no failed execution claim. This profile names
+`single-dedicated-browser-worker` topology only; it grants no mesh, collective
+transport, retry, shared-memory, cross-worker synchronization, or native
+companion claim.
+
+Required headed Chromium evidence on Apple Metal 3 executes both a raw-u8
+whole-allocation graph and a verified f32 semantic dispatch through independent
+Workers, proves caller mutation cannot alter admitted bytes, and observes
+Worker-owned WebGPU submission. CI and npm staging retain an exact-commit
+required Worker lane separately from the existing in-realm graph and
+performance lanes.
 
 ## Proof Matrix and Release Gates
 

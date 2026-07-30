@@ -10,6 +10,7 @@ describe("kernels publish evidence gate", () => {
     expect(() => validateViewCopyPublishGate({
       evidenceCommit: head,
       semanticHostGraphEvidenceCommit: head,
+      semanticHostGraphWorkerEvidenceCommit: head,
       semanticHostGraphPerformanceEvidenceCommit: head,
       semanticGemmEvidenceCommit: head,
       semanticAttentionEvidenceCommit: head,
@@ -22,6 +23,7 @@ describe("kernels publish evidence gate", () => {
     expect(() => validateViewCopyPublishGate({
       evidenceCommit: head,
       semanticHostGraphEvidenceCommit: head,
+      semanticHostGraphWorkerEvidenceCommit: head,
       semanticHostGraphPerformanceEvidenceCommit: head,
       semanticGemmEvidenceCommit: undefined,
       semanticAttentionEvidenceCommit: head,
@@ -34,6 +36,7 @@ describe("kernels publish evidence gate", () => {
     expect(() => validateViewCopyPublishGate({
       evidenceCommit: head,
       semanticHostGraphEvidenceCommit: head,
+      semanticHostGraphWorkerEvidenceCommit: head,
       semanticHostGraphPerformanceEvidenceCommit: head,
       semanticGemmEvidenceCommit: head,
       semanticAttentionEvidenceCommit: undefined,
@@ -46,6 +49,7 @@ describe("kernels publish evidence gate", () => {
     expect(() => validateViewCopyPublishGate({
       evidenceCommit: head,
       semanticHostGraphEvidenceCommit: head,
+      semanticHostGraphWorkerEvidenceCommit: head,
       semanticHostGraphPerformanceEvidenceCommit: undefined,
       semanticGemmEvidenceCommit: head,
       semanticAttentionEvidenceCommit: head,
@@ -58,6 +62,7 @@ describe("kernels publish evidence gate", () => {
     expect(() => validateViewCopyPublishGate({
       evidenceCommit: head,
       semanticHostGraphEvidenceCommit: head,
+      semanticHostGraphWorkerEvidenceCommit: head,
       semanticHostGraphPerformanceEvidenceCommit: head,
       semanticGemmEvidenceCommit: head,
       semanticAttentionEvidenceCommit: head,
@@ -70,6 +75,7 @@ describe("kernels publish evidence gate", () => {
     expect(() => validateViewCopyPublishGate({
       evidenceCommit: head,
       semanticHostGraphEvidenceCommit: undefined,
+      semanticHostGraphWorkerEvidenceCommit: head,
       semanticHostGraphPerformanceEvidenceCommit: head,
       semanticGemmEvidenceCommit: head,
       semanticAttentionEvidenceCommit: head,
@@ -79,6 +85,19 @@ describe("kernels publish evidence gate", () => {
       head,
       relevantStatus: "",
     })).toThrow(/semantic-host-graph:required/u);
+    expect(() => validateViewCopyPublishGate({
+      evidenceCommit: head,
+      semanticHostGraphEvidenceCommit: head,
+      semanticHostGraphWorkerEvidenceCommit: undefined,
+      semanticHostGraphPerformanceEvidenceCommit: head,
+      semanticGemmEvidenceCommit: head,
+      semanticAttentionEvidenceCommit: head,
+      semanticAttentionPerformanceEvidenceCommit: head,
+      jitEvidenceCommit: head,
+      githubSha: undefined,
+      head,
+      relevantStatus: "",
+    })).toThrow(/semantic-host-graph-worker:required/u);
     expect(() => validate(head, "", undefined, head, "0000000000000000000000000000000000000000"))
       .toThrow(/semantic GEMM evidence commit/u);
     expect(() => validate(
@@ -121,6 +140,18 @@ describe("kernels publish evidence gate", () => {
       head,
       "0000000000000000000000000000000000000000",
     )).toThrow(/semantic host-graph performance evidence commit/u);
+    expect(() => validate(
+      head,
+      "",
+      undefined,
+      head,
+      head,
+      head,
+      head,
+      head,
+      head,
+      "0000000000000000000000000000000000000000",
+    )).toThrow(/semantic host-graph Worker evidence commit/u);
   });
 
   it("accepts only the exact clean evidenced commit", () => {
@@ -140,10 +171,12 @@ function validate(
   semanticAttentionPerformanceEvidenceCommit: string | undefined = evidenceCommit,
   semanticHostGraphEvidenceCommit: string | undefined = evidenceCommit,
   semanticHostGraphPerformanceEvidenceCommit: string | undefined = evidenceCommit,
+  semanticHostGraphWorkerEvidenceCommit: string | undefined = evidenceCommit,
 ) {
   return validateViewCopyPublishGate({
     evidenceCommit,
     semanticHostGraphEvidenceCommit,
+    semanticHostGraphWorkerEvidenceCommit,
     semanticHostGraphPerformanceEvidenceCommit,
     semanticGemmEvidenceCommit,
     semanticAttentionEvidenceCommit,
