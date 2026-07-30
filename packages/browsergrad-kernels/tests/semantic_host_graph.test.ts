@@ -416,6 +416,93 @@ function resourceDynamicFanoutProgram(
   };
 }
 
+function sequentialResourceDynamicProgram(
+  countArtifacts: VerifiedViewCopyArtifacts,
+  dataArtifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 26 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire("1"),
+    resources: [
+      resource("launch-input", "input", "u32", "4"),
+      resource("launch-count", "temporary", "u32", "4"),
+      resource("next-count-input", "input", "u32", "4"),
+      resource("next-count", "temporary", "u32", "4"),
+      resource("input", "input", "f32"),
+      resource("output", "output", "f32"),
+    ],
+    nodes: [
+      {
+        nodeId: "produce-launch-count",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "launch-input",
+        destinationResourceId: "launch-count",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "produce-next-count",
+        kind: "dynamic-dispatch",
+        dependsOn: ["produce-launch-count"],
+        semanticArtifactHash: countArtifacts.kernelSemanticHash,
+        entrypointId: countArtifacts.operationId,
+        dimensionBindings: {},
+        bindings: [
+          {
+            semanticResourceId: countArtifacts.source.viewId,
+            graphResourceId: "next-count-input",
+          },
+          {
+            semanticResourceId: countArtifacts.destination.viewId,
+            graphResourceId: "next-count",
+          },
+        ],
+        launchSource: {
+          resourceId: "launch-count",
+          rank: wire("0"),
+          mode: "u32-prefix-element-count",
+        },
+        maxElementCount: wire("1"),
+        mode: "resource-u32-prefix-elements",
+      },
+      {
+        nodeId: "copy-selected-prefix",
+        kind: "dynamic-dispatch",
+        dependsOn: ["produce-next-count"],
+        semanticArtifactHash: dataArtifacts.kernelSemanticHash,
+        entrypointId: dataArtifacts.operationId,
+        dimensionBindings: {},
+        bindings: [
+          {
+            semanticResourceId: dataArtifacts.source.viewId,
+            graphResourceId: "input",
+          },
+          {
+            semanticResourceId: dataArtifacts.destination.viewId,
+            graphResourceId: "output",
+          },
+        ],
+        launchSource: {
+          resourceId: "next-count",
+          rank: wire("0"),
+          mode: "u32-prefix-element-count",
+        },
+        maxElementCount: wire("2"),
+        mode: "resource-u32-prefix-elements",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["copy-selected-prefix"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function collectiveProgram(
   artifacts: VerifiedViewCopyArtifacts,
   dtype: "f32" | "i32" | "u32",
@@ -1231,6 +1318,7 @@ describe("semantic host-graph WebGPU preparation", () => {
       dynamicDispatchCount: 2,
       resourceDynamicDispatchCount: 2,
       midGraphFeedbackCount: 2,
+      midGraphFeedbackStageCount: 1,
       runtimeControlIds: [],
     });
   });
@@ -1353,7 +1441,7 @@ describe("semantic host-graph WebGPU preparation", () => {
     expect(inputReads).toBe(0);
   });
 
-  it("prewarms one produced dynamic dispatch and version-1.24 shared fanout", async () => {
+  it("prewarms produced dynamic dispatch, shared fanout, and sequential feedback", async () => {
     const artifacts = await identityArtifacts();
     const graph = await verified(
       resourceDynamicPipelineProgram(artifacts),
@@ -1387,6 +1475,34 @@ describe("semantic host-graph WebGPU preparation", () => {
       dynamicDispatchCount: 2,
       resourceDynamicDispatchCount: 2,
       midGraphFeedbackCount: 2,
+      midGraphFeedbackStageCount: 1,
+      runtimeControlIds: [],
+    });
+
+    const countArtifacts = await identityArtifacts("u32", 1);
+    const sequentialOptions = {
+      kernelArtifacts: [countArtifacts.kernel, artifacts.kernel],
+      layoutArtifacts: [countArtifacts.layout, artifacts.layout],
+    };
+    const sequentialGraph = (await createVerifiedHostGraphArtifact(
+      sequentialResourceDynamicProgram(countArtifacts, artifacts),
+      sequentialOptions,
+    )).artifact;
+    const sequential = await prepareSemanticHostGraphWebGpu(
+      sequentialGraph,
+      sequentialOptions,
+    );
+    expect(sequential).toMatchObject({
+      backendVersion: SEMANTIC_HOST_GRAPH_WEBGPU_BACKEND_VERSION,
+      nodeCount: 4,
+      expandedStepCount: 3,
+      dispatchStepCount: 2,
+      copyStepCount: 1,
+      materializationCount: 1,
+      dynamicDispatchCount: 2,
+      resourceDynamicDispatchCount: 2,
+      midGraphFeedbackCount: 2,
+      midGraphFeedbackStageCount: 2,
       runtimeControlIds: [],
     });
   });

@@ -68,6 +68,8 @@ const CASE_IDS = Object.freeze([
   "f32-resource-dynamic-dispatch-two",
   "f32-resource-dynamic-fanout-one",
   "f32-resource-dynamic-fanout-two",
+  "f32-sequential-resource-feedback-one",
+  "f32-sequential-resource-feedback-two",
   "f32-aligned-dynamic-dispatch-64",
   "f32-aligned-dynamic-dispatch-128",
   "f32-aligned-resource-dynamic-dispatch-64",
@@ -130,7 +132,9 @@ const wire = (value: number): WireU64 => parseWireU64(String(value));
 
 interface PreparedCase {
   readonly caseId: string;
-  readonly artifacts?: VerifiedViewCopyArtifacts;
+  readonly artifacts?:
+    | VerifiedViewCopyArtifacts
+    | readonly VerifiedViewCopyArtifacts[];
   readonly graph: VerifiedHostGraphArtifact;
   readonly prepared: PreparedSemanticHostGraphWebGpu;
   readonly inputs: readonly SemanticHostGraphWebGpuInputBinding[];
@@ -153,6 +157,7 @@ interface CaseObservation extends JsonObject {
   readonly completedDynamicDispatches: readonly JsonObject[];
   readonly completedConditionals: readonly JsonObject[];
   readonly midGraphFeedbackCount: number;
+  readonly midGraphFeedbackStageCount: number;
   readonly collectiveReductionStepCount: number;
   readonly collectiveReplicationStepCount: number;
   readonly wgslModuleHashes: readonly string[];
@@ -258,6 +263,14 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
       ),
       prepareResourceDynamicFanoutCase(
         "f32-resource-dynamic-fanout-two",
+        2,
+      ),
+      prepareSequentialResourceFeedbackCase(
+        "f32-sequential-resource-feedback-one",
+        1,
+      ),
+      prepareSequentialResourceFeedbackCase(
+        "f32-sequential-resource-feedback-two",
         2,
       ),
       prepareWideDynamicDispatchCase(
@@ -632,6 +645,8 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
           actual.trace.completedDynamicDispatches,
         completedConditionals: actual.trace.completedConditionals,
         midGraphFeedbackCount: actual.trace.midGraphFeedbackCount,
+        midGraphFeedbackStageCount:
+          actual.trace.midGraphFeedbackStageCount,
         collectiveReductionStepCount:
           actual.trace.collectiveReductionStepCount,
         collectiveReplicationStepCount:
@@ -731,6 +746,32 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
     expect(twoResourceDynamicFanout?.expandedStepCount).toBe(6);
     expect(oneResourceDynamicFanout?.midGraphFeedbackCount).toBe(2);
     expect(twoResourceDynamicFanout?.midGraphFeedbackCount).toBe(2);
+    expect(oneResourceDynamicFanout?.midGraphFeedbackStageCount).toBe(1);
+    expect(twoResourceDynamicFanout?.midGraphFeedbackStageCount).toBe(1);
+    const oneSequentialFeedback = completedCases.find(({ caseId }) =>
+      caseId === "f32-sequential-resource-feedback-one");
+    const twoSequentialFeedback = completedCases.find(({ caseId }) =>
+      caseId === "f32-sequential-resource-feedback-two");
+    expect(oneSequentialFeedback?.pipelineIdentityHash)
+      .toBe(twoSequentialFeedback?.pipelineIdentityHash);
+    expect(oneSequentialFeedback?.backendSpecializationHash)
+      .not.toBe(twoSequentialFeedback?.backendSpecializationHash);
+    expect(oneSequentialFeedback).toMatchObject({
+      expandedStepCount: 3,
+      dispatchStepCount: 2,
+      copyStepCount: 1,
+      materializationCount: 1,
+      midGraphFeedbackCount: 2,
+      midGraphFeedbackStageCount: 2,
+    });
+    expect(twoSequentialFeedback).toMatchObject({
+      expandedStepCount: 3,
+      dispatchStepCount: 2,
+      copyStepCount: 1,
+      materializationCount: 1,
+      midGraphFeedbackCount: 2,
+      midGraphFeedbackStageCount: 2,
+    });
     const alignedDynamic64 = completedCases.find(({ caseId }) =>
       caseId === "f32-aligned-dynamic-dispatch-64");
     const alignedDynamic128 = completedCases.find(({ caseId }) =>
@@ -822,6 +863,8 @@ it("executes multi-rank host graphs on a required real GPUDevice", async (contex
     expect(largeRectangularFanout?.completedDynamicDispatches).toHaveLength(2);
     expect(smallRectangularFanout?.midGraphFeedbackCount).toBe(2);
     expect(largeRectangularFanout?.midGraphFeedbackCount).toBe(2);
+    expect(smallRectangularFanout?.midGraphFeedbackStageCount).toBe(1);
+    expect(largeRectangularFanout?.midGraphFeedbackStageCount).toBe(1);
 
     stage = "resource-repeat-bound-refusal";
     const resourceRepeatCase = cases.find(({ caseId }) =>
@@ -1305,6 +1348,61 @@ async function prepareResourceDynamicFanoutCase(
     ...values.map((bytes, rank) => input(rank, bytes)),
     namedInput(0, "launch-input", u32Bytes([elementCount])),
     namedInput(1, "launch-input", u32Bytes([0])),
+  ]);
+  return Object.freeze({
+    caseId,
+    artifacts,
+    graph,
+    prepared,
+    inputs,
+    artifactHash: await hashNamedComponents({
+      caseId,
+      graph: prepared.graphSemanticHash,
+      modules: prepared.wgslModuleHashes,
+      inputs: inputs.map(({ rank, resourceId, bytes }) => ({
+        rank,
+        resourceId,
+        bytes: Array.from(bytes),
+      })),
+    }),
+  });
+}
+
+async function prepareSequentialResourceFeedbackCase(
+  caseId:
+    | "f32-sequential-resource-feedback-one"
+    | "f32-sequential-resource-feedback-two",
+  elementCount: 1 | 2,
+): Promise<PreparedCase> {
+  const countArtifacts =
+    await createVerifiedDensePermutationViewCopyArtifacts({
+      inputShape: [parseWireI64("1")],
+      axes: [0],
+      dtype: "u32",
+    });
+  const dataArtifacts =
+    await createVerifiedDensePermutationViewCopyArtifacts({
+      inputShape: [parseWireI64("2")],
+      axes: [0],
+      dtype: "f32",
+    });
+  const artifacts = Object.freeze([countArtifacts, dataArtifacts]);
+  const options = artifactOptions(artifacts);
+  const graph = (await createVerifiedHostGraphArtifact(
+    sequentialResourceDynamicDispatchProgram(
+      countArtifacts,
+      dataArtifacts,
+    ),
+    options,
+  )).artifact;
+  const prepared = await prepareSemanticHostGraphWebGpu(
+    graph,
+    { ...options, workgroupSize: 64 },
+  );
+  const inputs = Object.freeze([
+    namedInput(0, "launch-input", u32Bytes([1])),
+    namedInput(0, "next-count-input", u32Bytes([elementCount])),
+    input(0, f32Bytes([1.25, -2.5])),
   ]);
   return Object.freeze({
     caseId,
@@ -2180,6 +2278,93 @@ function resourceDynamicDispatchFanoutProgram(
   };
 }
 
+function sequentialResourceDynamicDispatchProgram(
+  countArtifacts: VerifiedViewCopyArtifacts,
+  dataArtifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 26 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire(1),
+    resources: [
+      resource("launch-input", "input", "u32", 4),
+      resource("launch-count", "temporary", "u32", 4),
+      resource("next-count-input", "input", "u32", 4),
+      resource("next-count", "temporary", "u32", 4),
+      resource("input", "input", "f32", 8),
+      resource("output", "output", "f32", 8),
+    ],
+    nodes: [
+      {
+        nodeId: "produce-launch-count",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "launch-input",
+        destinationResourceId: "launch-count",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "produce-next-count",
+        kind: "dynamic-dispatch",
+        dependsOn: ["produce-launch-count"],
+        semanticArtifactHash: countArtifacts.kernelSemanticHash,
+        entrypointId: countArtifacts.operationId,
+        dimensionBindings: {},
+        bindings: [
+          {
+            semanticResourceId: countArtifacts.source.viewId,
+            graphResourceId: "next-count-input",
+          },
+          {
+            semanticResourceId: countArtifacts.destination.viewId,
+            graphResourceId: "next-count",
+          },
+        ],
+        launchSource: {
+          resourceId: "launch-count",
+          rank: wire(0),
+          mode: "u32-prefix-element-count",
+        },
+        maxElementCount: wire(1),
+        mode: "resource-u32-prefix-elements",
+      },
+      {
+        nodeId: "copy-selected-prefix",
+        kind: "dynamic-dispatch",
+        dependsOn: ["produce-next-count"],
+        semanticArtifactHash: dataArtifacts.kernelSemanticHash,
+        entrypointId: dataArtifacts.operationId,
+        dimensionBindings: {},
+        bindings: [
+          {
+            semanticResourceId: dataArtifacts.source.viewId,
+            graphResourceId: "input",
+          },
+          {
+            semanticResourceId: dataArtifacts.destination.viewId,
+            graphResourceId: "output",
+          },
+        ],
+        launchSource: {
+          resourceId: "next-count",
+          rank: wire(0),
+          mode: "u32-prefix-element-count",
+        },
+        maxElementCount: wire(2),
+        mode: "resource-u32-prefix-elements",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["copy-selected-prefix"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function rawCopyProgram(): HostGraphProgram {
   return {
     kind: "host-graph",
@@ -2547,10 +2732,17 @@ function dispatch(artifacts: VerifiedViewCopyArtifacts) {
   };
 }
 
-function artifactOptions(artifacts: VerifiedViewCopyArtifacts) {
+function artifactOptions(
+  artifacts:
+    | VerifiedViewCopyArtifacts
+    | readonly VerifiedViewCopyArtifacts[],
+) {
+  const artifactList = Array.isArray(artifacts)
+    ? artifacts
+    : [artifacts];
   return {
-    kernelArtifacts: [artifacts.kernel],
-    layoutArtifacts: [artifacts.layout],
+    kernelArtifacts: artifactList.map((artifact) => artifact.kernel),
+    layoutArtifacts: artifactList.map((artifact) => artifact.layout),
   };
 }
 

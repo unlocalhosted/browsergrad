@@ -260,6 +260,141 @@ function resourceDynamicFanoutProgram(
   };
 }
 
+function sequentialResourceDynamicProgram(
+  countArtifacts: VerifiedViewCopyArtifacts,
+  dataArtifacts: VerifiedViewCopyArtifacts,
+): HostGraphProgram {
+  return {
+    kind: "host-graph",
+    version: { major: 1, minor: 26 },
+    failureModel: "fail-stop-no-partial-output-commit",
+    rankCount: wire("1"),
+    resources: [
+      {
+        resourceId: "launch-input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u32",
+        byteLength: wire("4"),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "launch-count",
+        role: "temporary",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u32",
+        byteLength: wire("4"),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "next-count-input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "u32",
+        byteLength: wire("4"),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "next-count",
+        role: "temporary",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "u32",
+        byteLength: wire("4"),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "input",
+        role: "input",
+        multiplicity: "per-rank",
+        initialization: "external-input",
+        dtype: "f32",
+        byteLength: wire("8"),
+        alignmentBytes: 4,
+      },
+      {
+        resourceId: "output",
+        role: "output",
+        multiplicity: "per-rank",
+        initialization: "zero-fill",
+        dtype: "f32",
+        byteLength: wire("8"),
+        alignmentBytes: 4,
+      },
+    ],
+    nodes: [
+      {
+        nodeId: "produce-launch-count",
+        kind: "copy",
+        dependsOn: [],
+        sourceResourceId: "launch-input",
+        destinationResourceId: "launch-count",
+        mode: "whole-allocation-bytes-per-rank",
+      },
+      {
+        nodeId: "produce-next-count",
+        kind: "dynamic-dispatch",
+        dependsOn: ["produce-launch-count"],
+        semanticArtifactHash: countArtifacts.kernelSemanticHash,
+        entrypointId: countArtifacts.operationId,
+        dimensionBindings: {},
+        bindings: [
+          {
+            semanticResourceId: countArtifacts.source.viewId,
+            graphResourceId: "next-count-input",
+          },
+          {
+            semanticResourceId: countArtifacts.destination.viewId,
+            graphResourceId: "next-count",
+          },
+        ],
+        launchSource: {
+          resourceId: "launch-count",
+          rank: wire("0"),
+          mode: "u32-prefix-element-count",
+        },
+        maxElementCount: wire("1"),
+        mode: "resource-u32-prefix-elements",
+      },
+      {
+        nodeId: "copy-selected-prefix",
+        kind: "dynamic-dispatch",
+        dependsOn: ["produce-next-count"],
+        semanticArtifactHash: dataArtifacts.kernelSemanticHash,
+        entrypointId: dataArtifacts.operationId,
+        dimensionBindings: {},
+        bindings: [
+          {
+            semanticResourceId: dataArtifacts.source.viewId,
+            graphResourceId: "input",
+          },
+          {
+            semanticResourceId: dataArtifacts.destination.viewId,
+            graphResourceId: "output",
+          },
+        ],
+        launchSource: {
+          resourceId: "next-count",
+          rank: wire("0"),
+          mode: "u32-prefix-element-count",
+        },
+        maxElementCount: wire("2"),
+        mode: "resource-u32-prefix-elements",
+      },
+      {
+        nodeId: "materialize-output",
+        kind: "materialize",
+        dependsOn: ["copy-selected-prefix"],
+        resourceId: "output",
+        mode: "host-readback-after-graph-success",
+      },
+    ],
+  };
+}
+
 function rectangularDynamicProgram(
   artifacts: VerifiedViewCopyArtifacts,
   shape: readonly number[],
@@ -1890,7 +2025,7 @@ describe("host graph CPU reference", () => {
     }
   });
 
-  it("executes one produced-resource dynamic prefix and exact shared fanout", async () => {
+  it("executes produced-resource dynamic prefix, shared fanout, and sequential feedback", async () => {
     const artifacts = await identityArtifacts();
     const graph = await verified(
       resourceDynamicPipelineProgram(artifacts),
@@ -1993,6 +2128,101 @@ describe("host graph CPU reference", () => {
       [1.25, 0],
       [1.25, 0],
     ]);
+
+    const countArtifacts =
+      await createVerifiedDensePermutationViewCopyArtifacts({
+        inputShape: [parseWireI64("1")],
+        axes: [0],
+        dtype: "u32",
+      });
+    const sequentialOptions = {
+      kernelArtifacts: [countArtifacts.kernel, artifacts.kernel],
+      layoutArtifacts: [countArtifacts.layout, artifacts.layout],
+    };
+    const sequentialProgram = sequentialResourceDynamicProgram(
+      countArtifacts,
+      artifacts,
+    );
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...sequentialProgram,
+        version: { major: 1, minor: 25 },
+      },
+      sequentialOptions,
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-INVALID-BINDING" },
+    });
+    await expect(createVerifiedHostGraphArtifact(
+      {
+        ...sequentialProgram,
+        resources: [
+          ...sequentialProgram.resources,
+          {
+            resourceId: "orphan-count",
+            role: "temporary",
+            multiplicity: "per-rank",
+            initialization: "zero-fill",
+            dtype: "u32",
+            byteLength: wire("4"),
+            alignmentBytes: 4,
+          },
+        ],
+        nodes: sequentialProgram.nodes.map((node) =>
+          node.kind === "dynamic-dispatch" &&
+            node.nodeId === "copy-selected-prefix" &&
+            node.mode === "resource-u32-prefix-elements"
+            ? {
+              ...node,
+              launchSource: {
+                ...node.launchSource,
+                resourceId: "orphan-count",
+              },
+            }
+            : node),
+      },
+      sequentialOptions,
+    )).rejects.toMatchObject({
+      diagnostic: { code: "BG-GRAPH-INVALID-BINDING" },
+    });
+    const sequentialArtifact = (await createVerifiedHostGraphArtifact(
+      sequentialProgram,
+      sequentialOptions,
+    )).artifact;
+    const sequential = await prepareHostGraphCpu(
+      sequentialArtifact,
+      sequentialOptions,
+    );
+    expect(sequential).toMatchObject({
+      dynamicDispatchCount: 2,
+      resourceDynamicDispatchCount: 2,
+    });
+    for (const selectedCount of [1, 2]) {
+      const result = await sequential.execute({
+        inputs: [
+          {
+            rank: wire("0"),
+            resourceId: "launch-input",
+            bytes: u32Bytes([1]),
+          },
+          {
+            rank: wire("0"),
+            resourceId: "next-count-input",
+            bytes: u32Bytes([selectedCount]),
+          },
+          input(0, f32Bytes([1.25, -2.5])),
+        ],
+      });
+      expect(result.completedDynamicDispatches).toEqual([
+        { nodeId: "produce-next-count", elementCount: "1" },
+        {
+          nodeId: "copy-selected-prefix",
+          elementCount: String(selectedCount),
+        },
+      ]);
+      expect(readF32(result.outputs[0]!.bytes)).toEqual(
+        selectedCount === 1 ? [1.25, 0] : [1.25, -2.5],
+      );
+    }
   });
 
   it("rejects dynamic dispatch values before reading caller inputs", async () => {
