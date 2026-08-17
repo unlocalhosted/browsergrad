@@ -286,14 +286,23 @@ describe("Clang-Wasm evidence workflow", () => {
     }
   });
 
-  it("requires the exact native Clang version used by the locked source", () => {
+  it("requires one common signed native Clang 22.1.8 package set", () => {
     expect(ciWorkflow).toContain("llvm-toolchain-noble-22");
     expect(ciWorkflow).toContain("libclang-rt-22-dev");
+    expect(ciWorkflow).toContain("apt-cache policy");
+    expect(ciWorkflow).toContain("1:22.1.8~++*");
+    expect(ciWorkflow).toContain(
+      '[[ "${bg_llvm_candidate}" != "${bg_llvm_package_version}" ]]',
+    );
+    expect(ciWorkflow).toContain(
+      '"${bg_llvm_packages[@]/%/=${bg_llvm_package_version}}"',
+    );
     expect(ciWorkflow).toContain("/usr/lib/llvm-22/bin/llvm-config");
     expect(ciWorkflow).toContain("--version)\" = \"22.1.8\"");
     expect(ciWorkflow).toContain(
       "8b2a587ffd672c4687e7581dad4b2f6c1bb2ad6b480cd9771ba2ff48e0b8c75d",
     );
+    expect(ciWorkflow).not.toContain("20260613092238");
     expect(ciWorkflow).not.toContain("clang-18");
   });
 

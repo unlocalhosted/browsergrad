@@ -108,13 +108,37 @@ jobs:
           echo "deb [signed-by=/etc/apt/keyrings/llvm-snapshot.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | \
             sudo tee /etc/apt/sources.list.d/llvm22.list >/dev/null
           sudo apt-get update
-          bg_llvm_package_version="1:22.1.8~++20260613092238+e80beda6e255-1~exp1~20260613092253.78"
+          bg_llvm_packages=(
+            clang-22
+            libclang-22-dev
+            libclang-cpp22-dev
+            libclang-rt-22-dev
+            llvm-22-dev
+          )
+          bg_llvm_package_version="$(
+            apt-cache policy "${bg_llvm_packages[0]}" | \
+              awk '$1 == "Candidate:" { print $2 }'
+          )"
+          case "${bg_llvm_package_version}" in
+            1:22.1.8~++*) ;;
+            *)
+              echo "Expected signed LLVM 22.1.8 package candidate; got '${bg_llvm_package_version}'" >&2
+              exit 1
+              ;;
+          esac
+          for bg_llvm_package in "${bg_llvm_packages[@]}"; do
+            bg_llvm_candidate="$(
+              apt-cache policy "${bg_llvm_package}" | \
+                awk '$1 == "Candidate:" { print $2 }'
+            )"
+            if [[ "${bg_llvm_candidate}" != "${bg_llvm_package_version}" ]]; then
+              echo "LLVM package candidates differ: ${bg_llvm_package}=${bg_llvm_candidate}" >&2
+              exit 1
+            fi
+          done
+          echo "Installing signed LLVM package set ${bg_llvm_package_version}"
           sudo apt-get install --yes --no-install-recommends \
-            "clang-22=${bg_llvm_package_version}" \
-            "libclang-22-dev=${bg_llvm_package_version}" \
-            "libclang-cpp22-dev=${bg_llvm_package_version}" \
-            "libclang-rt-22-dev=${bg_llvm_package_version}" \
-            "llvm-22-dev=${bg_llvm_package_version}"
+            "${bg_llvm_packages[@]/%/=${bg_llvm_package_version}}"
           bg_llvm_config="/usr/lib/llvm-22/bin/llvm-config"
           test -x "${bg_llvm_config}"
           test "$("${bg_llvm_config}" --version)" = "22.1.8"

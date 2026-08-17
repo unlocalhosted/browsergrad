@@ -9115,6 +9115,25 @@ whether any files may be left partially changed.
   backend, or final-release authority. Those require the two actual external
   principals and their immutable returned statements.
 
+### 2026-08-17 — Native CI package-revision resilience
+
+- CI run `32024274916` proved every completed software, WebGPU, and Node lane,
+  but its required-native job failed before tests because apt.llvm.org had
+  removed the exact dated LLVM 22.1.8 package revision pinned in the workflow.
+  The signed repository still offered LLVM 22.1.8 under a newer packaging
+  revision; this was package-retention drift, not a compiler or test failure.
+- The installer now resolves the signed repository candidate once, requires its
+  upstream semantic version to remain exactly 22.1.8, proves all five required
+  packages expose that same candidate, and installs that exact common set in
+  one transaction. Repository URL, distribution, component, signing-key
+  SHA-256, package names, `llvm-config` path, and post-install 22.1.8 check stay
+  pinned. A missing, mixed, or newer semantic version fails before native tests.
+- Workflow guardrails assert candidate resolution, common-version enforcement,
+  exact-version transaction syntax, the pinned key hash, and removal of the
+  expired dated revision. This keeps required-native feedback runnable without
+  weakening the locked Clang API/version contract or treating it as clean-build
+  reproducibility evidence.
+
 ## Quick Resume Checklist
 
 1. Read this ledger, then the relevant gate and exit criteria in the normative
