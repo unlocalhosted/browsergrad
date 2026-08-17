@@ -126,6 +126,15 @@ describe("semantic architecture guardrails", () => {
     expect(validateImplementationCheckpoint(
       source.replace("This checkpoint is informational.", "Current status follows."),
     )).toContainEqual(expect.stringContaining("must state that it is informational"));
+    expect(validateImplementationCheckpoint(
+      source.replace(
+        "## Implementation Checkpoint — Active 2026-08-18",
+        "## Implementation Checkpoint — Active 2026-08-17",
+      ),
+    )).toContainEqual(expect.stringContaining("must match Last reviewed"));
+    expect(validateImplementationCheckpoint(
+      source.replace("**Last reviewed:** 2026-08-18", "**Last reviewed:** 2026-02-30"),
+    )).toContainEqual(expect.stringContaining("date must be canonical"));
   });
 
   it("keeps LLD gate statuses aligned with the implementation ledger", () => {

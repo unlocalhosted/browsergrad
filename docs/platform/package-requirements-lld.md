@@ -13,7 +13,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY**
 describe requirement strength. They are used deliberately rather than as
 general emphasis.
 
-## Implementation Checkpoint — Active 2026-07-30
+## Implementation Checkpoint — Active 2026-08-18
 
 This checkpoint is informational. The rest of this document is normative; the
 [implementation ledger](../internal/package-requirements-implementation-ledger.md) owns detailed chronology, decisions, failures, and evidence identities.

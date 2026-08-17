@@ -224,8 +224,13 @@ export function validateImplementationCheckpoint(
   }
   const startMarker = "## Implementation Checkpoint — Active ";
   const endMarker = "## Purpose";
-  const startOffsets = [...source.matchAll(/^## Implementation Checkpoint — Active .+$/gmu)]
-    .map((match) => match.index);
+  const checkpointHeadings = [
+    ...source.matchAll(/^## Implementation Checkpoint — Active (.+)$/gmu),
+  ];
+  const lastReviewedEntries = [
+    ...source.matchAll(/^- \*\*Last reviewed:\*\* (.+)$/gmu),
+  ];
+  const startOffsets = checkpointHeadings.map((match) => match.index);
   const endOffsets = [...source.matchAll(/^## Purpose$/gmu)]
     .map((match) => match.index);
   if (startOffsets.length !== 1) {
@@ -236,6 +241,32 @@ export function validateImplementationCheckpoint(
   if (endOffsets.length !== 1) {
     failures.push(
       `package requirements LLD must contain exactly one Purpose boundary; got ${endOffsets.length}`,
+    );
+  }
+  if (lastReviewedEntries.length !== 1) {
+    failures.push(
+      `package requirements LLD must contain exactly one Last reviewed date; got ${lastReviewedEntries.length}`,
+    );
+  }
+  const checkpointDate = checkpointHeadings[0]?.[1];
+  const lastReviewedDate = lastReviewedEntries[0]?.[1];
+  for (const [label, value] of [
+    ["implementation checkpoint", checkpointDate],
+    ["Last reviewed", lastReviewedDate],
+  ]) {
+    if (value !== undefined && !isCanonicalIsoDate(value)) {
+      failures.push(`${label} date must be canonical YYYY-MM-DD; got ${value}`);
+    }
+  }
+  if (
+    checkpointDate !== undefined
+    && lastReviewedDate !== undefined
+    && isCanonicalIsoDate(checkpointDate)
+    && isCanonicalIsoDate(lastReviewedDate)
+    && checkpointDate !== lastReviewedDate
+  ) {
+    failures.push(
+      `package requirements implementation checkpoint date ${checkpointDate} must match Last reviewed ${lastReviewedDate}`,
     );
   }
   const start = startOffsets[0];
@@ -259,6 +290,12 @@ export function validateImplementationCheckpoint(
     );
   }
   return failures;
+}
+
+function isCanonicalIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 export function validateGateStatusConvergence(lldSource, ledgerSource) {
