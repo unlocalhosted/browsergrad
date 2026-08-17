@@ -22,6 +22,7 @@ import {
   runSemanticArchitectureCheck,
   validateCompilerPointerBehaviorFixture,
   validateGradCompatibilityInventory,
+  validateGateStatusConvergence,
   validateJitOpaqueOperationInventory,
   validateAssignmentRequirementRegistrySource,
   validateGradFrameworkPlatformSupportSource,
@@ -125,6 +126,36 @@ describe("semantic architecture guardrails", () => {
     expect(validateImplementationCheckpoint(
       source.replace("This checkpoint is informational.", "Current status follows."),
     )).toContainEqual(expect.stringContaining("must state that it is informational"));
+  });
+
+  it("keeps LLD gate statuses aligned with the implementation ledger", () => {
+    const lldSource = readFileSync(
+      join(repoRoot, "docs/platform/package-requirements-lld.md"),
+      "utf8",
+    );
+    const ledgerSource = readFileSync(
+      join(repoRoot, "docs/internal/package-requirements-implementation-ledger.md"),
+      "utf8",
+    );
+    expect(validateGateStatusConvergence(lldSource, ledgerSource)).toEqual([]);
+    expect(validateGateStatusConvergence(
+      lldSource.replace(
+        "| 7 — host graphs and optional systems | verified |",
+        "| 7 — host graphs and optional systems | in progress |",
+      ),
+      ledgerSource,
+    )).toContainEqual(expect.stringContaining("gate 7 status mismatch"));
+    expect(validateGateStatusConvergence(
+      lldSource.replace(/^\| 5 — tiled attention .*\n/mu, ""),
+      ledgerSource,
+    )).toContainEqual(expect.stringContaining("exactly gates 0 through 7"));
+    expect(validateGateStatusConvergence(
+      lldSource,
+      ledgerSource.replace(
+        "| Gate 6 — framework convergence | `verified` |",
+        "| Gate 6 — framework convergence | `partial` |",
+      ),
+    )).toContainEqual(expect.stringContaining("gate 6 status mismatch"));
   });
 
   it("rejects cross-package implementation imports", () => {

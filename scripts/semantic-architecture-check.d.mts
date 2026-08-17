@@ -59,6 +59,11 @@ export function validateImplementationCheckpoint(
   maxLines?: number,
 ): string[];
 
+export function validateGateStatusConvergence(
+  lldSource: string,
+  ledgerSource: string,
+): string[];
+
 export function extractModuleSpecifiers(
   typescript: typeof ts,
   source: string,

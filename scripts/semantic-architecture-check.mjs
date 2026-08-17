@@ -261,6 +261,112 @@ export function validateImplementationCheckpoint(
   return failures;
 }
 
+export function validateGateStatusConvergence(lldSource, ledgerSource) {
+  const failures = [];
+  if (typeof lldSource !== "string") {
+    failures.push("package requirements LLD must be text");
+  }
+  if (typeof ledgerSource !== "string") {
+    failures.push("package requirements implementation ledger must be text");
+  }
+  if (failures.length > 0) return failures;
+
+  const lldSection = extractUniqueSection(
+    lldSource,
+    "### Gate status",
+    "### Feedback and evidence lanes",
+    "package requirements LLD gate-status table",
+    failures,
+  );
+  const ledgerSection = extractUniqueSection(
+    ledgerSource,
+    "## Gate Ledger",
+    "## Active Slice",
+    "package requirements implementation gate ledger",
+    failures,
+  );
+  if (lldSection === undefined || ledgerSection === undefined) return failures;
+
+  const lldStatuses = parseGateStatuses(lldSection, "LLD", failures);
+  const ledgerStatuses = parseGateStatuses(ledgerSection, "implementation ledger", failures);
+  const expectedGates = Array.from({ length: 8 }, (_, index) => String(index));
+  for (const [label, statuses] of [
+    ["LLD", lldStatuses],
+    ["implementation ledger", ledgerStatuses],
+  ]) {
+    const actualGates = [...statuses.keys()].sort((left, right) => Number(left) - Number(right));
+    if (actualGates.join(",") !== expectedGates.join(",")) {
+      failures.push(
+        `${label} gate-status table must contain exactly gates 0 through 7; got ${actualGates.join(",") || "none"}`,
+      );
+    }
+  }
+  for (const gate of expectedGates) {
+    const lldStatus = lldStatuses.get(gate);
+    const ledgerStatus = ledgerStatuses.get(gate);
+    if (lldStatus !== undefined && ledgerStatus !== undefined && lldStatus !== ledgerStatus) {
+      failures.push(
+        `gate ${gate} status mismatch: LLD ${lldStatus}; implementation ledger ${ledgerStatus}`,
+      );
+    }
+  }
+  return failures;
+}
+
+function extractUniqueSection(source, startMarker, endMarker, label, failures) {
+  const startOffsets = [...source.matchAll(new RegExp(`^${escapeRegExp(startMarker)}$`, "gmu"))]
+    .map((match) => match.index);
+  const endOffsets = [...source.matchAll(new RegExp(`^${escapeRegExp(endMarker)}$`, "gmu"))]
+    .map((match) => match.index);
+  if (startOffsets.length !== 1 || endOffsets.length !== 1) {
+    failures.push(
+      `${label} must have exactly one ${startMarker} and one ${endMarker} marker`,
+    );
+    return undefined;
+  }
+  const start = startOffsets[0];
+  const end = endOffsets[0];
+  if (start === undefined || end === undefined || end <= start) {
+    failures.push(`${label} markers must be ordered`);
+    return undefined;
+  }
+  return source.slice(start, end);
+}
+
+function parseGateStatuses(section, label, failures) {
+  const statuses = new Map();
+  const validStatuses = new Set([
+    "not-started",
+    "audit",
+    "in-progress",
+    "partial",
+    "blocked",
+    "verified",
+    "superseded",
+  ]);
+  const rowPattern = /^\|\s*(?:Gate\s+)?([0-9]+)\s+[^|]*\|\s*`?([a-z][a-z -]*)`?\s*\|/gmu;
+  for (const match of section.matchAll(rowPattern)) {
+    const gate = match[1];
+    const rawStatus = match[2];
+    if (gate === undefined || rawStatus === undefined) continue;
+    const status = rawStatus.trim().replaceAll(" ", "-");
+    if (statuses.has(gate)) {
+      failures.push(`${label} gate-status table contains duplicate gate ${gate}`);
+      continue;
+    }
+    if (!validStatuses.has(status)) {
+      failures.push(`${label} gate ${gate} has unsupported status ${status}`);
+      continue;
+    }
+    statuses.set(gate, status);
+  }
+  return statuses;
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
 export function extractModuleSpecifiers(ts, source, filename = "source.ts") {
   const sourceFile = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true);
   return moduleSpecifiers(ts, sourceFile);
@@ -1366,17 +1472,28 @@ function checkSharedSemanticFixtureContracts(root, failures) {
 }
 
 function checkImplementationCheckpoint(root, failures) {
-  const file = path.join(root, "docs/platform/package-requirements-lld.md");
-  let source;
+  const lldFile = path.join(root, "docs/platform/package-requirements-lld.md");
+  const ledgerFile = path.join(root, "docs/internal/package-requirements-implementation-ledger.md");
+  let lldSource;
   try {
-    source = fs.readFileSync(file, "utf8");
+    lldSource = fs.readFileSync(lldFile, "utf8");
   } catch (error) {
     failures.push(
       `docs/platform/package-requirements-lld.md cannot be read: ${errorMessage(error)}`,
     );
     return;
   }
-  failures.push(...validateImplementationCheckpoint(source));
+  let ledgerSource;
+  try {
+    ledgerSource = fs.readFileSync(ledgerFile, "utf8");
+  } catch (error) {
+    failures.push(
+      `docs/internal/package-requirements-implementation-ledger.md cannot be read: ${errorMessage(error)}`,
+    );
+    return;
+  }
+  failures.push(...validateImplementationCheckpoint(lldSource));
+  failures.push(...validateGateStatusConvergence(lldSource, ledgerSource));
 }
 
 function validateSharedSemanticFixtureManifest(root, manifest, failures) {
