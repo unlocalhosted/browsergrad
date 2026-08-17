@@ -275,13 +275,17 @@ and the registry.
 Before tagging or dispatching publish:
 
 ```sh
+git status --short --branch
 pnpm -r build
 pnpm test:release-packages
 node scripts/publish-missing-npm.mjs --dry-run
 ```
 
-Use `pnpm publish`, not `npm publish`, for workspace packages. `pnpm publish`
-rewrites `workspace:*` dependencies to concrete package versions in the tarball.
+Do not invoke package-local `npm publish` or `pnpm publish`. Use the protected
+tag or manual workflow; it publishes only the immutable staged tarball with
+scripts disabled. See [RELEASING.md](RELEASING.md) and
+[release readiness](docs/platform/release-readiness.md).
+
 After CI publishes, check npm directly:
 
 ```sh

@@ -11,6 +11,7 @@ const packedTarballs = new Map();
 const packedPackageDirectories = new Map();
 
 try {
+  assertProtectedReleaseInstructions();
   const primitives = packAndExtract("browsergrad-primitives");
   const runtime = packAndExtract("browsergrad-runtime");
   const semanticCore = packAndExtract("browsergrad-semantic-core");
@@ -2505,6 +2506,52 @@ function workflowSteps(workflow) {
     }
   }
   return steps;
+}
+
+function assertProtectedReleaseInstructions() {
+  const requiredPreflight = [
+    "git status --short --branch",
+    "pnpm -r build",
+    "pnpm test:release-packages",
+    "node scripts/publish-missing-npm.mjs --dry-run",
+  ];
+  const instructionPaths = [
+    "DEVELOPMENT.md",
+    "RTK.md",
+    "RELEASING.md",
+    "docs/platform/agent-consumption-guide.md",
+    "docs/platform/release-readiness.md",
+  ];
+  const documents = instructionPaths.map((path) => [
+    path,
+    readFileSync(join(root, path), "utf8"),
+  ]);
+
+  for (const [path, document] of documents) {
+    for (const command of requiredPreflight) {
+      assert(
+        document.includes(command),
+        `${path} must retain release preflight command: ${command}`,
+      );
+    }
+    assert(
+      document.includes("protected") && document.includes("staged"),
+      `${path} must direct releases through the protected staged path`,
+    );
+    assert(
+      document.includes("Do not invoke package-local `npm publish` or `pnpm publish`"),
+      `${path} must reject package-local publication`,
+    );
+  }
+
+  const combined = documents.map(([path, document]) => `${path}\n${document}`).join("\n");
+  for (const [description, pattern] of [
+    ["package-directory npm publication", /Tag the release\.\s+`npm publish` from the package directory/u],
+    ["pnpm-over-npm direct publication", /Use `pnpm publish`, not `npm publish`/u],
+    ["workspace-range direct publication", /dependencies\.\s+Use `pnpm publish`/u],
+  ]) {
+    assert(!pattern.test(combined), `release instructions must reject ${description}`);
+  }
 }
 
 function assert(condition, message) {

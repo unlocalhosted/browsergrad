@@ -110,4 +110,19 @@ pnpm -F <pkg> test:integration   # integration tests for one package
 
 ## Releasing
 
-Each package is versioned independently. Bump the `package.json` version, the `__version__` constant in the package's `__init__.py` (for grad), and the install-time smoke check pin. Update the package's `CHANGELOG.md`. Tag the release. `npm publish` from the package directory (currently a manual step until CI publishes).
+Each package is versioned independently. Bump the `package.json` version, the
+`__version__` constant in the package's `__init__.py` (for grad), and the
+install-time smoke check pin. Update the package's `CHANGELOG.md`, then run:
+
+```sh
+git status --short --branch
+pnpm -r build
+pnpm test:release-packages
+node scripts/publish-missing-npm.mjs --dry-run
+```
+
+Commit and push `main`, then use the documented package tag or protected manual
+workflow. Do not invoke package-local `npm publish` or `pnpm publish`; release
+workflows publish only the immutable staged tarball with scripts disabled. See
+[RELEASING.md](RELEASING.md) and
+[release readiness](docs/platform/release-readiness.md).

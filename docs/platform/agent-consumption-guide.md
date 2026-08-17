@@ -69,8 +69,10 @@ shows `workspace:*`, the release is broken even if CI was green.
 
 ## What Not To Do
 
-- Do not use `npm publish` for workspace packages with `workspace:*`
-  dependencies. Use `pnpm publish` so workspace ranges are rewritten.
+- Do not invoke package-local `npm publish` or `pnpm publish`. Use only the
+  protected tag or manual workflow; it publishes the immutable staged tarball
+  with scripts disabled. See [RELEASING.md](../../RELEASING.md) and
+  [release readiness](release-readiness.md).
 - Do not trust stale local `dist/` files. Always rebuild before packing.
 - Do not claim WebGPU coverage from unit tests. Use browser/WebGPU gates when
   shader behavior matters.

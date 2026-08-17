@@ -93,8 +93,10 @@ Tag format per package:
 
 ```sh
 # Build and validate packed metadata, exports, declarations, and fresh consumers
+git status --short --branch
 pnpm -r build
 pnpm test:release-packages
+node scripts/publish-missing-npm.mjs --dry-run
 
 # Create the same workspace-rewritten tarball shape used by publication
 mkdir -p /tmp/bg-pack
@@ -151,9 +153,9 @@ artifact, carry provenance from an approved BrowserGrad release workflow, and
 attest a commit reachable from protected `main`; same-version drift fails before
 any dependent publication.
 
-Do not run package-local `npm publish` as a fallback. The workflows freeze and
-transfer one validated tarball, enforce dependency order, and verify its final
-registry identity. Package-local publication breaks that chain.
+Do not invoke package-local `npm publish` or `pnpm publish`. The workflows
+freeze and transfer one validated tarball, enforce dependency order, and verify
+its final registry identity. Package-local publication breaks that chain.
 
 ## Adding a new package to the release pipeline
 
