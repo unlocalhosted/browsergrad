@@ -9105,11 +9105,15 @@ whether any files may be left partially changed.
   license review, distribution authorization, and release readiness false.
   Existing deterministic distribution materialization derives the matching
   profile and asset manifest from the newly admitted producer policy.
-- Five focused adversarial tests cover deterministic canonical output,
-  downstream admission, identity/key separation, invalid P-256 input, mutable
-  and symbolic-link input refusal, exact-tree no-clobber behavior, and explicit
-  private-key argument refusal. Strict script typecheck/lint and package build
-  pass. Fast browser-build tests pass 105 files/830 tests in 17.11 seconds.
+- Six focused tests cover deterministic canonical output, downstream admission,
+  identity/key separation, invalid P-256 input, mutable and symbolic-link input
+  refusal, exact-tree no-clobber behavior, and explicit private-key argument
+  refusal. The lifecycle integration case proves the authored trust-store and
+  policy bytes are exactly compatible with the production signing-request,
+  signature-binding, and opaque producer-trust transitions while preserving
+  false distribution/release claims. Strict script typecheck/lint and package
+  build pass. Fast browser-build tests pass 105 files/831 tests in 14.74
+  seconds.
 - This closes the remaining package-owned production-policy setup seam. It does
   not prove external private-key control or mint producer, legal, distribution,
   backend, or final-release authority. Those require the two actual external

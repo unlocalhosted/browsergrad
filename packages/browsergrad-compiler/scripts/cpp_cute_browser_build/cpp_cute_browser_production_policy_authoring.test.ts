@@ -22,11 +22,21 @@ import {
   admitCppCuteBrowserDistributionApprovalPolicy,
 } from "../../src/cpp_cute_browser_distribution_approval_policy.js";
 import {
+  createCppCuteBrowserBuildProvenanceSigningRequest,
+  verifyCppCuteBrowserBuildSignatureBinding,
+} from "../../src/cpp_cute_browser_build_provenance.js";
+import {
+  verifyCppCuteBrowserBuildProducer,
+} from "../../src/cpp_cute_browser_producer_trust.js";
+import {
   admitCppCuteBrowserProducerTrustPolicy,
 } from "../../src/cpp_cute_browser_producer_trust_policy.js";
 import {
   prepareCppCuteAttestationTrustStore,
 } from "../../src/cpp_cute_frontend_provenance.js";
+import {
+  createCppCuteBrowserProducerTrustFixture,
+} from "../../tests/compiler/support/cpp_cute_browser_producer_trust_fixtures.js";
 import {
   CPP_CUTE_BROWSER_PRODUCTION_POLICY_HANDOFF_SCHEMA,
   CppCuteBrowserProductionPolicyAuthoringError,
@@ -55,6 +65,72 @@ afterEach(async () => {
 });
 
 describe("browser production-policy authoring", () => {
+  it("feeds the exact build-signing and producer-trust lifecycle", async () => {
+    const fixture = await createCppCuteBrowserProducerTrustFixture();
+    const trustKey = fixture.build.trustStoreInput.keys[0];
+    if (trustKey === undefined) throw new Error("fixture trust key is required");
+    const root = await prepareRoot(
+      Uint8Array.from(Buffer.from(trustKey.spkiDerBase64, "base64")),
+      await publicKeyBytes(),
+    );
+
+    await runCppCuteBrowserProductionPolicyAuthoring(
+      argumentsFor(root, trustKey.builderId),
+    );
+
+    const producerTrustStoreBytes = Uint8Array.from(
+      await readFile(join(root, "producer-trust-store.json")),
+    );
+    const producerPolicyBytes = Uint8Array.from(
+      await readFile(join(root, "producer-trust-policy.json")),
+    );
+    expect(producerTrustStoreBytes).toEqual(
+      canonicalJsonBytes(fixture.build.trustStoreInput),
+    );
+    expect(producerPolicyBytes).toEqual(fixture.policyBytes);
+
+    const [trustStore, trustPolicy] = await Promise.all([
+      prepareCppCuteAttestationTrustStore(
+        JSON.parse(new TextDecoder().decode(producerTrustStoreBytes)),
+      ),
+      admitCppCuteBrowserProducerTrustPolicy(producerPolicyBytes),
+    ]);
+    const signingRequest =
+      await createCppCuteBrowserBuildProvenanceSigningRequest({
+        assetManifest: fixture.build.assetManifest,
+        buildInputLock: fixture.build.buildInputLock,
+        workerBundle: fixture.build.workerBundle,
+        trustPolicy,
+        trustStore,
+        builderId: trustKey.builderId,
+        keyId: trustKey.keyId,
+      });
+    expect(signingRequest.payload).toBe(fixture.build.envelope.payload);
+    expect(signingRequest.statement).toEqual(fixture.build.statement);
+
+    const signatureBinding =
+      await verifyCppCuteBrowserBuildSignatureBinding(fixture.build.envelope, {
+        assetManifest: fixture.build.assetManifest,
+        buildInputLock: fixture.build.buildInputLock,
+        workerBundle: fixture.build.workerBundle,
+        trustStore,
+      });
+    const trustedProducer = await verifyCppCuteBrowserBuildProducer(
+      signatureBinding,
+      trustPolicy,
+    );
+    expect(trustedProducer).toMatchObject({
+      builderId: trustKey.builderId,
+      keyId: trustKey.keyId,
+      buildSubjectId: fixture.build.buildSubject.buildSubjectId,
+      signatureVerified: true,
+      independentTrustPolicyMatched: true,
+      producerTrusted: true,
+      distributionAuthorized: false,
+      releaseReady: false,
+    });
+  });
+
   it("authors deterministic admitted policies without private-key authority", async () => {
     const producerKey = await publicKeyBytes();
     const reviewerKey = await publicKeyBytes();
@@ -272,11 +348,15 @@ describe("browser production-policy authoring", () => {
   });
 });
 
-function argumentsFor(root: string): readonly string[] {
+function argumentsFor(
+  root: string,
+  producerId = PRODUCER_ID,
+  reviewerId = REVIEWER_ID,
+): readonly string[] {
   return [
     `--output-root=${root}`,
-    `--producer-id=${PRODUCER_ID}`,
-    `--reviewer-id=${REVIEWER_ID}`,
+    `--producer-id=${producerId}`,
+    `--reviewer-id=${reviewerId}`,
   ];
 }
 
