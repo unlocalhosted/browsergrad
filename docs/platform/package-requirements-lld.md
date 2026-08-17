@@ -25,7 +25,7 @@ This checkpoint is informational. The rest of this document is normative; the
 | 0 — freeze and inventory | verified | Compiler, runtime, Grad, and JIT inventories are executable and architecture-guarded. |
 | 1 — value/layout core | verified | Canonical wire, value, layout, authority, hashing, and cross-language reference contracts are complete for the declared profile. |
 | 2 — multi-frontend view slice | verified | Compiler and typed JIT view paths converge on semantic-core CPU and kernels WebGPU execution. Additive exact-storage profiles cover bool/i8/u8 packed8, i16/u16/f16/bf16 packed16, f32/i32/u32 word32, and f64/i64/u64 word64 ranks 1–8; every width admits separately identified signed-affine source maps without conflating storage copy with value semantics or arithmetic support. |
-| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict nine-case Worker matrix including unchanged signed-rank-2 CuTe source, signed-source-aware authorized Artifact V3 lowering, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-clobber producer/reviewer exchange, and unified in-process backend/final-release composition are package-pinned. Final release rejects an identical producer/reviewer identity or public-key hash. The declared portable implementation exit now passes; externally rooted producer and distribution-review evidence plus actual production issuance remain open. |
+| 3 — real browser-local C++/CuTe | in progress | The current reproducible extractor, strict nine-case Worker matrix including unchanged signed-rank-2 CuTe source, signed-source-aware authorized Artifact V3 lowering, deterministic 24-output materializer, producer-gated finalizer, live two-root complete-distribution reproducibility authority, exact-payload shared CPU/required-WebGPU convergence, no-private-key production-policy authoring, no-clobber producer/reviewer exchange, and unified in-process backend/final-release composition are package-pinned. Policy authoring rejects identical producer/reviewer identities or public-key hashes, and final release independently enforces the same separation. The declared portable implementation exit now passes; externally controlled keys, externally issued producer and distribution-review evidence, plus actual production issuance remain open. |
 | 4 — tiled GEMM | verified | The closed certified exact-input f32 profile separates logical meaning from physical schedules and runs on real WebGPU. |
 | 5 — tiled attention | verified | The closed f32 online K/V-tile profile has separate correctness and performance evidence. |
 | 6 — framework convergence | verified | Grad/runtime convergence is complete for the declared inventory; JIT retains one intentional user-authored WGSL boundary. |
@@ -178,13 +178,12 @@ operation uses an opaque callback.
 Gate 3 still requires the following independent external authority; its
 portable implementation and exact-payload convergence exits already pass.
 
-1. A package-controlled production policy admits an externally controlled key
-   and an externally issued exact-build statement for the exact build subject.
-2. A production approval policy admits an externally controlled reviewer key,
-   and the package verifier accepts an external decision over the exact current
-   header distribution. Its exact reviewer identity and public-key hash must
-   differ from the producer coordinates. Package-generated material cannot
-   self-approve it.
+1. Provision externally controlled producer and reviewer public keys, run the
+   no-private-key authoring command, and retain its exact policies. Public-key
+   validation and separation do not prove who controls either private key.
+2. Materialize the policy-bound distribution, then have the external producer
+   and distinct reviewer sign their exact build and header-review requests.
+   Package-generated material cannot self-sign or self-approve either result.
 3. Run the unified host operation against those exact external responses so
    backend/final-release authority is minted in one process. Serialized
    observations and synthetic fixtures grant no production authority.
