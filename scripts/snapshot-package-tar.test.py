@@ -94,6 +94,13 @@ class SnapshotPackageTarTest(unittest.TestCase):
 
         result = snapshot_package_tar.snapshot(tarball)
 
+        canonical_package_json = json.dumps(
+            json.loads(package_json),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+
         self.assertEqual(result["schema"], "browsergrad.packed-package-snapshot@1")
         self.assertEqual(result["compressedBytes"], tarball.stat().st_size)
         self.assertEqual(result["memberCount"], 4)
@@ -111,13 +118,71 @@ class SnapshotPackageTarTest(unittest.TestCase):
                 ),
                 (
                     "package.json",
-                    f"file:644:{len(package_json)}:{hashlib.sha512(package_json).hexdigest()}",
+                    f"file:644:{len(canonical_package_json)}:{hashlib.sha512(canonical_package_json).hexdigest()}",
                 ),
                 (
                     "z.txt",
                     f"file:644:{len(zeta)}:{hashlib.sha512(zeta).hexdigest()}",
                 ),
             ],
+        )
+
+    def test_normalizes_package_json_object_order_and_formatting(self) -> None:
+        left = self.write_tarball(
+            [
+                regular_file(
+                    "package/package.json",
+                    (
+                        b'{"name":"pkg","version":"1.0.0",'
+                        b'"devDependencies":{"a":"1","b":"2"}}'
+                    ),
+                )
+            ]
+        )
+        right = self.write_tarball(
+            [
+                regular_file(
+                    "package/package.json",
+                    b'{\n  "devDependencies": {"b": "2", "a": "1"},\n  "version": "1.0.0",\n  "name": "pkg"\n}\n',
+                )
+            ]
+        )
+
+        left_snapshot = snapshot_package_tar.snapshot(left)
+        right_snapshot = snapshot_package_tar.snapshot(right)
+
+        self.assertEqual(left_snapshot["entries"], right_snapshot["entries"])
+
+    def test_preserves_package_json_semantic_changes(self) -> None:
+        left = self.write_tarball(
+            [
+                regular_file(
+                    "package/package.json", b'{"name":"pkg","version":"1.0.0"}'
+                )
+            ]
+        )
+        right = self.write_tarball(
+            [
+                regular_file(
+                    "package/package.json", b'{"name":"pkg","version":"1.0.1"}'
+                )
+            ]
+        )
+
+        left_snapshot = snapshot_package_tar.snapshot(left)
+        right_snapshot = snapshot_package_tar.snapshot(right)
+
+        self.assertNotEqual(left_snapshot["entries"], right_snapshot["entries"])
+
+    def test_rejects_duplicate_package_json_keys(self) -> None:
+        self.assert_snapshot_rejected(
+            [
+                regular_file(
+                    "package/package.json",
+                    b'{"name":"pkg","name":"other","version":"1.0.0"}',
+                )
+            ],
+            "duplicate key",
         )
 
     def test_rejects_parent_traversal(self) -> None:

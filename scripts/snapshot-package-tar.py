@@ -29,6 +29,39 @@ def fail(message: str) -> NoReturn:
     raise ValueError(message)
 
 
+def reject_duplicate_json_keys(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            fail(f"package/package.json contains duplicate key: {key!r}")
+        result[key] = value
+    return result
+
+
+def canonical_package_json(payload: bytes) -> tuple[dict[str, object], bytes]:
+    try:
+        parsed = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=reject_duplicate_json_keys,
+            parse_constant=lambda value: fail(
+                f"package/package.json contains non-finite number: {value}"
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        fail(f"package/package.json is not valid UTF-8 JSON: {error}")
+    if not isinstance(parsed, dict):
+        fail("package/package.json must contain an object")
+    canonical = json.dumps(
+        parsed,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return parsed, canonical
+
+
 def validated_parts(name: str) -> tuple[str, ...]:
     if "\x00" in name or "\\" in name:
         fail(f"unsafe archive path: {name!r}")
@@ -253,7 +286,7 @@ def snapshot(tarball: Path) -> dict[str, object]:
     entries: list[tuple[str, str]] = []
     total_file_bytes = 0
     member_count = 0
-    package_json_bytes: bytes | None = None
+    package_json: dict[str, object] | None = None
     with tarfile.open(tarball, mode="r:gz") as archive:
         for member in archive:
             member_count += 1
@@ -291,8 +324,8 @@ def snapshot(tarball: Path) -> dict[str, object]:
             source = archive.extractfile(member)
             if source is None:
                 fail(f"archive member has no readable payload: {canonical_name}")
-            digest = hashlib.sha512()
             captured = bytearray() if relative_path == "package.json" else None
+            digest = hashlib.sha512()
             bytes_read = 0
             while True:
                 chunk = source.read(READ_CHUNK_BYTES)
@@ -307,12 +340,16 @@ def snapshot(tarball: Path) -> dict[str, object]:
             if bytes_read != member.size:
                 fail(f"archive member size mismatch: {canonical_name}")
             if captured is not None:
-                package_json_bytes = bytes(captured)
+                package_json, canonical_payload = canonical_package_json(bytes(captured))
+                digest = hashlib.sha512(canonical_payload)
+                identity_size = len(canonical_payload)
+            else:
+                identity_size = member.size
             mode = f"{member.mode & 0o777:03o}"
             entries.append(
                 (
                     relative_path,
-                    f"file:{mode}:{member.size}:{digest.hexdigest()}",
+                    f"file:{mode}:{identity_size}:{digest.hexdigest()}",
                 )
             )
 
@@ -321,14 +358,8 @@ def snapshot(tarball: Path) -> dict[str, object]:
 
     if member_count == 0 or not entries:
         fail("archive has no package files")
-    if package_json_bytes is None:
+    if package_json is None:
         fail("archive has no package/package.json")
-    try:
-        package_json = json.loads(package_json_bytes.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        fail(f"package/package.json is not valid UTF-8 JSON: {error}")
-    if not isinstance(package_json, dict):
-        fail("package/package.json must contain an object")
     package_name = package_json.get("name")
     package_version = package_json.get("version")
     if not isinstance(package_name, str) or not package_name:
