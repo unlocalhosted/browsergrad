@@ -54,6 +54,8 @@ How leaf rebinding works:
 
 from __future__ import annotations
 from typing import Any, Dict, Optional, Tuple
+import itertools
+import weakref
 
 from ._ir import (
     UOp,
@@ -73,12 +75,27 @@ from ._ir import (
 _ENABLED: bool = True
 _HITS: int = 0
 _MISSES: int = 0
-# Cache state. Keyed by (module-id, training_flag,
+# Cache state. Keyed by (lifetime-unique module token, training_flag,
 # session_shape_dtype_signature). UOps and buffer IDs are session-owned, so
 # equal shapes and dtypes from another session must never hit the same trace.
 # The signature is a tuple of (session identity, shape, dtype) per positional
 # input.
 _CACHE: Dict[Tuple[int, bool, tuple], "_CompiledTrace"] = {}
+_MODULE_TOKENS = itertools.count(1)
+
+
+def _evict_module(module_token: int) -> None:
+    """Drop every trace owned by a collected Module."""
+    for key in tuple(_CACHE):
+        if key[0] == module_token:
+            _CACHE.pop(key, None)
+
+
+def register_module(module: Any) -> int:
+    """Return a never-reused token and bind cache cleanup to module lifetime."""
+    token = next(_MODULE_TOKENS)
+    weakref.finalize(module, _evict_module, token)
+    return token
 
 
 def is_enabled() -> bool:
@@ -219,7 +236,7 @@ def _rebind(root: UOp, subs: Dict[int, UOp]) -> UOp:
 
 
 def maybe_cached_forward(
-    module_id: int,
+    module_token: int,
     training: bool,
     args: Tuple[Any, ...],
 ) -> Optional[Any]:
@@ -236,7 +253,7 @@ def maybe_cached_forward(
     sig = _signature(args)
     if sig is None:
         return None
-    key = (module_id, training, sig)
+    key = (module_token, training, sig)
     cached = _CACHE.get(key)
     if cached is None:
         _MISSES += 1
@@ -263,7 +280,7 @@ def maybe_cached_forward(
 
 
 def record(
-    module_id: int,
+    module_token: int,
     training: bool,
     args: Tuple[Any, ...],
     output: Any,
@@ -306,7 +323,7 @@ def record(
     input_buffers = tuple(_input_buffer_uop(a) for a in args)
     if any(b is None for b in input_buffers):
         return
-    key = (module_id, training, sig)
+    key = (module_token, training, sig)
     _CACHE[key] = _CompiledTrace(
         output_uop=output._uop,
         output_shape=output._uop.shape,
@@ -321,6 +338,7 @@ __all__ = [
     "is_enabled",
     "stats",
     "clear",
+    "register_module",
     "maybe_cached_forward",
     "record",
 ]

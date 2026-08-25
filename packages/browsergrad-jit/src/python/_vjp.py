@@ -1254,45 +1254,105 @@ def _vjp_matmul(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional
     un-broadcast the resulting gradient back to original input shape via
     sum-reduce on broadcast axes.
 
-    1-D edge cases (vector dot, vector-matrix, matrix-vector) follow the
-    same shape conventions as the forward — defer to PRD-007 W3 for full
-    coverage; fall back to closure for now if either input is 1-D.
+    1-D operands are promoted to matrices for the VJP, then reduced and
+    reshaped back to their original vector shapes. This matches NumPy/PyTorch
+    matmul promotion without creating a second realized-value path.
     """
     a, b = inputs
-    if len(a.shape) < 2 or len(b.shape) < 2:
-        # 1-D edge cases; closure backward handles them today, keep that.
-        return (None, None)
+    a_was_vector = len(a.shape) == 1
+    b_was_vector = len(b.shape) == 1
+
+    a_promoted_shape = (1, a.shape[0]) if a_was_vector else a.shape
+    b_promoted_shape = (b.shape[0], 1) if b_was_vector else b.shape
+
+    a_promoted = a
+    if a_was_vector:
+        a_promoted = _vjp_uop(
+            OP_RESHAPE,
+            (a,),
+            a_promoted_shape,
+            a.dtype,
+            output,
+            arg={"new_shape": a_promoted_shape},
+        )
+    b_promoted = b
+    if b_was_vector:
+        b_promoted = _vjp_uop(
+            OP_RESHAPE,
+            (b,),
+            b_promoted_shape,
+            b.dtype,
+            output,
+            arg={"new_shape": b_promoted_shape},
+        )
+
+    dy_promoted = dy
+    if a_was_vector and b_was_vector:
+        dy_promoted_shape = (1, 1)
+    elif a_was_vector:
+        dy_promoted_shape = dy.shape[:-1] + (1, dy.shape[-1])
+    elif b_was_vector:
+        dy_promoted_shape = dy.shape + (1,)
+    else:
+        dy_promoted_shape = dy.shape
+    if dy_promoted_shape != dy.shape:
+        dy_promoted = _vjp_uop(
+            OP_RESHAPE,
+            (dy,),
+            dy_promoted_shape,
+            dy.dtype,
+            output,
+            arg={"new_shape": dy_promoted_shape},
+        )
 
     # da = dy @ B.T
     bT = _vjp_uop(
         OP_PERMUTE,
-        (b,),
-        _swap_last_two_shape(b.shape),
-        b.dtype,
+        (b_promoted,),
+        _swap_last_two_shape(b_promoted.shape),
+        b_promoted.dtype,
         output,
-        arg={"axes": _swap_last_two(len(b.shape))},
+        arg={"axes": _swap_last_two(len(b_promoted.shape))},
     )
     # Shape after MATMUL: leading-broadcast(dy.shape[:-2], bT.shape[:-2]) + (dy.shape[-2], bT.shape[-1])
-    da_full_shape = _broadcast_batch_shape(dy.shape, bT.shape) + (dy.shape[-2], bT.shape[-1])
-    da_full = _vjp_uop(OP_MATMUL, (dy, bT), da_full_shape, dy.dtype, output)
+    da_full_shape = _broadcast_batch_shape(dy_promoted.shape, bT.shape) + (dy_promoted.shape[-2], bT.shape[-1])
+    da_full = _vjp_uop(OP_MATMUL, (dy_promoted, bT), da_full_shape, dy.dtype, output)
 
     # db = A.T @ dy
     aT = _vjp_uop(
         OP_PERMUTE,
-        (a,),
-        _swap_last_two_shape(a.shape),
-        a.dtype,
+        (a_promoted,),
+        _swap_last_two_shape(a_promoted.shape),
+        a_promoted.dtype,
         output,
-        arg={"axes": _swap_last_two(len(a.shape))},
+        arg={"axes": _swap_last_two(len(a_promoted.shape))},
     )
-    db_full_shape = _broadcast_batch_shape(aT.shape, dy.shape) + (aT.shape[-2], dy.shape[-1])
-    db_full = _vjp_uop(OP_MATMUL, (aT, dy), db_full_shape, dy.dtype, output)
+    db_full_shape = _broadcast_batch_shape(aT.shape, dy_promoted.shape) + (aT.shape[-2], dy_promoted.shape[-1])
+    db_full = _vjp_uop(OP_MATMUL, (aT, dy_promoted), db_full_shape, dy.dtype, output)
 
-    # Un-broadcast batch dims back to original input shapes.
-    return (
-        _unbroadcast_uop(da_full, a.shape, output),
-        _unbroadcast_uop(db_full, b.shape, output),
-    )
+    # Un-broadcast batch dims to promoted operands, then remove vector-only
+    # dimensions so leaf gradients exactly match original shapes.
+    da = _unbroadcast_uop(da_full, a_promoted_shape, output)
+    db = _unbroadcast_uop(db_full, b_promoted_shape, output)
+    if a_was_vector:
+        da = _vjp_uop(
+            OP_RESHAPE,
+            (da,),
+            a.shape,
+            a.dtype,
+            output,
+            arg={"new_shape": a.shape},
+        )
+    if b_was_vector:
+        db = _vjp_uop(
+            OP_RESHAPE,
+            (db,),
+            b.shape,
+            b.dtype,
+            output,
+            arg={"new_shape": b.shape},
+        )
+    return da, db
 
 
 @register_vjp(OP_EINSUM)

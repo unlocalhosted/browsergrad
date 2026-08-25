@@ -9,6 +9,14 @@ contract in the README](README.md#compatibility-contract).
 
 ### Added
 
+- `TensorProxy.is_contiguous()` and lazy integer/paired-int64 indexing, with
+  bounds validation and scatter-add gradients for repeated paired indices.
+- `torch.nn.utils.clip_grad_norm_` with aggregate p-norm and infinity-norm
+  clipping, pre-clip scalar Tensor results, and explicit unsupported-device and
+  `foreach=True` diagnostics.
+- Portable `state_dict()` / `load_state_dict()` round trips for SGD, Adam, and
+  AdamW, including deterministic positional parameter ids, group options,
+  momentum/moment buffers, step counters, and atomic compatibility checks.
 - JavaScript `frameworkOperationSupport()` and
   `frameworkPlatformSupportSource()` projections generated from the same
   36-record registry consumed by the Python executable validators. Calls
@@ -17,6 +25,18 @@ contract in the README](README.md#compatibility-contract).
 
 ### Changed
 
+- Trace-cache keys now use never-reused Module lifetime tokens and weak
+  finalizers evict collected-module entries, preventing stale graph/parameter
+  reuse after CPython object-id recycling.
+- Scalar leaf backward normalizes NumPy scalar gradients to rank-zero ndarrays,
+  preserving scalar shape, dtype, and repeated-backward accumulation.
+- Sigmoid uses overflow-safe typed lazy primitives and returns finite gradients
+  for large finite logits, including the exact derivative at zero.
+- Symbolic matmul backward now covers vector-vector, vector-matrix,
+  matrix-vector, batched rank-one promotion, and rank-one `F.linear` operands.
+- `Module.load_state_dict(strict=False)` now loads present compatible values
+  and returns deterministic missing/unexpected-key lists; strict and shape
+  failures validate atomically before mutation.
 - `bg.kernels.attention_forward` now emits typed `ATTENTION_FORWARD` IR for a
   bounded dense rank-4 float32 profile with matching Q/K/V dimensions,
   canonical inverse-square-root scaling, stable owning CPU realization, and
@@ -198,6 +218,13 @@ contract in the README](README.md#compatibility-contract).
   and module trees with mutable buffers bypass caching. Equal-shaped tensors
   from different buffer namespaces and changed module buffers can no longer
   reuse an invalid or stale graph.
+
+### Security
+
+- `torch.load` no longer ignores `weights_only` or other keyword arguments.
+  `weights_only=True` fails before opening a payload until a genuine restricted
+  unpickler exists; trusted unrestricted-pickle loading remains explicit and
+  safetensors is documented as the data-only alternative.
 
 ### Added
 

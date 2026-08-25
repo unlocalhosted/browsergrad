@@ -112,12 +112,18 @@ def relu(x: TensorProxy) -> TensorProxy:
 
 
 def sigmoid(x: TensorProxy) -> TensorProxy:
-    """sigmoid(x) = 1 / (1 + exp(-x)). Closed-form backward uses output."""
-    # Reuse the existing ops; for numerical stability with large negative x
-    # we use a CUSTOM-free form: (-x).exp(); 1.0 / (1.0 + e).
-    e = (-x).exp()
+    """Numerically stable sigmoid built from typed lazy primitives."""
+    # exp(-abs(x)) never overflows. Both branches are safe to realize eagerly,
+    # unlike where(x >= 0, 1/(1+exp(-x)), exp(x)/(1+exp(x))). ABS has a zero
+    # derivative at x=0, so add a value-neutral selected term that supplies
+    # sigmoid's exact 1/4 derivative at that single point.
+    zero = _to_proxy(0.0, x._get_session())
     one = _to_proxy(1.0, x._get_session())
-    return one / (one + e)
+    e = (-x.abs()).exp()
+    denominator = one + e
+    stable = where(x >= zero, one / denominator, e / denominator)
+    zero_derivative = where(x == zero, x * 0.25, zero)
+    return stable + zero_derivative
 
 
 def tanh(x: TensorProxy) -> TensorProxy:

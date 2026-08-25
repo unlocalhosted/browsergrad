@@ -150,6 +150,11 @@ optim = _optim
 functional = _functional
 F = _functional
 
+nn_utils_mod = _types.ModuleType("browsergrad_jit.nn.utils")
+nn_utils_mod.clip_grad_norm_ = _nn.clip_grad_norm_
+_nn.utils = nn_utils_mod
+_sys.modules["browsergrad_jit.nn.utils"] = nn_utils_mod
+
 
 def framework_operation_support():
     """Return executable typed-operation decisions used by every JIT boundary."""
@@ -709,8 +714,28 @@ def save(obj, path):
 
 
 def load(path, **kwargs):
-    """Load an object written by save(). Extra kwargs are accepted for
-    PyTorch-shaped call sites and ignored."""
+    """Load a trusted object written by save().
+
+    This compatibility path uses unrestricted pickle and must never be used
+    for untrusted data. BrowserGrad does not yet implement PyTorch's restricted
+    weights-only unpickler, so requesting that security boundary fails before
+    opening the payload.
+    """
+    weights_only = kwargs.pop("weights_only", False)
+    if type(weights_only) is not bool:
+        raise TypeError(
+            "load: weights_only must be a bool, "
+            f"got {type(weights_only).__name__}"
+        )
+    if weights_only:
+        raise JitNotImplementedError(
+            "load(weights_only=True) is unsupported: BrowserGrad's current "
+            "checkpoint loader uses unrestricted pickle. Use a trusted "
+            "checkpoint with weights_only=False or load_safetensors()."
+        )
+    if kwargs:
+        unsupported = ", ".join(sorted(kwargs))
+        raise TypeError(f"load: unsupported keyword argument(s): {unsupported}")
     import pickle as _pickle
     with open(path, "rb") as _f:
         return _pickle.load(_f)

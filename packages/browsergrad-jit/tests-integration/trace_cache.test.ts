@@ -4,7 +4,7 @@
  * The cache fires on `nn.Module.__call__` when:
  *   - Every positional arg is a TensorProxy.
  *   - No arg has `requires_grad=True`.
- *   - The signature (id(module), training, session+shape+dtype-tuple) matches
+ *   - The signature (lifetime token, training, session+shape+dtype-tuple) matches
  *     a prior call.
  *   - The module tree has no mutable buffers.
  *

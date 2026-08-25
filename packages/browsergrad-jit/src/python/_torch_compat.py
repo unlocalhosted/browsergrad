@@ -93,6 +93,8 @@ def install_torch_alias(*, force: bool = False) -> None:
     sys.modules["torch"] = torch_mod
     sys.modules["torch.nn"] = browsergrad_jit.nn
     sys.modules["torch.nn.functional"] = browsergrad_jit._functional
+    if hasattr(browsergrad_jit.nn, "utils"):
+        sys.modules["torch.nn.utils"] = browsergrad_jit.nn.utils
     sys.modules["torch.optim"] = browsergrad_jit.optim
     # torch.utils.checkpoint / torch.utils.data — PyTorch-shaped utility APIs.
     if hasattr(browsergrad_jit, "utils"):
@@ -122,6 +124,7 @@ def uninstall_torch_alias() -> None:
     sys.modules.pop("torch", None)
     sys.modules.pop("torch.nn", None)
     sys.modules.pop("torch.nn.functional", None)
+    sys.modules.pop("torch.nn.utils", None)
     sys.modules.pop("torch.optim", None)
     sys.modules.pop("torch.utils", None)
     sys.modules.pop("torch.utils.checkpoint", None)

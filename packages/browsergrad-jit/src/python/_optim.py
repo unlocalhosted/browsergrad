@@ -17,7 +17,7 @@ GPU for the no-momentum case. `Adam.step(..., resident=True)` and
 """
 
 from __future__ import annotations
-from typing import Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import numpy as np
 
@@ -340,6 +340,102 @@ class Optimizer:
     def step(self, device: Optional[str] = None, resident: bool = False) -> None:
         raise NotImplementedError
 
+    def _group_options(self) -> Dict[str, Any]:
+        return {}
+
+    def _serialize_state(self) -> Dict[int, Dict[str, Any]]:
+        return {}
+
+    def _load_serialized_state(
+        self,
+        state: Dict[int, Dict[str, Any]],
+        options: Dict[str, Any],
+    ) -> None:
+        if state or options:
+            raise ValueError(
+                f"{type(self).__name__}.load_state_dict: unsupported state"
+            )
+
+    def state_dict(self) -> Dict[str, Any]:
+        """Return portable single-group optimizer state using positional ids."""
+        group = {
+            **self._group_options(),
+            "params": list(range(len(self._params))),
+        }
+        return {
+            "state": self._serialize_state(),
+            "param_groups": [group],
+        }
+
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        """Restore a compatible optimizer state without partial mutation."""
+        if not isinstance(state_dict, dict):
+            raise TypeError(
+                "optimizer.load_state_dict: expected dict, "
+                f"got {type(state_dict).__name__}"
+            )
+        if set(state_dict) != {"state", "param_groups"}:
+            raise ValueError(
+                "optimizer.load_state_dict: expected exactly 'state' and "
+                "'param_groups'"
+            )
+        raw_state = state_dict["state"]
+        raw_groups = state_dict["param_groups"]
+        if not isinstance(raw_state, dict):
+            raise TypeError("optimizer.load_state_dict: state must be a dict")
+        if any(type(identifier) is not int for identifier in raw_state):
+            raise TypeError(
+                "optimizer.load_state_dict: state keys must be integer "
+                "parameter ids"
+            )
+        if not isinstance(raw_groups, (list, tuple)) or len(raw_groups) != 1:
+            raise ValueError(
+                "optimizer.load_state_dict: BrowserGrad supports exactly one "
+                "parameter group"
+            )
+        raw_group = raw_groups[0]
+        if not isinstance(raw_group, dict) or "params" not in raw_group:
+            raise TypeError(
+                "optimizer.load_state_dict: parameter group must be a dict "
+                "containing params"
+            )
+        serialized_ids = raw_group["params"]
+        if not isinstance(serialized_ids, (list, tuple)):
+            raise TypeError(
+                "optimizer.load_state_dict: param group params must be a sequence"
+            )
+        if len(serialized_ids) != len(self._params):
+            raise ValueError(
+                "optimizer.load_state_dict: parameter count mismatch: "
+                f"checkpoint has {len(serialized_ids)}, optimizer has "
+                f"{len(self._params)}"
+            )
+        if any(type(identifier) is not int for identifier in serialized_ids):
+            raise TypeError(
+                "optimizer.load_state_dict: serialized parameter ids must be integers"
+            )
+        if len(set(serialized_ids)) != len(serialized_ids):
+            raise ValueError(
+                "optimizer.load_state_dict: serialized parameter ids must be unique"
+            )
+        positions = {identifier: index for index, identifier in enumerate(serialized_ids)}
+        unknown = set(raw_state) - set(positions)
+        if unknown:
+            raise ValueError(
+                "optimizer.load_state_dict: state references unknown parameter "
+                f"ids {sorted(unknown)!r}"
+            )
+        mapped_state = {
+            positions[identifier]: value
+            for identifier, value in raw_state.items()
+        }
+        if any(not isinstance(value, dict) for value in mapped_state.values()):
+            raise TypeError(
+                "optimizer.load_state_dict: every parameter state must be a dict"
+            )
+        options = {key: value for key, value in raw_group.items() if key != "params"}
+        self._load_serialized_state(mapped_state, options)
+
 
 class SGD(Optimizer):
     """Standard SGD with optional momentum.
@@ -364,6 +460,68 @@ class SGD(Optimizer):
         self.weight_decay = weight_decay
         # Momentum buffers per parameter — indexed by Parameter identity.
         self._velocity: dict[int, np.ndarray] = {}
+
+    def _group_options(self) -> Dict[str, Any]:
+        return {
+            "lr": self.lr,
+            "momentum": self.momentum,
+            "weight_decay": self.weight_decay,
+        }
+
+    def _serialize_state(self) -> Dict[int, Dict[str, Any]]:
+        state = {}
+        for index, parameter in enumerate(self._params):
+            velocity = self._velocity.get(id(parameter))
+            if velocity is not None:
+                state[index] = {
+                    "momentum_buffer": np.array(velocity, copy=True),
+                }
+        return state
+
+    def _load_serialized_state(
+        self,
+        state: Dict[int, Dict[str, Any]],
+        options: Dict[str, Any],
+    ) -> None:
+        expected_options = {"lr", "momentum", "weight_decay"}
+        if set(options) != expected_options:
+            raise ValueError(
+                "SGD.load_state_dict: expected group options "
+                f"{sorted(expected_options)!r}, got {sorted(options)!r}"
+            )
+        try:
+            lr = float(options["lr"])
+            momentum = float(options["momentum"])
+            weight_decay = float(options["weight_decay"])
+        except (TypeError, ValueError) as error:
+            raise TypeError("SGD.load_state_dict: options must be numeric") from error
+        if lr < 0 or momentum < 0:
+            raise ValueError("SGD.load_state_dict: lr and momentum must be non-negative")
+
+        velocity = {}
+        for index, item in state.items():
+            if set(item) != {"momentum_buffer"}:
+                raise ValueError(
+                    "SGD.load_state_dict: parameter state must contain only "
+                    "momentum_buffer"
+                )
+            array = item["momentum_buffer"]
+            parameter = self._params[index]
+            if not isinstance(array, np.ndarray):
+                raise TypeError(
+                    "SGD.load_state_dict: momentum_buffer must be an ndarray"
+                )
+            if array.shape != parameter.shape or array.dtype.name != parameter.dtype:
+                raise ShapeError(
+                    "SGD.load_state_dict: momentum_buffer metadata does not "
+                    f"match parameter {index}"
+                )
+            velocity[id(parameter)] = np.array(array, copy=True)
+
+        self.lr = lr
+        self.momentum = momentum
+        self.weight_decay = weight_decay
+        self._velocity = velocity
 
     def step(self, device: Optional[str] = None, resident: bool = False) -> None:
         step_device, resident = _resolve_step_device_and_residency(
@@ -441,6 +599,115 @@ class Adam(Optimizer):
         self._v: dict[int, np.ndarray] = {}
         self._m_resident: dict[int, TensorProxy] = {}
         self._v_resident: dict[int, TensorProxy] = {}
+
+    def _group_options(self) -> Dict[str, Any]:
+        return {
+            "lr": self.lr,
+            "betas": (self.beta1, self.beta2),
+            "eps": self.eps,
+            "weight_decay": self.weight_decay,
+            "step": self._step,
+        }
+
+    def _serialize_state(self) -> Dict[int, Dict[str, Any]]:
+        state = {}
+        for index, parameter in enumerate(self._params):
+            parameter_id = id(parameter)
+            if parameter_id in self._m_resident:
+                first = self._m_resident[parameter_id].numpy()
+                second = self._v_resident[parameter_id].numpy()
+            elif parameter_id in self._m:
+                first = self._m[parameter_id]
+                second = self._v[parameter_id]
+            else:
+                continue
+            state[index] = {
+                "step": self._step,
+                "exp_avg": np.array(first, copy=True),
+                "exp_avg_sq": np.array(second, copy=True),
+            }
+        return state
+
+    def _load_serialized_state(
+        self,
+        state: Dict[int, Dict[str, Any]],
+        options: Dict[str, Any],
+    ) -> None:
+        expected_options = {"lr", "betas", "eps", "weight_decay", "step"}
+        if set(options) != expected_options:
+            raise ValueError(
+                f"{type(self).__name__}.load_state_dict: expected group options "
+                f"{sorted(expected_options)!r}, got {sorted(options)!r}"
+            )
+        betas = options["betas"]
+        if not isinstance(betas, (list, tuple)) or len(betas) != 2:
+            raise TypeError(
+                f"{type(self).__name__}.load_state_dict: betas must have length 2"
+            )
+        try:
+            lr = float(options["lr"])
+            beta1 = float(betas[0])
+            beta2 = float(betas[1])
+            eps = float(options["eps"])
+            weight_decay = float(options["weight_decay"])
+        except (TypeError, ValueError) as error:
+            raise TypeError(
+                f"{type(self).__name__}.load_state_dict: options must be numeric"
+            ) from error
+        step = options["step"]
+        if type(step) is not int or step < 0:
+            raise ValueError(
+                f"{type(self).__name__}.load_state_dict: step must be a non-negative int"
+            )
+        if lr < 0 or eps < 0 or weight_decay < 0:
+            raise ValueError(
+                f"{type(self).__name__}.load_state_dict: lr, eps, and "
+                "weight_decay must be non-negative"
+            )
+        if not (0 <= beta1 < 1 and 0 <= beta2 < 1):
+            raise ValueError(
+                f"{type(self).__name__}.load_state_dict: betas must be in [0, 1)"
+            )
+
+        first_moment = {}
+        second_moment = {}
+        for index, item in state.items():
+            if set(item) != {"step", "exp_avg", "exp_avg_sq"}:
+                raise ValueError(
+                    f"{type(self).__name__}.load_state_dict: parameter state "
+                    "must contain step, exp_avg, and exp_avg_sq"
+                )
+            if type(item["step"]) is not int or item["step"] != step:
+                raise ValueError(
+                    f"{type(self).__name__}.load_state_dict: per-parameter "
+                    "steps must match the group step"
+                )
+            parameter = self._params[index]
+            exp_avg = item["exp_avg"]
+            exp_avg_sq = item["exp_avg_sq"]
+            if not isinstance(exp_avg, np.ndarray) or not isinstance(exp_avg_sq, np.ndarray):
+                raise TypeError(
+                    f"{type(self).__name__}.load_state_dict: moments must be ndarrays"
+                )
+            for name, array in (("exp_avg", exp_avg), ("exp_avg_sq", exp_avg_sq)):
+                if array.shape != parameter.shape or array.dtype.name != parameter.dtype:
+                    raise ShapeError(
+                        f"{type(self).__name__}.load_state_dict: {name} metadata "
+                        f"does not match parameter {index}"
+                    )
+            first_moment[id(parameter)] = np.array(exp_avg, copy=True)
+            second_moment[id(parameter)] = np.array(exp_avg_sq, copy=True)
+
+        self.lr = lr
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.eps = eps
+        self.weight_decay = weight_decay
+        self._step = step
+        self._m = first_moment
+        self._v = second_moment
+        self._m_resident = {}
+        self._v_resident = {}
 
     def step(self, device: Optional[str] = None, resident: bool = False) -> None:
         self._step += 1

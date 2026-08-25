@@ -328,11 +328,17 @@ state = {"w1": model[0].weight, "b1": model[0].bias}
 blob = bg.save_safetensors(state)        # bytes — browser-friendly
 restored = bg.load_safetensors(blob)
 model[0].weight = restored["w1"]          # from_numpy accepts TensorProxy
+
+optimizer_state = optimizer.state_dict()  # SGD/Adam/AdamW moments + options
+optimizer.load_state_dict(optimizer_state)
 ```
 
 The PyTorch alias also exposes minimal `torch.save()` / `torch.load()` for
-pickle-safe BrowserGrad objects such as state dicts. It is not a full PyTorch
-checkpoint compatibility layer.
+trusted, pickle-safe BrowserGrad objects such as state dicts. This path uses
+unrestricted pickle and must not load untrusted data. `weights_only=True` and
+other unsupported load options fail explicitly; use safetensors when a
+restricted data-only format is required. This is not a full PyTorch checkpoint
+compatibility layer.
 
 ### ONNX export
 ```python
@@ -391,10 +397,11 @@ import torch, torch.nn, torch.func, torch.amp, torch.utils.checkpoint, torch.uti
 ```
 
 The shim covers the curated BrowserGrad subset of `torch.nn`, `torch.optim`,
-`torch.nn.functional`, `torch.func`, `torch.amp`, `torch.utils.checkpoint`, and
-`torch.utils.data`. It also exposes dtype tokens such as `torch.float32` and
-`torch.int64`, plus `torch.save` / `torch.load` for BrowserGrad state dicts.
-Anything not implemented raises `AttributeError`, not silent wrong behavior.
+`torch.nn.functional`, `torch.nn.utils` (including `clip_grad_norm_`),
+`torch.func`, `torch.amp`, `torch.utils.checkpoint`, and `torch.utils.data`. It
+also exposes dtype tokens such as `torch.float32` and `torch.int64`, plus
+`torch.save` / `torch.load` for BrowserGrad state dicts. Anything not
+implemented raises `AttributeError`, not silent wrong behavior.
 
 ## Coexists with browsergrad-grad
 

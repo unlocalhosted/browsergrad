@@ -537,6 +537,15 @@ class TensorProxy:
     def device(self) -> str:
         return "cpu"
 
+    def is_contiguous(self) -> bool:
+        """Return layout truth for the current value-semantic tensor profile.
+
+        BrowserGrad does not expose strided aliasing views: reshape, permute,
+        and gather produce canonical value tensors for downstream execution.
+        Every currently representable TensorProxy is therefore contiguous.
+        """
+        return True
+
     @property
     def is_leaf(self) -> bool:
         return self._ctx is None
@@ -691,6 +700,56 @@ class TensorProxy:
         for slice_arr in arr:
             yield from_numpy(np.asarray(slice_arr).copy(),
                              session=self._get_session())
+
+    def __getitem__(self, index: Any) -> "TensorProxy":
+        """Support integer rows and paired rank-one tensor indexing lazily."""
+        if type(index) in _EXACT_INTEGER_SCALAR_TYPES:
+            if self.ndim == 0:
+                raise IndexError("cannot index a 0-d tensor")
+            row = int(index)
+            if row < 0:
+                row += self.shape[0]
+            if row < 0 or row >= self.shape[0]:
+                raise IndexError(
+                    f"index {index} is out of bounds for dimension 0 "
+                    f"with size {self.shape[0]}"
+                )
+            row_index = from_numpy(
+                np.asarray([row], dtype=np.int64),
+                session=self._get_session(),
+            )
+            gather_shape = (1,) + self.shape[1:]
+            expanded = row_index.reshape((1,) + (1,) * (self.ndim - 1))
+            expanded = expanded.repeat(*gather_shape)
+            return self.gather(0, expanded).squeeze(0)
+
+        if isinstance(index, tuple) and len(index) == 2 and self.ndim == 2:
+            rows, columns = index
+            if not isinstance(rows, TensorProxy) or not isinstance(columns, TensorProxy):
+                raise JitNotImplementedError(
+                    "TensorProxy indexing supports a pair of TensorProxy indices"
+                )
+            if (
+                rows._get_session() is not self._get_session()
+                or columns._get_session() is not self._get_session()
+            ):
+                raise ShapeError("index tensors must belong to the source session")
+            if rows.dtype != "int64" or columns.dtype != "int64":
+                raise ShapeError(
+                    "paired tensor indices must both have dtype int64"
+                )
+            if rows.ndim != 1 or columns.ndim != 1 or rows.shape != columns.shape:
+                raise ShapeError(
+                    "paired tensor indices must be rank-one with matching shapes"
+                )
+            row_grid = rows.unsqueeze(1).repeat(1, self.shape[1])
+            selected_rows = self.gather(0, row_grid)
+            return selected_rows.gather(1, columns.unsqueeze(1)).squeeze(1)
+
+        raise JitNotImplementedError(
+            "TensorProxy indexing currently supports an integer row or "
+            "paired rank-one int64 TensorProxy indices"
+        )
 
     # ------------------------------------------------------------------
     # Arithmetic dunders — build IR, never realize
@@ -2142,6 +2201,17 @@ def from_numpy(
                 requires_grad=True,
             )
         return array
+    if isinstance(array, np.generic):
+        # NumPy reductions over rank-zero tensors may return a scalar object
+        # (for example np.float32) rather than an ndarray. BufferTable owns an
+        # ndarray-only boundary, so preserve scalar rank by normalizing only
+        # NumPy scalar values here instead of broadly coercing Python objects.
+        array = np.asarray(array)
+    if not isinstance(array, np.ndarray):
+        raise TypeError(
+            "from_numpy: expected np.ndarray or NumPy scalar, "
+            f"got {type(array).__name__}"
+        )
     if session is None:
         import browsergrad_jit
         session = browsergrad_jit.get_default_session()
@@ -2253,6 +2323,13 @@ def tensor(
     elif arr.dtype == np.float64:
         # PyTorch default: float32, not float64.
         arr = arr.astype(np.float32, copy=False)
+    elif (
+        not isinstance(value, (np.ndarray, np.generic))
+        and arr.dtype.kind in ("i", "u")
+    ):
+        # Pyodide/Wasm may expose Python integer sequences as int32. PyTorch's
+        # Python-value default is int64 regardless of host pointer width.
+        arr = arr.astype(np.int64, copy=False)
     return from_numpy(arr, requires_grad=requires_grad, session=session)
 
 

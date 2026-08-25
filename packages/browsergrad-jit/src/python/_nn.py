@@ -9,7 +9,7 @@ remain module-level coverage that can be promoted as GPU-native demand lands.
 
 from __future__ import annotations
 from typing import Any, Iterator, Optional, Tuple
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 import math
 import uuid
 
@@ -22,6 +22,7 @@ from ._tensor_proxy import (
     from_numpy,
     zeros,
     randn,
+    _has_gpu_resident_inputs,
 )
 from ._ir import (
     UOp,
@@ -41,6 +42,12 @@ from ._framework_contracts import (
     normalize_batch_norm_1d_num_features,
 )
 from . import _functional as F
+
+
+IncompatibleKeys = namedtuple(
+    "IncompatibleKeys",
+    ("missing_keys", "unexpected_keys"),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +106,12 @@ class Module:
         object.__setattr__(self, "_modules", OrderedDict())
         object.__setattr__(self, "_buffers", OrderedDict())
         object.__setattr__(self, "training", True)
+        from . import _trace_cache
+        object.__setattr__(
+            self,
+            "_trace_cache_token",
+            _trace_cache.register_module(self),
+        )
 
     def __setattr__(self, name: str, value: Any) -> None:
         # Strip the old registration if `name` was a Parameter/Module before.
@@ -147,7 +160,7 @@ class Module:
         )
         if cacheable and _trace_cache.is_enabled():
             cached = _trace_cache.maybe_cached_forward(
-                module_id=id(self),
+                module_token=self._trace_cache_token,
                 training=bool(self.training),
                 args=args,
             )
@@ -156,7 +169,7 @@ class Module:
         out = self.forward(*args, **kwargs)
         if cacheable:
             _trace_cache.record(
-                module_id=id(self),
+                module_token=self._trace_cache_token,
                 training=bool(self.training),
                 args=args,
                 output=out,
@@ -226,41 +239,57 @@ class Module:
             state[name] = np.array(b, copy=True)
         return state
 
-    def load_state_dict(self, state: dict, strict: bool = True) -> None:
+    def load_state_dict(self, state: dict, strict: bool = True) -> IncompatibleKeys:
         self._synchronize_pending_state()
-        expected = {name for name, _ in self.named_parameters()}
-        expected.update(name for name, _ in self.named_buffers())
-        if strict:
-            extra = sorted(set(state.keys()) - expected)
-            if extra:
-                raise KeyError(
-                    f"state_dict has unexpected keys {extra!r}. Expected keys: {sorted(expected)}"
-                )
-        for name, p in self.named_parameters():
+        if not isinstance(state, dict):
+            raise TypeError(
+                f"load_state_dict: expected dict, got {type(state).__name__}"
+            )
+        parameters = list(self.named_parameters())
+        buffers = list(self.named_buffers())
+        expected_names = [name for name, _ in parameters]
+        expected_names.extend(name for name, _ in buffers)
+        expected = set(expected_names)
+        missing = [name for name in expected_names if name not in state]
+        unexpected = sorted(set(state.keys()) - expected)
+        incompatible = IncompatibleKeys(missing, unexpected)
+        if strict and (missing or unexpected):
+            details = []
+            if missing:
+                details.append(f"missing keys {missing!r}")
+            if unexpected:
+                details.append(f"unexpected keys {unexpected!r}")
+            raise KeyError("state_dict has " + " and ".join(details))
+
+        # Validate every present value before mutating any state. A late shape
+        # error must not leave an earlier parameter partially restored.
+        parameter_updates = []
+        for name, p in parameters:
             if name not in state:
-                raise KeyError(
-                    f"state_dict missing key {name!r}. Have keys: {list(state)}"
-                )
+                continue
             arr = np.asarray(state[name])
             if arr.shape != p.shape:
                 raise ShapeError(
                     f"state_dict[{name!r}] shape {arr.shape} != parameter shape {p.shape}"
                 )
-            # Write into the parameter's underlying buffer.
-            session = p._get_session()
-            session.buffer_table.update(p._uop.inputs[0].arg,
-                                        arr.astype(np.dtype(p.dtype), copy=False))
-        for name, b in self.named_buffers():
+            parameter_updates.append((p, arr.astype(np.dtype(p.dtype), copy=False)))
+        buffer_updates = []
+        for name, b in buffers:
             if name not in state:
-                raise KeyError(
-                    f"state_dict missing key {name!r}. Have keys: {list(state)}"
-                )
+                continue
             arr = np.asarray(state[name])
             if arr.shape != b.shape:
                 raise ShapeError(
                     f"state_dict[{name!r}] shape {arr.shape} != buffer shape {b.shape}"
                 )
-            b[...] = arr.astype(b.dtype, copy=False)
+            buffer_updates.append((b, arr.astype(b.dtype, copy=False)))
+
+        for p, arr in parameter_updates:
+            session = p._get_session()
+            session.buffer_table.update(p._uop.inputs[0].arg, arr)
+        for b, arr in buffer_updates:
+            b[...] = arr
+        return incompatible
 
     def _synchronize_pending_state(self) -> None:
         """Commit lazy state effects before externally observing state."""
@@ -271,6 +300,91 @@ class Module:
         """Reset all parameter gradients. Mirrors optimizer.zero_grad()."""
         for p in self.parameters():
             p.grad = None
+
+
+def clip_grad_norm_(
+    parameters: Any,
+    max_norm: Any,
+    norm_type: Any = 2.0,
+    error_if_nonfinite: bool = False,
+    foreach: Any = None,
+) -> TensorProxy:
+    """Clip aggregate gradient norm and return its pre-clip scalar value."""
+    if foreach not in (None, False):
+        raise JitNotImplementedError(
+            "clip_grad_norm_: foreach=True is unsupported in BrowserGrad"
+        )
+    if type(error_if_nonfinite) is not bool:
+        raise TypeError("clip_grad_norm_: error_if_nonfinite must be a bool")
+    try:
+        max_norm_value = float(max_norm)
+    except (TypeError, ValueError) as error:
+        raise TypeError("clip_grad_norm_: max_norm must be numeric") from error
+    if max_norm_value < 0:
+        raise ValueError("clip_grad_norm_: max_norm must be non-negative")
+    if norm_type == float("inf") or norm_type == "inf":
+        norm_value = float("inf")
+    else:
+        try:
+            norm_value = float(norm_type)
+        except (TypeError, ValueError) as error:
+            raise TypeError("clip_grad_norm_: norm_type must be numeric or inf") from error
+        if norm_value <= 0 or not np.isfinite(norm_value):
+            raise ValueError("clip_grad_norm_: norm_type must be positive or inf")
+
+    params = list(parameters)
+    grads = []
+    session = None
+    return_dtype = np.dtype(np.float32)
+    for parameter in params:
+        if not isinstance(parameter, TensorProxy):
+            raise TypeError(
+                "clip_grad_norm_: parameters must contain TensorProxy values, "
+                f"got {type(parameter).__name__}"
+            )
+        grad = parameter.grad
+        if grad is None:
+            continue
+        grad_session = grad._get_session()
+        if session is None:
+            session = grad_session
+            return_dtype = np.dtype(grad.dtype)
+        elif grad_session is not session:
+            raise ShapeError("clip_grad_norm_: gradients span multiple sessions")
+        if _has_gpu_resident_inputs(grad._uop, grad_session):
+            raise JitNotImplementedError(
+                "clip_grad_norm_: WebGPU-resident gradients are unsupported"
+            )
+        grads.append((parameter, np.asarray(grad.numpy())))
+
+    if norm_value == float("inf"):
+        total_norm = max(
+            (float(np.max(np.abs(array))) for _, array in grads if array.size),
+            default=0.0,
+        )
+    else:
+        powered = sum(
+            float(np.sum(np.abs(array).astype(np.float64) ** norm_value))
+            for _, array in grads
+        )
+        total_norm = powered ** (1.0 / norm_value)
+
+    if not np.isfinite(total_norm) and error_if_nonfinite:
+        raise RuntimeError(
+            "clip_grad_norm_: total norm is non-finite and "
+            "error_if_nonfinite=True"
+        )
+    coefficient = max_norm_value / (total_norm + 1e-6)
+    if coefficient < 1.0:
+        for parameter, array in grads:
+            parameter.grad = from_numpy(
+                np.asarray(array * coefficient, dtype=array.dtype),
+                session=parameter._get_session(),
+            )
+    return from_numpy(
+        np.asarray(total_norm, dtype=return_dtype),
+        session=session,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1180,6 +1294,8 @@ functional = F
 __all__ = [
     "Module",
     "Parameter",
+    "IncompatibleKeys",
+    "clip_grad_norm_",
     "Linear",
     "Conv1d",
     "Conv2d",
