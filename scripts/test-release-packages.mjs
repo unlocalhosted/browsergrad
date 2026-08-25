@@ -901,6 +901,13 @@ try {
       `${workflowName} protected publish job must install a pinned attestation-capable npm CLI without OIDC authority`,
     );
     assert(
+      publishJob.includes("NPM_CONFIG_USERCONFIG: /dev/null")
+        && publishJob.includes(
+          'NPM_CONFIG_GLOBALCONFIG: ${{ runner.temp }}/browsergrad-npm-empty-global.npmrc',
+        ),
+      `${workflowName} protected publish job must isolate npm user/global config with distinct paths`,
+    );
+    assert(
       (workflow.match(/NODE_AUTH_TOKEN:/gu) ?? []).length === (workflowName === "release" ? 0 : 1),
       `${workflowName} workflow must keep trusted publishing tokenless and scope fallback token to one protected step`,
     );

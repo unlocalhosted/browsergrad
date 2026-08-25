@@ -274,7 +274,7 @@ jobs:
           ACTIONS_ID_TOKEN_REQUEST_URL: ''
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ''
           NPM_CONFIG_USERCONFIG: /dev/null
-          NPM_CONFIG_GLOBALCONFIG: /dev/null
+          NPM_CONFIG_GLOBALCONFIG: ${{ runner.temp }}/browsergrad-npm-empty-global.npmrc
 
       - name: Require attestation-capable npm CLI
         run: node scripts/require-npm-version.mjs 11.12.0
