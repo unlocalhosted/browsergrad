@@ -17,11 +17,6 @@ contract in the README](README.md#compatibility-contract).
 - Portable `state_dict()` / `load_state_dict()` round trips for SGD, Adam, and
   AdamW, including deterministic positional parameter ids, group options,
   momentum/moment buffers, step counters, and atomic compatibility checks.
-- JavaScript `frameworkOperationSupport()` and
-  `frameworkPlatformSupportSource()` projections generated from the same
-  36-record registry consumed by the Python executable validators. Calls
-  return detached records, preserve all ten exact decision categories, and
-  expose no runtime/device availability or execution-evidence boolean.
 
 ### Changed
 
@@ -37,6 +32,25 @@ contract in the README](README.md#compatibility-contract).
 - `Module.load_state_dict(strict=False)` now loads present compatible values
   and returns deterministic missing/unexpected-key lists; strict and shape
   failures validate atomically before mutation.
+
+### Security
+
+- `torch.load` no longer ignores `weights_only` or other keyword arguments.
+  `weights_only=True` fails before opening a payload until a genuine restricted
+  unpickler exists; trusted unrestricted-pickle loading remains explicit and
+  safetensors is documented as the data-only alternative.
+
+## [0.9.0] - 2026-08-25
+
+### Added
+
+- JavaScript `frameworkOperationSupport()` and
+  `frameworkPlatformSupportSource()` projections generated from the same
+  36-record registry consumed by the Python executable validators. Calls
+  return detached records, preserve all ten exact decision categories, and
+  expose no runtime/device availability or execution-evidence boolean.
+
+### Changed
 - `bg.kernels.attention_forward` now emits typed `ATTENTION_FORWARD` IR for a
   bounded dense rank-4 float32 profile with matching Q/K/V dimensions,
   canonical inverse-square-root scaling, stable owning CPU realization, and
@@ -218,13 +232,6 @@ contract in the README](README.md#compatibility-contract).
   and module trees with mutable buffers bypass caching. Equal-shaped tensors
   from different buffer namespaces and changed module buffers can no longer
   reuse an invalid or stale graph.
-
-### Security
-
-- `torch.load` no longer ignores `weights_only` or other keyword arguments.
-  `weights_only=True` fails before opening a payload until a genuine restricted
-  unpickler exists; trusted unrestricted-pickle loading remains explicit and
-  safetensors is documented as the data-only alternative.
 
 ### Added
 

@@ -995,6 +995,11 @@ try {
       && publisherSource.includes("Untracked source files cannot enter staged release artifacts"),
     "publisher must reject untracked source while allowing only its declared staging directory",
   );
+  assert(
+    publisherSource.includes("const PUBLISHED_VISIBILITY_ATTEMPTS = 32;")
+      && publisherSource.includes("attempt <= PUBLISHED_VISIBILITY_ATTEMPTS"),
+    "publisher must tolerate bounded npm processing delay before immutable resume",
+  );
   assertCommandFails(
     process.execPath,
     [join(root, "scripts/publish-missing-npm.mjs"), "--preflight", "--provenance"],

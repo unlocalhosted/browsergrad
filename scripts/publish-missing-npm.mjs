@@ -44,6 +44,10 @@ const STAGED_SCHEMA = "browsergrad.staged-npm-release@1";
 const MAX_STAGED_MANIFEST_BYTES = 1024 * 1024;
 const MAX_STAGED_TARBALL_BYTES = 64 * 1024 * 1024;
 const COPY_BUFFER_BYTES = 1024 * 1024;
+// npm can accept and provenance-log a publish while its package document still
+// reports that the version is processing. Keep the immutable resume gate
+// bounded, but allow that documented registry convergence window.
+const PUBLISHED_VISIBILITY_ATTEMPTS = 32;
 const APPROVED_RELEASE_WORKFLOWS = Object.freeze([
   ".github/workflows/release.yml",
   ".github/workflows/publish-npm.yml",
@@ -574,11 +578,11 @@ function npmVersionStatus({ manifest }) {
 }
 
 function waitForPublished(manifest) {
-  for (let attempt = 1; attempt <= 8; attempt += 1) {
+  for (let attempt = 1; attempt <= PUBLISHED_VISIBILITY_ATTEMPTS; attempt += 1) {
     if (npmVersionStatus({ manifest }) === "published") {
       return;
     }
-    if (attempt < 8) {
+    if (attempt < PUBLISHED_VISIBILITY_ATTEMPTS) {
       sleep(Math.min(1000 * (2 ** (attempt - 1)), 5000));
     }
   }
