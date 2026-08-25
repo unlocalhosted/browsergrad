@@ -1,6 +1,6 @@
 # @unlocalhosted/browsergrad-compiler Changelog
 
-## Unreleased
+## 0.2.0 - 2026-08-25
 
 - Adds compiler-owned construction of bounded linear multi-dispatch view-copy
   host graphs from opaque prepared binding authority. Intermediate allocation

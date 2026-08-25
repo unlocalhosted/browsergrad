@@ -5,6 +5,8 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
+import { validateReleaseChangelog } from "./release-changelog-policy.mjs";
+
 const root = resolve(new URL("..", import.meta.url).pathname);
 const tmp = mkdtempSync(join(tmpdir(), "browsergrad-release-pack-"));
 const packedTarballs = new Map();
@@ -30,6 +32,7 @@ try {
 
   const workspacePrimitivesPkg = readPackage(join(root, "packages/browsergrad-primitives"));
   const primitivesPkg = readPackage(primitives);
+  assertReleaseChangelog(primitives, primitivesPkg);
   assert(
     primitivesPkg.version === workspacePrimitivesPkg.version,
     `primitives version mismatch: ${primitivesPkg.version}`,
@@ -85,6 +88,7 @@ try {
 
   const workspaceRuntimePkg = readPackage(join(root, "packages/browsergrad-runtime"));
   const runtimePkg = readPackage(runtime);
+  assertReleaseChangelog(runtime, runtimePkg);
   assert(runtimePkg.version === workspaceRuntimePkg.version, `runtime version mismatch: ${runtimePkg.version}`);
   assertRepositoryMetadata(runtimePkg, "browsergrad-runtime");
   assert(runtimePkg.private !== true, "runtime tarball must be publishable");
@@ -139,6 +143,7 @@ try {
   verifyInstalledRuntimeConsumer(npmRuntimeConsumer, workspaceRuntimePkg.version);
 
   const semanticCorePkg = readPackage(semanticCore);
+  assertReleaseChangelog(semanticCore, semanticCorePkg);
   assert(semanticCorePkg.version === workspaceSemanticCoreVersion, `semantic-core version mismatch: ${semanticCorePkg.version}`);
   assertRepositoryMetadata(semanticCorePkg, "browsergrad-semantic-core");
   assert(semanticCorePkg.private !== true, "semantic-core tarball must be publishable");
@@ -611,6 +616,7 @@ try {
   );
 
   const kernelsPkg = readPackage(kernels);
+  assertReleaseChangelog(kernels, kernelsPkg);
   const workspaceKernelsPkg = readPackage(join(root, "packages/browsergrad-kernels"));
   const workspaceKernelsVersion = workspaceKernelsPkg.version;
   assert(kernelsPkg.version === workspaceKernelsVersion, `kernels version mismatch: ${kernelsPkg.version}`);
@@ -775,6 +781,7 @@ try {
   verifyInstalledSemanticViewCopyConsumer(installedConsumer);
 
   const compilerPkg = readPackage(compiler);
+  assertReleaseChangelog(compiler, compilerPkg);
   const workspaceCompilerPkg = readPackage(join(root, "packages/browsergrad-compiler"));
   const kernelsRange = compilerPkg.dependencies?.["@unlocalhosted/browsergrad-kernels"];
   assert(kernelsRange, "compiler package missing kernels dependency");
@@ -990,6 +997,7 @@ try {
 
   const workspaceGradPkg = readPackage(join(root, "packages/browsergrad-grad"));
   const gradPkg = readPackage(grad);
+  assertReleaseChangelog(grad, gradPkg);
   assert(gradPkg.version === workspaceGradPkg.version, `Grad version mismatch: ${gradPkg.version}`);
   assert(gradPkg.optionalPeerDependencies === undefined, "Grad tarball must not use nonstandard optionalPeerDependencies");
   assert(
@@ -1030,6 +1038,7 @@ try {
 
   const workspaceJitPkg = readPackage(join(root, "packages/browsergrad-jit"));
   const jitPkg = readPackage(jit);
+  assertReleaseChangelog(jit, jitPkg);
   assert(jitPkg.version === workspaceJitPkg.version, `JIT version mismatch: ${jitPkg.version}`);
   assert(jitPkg.optionalPeerDependencies === undefined, "JIT tarball must not use nonstandard optionalPeerDependencies");
   assert(Object.keys(jitPkg.dependencies ?? {}).length === 0, "JIT tarball must have no install-time dependencies");
@@ -2552,6 +2561,16 @@ function assertProtectedReleaseInstructions() {
   ]) {
     assert(!pattern.test(combined), `release instructions must reject ${description}`);
   }
+}
+
+function assertReleaseChangelog(packageDirectory, manifest) {
+  const changelogPath = join(packageDirectory, "CHANGELOG.md");
+  const failures = validateReleaseChangelog({
+    source: readFileSync(changelogPath, "utf8"),
+    expectedVersion: manifest.version,
+    path: `${manifest.name}/CHANGELOG.md`,
+  });
+  assert(failures.length === 0, failures.join("\n"));
 }
 
 function assert(condition, message) {
